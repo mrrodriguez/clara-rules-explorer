@@ -11,8 +11,7 @@ We have implemented two primary workflows:
 ## 2. Server CI Workflow (`.github/workflows/server.yml`)
 
 ### Triggers
-- Push/Pull Request targeting `main` branch.
-- Specifically when changes occur in `server/**` or `.github/workflows/server.yml`.
+- Push/Pull Request targeting `main` branch (runs on all changes to ensure compatibility with required status checks).
 
 ### Jobs
 - **Test**:
@@ -25,8 +24,7 @@ We have implemented two primary workflows:
 ## 3. UI CI Workflow (`.github/workflows/ui.yml`)
 
 ### Triggers
-- Push/Pull Request targeting `main` branch.
-- Specifically when changes occur in `ui/**`, `server/**` (for E2E), or `.github/workflows/ui.yml`.
+- Push/Pull Request targeting `main` branch (runs on all changes to ensure compatibility with required status checks).
 
 ### Jobs
 - **Lint & Type Check**:

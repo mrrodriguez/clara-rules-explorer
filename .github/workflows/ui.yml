@@ -3,16 +3,8 @@ name: UI CI
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'ui/**'
-      - 'server/**' # UI E2E tests depend on server code
-      - '.github/workflows/ui.yml'
   pull_request:
     branches: [ main ]
-    paths:
-      - 'ui/**'
-      - 'server/**'
-      - '.github/workflows/ui.yml'
 
 jobs:
   lint-and-test:
