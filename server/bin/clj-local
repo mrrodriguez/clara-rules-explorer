@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+# If CLARA_HOME is set, inject our override first.
+# Multiple -Sdeps flags are merged by the Clojure CLI from left to right.
+if [ -n "$CLARA_HOME" ]; then
+	echo "Found CLARA_HOME=${CLARA_HOME}"
+	clojure -Sdeps "{:deps {com.github.gateless/clara-rules {:local/root \"$CLARA_HOME\"}}}" "$@"
+else
+	echo "CLARA_HOME not found"
+	clojure "$@"
+fi

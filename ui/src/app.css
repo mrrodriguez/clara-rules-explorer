@@ -1,0 +1,24 @@
+/*
+ * Global utility classes shared across the application.
+ * These cover patterns that Bootstrap 5 does not natively provide.
+ */
+
+/* -- Custom Properties -- */
+:root {
+	--navbar-height: 56px;
+}
+
+/* -- Typography Utilities -- */
+.text-tracking-wide {
+	letter-spacing: 0.05rem;
+}
+
+/* Font sizes not covered by Bootstrap's fs-* scale */
+.fs-7 {
+	font-size: 0.75rem;
+}
+
+/* -- Border Utilities -- */
+.border-dashed {
+	border-style: dashed !important;
+}

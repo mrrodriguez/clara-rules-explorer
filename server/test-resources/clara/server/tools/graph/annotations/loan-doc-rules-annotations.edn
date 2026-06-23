@@ -1,0 +1,14 @@
+{clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs
+ {:clara-rules/insert-types [AllGivenDocuments]}
+
+ clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs
+ {:clara-rules/insert-types [AllRequiredDocuments]}
+
+ clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input
+ {:clara-rules/insert-types [DocumentCheckInput]}
+
+ clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs
+ {:clara-rules/insert-types [DocumentCheck]}
+
+ clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs
+ {:clara-rules/no-output-types true}}

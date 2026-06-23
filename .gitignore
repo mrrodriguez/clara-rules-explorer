@@ -1,0 +1,25 @@
+node_modules
+.pnpm-home
+.svelte-kit
+.cpcache
+.lsp
+**/.clj-kondo/.cache/
+.nrepl-port
+target
+demo-data
+.envrc
+.direnv
+package-lock.json
+pnpm-lock.yaml
+docs/internal
+ui/docs/internal
+
+# IDEs and editors
+.idea/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
