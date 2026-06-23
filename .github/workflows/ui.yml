@@ -3,16 +3,8 @@ name: UI CI
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'ui/**'
-      - 'server/**' # UI E2E tests depend on server code
-      - '.github/workflows/ui.yml'
   pull_request:
     branches: [ main ]
-    paths:
-      - 'ui/**'
-      - 'server/**'
-      - '.github/workflows/ui.yml'
 
 jobs:
   lint-and-test:
@@ -22,10 +14,10 @@ jobs:
         working-directory: ui
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
 
@@ -39,7 +31,7 @@ jobs:
         run: |
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -61,10 +53,10 @@ jobs:
   e2e-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '21'
           distribution: 'temurin'
@@ -76,7 +68,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
 
@@ -89,9 +81,27 @@ jobs:
         working-directory: ui
         run: pnpm install
 
+      - name: Get Playwright version
+        id: playwright-version
+        working-directory: ui
+        run: echo "PLAYWRIGHT_VERSION=$(pnpm exec playwright --version | awk '{print $2}')" >> $GITHUB_OUTPUT
+
+      - name: Cache Playwright Binaries
+        id: playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
+
       - name: Install Playwright Browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: ui
         run: pnpm exec playwright install --with-deps
+
+      - name: Install Playwright System Dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: ui
+        run: pnpm exec playwright install-deps
 
       - name: Build UI
         working-directory: ui
