@@ -18,7 +18,7 @@
 		"format": "prettier --write src static *.config.js *.config.ts package.json tsconfig.json",
 		"test:unit": "vitest --passWithNoTests",
 		"test": "npm run test:unit -- --run && npm run test:e2e",
-		"test:e2e": "playwright install && playwright test"
+		"test:e2e": "playwright test"
 	},
 	"dependencies": {
 		"@popperjs/core": "^2.11.8",
