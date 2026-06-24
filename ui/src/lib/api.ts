@@ -1,3 +1,4 @@
+import { base } from '$app/paths';
 import { toUrlId } from '$lib/utils';
 import type {
 	RuleSummary,
@@ -20,7 +21,7 @@ function getUrl(urlPath: string): string {
 	const isDemo = import.meta.env.VITE_DEMO_MODE === 'true';
 	if (isDemo) {
 		const relativePath = urlPath.substring(API_BASE.length);
-		return `${DEMO_BASE}${relativePath}.json`;
+		return `${base}${DEMO_BASE}${relativePath}.json`;
 	}
 	return urlPath;
 }
@@ -97,7 +98,9 @@ export async function fetchRule(
 	name: string,
 	customFetch: typeof fetch = fetch
 ): Promise<RuleSummary> {
-	const response = await customFetch(getUrl(`${API_BASE}/rules/${encodeURIComponent(toUrlId(name))}`));
+	const response = await customFetch(
+		getUrl(`${API_BASE}/rules/${encodeURIComponent(toUrlId(name))}`)
+	);
 	if (!response.ok) {
 		throw new Error(`Failed to fetch rule ${name}: ${response.statusText}`);
 	}
@@ -111,7 +114,9 @@ export async function fetchQuery(
 	name: string,
 	customFetch: typeof fetch = fetch
 ): Promise<QuerySummary> {
-	const response = await customFetch(getUrl(`${API_BASE}/queries/${encodeURIComponent(toUrlId(name))}`));
+	const response = await customFetch(
+		getUrl(`${API_BASE}/queries/${encodeURIComponent(toUrlId(name))}`)
+	);
 	if (!response.ok) {
 		throw new Error(`Failed to fetch query ${name}: ${response.statusText}`);
 	}
@@ -125,7 +130,9 @@ export async function fetchFactType(
 	name: string,
 	customFetch: typeof fetch = fetch
 ): Promise<FactTypeSummary> {
-	const response = await customFetch(getUrl(`${API_BASE}/fact-types/${encodeURIComponent(toUrlId(name))}`));
+	const response = await customFetch(
+		getUrl(`${API_BASE}/fact-types/${encodeURIComponent(toUrlId(name))}`)
+	);
 	if (!response.ok) {
 		throw new Error(`Failed to fetch fact type ${name}: ${response.statusText}`);
 	}
