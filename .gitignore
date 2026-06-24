@@ -9,8 +9,6 @@ target
 demo-data
 .envrc
 .direnv
-package-lock.json
-pnpm-lock.yaml
 docs/internal
 ui/docs/internal
 
