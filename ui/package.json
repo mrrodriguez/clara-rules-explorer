@@ -11,7 +11,7 @@
 		"dev": "vite dev",
 		"build": "vite build",
 		"build:demo": "VITE_DEMO_MODE=true BASE_PATH=\"/clara-rules-explorer\" vite build",
-		"scrape:demo": "node bin/scrape-demo-data.js",
+		"scrape:demo": "node bin/scrape-demo-data.js && prettier --write \"static/demo-data/**/*.json\"",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",

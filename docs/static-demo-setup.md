@@ -72,6 +72,6 @@ Once deployed, the explorer demo is served at:
 
 You can automate building and deploying the static demo to the `gh-pages` branch on every push to the `main` branch. 
 
-The build and deploy pipeline is configured in [.github/workflows/deploy-demo.yml](file:///Users/mrrodriguez/Projects/clara-rules-explorer/.github/workflows/deploy-demo.yml). 
+The build and deploy pipeline is configured in [.github/workflows/deploy-demo.yml](../.github/workflows/deploy-demo.yml). 
 
 Once pushed, GitHub Actions will build your UI statically and deploy the static artifacts to the `gh-pages` branch, which GitHub Pages will serve automatically.
