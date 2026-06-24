@@ -1,0 +1,29 @@
+{
+	"id": 9,
+	"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+	"data": {
+		"app-id": "app-1",
+		"status": "pass",
+		"message": "All required documents found"
+	},
+	"is-root": false,
+	"inserted-from": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	],
+	"used-by": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/find-document-check",
+			"ns": "",
+			"type": "query"
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"type": "rule"
+		}
+	]
+}

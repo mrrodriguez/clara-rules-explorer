@@ -1,0 +1,24 @@
+{
+	"ns": "",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/find-document-check",
+	"params": ["?app-id"],
+	"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"constraints": "[\n(= ?app-id app-id)\n]",
+			"fact-binding": "?document-check"
+		}
+	],
+	"notes": null,
+	"annotation-sources": [],
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"type": "rule"
+		}
+	],
+	"doc": null,
+	"props": {}
+}

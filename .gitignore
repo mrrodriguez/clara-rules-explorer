@@ -6,7 +6,7 @@ node_modules
 **/.clj-kondo/.cache/
 .nrepl-port
 target
-demo-data
+/server/demo-data/
 .envrc
 .direnv
 docs/internal

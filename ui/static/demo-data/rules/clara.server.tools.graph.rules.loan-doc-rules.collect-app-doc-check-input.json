@@ -1,0 +1,56 @@
+{
+	"downstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs",
+			"type": "rule"
+		}
+	],
+	"source-rule": false,
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+	"lhs-types": [
+		"clara.server.tools.graph.rules.loan_app_facts.Application",
+		"clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+		"clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"
+	],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"constraints": "[\n(= ?app-id app-id)\n]"
+		},
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= ?given-docs docs)\n]"
+		},
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= ?required-docs docs)\n]"
+		}
+	],
+	"retract-types": [],
+	"notes": null,
+	"annotation-sources": ["clara-rules/insert-types"],
+	"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput"],
+	"rhs-form": "(do\n (let\n  [given-doc-types (into #{} (map :doc-type) ?given-docs)]\n  (r/insert!\n   (laf/map->DocumentCheckInput\n    {:app-id ?app-id,\n     :required-docs ?required-docs,\n     :given-docs ?given-docs,\n     :missing-required-docs\n     (into\n      []\n      (remove (comp given-doc-types :doc-type))\n      ?required-docs)}))))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+			"type": "rule"
+		}
+	],
+	"doc": null,
+	"sink-rule": false,
+	"props": {}
+}

@@ -1,0 +1,34 @@
+{
+	"ns": "",
+	"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
+	"params": ["?app-id"],
+	"lhs-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+			"constraints": "[\n(= ?app-id app-id)\n]",
+			"fact-binding": "?outcome"
+		}
+	],
+	"notes": null,
+	"annotation-sources": [],
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending",
+			"type": "rule"
+		}
+	],
+	"doc": null,
+	"props": {}
+}

@@ -1,0 +1,45 @@
+{
+	"matches": [
+		{
+			"id": 12,
+			"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+			"data": {
+				"?outcome": {
+					"message": "Application approved",
+					"checks-incomplete": null,
+					"status": "approved",
+					"passed-checks": [
+						{
+							"check-type": "document"
+						},
+						{
+							"check-type": "identity"
+						},
+						{
+							"check-type": "fraud"
+						}
+					],
+					"app-id": "app-1",
+					"checks-complete": null,
+					"failed-checks": null
+				},
+				"?app-id": "app-1"
+			},
+			"is-root": false,
+			"inserted-from": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+					"ns": "clara.server.tools.graph.rules.loan-app-rules",
+					"type": "rule"
+				}
+			],
+			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
+					"ns": "",
+					"type": "query"
+				}
+			]
+		}
+	]
+}

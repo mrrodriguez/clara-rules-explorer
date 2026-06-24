@@ -1,0 +1,56 @@
+{
+	"downstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/find-document-check",
+			"type": "query"
+		}
+	],
+	"source-rule": false,
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+	"lhs-types": [
+		"clara.server.tools.graph.rules.loan_app_facts.Application",
+		"clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput"
+	],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"constraints": "[\n(= ?app-id app-id)\n]"
+		},
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= ?required-docs required-docs)\n\n(= ?given-docs given-docs)\n\n(= ?missing-required-docs missing-required-docs)\n]"
+		}
+	],
+	"retract-types": [],
+	"notes": null,
+	"annotation-sources": ["clara-rules/insert-types"],
+	"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
+	"rhs-form": "(do\n (let\n  [status\n   (if (seq ?missing-required-docs) :fail :pass)\n   message\n   (case\n    status\n    :fail\n    \"Missing required documents\"\n    \"All required documents found\")]\n  (r/insert!\n   (laf/map->DocumentCheck\n    {:app-id ?app-id, :status status, :message message}))))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"type": "rule"
+		}
+	],
+	"doc": null,
+	"sink-rule": false,
+	"props": {}
+}

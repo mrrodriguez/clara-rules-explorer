@@ -1,0 +1,63 @@
+{
+	"downstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
+			"type": "query"
+		}
+	],
+	"source-rule": false,
+	"ns": "clara.server.tools.graph.rules.loan-app-rules",
+	"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+	"lhs-types": [
+		"clara.server.tools.graph.rules.loan_app_facts.Application",
+		"clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+		"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+		"clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
+	],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"constraints": "[\n(= ?app-id app-id)\n]"
+		},
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+		},
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+		},
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+		}
+	],
+	"retract-types": [],
+	"notes": null,
+	"annotation-sources": ["clara-rules/insert-types"],
+	"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
+	"rhs-form": "(do\n (r/insert!\n  (map->ApplicationOutcome\n   {:app-id ?app-id,\n    :status :approved,\n    :message \"Application approved\",\n    :passed-checks\n    [{:check-type :document}\n     {:check-type :identity}\n     {:check-type :fraud}]})))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"type": "rule"
+		}
+	],
+	"doc": null,
+	"sink-rule": false,
+	"props": {
+		"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"]
+	}
+}

@@ -1,0 +1,17 @@
+{
+	"id": 4,
+	"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+	"data": {
+		"app-id": "app-1",
+		"doc-type": "paycheck"
+	},
+	"is-root": true,
+	"inserted-from": [],
+	"used-by": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	]
+}
