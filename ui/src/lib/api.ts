@@ -14,6 +14,16 @@ import type {
 } from './types/api';
 
 const API_BASE = '/v1';
+const DEMO_BASE = '/demo-data';
+
+function getUrl(urlPath: string): string {
+	const isDemo = import.meta.env.VITE_DEMO_MODE === 'true';
+	if (isDemo) {
+		const relativePath = urlPath.substring(API_BASE.length);
+		return `${DEMO_BASE}${relativePath}.json`;
+	}
+	return urlPath;
+}
 
 /**
  * Fetches a summary of the rulebase counts.
@@ -21,7 +31,7 @@ const API_BASE = '/v1';
 export async function fetchRulebaseSummary(
 	customFetch: typeof fetch = fetch
 ): Promise<RulebaseSummary> {
-	const response = await customFetch(`${API_BASE}/rulebase-summary`);
+	const response = await customFetch(getUrl(`${API_BASE}/rulebase-summary`));
 	if (!response.ok) {
 		throw new Error(`Failed to fetch rulebase summary: ${response.statusText}`);
 	}
@@ -33,7 +43,7 @@ export async function fetchRulebaseSummary(
  * @deprecated Use specific endpoints instead.
  */
 export async function fetchAnalysis(customFetch: typeof fetch = fetch): Promise<Analysis> {
-	const response = await customFetch(`${API_BASE}/analysis`);
+	const response = await customFetch(getUrl(`${API_BASE}/analysis`));
 	if (!response.ok) {
 		throw new Error(`Failed to fetch analysis: ${response.statusText}`);
 	}
@@ -44,7 +54,7 @@ export async function fetchAnalysis(customFetch: typeof fetch = fetch): Promise<
  * Fetches the list of all rules with minimal metadata.
  */
 export async function fetchRulesList(customFetch: typeof fetch = fetch): Promise<RuleListItem[]> {
-	const response = await customFetch(`${API_BASE}/rules`);
+	const response = await customFetch(getUrl(`${API_BASE}/rules`));
 	if (!response.ok) {
 		throw new Error(`Failed to fetch rules list: ${response.statusText}`);
 	}
@@ -58,7 +68,7 @@ export async function fetchRulesList(customFetch: typeof fetch = fetch): Promise
 export async function fetchQueriesList(
 	customFetch: typeof fetch = fetch
 ): Promise<QueryListItem[]> {
-	const response = await customFetch(`${API_BASE}/queries`);
+	const response = await customFetch(getUrl(`${API_BASE}/queries`));
 	if (!response.ok) {
 		throw new Error(`Failed to fetch queries list: ${response.statusText}`);
 	}
@@ -72,7 +82,7 @@ export async function fetchQueriesList(
 export async function fetchFactTypesList(
 	customFetch: typeof fetch = fetch
 ): Promise<FactTypeSummary[]> {
-	const response = await customFetch(`${API_BASE}/fact-types`);
+	const response = await customFetch(getUrl(`${API_BASE}/fact-types`));
 	if (!response.ok) {
 		throw new Error(`Failed to fetch fact types list: ${response.statusText}`);
 	}
@@ -87,7 +97,7 @@ export async function fetchRule(
 	name: string,
 	customFetch: typeof fetch = fetch
 ): Promise<RuleSummary> {
-	const response = await customFetch(`${API_BASE}/rules/${encodeURIComponent(toUrlId(name))}`);
+	const response = await customFetch(getUrl(`${API_BASE}/rules/${encodeURIComponent(toUrlId(name))}`));
 	if (!response.ok) {
 		throw new Error(`Failed to fetch rule ${name}: ${response.statusText}`);
 	}
@@ -101,7 +111,7 @@ export async function fetchQuery(
 	name: string,
 	customFetch: typeof fetch = fetch
 ): Promise<QuerySummary> {
-	const response = await customFetch(`${API_BASE}/queries/${encodeURIComponent(toUrlId(name))}`);
+	const response = await customFetch(getUrl(`${API_BASE}/queries/${encodeURIComponent(toUrlId(name))}`));
 	if (!response.ok) {
 		throw new Error(`Failed to fetch query ${name}: ${response.statusText}`);
 	}
@@ -115,7 +125,7 @@ export async function fetchFactType(
 	name: string,
 	customFetch: typeof fetch = fetch
 ): Promise<FactTypeSummary> {
-	const response = await customFetch(`${API_BASE}/fact-types/${encodeURIComponent(toUrlId(name))}`);
+	const response = await customFetch(getUrl(`${API_BASE}/fact-types/${encodeURIComponent(toUrlId(name))}`));
 	if (!response.ok) {
 		throw new Error(`Failed to fetch fact type ${name}: ${response.statusText}`);
 	}
@@ -132,7 +142,7 @@ export async function fetchFactType(
 export async function fetchSessionFactTypes(
 	customFetch: typeof fetch = fetch
 ): Promise<SessionFactTypesResponse> {
-	const response = await customFetch(`${API_BASE}/session/fact-types`);
+	const response = await customFetch(getUrl(`${API_BASE}/session/fact-types`));
 	if (!response.ok) {
 		throw new Error(`Failed to fetch session fact types: ${response.statusText}`);
 	}
@@ -147,7 +157,7 @@ export async function fetchSessionFactTypeInstances(
 	customFetch: typeof fetch = fetch
 ): Promise<SessionFactTypeInstancesResponse> {
 	const response = await customFetch(
-		`${API_BASE}/session/fact-types/${encodeURIComponent(toUrlId(typeName))}`
+		getUrl(`${API_BASE}/session/fact-types/${encodeURIComponent(toUrlId(typeName))}`)
 	);
 	if (!response.ok) {
 		throw new Error(`Failed to fetch instances for type ${typeName}: ${response.statusText}`);
@@ -162,7 +172,7 @@ export async function fetchSessionFactDetail(
 	id: number | string,
 	customFetch: typeof fetch = fetch
 ): Promise<SessionFact> {
-	const response = await customFetch(`${API_BASE}/session/facts/${id}`);
+	const response = await customFetch(getUrl(`${API_BASE}/session/facts/${id}`));
 	if (!response.ok) {
 		throw new Error(`Failed to fetch session fact ${id}: ${response.statusText}`);
 	}
@@ -177,7 +187,7 @@ export async function fetchSessionRuleActivity(
 	customFetch: typeof fetch = fetch
 ): Promise<SessionProductionActivityResponse> {
 	const response = await customFetch(
-		`${API_BASE}/session/rules/${encodeURIComponent(toUrlId(ruleName))}`
+		getUrl(`${API_BASE}/session/rules/${encodeURIComponent(toUrlId(ruleName))}`)
 	);
 	if (!response.ok) {
 		throw new Error(
@@ -199,7 +209,7 @@ export async function fetchSessionQueryActivity(
 	customFetch: typeof fetch = fetch
 ): Promise<SessionProductionActivityResponse> {
 	const response = await customFetch(
-		`${API_BASE}/session/queries/${encodeURIComponent(toUrlId(queryName))}`
+		getUrl(`${API_BASE}/session/queries/${encodeURIComponent(toUrlId(queryName))}`)
 	);
 	if (!response.ok) {
 		throw new Error(
