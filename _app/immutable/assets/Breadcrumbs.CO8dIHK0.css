@@ -1,0 +1,1 @@
+.breadcrumb-item.svelte-juexlt+.breadcrumb-item:where(.svelte-juexlt):before{content:var(--bs-breadcrumb-divider,"/")}

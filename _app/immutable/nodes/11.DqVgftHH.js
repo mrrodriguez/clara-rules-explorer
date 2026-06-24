@@ -1,0 +1,1 @@
+import"../chunks/gavQxMg8.js";import"../chunks/xihTtKlq.js";import{t as e}from"../chunks/BYpzeFPU.js";function t(t){e(t,{title:`Select a query from the list`,description:`Choose a query on the left to view its summary and parameters.`})}export{t as component};

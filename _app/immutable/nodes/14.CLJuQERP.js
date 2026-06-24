@@ -1,0 +1,1 @@
+import"../chunks/gavQxMg8.js";import"../chunks/xihTtKlq.js";import{t as e}from"../chunks/BYpzeFPU.js";function t(t){e(t,{title:`Select a rule from the list`,description:`Choose a rule on the left to view its summary and metadata.`})}export{t as component};

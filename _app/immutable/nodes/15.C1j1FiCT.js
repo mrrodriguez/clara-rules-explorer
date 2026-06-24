@@ -1,0 +1,1 @@
+import{X as e,Z as t}from"../chunks/gavQxMg8.js";import"../chunks/xihTtKlq.js";import{t as n}from"../chunks/B2UJR8Iv.js";function r(r,i){t(i,!0),n(r,{get rule(){return i.data.rule}}),e()}export{r as component};
