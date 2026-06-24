@@ -52,11 +52,19 @@ Open the local URL in your browser to inspect the visualizer running 100% static
 
 The demo is configured to be hosted as a subdirectory of your main domain, `metasimple.org`, which is already connected to your `<username>.github.io` blog repository. 
 
-Once deployed, the explorer demo will automatically be served at:
-👉 **`https://metasimple.org/clara-rules-explorer/`**
+Once deployed, the explorer demo is served at:
+👉 **[https://www.metasimple.org/clara-rules-explorer/](https://www.metasimple.org/clara-rules-explorer/)**
 
 * **DNS Configuration**: None required.
-* **Build Path**: Compiled using `BASE_PATH="/clara-rules-explorer"` (this is handled automatically by `pnpm build:demo`).
+* **Build Path**: Compiled using `BASE_PATH="/clara-rules-explorer"` (handled automatically by `pnpm build:demo`).
+
+> [!IMPORTANT]
+> **If you see a 404 page at the URL above:**
+> 1. Go to your repository settings on GitHub: **Settings > Pages**.
+> 2. Under **Build and deployment > Source**, ensure **Deploy from a branch** is selected.
+> 3. Under **Branch**, select `gh-pages` and root folder (`/`), then click **Save**.
+> 4. Wait a couple of minutes for GitHub to build and deploy the Page.
+
 
 ---
 
