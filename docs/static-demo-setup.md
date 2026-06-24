@@ -50,25 +50,13 @@ Open the local URL in your browser to inspect the visualizer running 100% static
 
 ## 4. Hosting on GitHub Pages
 
-You have two main choices for hosting this on GitHub Pages:
+The demo is configured to be hosted as a subdirectory of your main domain, `metasimple.org`, which is already connected to your `<username>.github.io` blog repository. 
 
-### Option A: Subdirectory on your main blog domain (Recommended)
-If `metasimple.org` is already mapped to your `<username>.github.io` blog repository, this demo will automatically become available at:
-👉 `https://metasimple.org/clara-rules-explorer/`
+Once deployed, the explorer demo will automatically be served at:
+👉 **`https://metasimple.org/clara-rules-explorer/`**
 
-* **DNS Changes**: None.
-* **Build Command**: Use the default `pnpm build:demo` (which compiles with `BASE_PATH="/clara-rules-explorer"`).
-
-### Option B: A Dedicated Subdomain (e.g. `explorer.metasimple.org`)
-To serve the app on its own dedicated subdomain:
-1. In your domain registrar DNS settings, add a `CNAME` record:
-   * **Host**: `explorer`
-   * **Target**: `mrrodriguez.github.io`
-2. In the `clara-rules-explorer` repository on GitHub, go to **Settings > Pages > Custom Domain**, enter `explorer.metasimple.org`, and click **Save**.
-3. In `ui/package.json`, change the `build:demo` script to use `BASE_PATH=""` instead of the subdirectory:
-   ```json
-   "build:demo": "VITE_DEMO_MODE=true BASE_PATH=\"\" vite build"
-   ```
+* **DNS Configuration**: None required.
+* **Build Path**: Compiled using `BASE_PATH="/clara-rules-explorer"` (this is handled automatically by `pnpm build:demo`).
 
 ---
 
@@ -76,50 +64,6 @@ To serve the app on its own dedicated subdomain:
 
 You can automate building and deploying the static demo to the `gh-pages` branch on every push to the `main` branch. 
 
-Create a workflow file at `.github/workflows/deploy-demo.yml`:
+The build and deploy pipeline is configured in [.github/workflows/deploy-demo.yml](file:///Users/mrrodriguez/Projects/clara-rules-explorer/.github/workflows/deploy-demo.yml). 
 
-```yaml
-name: Deploy Demo to GitHub Pages
-
-on:
-  push:
-    branches: [ "main", "static-ui-demo" ] # Runs when changes hit these branches
-
-permissions:
-  contents: write
-
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 10
-
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'pnpm'
-          cache-dependency-path: 'ui/pnpm-lock.yaml'
-
-      - name: Build Demo
-        run: |
-          cd ui
-          pnpm install
-          pnpm build:demo
-        env:
-          # Automatically uses correct subfolder for GitHub Pages
-          BASE_PATH: '/clara-rules-explorer'
-
-      - name: Deploy to GitHub Pages
-        uses: JamesIves/github-pages-deploy-action@v4
-        with:
-          folder: ui/build
-          branch: gh-pages # Deploys static build to the gh-pages branch
-```
-Once pushed, GitHub Pages will deploy the contents of the `gh-pages` branch automatically.
+Once pushed, GitHub Actions will build your UI statically and deploy the static artifacts to the `gh-pages` branch, which GitHub Pages will serve automatically.
