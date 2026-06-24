@@ -1,1 +1,0 @@
-import{X as e,Z as t}from"../chunks/gavQxMg8.js";import"../chunks/xihTtKlq.js";import{t as n}from"../chunks/X0JUJEnD.js";function r(r,i){t(i,!0),n(r,{get query(){return i.data.query}}),e()}export{r as component};

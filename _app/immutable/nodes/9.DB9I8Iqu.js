@@ -1,1 +1,0 @@
-import"../chunks/gavQxMg8.js";import"../chunks/xihTtKlq.js";import{t as e}from"../chunks/BYpzeFPU.js";function t(t){e(t,{title:`Select a fact type from the list`,description:`Choose a fact type on the left to view its summary and usages.`})}export{t as component};
