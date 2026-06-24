@@ -1,0 +1,12 @@
+{
+	"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput",
+	"used-by-rules": [
+		"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+		"clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs"
+	],
+	"used-by-queries": [],
+	"inserted-by-rules": [
+		"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
+	],
+	"retracted-by-rules": []
+}

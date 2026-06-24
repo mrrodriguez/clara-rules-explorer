@@ -1,0 +1,95 @@
+{
+	"downstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
+			"type": "query"
+		}
+	],
+	"source-rule": false,
+	"ns": "clara.server.tools.graph.rules.loan-app-rules",
+	"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending",
+	"lhs-types": [
+		"clara.server.tools.graph.rules.loan_app_facts.Application",
+		"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+		"clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+		"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+		"clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
+	],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"constraints": "[\n(= ?app-id app-id)\n]"
+		},
+		[
+			"not",
+			{
+				"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+				"constraints": "[\n(= ?app-id app-id)\n\n(= status :approved)\n]"
+			}
+		],
+		[
+			"not",
+			{
+				"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+				"constraints": "[\n(= ?app-id app-id)\n\n(= status :denied)\n]"
+			}
+		],
+		{
+			"accumulator": ["clara.rules.accumulators/all"],
+			"from": {
+				"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+				"constraints": "[\n(= ?app-id app-id)\n]"
+			},
+			"result-binding": "?doc-checks"
+		},
+		{
+			"accumulator": ["clara.rules.accumulators/all"],
+			"from": {
+				"type": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+				"constraints": "[\n(= ?app-id app-id)\n]"
+			},
+			"result-binding": "?id-checks"
+		},
+		{
+			"accumulator": ["clara.rules.accumulators/all"],
+			"from": {
+				"type": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
+				"constraints": "[\n(= ?app-id app-id)\n]"
+			},
+			"result-binding": "?fraud-checks"
+		}
+	],
+	"retract-types": [],
+	"notes": null,
+	"annotation-sources": ["clara-rules/insert-types"],
+	"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
+	"rhs-form": "(do\n (let\n  [all-checks\n   [{:check-type :document, :complete? (boolean (seq ?doc-checks))}\n    {:check-type :identity, :complete? (boolean (seq ?id-checks))}\n    {:check-type :fraud, :complete? (boolean (seq ?fraud-checks))}]\n   checks-complete\n   (into [] (comp (filter :complete?) (map :check-type)) all-checks)\n   checks-incomplete\n   (into [] (comp (remove :complete?) (map :check-type)) all-checks)]\n  (r/insert!\n   (map->ApplicationOutcome\n    {:app-id ?app-id,\n     :status :pending,\n     :message \"Application pending\",\n     :checks-complete checks-complete,\n     :checks-incomplete checks-incomplete}))))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"type": "rule"
+		}
+	],
+	"doc": null,
+	"sink-rule": false,
+	"props": {
+		"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"]
+	}
+}

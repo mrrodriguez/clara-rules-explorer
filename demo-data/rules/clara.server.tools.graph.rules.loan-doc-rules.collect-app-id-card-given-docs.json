@@ -1,0 +1,35 @@
+{
+	"source-rule": true,
+	"unlinked-rule": {
+		"downstream": "unknown",
+		"reason": "no declared insert-types or retract-types"
+	},
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+	"lhs-types": [
+		"clara.server.tools.graph.rules.loan_app_facts.Application",
+		"clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
+	],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"constraints": "[\n(= ?app-id app-id)\n]"
+		},
+		{
+			"accumulator": ["clara.rules.accumulators/all"],
+			"from": {
+				"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+				"constraints": "[\n(= ?app-id app-id)\n\n(= doc-type :id-card)\n]"
+			},
+			"result-binding": "?docs"
+		}
+	],
+	"retract-types": [],
+	"notes": null,
+	"annotation-sources": [],
+	"insert-types": [],
+	"rhs-form": "(do\n (r/insert!\n  (map->AllIdCardGivenDocuments {:app-id ?app-id, :docs ?docs})))\n",
+	"doc": null,
+	"sink-rule": false,
+	"props": {}
+}

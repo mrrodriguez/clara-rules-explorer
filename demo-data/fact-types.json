@@ -1,0 +1,116 @@
+{
+	"fact-types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"used-by-rules": [
+				"clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+				"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+				"clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+				"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+				"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+			],
+			"used-by-queries": [],
+			"inserted-by-rules": [],
+			"retracted-by-rules": []
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+			"used-by-rules": [
+				"clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+				"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
+			],
+			"used-by-queries": [],
+			"inserted-by-rules": [],
+			"retracted-by-rules": []
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+			"used-by-rules": [
+				"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
+			],
+			"used-by-queries": [],
+			"inserted-by-rules": ["clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"],
+			"retracted-by-rules": []
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
+			"used-by-rules": ["clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"],
+			"used-by-queries": [],
+			"inserted-by-rules": [],
+			"retracted-by-rules": []
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+			"used-by-rules": [
+				"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
+			],
+			"used-by-queries": [],
+			"inserted-by-rules": ["clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"],
+			"retracted-by-rules": []
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput",
+			"used-by-rules": [
+				"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+				"clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs"
+			],
+			"used-by-queries": [],
+			"inserted-by-rules": [
+				"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
+			],
+			"retracted-by-rules": []
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"used-by-rules": [
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+			],
+			"used-by-queries": ["clara.server.tools.graph.rules.loan-doc-rules/find-document-check"],
+			"inserted-by-rules": [
+				"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
+			],
+			"retracted-by-rules": []
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+			"used-by-rules": [
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+			],
+			"used-by-queries": [],
+			"inserted-by-rules": [],
+			"retracted-by-rules": []
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
+			"used-by-rules": [
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+			],
+			"used-by-queries": [],
+			"inserted-by-rules": [],
+			"retracted-by-rules": []
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+			"used-by-rules": [
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+			],
+			"used-by-queries": ["clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"],
+			"inserted-by-rules": [
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+			],
+			"retracted-by-rules": []
+		}
+	]
+}

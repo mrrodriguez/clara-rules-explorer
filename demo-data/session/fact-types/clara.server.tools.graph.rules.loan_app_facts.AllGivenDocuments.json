@@ -1,0 +1,95 @@
+{
+	"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+	"count": 1,
+	"inserted-from": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 6,
+					"type": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+					"data": {
+						"app-id": "app-1",
+						"docs": [
+							{
+								"app-id": "app-1",
+								"doc-type": "id-card"
+							},
+							{
+								"app-id": "app-1",
+								"doc-type": "paycheck"
+							},
+							{
+								"app-id": "app-1",
+								"doc-type": "bank-statement"
+							}
+						]
+					},
+					"is-root": false,
+					"inserted-from": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		}
+	],
+	"used-by": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 6,
+					"type": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+					"data": {
+						"app-id": "app-1",
+						"docs": [
+							{
+								"app-id": "app-1",
+								"doc-type": "id-card"
+							},
+							{
+								"app-id": "app-1",
+								"doc-type": "paycheck"
+							},
+							{
+								"app-id": "app-1",
+								"doc-type": "bank-statement"
+							}
+						]
+					},
+					"is-root": false,
+					"inserted-from": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		}
+	],
+	"ids": [6]
+}

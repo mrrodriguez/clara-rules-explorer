@@ -1,0 +1,28 @@
+{
+	"source-rule": false,
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs",
+	"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput"],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= ?missing-required-docs missing-required-docs)\n\n(seq ?missing-required-docs)\n]"
+		}
+	],
+	"no-output-types": true,
+	"retract-types": [],
+	"notes": null,
+	"annotation-sources": ["clara-rules/no-output-types"],
+	"insert-types": [],
+	"rhs-form": "(do (swap! count-atom inc))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"type": "rule"
+		}
+	],
+	"doc": null,
+	"sink-rule": true,
+	"props": {}
+}

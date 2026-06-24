@@ -1,0 +1,14 @@
+{
+	"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+	"used-by-rules": [
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+	],
+	"used-by-queries": ["clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"],
+	"inserted-by-rules": [
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+	],
+	"retracted-by-rules": []
+}

@@ -1,0 +1,109 @@
+{
+	"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput",
+	"count": 1,
+	"inserted-from": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 8,
+					"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput",
+					"data": {
+						"app-id": "app-1",
+						"required-docs": [
+							{
+								"app-id": "app-1",
+								"doc-type": "id-card"
+							}
+						],
+						"given-docs": [
+							{
+								"app-id": "app-1",
+								"doc-type": "id-card"
+							},
+							{
+								"app-id": "app-1",
+								"doc-type": "paycheck"
+							},
+							{
+								"app-id": "app-1",
+								"doc-type": "bank-statement"
+							}
+						],
+						"missing-required-docs": []
+					},
+					"is-root": false,
+					"inserted-from": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		}
+	],
+	"used-by": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 8,
+					"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput",
+					"data": {
+						"app-id": "app-1",
+						"required-docs": [
+							{
+								"app-id": "app-1",
+								"doc-type": "id-card"
+							}
+						],
+						"given-docs": [
+							{
+								"app-id": "app-1",
+								"doc-type": "id-card"
+							},
+							{
+								"app-id": "app-1",
+								"doc-type": "paycheck"
+							},
+							{
+								"app-id": "app-1",
+								"doc-type": "bank-statement"
+							}
+						],
+						"missing-required-docs": []
+					},
+					"is-root": false,
+					"inserted-from": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		}
+	],
+	"ids": [8]
+}

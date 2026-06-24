@@ -1,0 +1,38 @@
+{
+	"downstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"type": "rule"
+		}
+	],
+	"source-rule": true,
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+	"lhs-types": [
+		"clara.server.tools.graph.rules.loan_app_facts.Application",
+		"clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
+	],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"constraints": "[\n(= ?app-id app-id)\n]"
+		},
+		{
+			"accumulator": ["clara.rules.accumulators/all"],
+			"from": {
+				"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+				"constraints": "[\n(= ?app-id app-id)\n]"
+			},
+			"result-binding": "?docs"
+		}
+	],
+	"retract-types": [],
+	"notes": null,
+	"annotation-sources": ["clara-rules/insert-types"],
+	"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"],
+	"rhs-form": "(do\n (r/insert!\n  (laf/map->AllGivenDocuments {:app-id ?app-id, :docs ?docs})))\n",
+	"doc": null,
+	"sink-rule": false,
+	"props": {}
+}
