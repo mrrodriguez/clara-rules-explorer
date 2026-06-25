@@ -39,6 +39,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-clojure-
 
+      - name: Run Linter
+        run: clojure -M:lint --lint src test dev
+
       - name: Run Tests
         run: clojure -M:test:run-tests
 

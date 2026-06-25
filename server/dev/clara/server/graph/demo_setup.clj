@@ -29,8 +29,9 @@
 ;; Session factory
 ;; ---------------------------------------------------------------------------
 
-(defn approved-app-working-memory []
+(defn approved-app-working-memory
   "Working memory for a single approved loan application (app-1)."
+  []
   [(laf/map->Application {:app-id "app-1"})
    (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
    (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card})

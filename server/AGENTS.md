@@ -48,6 +48,6 @@ To ensure code quality and adherence to Clojure standards, use `clj-kondo`:
 
 1.  **Targeted Linting:** Lint specific files or directories for quick feedback during development.
     ```bash
-    clojure -M:clj-kondo --lint <file-or-dir>
+    clojure -M:lint --lint <file-or-dir>
     ```
-    *Example:* `clojure -M:clj-kondo --lint src/clara/server/tools/graph/`
+    *Example:* `clojure -M:lint --lint src/clara/server/tools/graph/`

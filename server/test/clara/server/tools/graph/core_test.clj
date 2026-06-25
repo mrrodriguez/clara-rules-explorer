@@ -110,7 +110,7 @@
           (is (some #{"clara.server.tools.graph.rules.loan_app_facts.Application" "clara.server.tools.graph.rules.loan_app_facts.GivenDocument"}
                     (:lhs-types summary)))
           ;; Verify summary includes downstream info directly
-          (is (some (fn [d] (= "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input" (:name d))) 
+          (is (some (fn [d] (= "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input" (:name d)))
                     (:downstream summary))))))
 
     (testing "Queries summary"
@@ -120,14 +120,14 @@
           (is (= #{"?app-id"} (:params summary)))
           (is (some #{"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"} (:lhs-types summary)))
           ;; Verify summary includes upstream info directly
-          (is (some (fn [u] (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved" (:name u))) 
+          (is (some (fn [u] (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved" (:name u)))
                     (:upstream summary))))
 
         (is (contains? queries-map "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"))
         (let [summary (get queries-map "clara.server.tools.graph.rules.loan-doc-rules/find-document-check")]
           (is (= #{"?app-id"} (:params summary)))
           (is (some #{"clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"} (:lhs-types summary)))
-          (is (some (fn [u] (= "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs" (:name u))) 
+          (is (some (fn [u] (= "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs" (:name u)))
                     (:upstream summary))))))
 
     (testing "Fact types summary"
@@ -167,22 +167,21 @@
       (let [collect-given "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
             collect-req "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
             collect-input "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
-            
+
             summary-given (get rules collect-given)
             summary-input (get rules collect-input)]
-        
+
         ;; collect-app-given-docs inserts AllGivenDocuments
         ;; collect-app-doc-check-input reads AllGivenDocuments
         ;; Thus collect-app-given-docs -> collect-app-doc-check-input
-        
+
         (is (some #{"clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"} (:insert-types summary-given)))
         (is (some #{"clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"} (:lhs-types summary-input)))
-        
+
         ;; Note: summary upstream/downstream entries are maps: {:ns ... :name ... :type ...}
         (is (some (fn [d] (= collect-input (:name d))) (:downstream summary-given)))
         (is (some (fn [u] (= collect-given (:name u))) (:upstream summary-input)))
         (is (some (fn [u] (= collect-req (:name u))) (:upstream summary-input)))))))
-
 
 (deftest test-dep-graph-full
   (let [session (->test-session)
@@ -340,7 +339,7 @@
       (let [rule-list (core/rules-list analysis)
             unlinked-item (first (filter #(= unlinked-rule-name (:name %)) rule-list))]
         (is (contains? unlinked-item :unlinked-rule))
-        (is (not (contains? unlinked-item :downstream))))))
+        (is (not (contains? unlinked-item :downstream)))))))
 
 (deftest test-no-output-types-annotation-prevents-unlinked
   (testing "Rule with :clara-rules/no-output-types true is not flagged as unlinked"
@@ -353,4 +352,4 @@
       (is (empty? (:insert-types rule)))
       (is (empty? (:retract-types rule)))
       (is (false? (:sink-rule rule))
-          "No-output rule should not be considered a sink")))))
+          "No-output rule should not be considered a sink"))))

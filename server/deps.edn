@@ -9,7 +9,10 @@
         org.clojure/tools.cli {:mvn/version "1.0.214"}}
 
  :aliases
- {:test {:extra-paths ["test" "test-resources"]
+ {:lint {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2026.05.25"}}
+         :main-opts ["-m" "clj-kondo.main"]}
+
+  :test {:extra-paths ["test" "test-resources"]
          :extra-deps {ring/ring-mock {:mvn/version "0.6.2"}
                       clj-http/clj-http {:mvn/version "3.13.1"}}}
 
