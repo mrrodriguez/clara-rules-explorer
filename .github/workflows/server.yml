@@ -40,10 +40,10 @@ jobs:
             ${{ runner.os }}-clojure-
 
       - name: Run Linter
-        run: clojure -M:lint --lint src test dev
+        run: make lint
 
       - name: Run Tests
-        run: clojure -M:test:run-tests
+        run: make test
 
       - name: Reflection Check
-        run: ./bin/ci/check-reflection.sh
+        run: make reflection-check

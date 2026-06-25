@@ -39,7 +39,7 @@ To ensure changes are correctly verified and to maintain development velocity, y
 
 3.  **Full Suite Verification:** Run the entire project test suite.
     ```bash
-    clojure -M:test
+    make test
     ```
 
 # Linting Procedures
@@ -51,3 +51,8 @@ To ensure code quality and adherence to Clojure standards, use `clj-kondo`:
     clojure -M:lint --lint <file-or-dir>
     ```
     *Example:* `clojure -M:lint --lint src/clara/server/tools/graph/`
+
+2.  **Full Project Linting:** Run the full project linting.
+    ```bash
+    make lint
+    ```
