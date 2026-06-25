@@ -1,0 +1,49 @@
+{
+	"types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+			"count": 3
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+			"count": 1
+		}
+	],
+	"total-count": 13
+}

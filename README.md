@@ -3,6 +3,8 @@
 A tool for analyzing and navigating [Clara Rules](https://github.com/gateless/clara-rules)
 rules, queries, and facts.
 
+👉 **[Try the Live Interactive Demo](https://www.metasimple.org/clara-rules-explorer/)**
+
 > [!WARNING] > **Experimental Project:** This repository is currently in an exploratory,
 > experimental stage. There are no deployed release versions, and it should not
 > be considered production-ready. It is active research and development that

@@ -6,11 +6,9 @@ node_modules
 **/.clj-kondo/.cache/
 .nrepl-port
 target
-demo-data
+/server/demo-data/
 .envrc
 .direnv
-package-lock.json
-pnpm-lock.yaml
 docs/internal
 ui/docs/internal
 

@@ -1,0 +1,22 @@
+{
+	"id": 13,
+	"type": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
+	"data": {
+		"app-id": "app-1",
+		"docs": [
+			{
+				"app-id": "app-1",
+				"doc-type": "id-card"
+			}
+		]
+	},
+	"is-root": false,
+	"inserted-from": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	],
+	"used-by": []
+}

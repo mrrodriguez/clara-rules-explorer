@@ -1,0 +1,11 @@
+{
+	"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+	"used-by-rules": [
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+	],
+	"used-by-queries": [],
+	"inserted-by-rules": [],
+	"retracted-by-rules": []
+}

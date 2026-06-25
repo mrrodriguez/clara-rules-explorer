@@ -1,50 +1,12 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { fetchSessionFactTypeInstances } from '$lib/api';
-	import type { SessionFactTypeDetail, SessionFactGroup } from '$lib/types/api';
+	import type { SessionFactGroup } from '$lib/types/api';
 	import QualifiedName from '$lib/components/ui/QualifiedName.svelte';
 	import FactGroup from './FactGroup.svelte';
 	import SessionSectionHeader from './SessionSectionHeader.svelte';
 
-	let detail = $state<SessionFactTypeDetail | null>(null);
-	let loading = $state(true);
-	let error = $state<string | null>(null);
-
-	$effect(() => {
-		const typeName = page.params.typeName;
-		let active = true;
-
-		if (!typeName) {
-			loading = false;
-			return;
-		}
-
-		async function load(name: string) {
-			loading = true;
-			error = null;
-			detail = null;
-			try {
-				const result = await fetchSessionFactTypeInstances(name);
-				if (active) {
-					detail = result;
-				}
-			} catch (e) {
-				if (active) {
-					error = (e as Error).message;
-				}
-			} finally {
-				if (active) {
-					loading = false;
-				}
-			}
-		}
-
-		load(typeName);
-
-		return () => {
-			active = false;
-		};
-	});
+	let { data } = $props();
+	const detail = $derived(data.detail);
 
 	interface ColumnDef {
 		icon: string;
@@ -92,7 +54,7 @@
 				{/if}
 			</h3>
 		</div>
-		{#if !loading && !error && detail}
+		{#if detail}
 			<div class="text-end border-start ps-4 ms-4">
 				<div class="display-6 fw-bold text-primary mb-0">{detail.count}</div>
 				<div class="fs-7 text-muted text-uppercase fw-bold">Active Instances</div>
@@ -100,22 +62,7 @@
 		{/if}
 	</div>
 
-	{#if loading}
-		<div class="d-flex flex-column align-items-center justify-content-center p-5 text-muted">
-			<div class="spinner-border text-primary mb-3" role="status">
-				<span class="visually-hidden">Loading...</span>
-			</div>
-			<span>Retrieving working memory snapshots...</span>
-		</div>
-	{:else if error}
-		<div class="alert alert-danger shadow-sm border-0 d-flex align-items-center p-4">
-			<i class="bi bi-exclamation-triangle-fill fs-3 me-3"></i>
-			<div>
-				<h5 class="alert-heading fw-bold mb-1">Failed to load instances</h5>
-				<p class="mb-0 small">{error}</p>
-			</div>
-		</div>
-	{:else if !detail || detail.count === 0}
+	{#if !detail || detail.count === 0}
 		<div class="text-center p-5 text-muted border border-dashed rounded bg-light">
 			<i class="bi bi-inbox display-4 d-block mb-3 text-muted opacity-50"></i>
 			<h5 class="fw-bold">No instances found</h5>

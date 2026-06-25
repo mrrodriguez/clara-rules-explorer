@@ -1,0 +1,163 @@
+{
+	"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+	"count": 3,
+	"inserted-from": [
+		{
+			"name": "Root Facts (External)",
+			"type": "root",
+			"facts": [
+				{
+					"id": 2,
+					"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+					"data": {
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					},
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				},
+				{
+					"id": 3,
+					"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+					"data": {
+						"app-id": "app-1",
+						"doc-type": "bank-statement"
+					},
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				},
+				{
+					"id": 4,
+					"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+					"data": {
+						"app-id": "app-1",
+						"doc-type": "paycheck"
+					},
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				}
+			]
+		}
+	],
+	"used-by": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 2,
+					"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+					"data": {
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					},
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 2,
+					"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+					"data": {
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					},
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				},
+				{
+					"id": 3,
+					"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+					"data": {
+						"app-id": "app-1",
+						"doc-type": "bank-statement"
+					},
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				},
+				{
+					"id": 4,
+					"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+					"data": {
+						"app-id": "app-1",
+						"doc-type": "paycheck"
+					},
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		}
+	],
+	"ids": [4, 3, 2]
+}
