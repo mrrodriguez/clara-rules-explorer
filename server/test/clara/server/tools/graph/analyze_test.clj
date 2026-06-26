@@ -14,7 +14,6 @@
            [clara.server.tools.graph.rules.analyze_test_rules
             LocalDummyRecord]))
 
-
 (deftest test-static-analysis-rules
   (testing "Traces RHS function calls and constructors programmatically"
     (let [annotations (analyze/analyze-rules-from-paths {:paths ["test/clara/server/tools/graph/rules/loan_doc_rules.clj"]})]
@@ -200,10 +199,10 @@
         (is (= [`LocalDummyRecord]
                (:clara-rules/insert-types ann-h10))
             "Should identify LocalDummyRecord from insert-all-unconditional! usage"))
-      
+
       ;; Test filter and no-output-types generation
       (let [annotations-filtered (analyze/analyze-rules-from-paths {:paths ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]
-                                                                     :rules-filter [`atr/rule-side-effect-only]})
+                                                                    :rules-filter [`atr/rule-side-effect-only]})
             ann-h6 (get annotations-filtered `atr/rule-side-effect-only)]
         (is (some? ann-h6) "Should keep rule-side-effect-only when it is in rules-filter")
         (is (true? (:clara-rules/no-output-types ann-h6))
@@ -245,8 +244,8 @@
     (let [cache (atom {})
           project-prefix "clara.server.tools.graph.rules"
           merged (analyze/build-analysis-from-namespaces {:starting-namespaces ['clara.server.tools.graph.rules.analyze-test-rules]
-                                                           :include-ns-prefixes [project-prefix]
-                                                           :cache-atom cache})]
+                                                          :include-ns-prefixes [project-prefix]
+                                                          :cache-atom cache})]
       ;; Verify that the starting namespace was analyzed and stored in cache
       (is (contains? @cache 'clara.server.tools.graph.rules.analyze-test-rules))
       ;; Verify that dependencies (e.g. loan-app-facts) were transitively analyzed and cached
@@ -260,10 +259,10 @@
     (analyze/clear-global-analysis-cache!)
     (let [project-prefix "clara.server.tools.graph.rules"
           _ (analyze/build-analysis-from-namespaces {:starting-namespaces ['clara.server.tools.graph.rules.analyze-test-rules]
-                                                      :include-ns-prefixes [project-prefix]})]
+                                                     :include-ns-prefixes [project-prefix]})]
       ;; Verify the global cache is populated
       (is (not-empty @@#'analyze/global-analysis-cache))
-      
+
       (analyze/clear-global-analysis-cache!)
       ;; Verify the global cache is cleared
       (is (empty? @@#'analyze/global-analysis-cache))))
@@ -271,7 +270,7 @@
   (testing "Resolve, ingest, and analyze rules together (production style)"
     (let [project-prefix "clara.server.tools.graph.rules"
           merged-analysis (analyze/build-analysis-from-namespaces {:starting-namespaces ['clara.server.tools.graph.rules.analyze-test-rules]
-                                                                    :include-ns-prefixes [project-prefix]})
+                                                                   :include-ns-prefixes [project-prefix]})
           annotations (analyze/analyze-rules {:analysis merged-analysis})]
       (is (some? (get annotations `atr/rule-record-constructor)))
       (is (= [`LocalDummyRecord]
@@ -281,7 +280,7 @@
     (let [session (r/mk-session 'clara.server.tools.graph.rules.analyze-test-rules)
           project-prefix "clara.server.tools.graph.rules"
           annotations (analyze/analyze-session-rules {:session-or-rulebase session
-                                                       :include-ns-prefixes [project-prefix]})]
+                                                      :include-ns-prefixes [project-prefix]})]
       (is (some? (get annotations `atr/rule-record-constructor)))
       (is (= [`LocalDummyRecord]
              (get-in annotations [`atr/rule-record-constructor :clara-rules/insert-types])))

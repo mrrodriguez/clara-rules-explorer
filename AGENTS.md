@@ -22,6 +22,8 @@ combinations yourself:
 ```bash
 cd server
 make test             # run the full test suite
+make format           # auto-format all source files (cljfmt)
+make format-check     # verify formatting is correct (for CI)
 make lint             # clj-kondo static analysis across src, test, dev
 make reflection-check # *warn-on-reflection* true on all sources
 make clean            # remove target and .cpcache

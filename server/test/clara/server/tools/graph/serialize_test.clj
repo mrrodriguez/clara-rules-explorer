@@ -76,7 +76,7 @@
       (is (str/includes? (:constraints serialized) "(= ?a 1)"))))
 
   (testing "Nested condition serialization (OR/AND)"
-    (let [condition [:or 
+    (let [condition [:or
                      {:type :type-a :constraints '[(= ?a 1)]}
                      {:type :type-b :constraints '[(= ?b 2)]}]
           serialized (s/serialize-condition condition)]

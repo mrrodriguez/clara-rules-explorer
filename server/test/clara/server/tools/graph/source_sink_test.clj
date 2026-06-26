@@ -45,7 +45,7 @@
       ;; Thus they are downstream of any rule inserting ApplicationOutcome (including themselves).
       (let [pending (get rules "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending")]
         (is (false? (:sink-rule pending)) "Should NOT be a sink because it is upstream of other rules via ApplicationOutcome"))
-      
+
       (let [approved (get rules "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved")]
         (is (false? (:sink-rule approved)) "Should NOT be a sink because denied/pending depend on its ApplicationOutcome inserts")))
 

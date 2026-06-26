@@ -46,15 +46,15 @@
       (let [snapshot-resp (handler (mock/request :get "/v1/session-snapshot"))
             snapshot (parse-json (:body snapshot-resp))
             ;; Be more specific: lookup by type AND app-id
-            fact-id (some (fn [[id f]] 
+            fact-id (some (fn [[id f]]
                             (when (and (= (:type f) "clara.server.tools.graph.rules.loan_app_facts.Application")
-                                       (= (get-in f [:data :app-id]) "app-1")) 
-                              id)) 
+                                       (= (get-in f [:data :app-id]) "app-1"))
+                              id))
                           (:facts snapshot))
-            
+
             ;; Now test the granular endpoint
             response (handler (mock/request :get (str "/v1/session/facts/" (name fact-id))))]
-        
+
         (is (= 200 (:status response)))
         (let [body (parse-json (:body response))]
           (is (= "clara.server.tools.graph.rules.loan_app_facts.Application" (:type body)))
