@@ -153,24 +153,28 @@
     session-or-rulebase))
 
 (defn- direct-callers
-  "Returns the set of vars in `vars` that directly call any function in `target-fns`
-   according to the call `graph`."
-  [graph vars target-fns]
+  "Returns the set of var names in in `var-names` that directly call any function in `target-fns`
+  according to the call `graph`."
+  [graph var-names target-fns]
   (into #{}
-        (filter (fn [v] (some target-fns (get graph v))))
-        vars))
+        (filter (fn [var-name] (some target-fns (get graph var-name))))
+        var-names))
 
 (defn- var-reachability
-  "For a given var, returns a map of:
-     :reachable      - set of all transitively reachable vars
-     :is-inserter?   - true if reachable set includes an insert fn or a direct inserter
-     :is-retractor?  - true if reachable set includes a retract fn or a direct retractor
-     :types          - set of fact types reachable through constructors"
-  [v
+  "For a given `var-name`, returns a map of:
+
+  * :reachable - set of all transitively reachable vars
+
+  * :is-inserter? - true if reachable set includes an insert fn or a direct inserter
+
+  * :is-retractor? - true if reachable set includes a retract fn or a direct retractor
+
+  * :types - set of fact types reachable through constructors"
+  [var-name
    {:keys [graph constructors java-constructors
            insert-fns retract-fns
            direct-inserters direct-retractors]}]
-  (let [reachable (transitive-reachability graph [v])
+  (let [reachable (transitive-reachability graph [var-name])
         is-inserter? (some #(or (contains? insert-fns %)
                                 (contains? direct-inserters %))
                            reachable)
@@ -184,11 +188,11 @@
      :is-retractor? is-retractor?
      :types types}))
 
-(defn- infer-annotation
-  "Returns an annotation map for the given var when it inserts or retracts
-   fact types. Returns nil when the var has no output side-effects."
-  [v ctx]
-  (let [{:keys [is-inserter? is-retractor? types]} (var-reachability v ctx)]
+(defn- infer-annotation-for-var
+  "Returns an annotation map for the var referred to by the given `var-name` when it inserts or
+  retracts fact types. Returns nil when the var has no output side-effects."
+  [var-name ctx]
+  (let [{:keys [is-inserter? is-retractor? types]} (var-reachability var-name ctx)]
     (when (or is-inserter? is-retractor?)
       (cond-> {}
         is-inserter?
@@ -291,7 +295,7 @@
         annotations
         (into (sorted-map)
               (keep (fn [v]
-                      (if-let [annotation (infer-annotation
+                      (if-let [annotation (infer-annotation-for-var
                                            v
                                            {:graph graph
                                             :constructors constructors
