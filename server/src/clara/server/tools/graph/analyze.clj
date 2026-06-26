@@ -5,7 +5,6 @@
             [clojure.string :as str]
             [clojure.set :as set]
             [clojure.java.io :as io]
-            [clojure.pprint :as pp]
             [clara.rules.engine :as eng])
   (:import [clara.rules.engine LocalSession]))
 
@@ -268,9 +267,9 @@
            (and is-retractor? (empty? types))
            (assoc :clara-rules/dynamic-retract-types-detected true))])))
 
-(defn analyze-rules
-  "Builds the call graph from a pre-computed clj-kondo analysis map,
-   and returns a map of rule FQ-name symbols to their inferred annotations.
+(defn generate-annotations-from-analysis
+  "Generates rule annotations (insert/retract types etc.) from a pre-computed
+   clj-kondo analysis map.
 
    Options:
      :analysis     - the clj-kondo analysis map (required)
@@ -347,11 +346,11 @@
                          {:starting-namespaces namespaces
                           :include-ns-prefixes include-ns-prefixes
                           :cache-atom cache-atom})]
-    (analyze-rules {:analysis merged-analysis :rules-filter rule-names})))
+    (generate-annotations-from-analysis {:analysis merged-analysis :rules-filter rule-names})))
 
-(defn analyze-rules-from-paths
+(defn generate-annotations-from-paths
   "Runs clj-kondo on the specified paths to generate an analysis map,
-   then analyzes rules and returns their inferred annotations.
+   then generates rule annotations from that analysis.
 
    Options:
      :paths        - paths to analyze (required)
@@ -362,52 +361,5 @@
                          :config {:analysis {:var-definitions true
                                              :var-usages true
                                              :java-class-usages true}}})]
-    (analyze-rules {:analysis (:analysis res) :rules-filter rules-filter})))
+    (generate-annotations-from-analysis {:analysis (:analysis res) :rules-filter rules-filter})))
 
-(defn merge-annotations
-  "Merges existing annotations with generated annotations.
-   Existing annotations take precedence, but empty or missing fields are populated.
-   New rules in generated annotations are added."
-  [existing generated]
-  (let [normalized-existing (into {} (map (fn [[k v]] [(normalize-key k) [k v]]) existing))
-        merged-normalized
-        (reduce (fn [acc [rule-sym gen-val]]
-                  (if-let [[orig-key orig-val] (get normalized-existing rule-sym)]
-                    ;; Rule exists, merge properties
-                    (let [merged-val (cond-> orig-val
-                                       (and (not (contains? orig-val :clara-rules/insert-types))
-                                            (seq (:clara-rules/insert-types gen-val)))
-                                       (assoc :clara-rules/insert-types (:clara-rules/insert-types gen-val))
-
-                                       (and (not (contains? orig-val :clara-rules/retract-types))
-                                            (seq (:clara-rules/retract-types gen-val)))
-                                       (assoc :clara-rules/retract-types (:clara-rules/retract-types gen-val))
-
-                                       (and (not (contains? orig-val :clara-rules/dynamic-insert-types-detected))
-                                            (contains? gen-val :clara-rules/dynamic-insert-types-detected)
-                                            (not (seq (:clara-rules/insert-types orig-val))))
-                                       (assoc :clara-rules/dynamic-insert-types-detected (:clara-rules/dynamic-insert-types-detected gen-val))
-
-                                       (and (not (contains? orig-val :clara-rules/dynamic-retract-types-detected))
-                                            (contains? gen-val :clara-rules/dynamic-retract-types-detected)
-                                            (not (seq (:clara-rules/retract-types orig-val))))
-                                       (assoc :clara-rules/dynamic-retract-types-detected (:clara-rules/dynamic-retract-types-detected gen-val))
-
-                                       (and (not (contains? orig-val :clara-rules/no-output-types))
-                                            (:clara-rules/no-output-types gen-val)
-                                            (not (seq (:clara-rules/insert-types orig-val)))
-                                            (not (seq (:clara-rules/retract-types orig-val))))
-                                       (assoc :clara-rules/no-output-types true))]
-                      (assoc acc orig-key merged-val))
-                    ;; New rule, add it
-                    (assoc acc rule-sym gen-val)))
-                existing
-                generated)]
-    merged-normalized))
-
-(defn write-annotations!
-  "Writes the annotations map to the specified file path as pretty-printed EDN."
-  [path annotations]
-  (with-open [w (io/writer path)]
-    (binding [*print-meta* true]
-      (pp/pprint annotations w))))

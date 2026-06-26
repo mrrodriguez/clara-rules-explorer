@@ -1,6 +1,10 @@
 (ns clara.server.tools.graph.annotations-test
   (:require [clara.server.tools.graph.annotations :as ann]
-            [clojure.test :refer [deftest is testing]]))
+            [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
+            [clojure.test :refer [deftest is testing]])
+  (:import [clara.server.tools.graph.rules.loan_app_facts
+            AllGivenDocuments
+            AllRequiredDocuments]))
 
 (deftest test-resolve-annotations--no-sidecar
   (let [production {:ns-name 'user
@@ -69,3 +73,27 @@
           sidecar {"user/my-rule" {:clara-rules/insert-types [`String]}}
           resolved (ann/resolve-annotations production sidecar)]
       (is (= [String] (:insert-types resolved))))))
+
+(deftest test-merge-annotations
+  (testing "Merging existing annotations with newly generated annotations"
+    (let [existing {`ldr/collect-app-given-docs
+                    {:clara-rules/insert-types '[AllGivenDocuments]}}
+          generated {`ldr/collect-app-given-docs
+                     {:clara-rules/insert-types [`AllGivenDocuments]}
+                     `ldr/collect-app-req-docs
+                     {:clara-rules/insert-types [`AllRequiredDocuments]}}
+          merged (ann/merge-annotations existing generated)]
+      (is (= '[AllGivenDocuments]
+             (get-in merged [`ldr/collect-app-given-docs :clara-rules/insert-types]))
+          "Existing symbol annotations should be preserved over generated ones")
+      (is (= [`AllRequiredDocuments]
+             (get-in merged [`ldr/collect-app-req-docs :clara-rules/insert-types]))
+          "New rules should be correctly added to the annotations map")
+
+      (let [existing-str {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
+                          {:clara-rules/insert-types '[AllGivenDocuments]}}
+            merged-str (ann/merge-annotations existing-str generated)]
+        (is (= '[AllGivenDocuments]
+               (get-in merged-str ["clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs" :clara-rules/insert-types]))
+            "Existing string annotations should be preserved over generated ones")))))
+

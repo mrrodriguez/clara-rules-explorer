@@ -16,7 +16,7 @@
 
 (deftest test-static-analysis-rules
   (testing "Traces RHS function calls and constructors programmatically"
-    (let [annotations (analyze/analyze-rules-from-paths {:paths ["test/clara/server/tools/graph/rules/loan_doc_rules.clj"]})]
+    (let [annotations (analyze/generate-annotations-from-paths {:paths ["test/clara/server/tools/graph/rules/loan_doc_rules.clj"]})]
       ;; Rule 1: collect-app-id-card-given-docs
       (let [ann-1 (get annotations `ldr/collect-app-id-card-given-docs)]
         (is (some? ann-1) "Should find collect-app-id-card-given-docs")
@@ -58,7 +58,7 @@
 
 (deftest test-static-analysis-edge-cases
   (testing "Traces different Clojure and Java constructor patterns and helpers"
-    (let [annotations (analyze/analyze-rules-from-paths {:paths ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]})]
+    (let [annotations (analyze/generate-annotations-from-paths {:paths ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]})]
       ;; Rule A: standard Clojure record constructor
       (let [ann-a (get annotations `atr/rule-record-constructor)]
         (is (some? ann-a))
@@ -201,35 +201,12 @@
             "Should identify LocalDummyRecord from insert-all-unconditional! usage"))
 
       ;; Test filter and no-output-types generation
-      (let [annotations-filtered (analyze/analyze-rules-from-paths {:paths ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]
-                                                                    :rules-filter [`atr/rule-side-effect-only]})
+      (let [annotations-filtered (analyze/generate-annotations-from-paths {:paths ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]
+                                                                           :rules-filter [`atr/rule-side-effect-only]})
             ann-h6 (get annotations-filtered `atr/rule-side-effect-only)]
         (is (some? ann-h6) "Should keep rule-side-effect-only when it is in rules-filter")
         (is (true? (:clara-rules/no-output-types ann-h6))
             "Should mark rules that don't insert/retract at all as no-output-types true")))))
-
-(deftest test-merge-annotations
-  (testing "Merging existing annotations with newly generated annotations"
-    (let [existing {`ldr/collect-app-given-docs
-                    {:clara-rules/insert-types '[AllGivenDocuments]}}
-          generated {`ldr/collect-app-given-docs
-                     {:clara-rules/insert-types [`AllGivenDocuments]}
-                     `ldr/collect-app-req-docs
-                     {:clara-rules/insert-types [`AllRequiredDocuments]}}
-          merged (analyze/merge-annotations existing generated)]
-      (is (= '[AllGivenDocuments]
-             (get-in merged [`ldr/collect-app-given-docs :clara-rules/insert-types]))
-          "Existing symbol annotations should be preserved over generated ones")
-      (is (= [`AllRequiredDocuments]
-             (get-in merged [`ldr/collect-app-req-docs :clara-rules/insert-types]))
-          "New rules should be correctly added to the annotations map")
-
-      (let [existing-str {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
-                          {:clara-rules/insert-types '[AllGivenDocuments]}}
-            merged-str (analyze/merge-annotations existing-str generated)]
-        (is (= '[AllGivenDocuments]
-               (get-in merged-str ["clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs" :clara-rules/insert-types]))
-            "Existing string annotations should be preserved over generated ones")))))
 
 (deftest test-classpath-resolution-and-caching
   (testing "Namespace path conversion"
@@ -271,7 +248,7 @@
     (let [project-prefix "clara.server.tools.graph.rules"
           merged-analysis (analyze/build-analysis-from-namespaces {:starting-namespaces ['clara.server.tools.graph.rules.analyze-test-rules]
                                                                    :include-ns-prefixes [project-prefix]})
-          annotations (analyze/analyze-rules {:analysis merged-analysis})]
+          annotations (analyze/generate-annotations-from-analysis {:analysis merged-analysis})]
       (is (some? (get annotations `atr/rule-record-constructor)))
       (is (= [`LocalDummyRecord]
              (get-in annotations [`atr/rule-record-constructor :clara-rules/insert-types])))))

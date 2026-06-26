@@ -3,7 +3,8 @@
    Handles arbitrary fact types (classes, keywords, symbols) as supported by Clara's
    pluggable fact-type-fn."
   (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [clojure.pprint :as pp]))
 
 (defn load-sidecar
   "Loads annotations from an EDN file path. Keyed by rule/query FQ-name strings
@@ -84,6 +85,64 @@
      (cond
        has-sidecar-notes :sidecar
        has-props-notes :props)}))
+
+(defn- normalize-key [k]
+  (if (string? k)
+    (symbol k)
+    k))
+
+(defn normalize-annotations
+  "Normalizes keys in an annotations map.
+   String keys are converted to symbols.
+   Returns a lookup map of normalized-key -> [original-key original-value]."
+  [annotations]
+  (into {} (map (fn [[k v]] [(normalize-key k) [k v]]) annotations)))
+
+(defn merge-annotations
+  "Merges existing annotations with generated annotations.
+   Existing annotations take precedence, but empty or missing fields are populated.
+   New rules in generated annotations are added."
+  [existing generated]
+  (let [normalized-existing (normalize-annotations existing)]
+    (reduce (fn [acc [rule-sym gen-val]]
+              (if-let [[orig-key orig-val] (get normalized-existing rule-sym)]
+                ;; Rule exists, merge properties
+                (let [merged-val (cond-> orig-val
+                                   (and (not (contains? orig-val :clara-rules/insert-types))
+                                        (seq (:clara-rules/insert-types gen-val)))
+                                   (assoc :clara-rules/insert-types (:clara-rules/insert-types gen-val))
+
+                                   (and (not (contains? orig-val :clara-rules/retract-types))
+                                        (seq (:clara-rules/retract-types gen-val)))
+                                   (assoc :clara-rules/retract-types (:clara-rules/retract-types gen-val))
+
+                                   (and (not (contains? orig-val :clara-rules/dynamic-insert-types-detected))
+                                        (contains? gen-val :clara-rules/dynamic-insert-types-detected)
+                                        (not (seq (:clara-rules/insert-types orig-val))))
+                                   (assoc :clara-rules/dynamic-insert-types-detected (:clara-rules/dynamic-insert-types-detected gen-val))
+
+                                   (and (not (contains? orig-val :clara-rules/dynamic-retract-types-detected))
+                                        (contains? gen-val :clara-rules/dynamic-retract-types-detected)
+                                        (not (seq (:clara-rules/retract-types orig-val))))
+                                   (assoc :clara-rules/dynamic-retract-types-detected (:clara-rules/dynamic-retract-types-detected gen-val))
+
+                                   (and (not (contains? orig-val :clara-rules/no-output-types))
+                                        (:clara-rules/no-output-types gen-val)
+                                        (not (seq (:clara-rules/insert-types orig-val)))
+                                        (not (seq (:clara-rules/retract-types orig-val))))
+                                   (assoc :clara-rules/no-output-types true))]
+                  (assoc acc orig-key merged-val))
+                ;; New rule, add it
+                (assoc acc rule-sym gen-val)))
+            existing
+            generated)))
+
+(defn write-annotations!
+  "Writes the annotations map to the specified file path as pretty-printed EDN."
+  [path annotations]
+  (with-open [w (io/writer path)]
+    (binding [*print-meta* true]
+      (pp/pprint annotations w))))
 
 (defn resolve-annotations
   "Merges Path A (rule props) and Path B (sidecar) metadata for a production.
