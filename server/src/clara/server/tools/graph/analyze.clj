@@ -152,8 +152,56 @@
     (-> session-or-rulebase eng/components :rulebase)
     session-or-rulebase))
 
+(defn- direct-callers
+  "Returns the set of vars in `vars` that directly call any function in `target-fns`
+   according to the call `graph`."
+  [graph vars target-fns]
+  (into #{}
+        (filter (fn [v] (some target-fns (get graph v))))
+        vars))
+
+(defn- var-reachability
+  "For a given var, returns a map of:
+     :reachable      - set of all transitively reachable vars
+     :is-inserter?   - true if reachable set includes an insert fn or a direct inserter
+     :is-retractor?  - true if reachable set includes a retract fn or a direct retractor
+     :types          - set of fact types reachable through constructors"
+  [v
+   {:keys [graph constructors java-constructors
+           insert-fns retract-fns
+           direct-inserters direct-retractors]}]
+  (let [reachable (transitive-reachability graph [v])
+        is-inserter? (some #(or (contains? insert-fns %)
+                                (contains? direct-inserters %))
+                           reachable)
+        is-retractor? (some #(or (contains? retract-fns %)
+                                 (contains? direct-retractors %))
+                            reachable)
+        types (set/union (into #{} (mapcat constructors reachable))
+                         (into #{} (mapcat java-constructors reachable)))]
+    {:reachable reachable
+     :is-inserter? is-inserter?
+     :is-retractor? is-retractor?
+     :types types}))
+
+(defn- infer-annotation
+  "Returns an annotation map for the given var when it inserts or retracts
+   fact types. Returns nil when the var has no output side-effects."
+  [v ctx]
+  (let [{:keys [is-inserter? is-retractor? types]} (var-reachability v ctx)]
+    (when (or is-inserter? is-retractor?)
+      (cond-> {}
+        is-inserter?
+        (assoc :clara-rules/insert-types (vec (sort (map symbol types))))
+        (and is-inserter? (empty? types))
+        (assoc :clara-rules/dynamic-insert-types-detected true)
+        is-retractor?
+        (assoc :clara-rules/retract-types (vec (sort (map symbol types))))
+        (and is-retractor? (empty? types))
+        (assoc :clara-rules/dynamic-retract-types-detected true)))))
+
 ;;
-;; Public API
+;; API
 ;;
 
 (defn clear-global-analysis-cache!
@@ -219,54 +267,6 @@
               ;; Resource not found on classpath, skip
               (recur remaining (conj processed ns-sym) merged-analysis))))))))
 
-(defn- direct-callers
-  "Returns the set of vars in `vars` that directly call any function in `target-fns`
-   according to the call `graph`."
-  [graph vars target-fns]
-  (into #{}
-        (filter (fn [v] (some target-fns (get graph v))))
-        vars))
-
-(defn- var-reachability
-  "For a given var, returns a map of:
-     :reachable      - set of all transitively reachable vars
-     :is-inserter?   - true if reachable set includes an insert fn or a direct inserter
-     :is-retractor?  - true if reachable set includes a retract fn or a direct retractor
-     :types          - set of fact types reachable through constructors"
-  [v
-   {:keys [graph constructors java-constructors
-           insert-fns retract-fns
-           direct-inserters direct-retractors]}]
-  (let [reachable (transitive-reachability graph [v])
-        is-inserter? (some #(or (contains? insert-fns %)
-                                (contains? direct-inserters %))
-                           reachable)
-        is-retractor? (some #(or (contains? retract-fns %)
-                                 (contains? direct-retractors %))
-                            reachable)
-        types (set/union (into #{} (mapcat constructors reachable))
-                         (into #{} (mapcat java-constructors reachable)))]
-    {:reachable reachable
-     :is-inserter? is-inserter?
-     :is-retractor? is-retractor?
-     :types types}))
-
-(defn- var-annotation
-  "Returns a [var-key annotation-map] pair for the given var when it inserts or
-   retracts fact types. Returns nil when the var has no output side-effects."
-  [v ctx]
-  (let [{:keys [is-inserter? is-retractor? types]} (var-reachability v ctx)]
-    (when (or is-inserter? is-retractor?)
-      [v (cond-> {}
-           is-inserter?
-           (assoc :clara-rules/insert-types (vec (sort (map symbol types))))
-           (and is-inserter? (empty? types))
-           (assoc :clara-rules/dynamic-insert-types-detected true)
-           is-retractor?
-           (assoc :clara-rules/retract-types (vec (sort (map symbol types))))
-           (and is-retractor? (empty? types))
-           (assoc :clara-rules/dynamic-retract-types-detected true))])))
-
 (defn generate-annotations-from-analysis
   "Generates rule annotations (insert/retract types etc.) from a pre-computed
    clj-kondo analysis map.
@@ -289,18 +289,18 @@
                   project-vars)
 
         annotations
-        (into {}
+        (into (sorted-map)
               (keep (fn [v]
-                      (if-let [pair (var-annotation
-                                     v
-                                     {:graph graph
-                                      :constructors constructors
-                                      :java-constructors java-constructors
-                                      :insert-fns insert-fns
-                                      :retract-fns retract-fns
-                                      :direct-inserters direct-inserters
-                                      :direct-retractors direct-retractors})]
-                        pair
+                      (if-let [annotation (infer-annotation
+                                           v
+                                           {:graph graph
+                                            :constructors constructors
+                                            :java-constructors java-constructors
+                                            :insert-fns insert-fns
+                                            :retract-fns retract-fns
+                                            :direct-inserters direct-inserters
+                                            :direct-retractors direct-retractors})]
+                        [v annotation]
                         (when (seq rules-filter)
                           [v {:clara-rules/no-output-types true}]))))
               var-seq)]
@@ -327,12 +327,14 @@
                    (distinct)))))
 
 (defn analyze-session-rules
-  "Analyzes the rules in a Clara session or rulebase by:
+  "Builds a unified clj-kondo analysis map for the rules in a Clara session
+   or rulebase by:
    1. Extracting the namespaces and rule names from the session.
-   2. Building a unified clj-kondo analysis map from the classpath (using the cache).
-   3. Running call-graph analysis to infer insert/retract annotations.
+   2. Building a merged analysis map from the classpath (using the cache).
 
-   Returns a map of rule FQ-name symbols to their inferred annotations.
+   Returns the merged clj-kondo analysis map.
+   Consumers can feed this to `generate-annotations-from-analysis` with
+   `extract-session-rule-names` to generate annotations.
 
    Options:
      :session-or-rulebase   - Clara session or rulebase (required)
@@ -340,13 +342,11 @@
      :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache."
   [{:keys [session-or-rulebase include-ns-prefixes cache-atom]
     :or {cache-atom global-analysis-cache}}]
-  (let [rule-names (extract-session-rule-names session-or-rulebase)
-        namespaces (extract-session-namespaces session-or-rulebase)
-        merged-analysis (build-analysis-from-namespaces
-                         {:starting-namespaces namespaces
-                          :include-ns-prefixes include-ns-prefixes
-                          :cache-atom cache-atom})]
-    (generate-annotations-from-analysis {:analysis merged-analysis :rules-filter rule-names})))
+  (let [namespaces (extract-session-namespaces session-or-rulebase)]
+    (build-analysis-from-namespaces
+     {:starting-namespaces namespaces
+      :include-ns-prefixes include-ns-prefixes
+      :cache-atom cache-atom})))
 
 (defn generate-annotations-from-paths
   "Runs clj-kondo on the specified paths to generate an analysis map,
@@ -362,4 +362,3 @@
                                              :var-usages true
                                              :java-class-usages true}}})]
     (generate-annotations-from-analysis {:analysis (:analysis res) :rules-filter rules-filter})))
-

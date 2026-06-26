@@ -256,8 +256,11 @@
   (testing "Analyze session rules directly (high-level API)"
     (let [session (r/mk-session 'clara.server.tools.graph.rules.analyze-test-rules)
           project-prefix "clara.server.tools.graph.rules"
-          annotations (analyze/analyze-session-rules {:session-or-rulebase session
-                                                      :include-ns-prefixes [project-prefix]})]
+          analysis (analyze/analyze-session-rules {:session-or-rulebase session
+                                                   :include-ns-prefixes [project-prefix]})
+          rule-names (analyze/extract-session-rule-names session)
+          annotations (analyze/generate-annotations-from-analysis {:analysis analysis
+                                                                   :rules-filter rule-names})]
       (is (some? (get annotations `atr/rule-record-constructor)))
       (is (= [`LocalDummyRecord]
              (get-in annotations [`atr/rule-record-constructor :clara-rules/insert-types])))
