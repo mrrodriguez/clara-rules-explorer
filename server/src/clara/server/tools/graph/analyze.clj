@@ -17,14 +17,14 @@
 
 (defn constructor->fact-type
   "Maps a record constructor function name to its fully qualified record class symbol.
-   E.g. clara.rules.facts/map->Application => clara.rules.facts.Application"
+   Uses clojure.core/munge to handle namespace symbol munging."
   [ns name-str]
   (let [record-name (cond
                       (str/starts-with? name-str "map->") (subs name-str 5)
                       (str/starts-with? name-str "->") (subs name-str 2)
                       :else nil)]
     (when record-name
-      (let [ns-pkg (str/replace (str ns) "-" "_")]
+      (let [ns-pkg (munge (str ns))]
         (symbol (str ns-pkg "." record-name))))))
 
 (def ^:private insert-fns
@@ -41,6 +41,11 @@
   #{'clara.rules/retract!
     'clara.rules.engine/rhs-retract-facts!
     'clara.rules/retract})
+
+(defn- java-class? [class-str]
+  (let [last-segment (last (str/split class-str #"\."))]
+    (and (seq last-segment)
+         (Character/isUpperCase ^Character (first last-segment)))))
 
 (defn- build-graph [analysis]
   (reduce (fn [acc {:keys [from from-var to name]}]
@@ -64,6 +69,46 @@
           {}
           (:var-usages analysis)))
 
+(defn- build-java-constructors [analysis]
+  (let [defs (:var-definitions analysis)
+        java-usages (:java-class-usages analysis)]
+    (reduce (fn [acc d]
+              (let [caller (fq-name-sym (:ns d) (:name d))
+                    start-row (:row d)
+                    end-row (:end-row d)]
+                (if (and start-row end-row)
+                  (let [contained-classes
+                        (keep (fn [u]
+                                (when (and (:row u)
+                                           (<= start-row (:row u))
+                                           (<= (:row u) end-row)
+                                           (not (:import u))
+                                           (not= (:col u) (:name-col u)))
+                                  (if-let [method-name (:method-name u)]
+                                    (cond
+                                      (str/starts-with? method-name "map->")
+                                      (let [record-name (subs method-name 5)]
+                                        (symbol (str (:class u) "." record-name)))
+                                      
+                                      (str/starts-with? method-name "->")
+                                      (let [record-name (subs method-name 2)]
+                                        (symbol (str (:class u) "." record-name)))
+                                      
+                                      (= method-name "new")
+                                      (when (java-class? (:class u))
+                                        (symbol (:class u)))
+                                      
+                                      :else nil)
+                                    (when (java-class? (:class u))
+                                      (symbol (:class u))))))
+                              java-usages)]
+                    (if (seq contained-classes)
+                      (update acc caller (fnil set/union #{}) (set contained-classes))
+                      acc))
+                  acc)))
+            {}
+            defs)))
+
 (defn- transitive-reachability [graph start-vars]
   (loop [seen #{}
          todo (set start-vars)]
@@ -80,11 +125,14 @@
   ([paths]
    (analyze-rules paths nil))
   ([paths rules-filter]
-   (let [{:keys [analysis]} (kondo/run! {:lint paths
-                                         :config {:analysis {:var-definitions true
-                                                             :var-usages true}}})
+   (let [res (kondo/run! {:lint paths
+                          :config {:analysis {:var-definitions true
+                                              :var-usages true
+                                              :java-class-usages true}}})
+         analysis (:analysis res)
          graph (build-graph analysis)
          constructors (build-constructors analysis)
+         java-constructors (build-java-constructors analysis)
          project-vars (keys graph)
 
          ;; Find all project vars that directly call insert/retract
@@ -99,7 +147,8 @@
                      :let [reachable (transitive-reachability graph [v])
                            is-inserter? (some #(or (contains? insert-fns %) (contains? direct-inserters %)) reachable)
                            is-retractor? (some #(or (contains? retract-fns %) (contains? direct-retractors %)) reachable)
-                           types (set (mapcat constructors reachable))]
+                           types (set/union (into #{} (mapcat constructors reachable))
+                                            (into #{} (mapcat java-constructors reachable)))]
                      :when (or is-inserter? is-retractor?)]
                  [v (cond-> {}
                       is-inserter? (assoc :clara-rules/insert-types (vec (sort (map symbol types))))
