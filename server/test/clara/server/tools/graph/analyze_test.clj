@@ -1,5 +1,6 @@
 (ns clara.server.tools.graph.analyze-test
   (:require [clojure.test :refer [deftest is testing]]
+            [clara.rules :as r]
             [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
             [clara.server.tools.graph.rules.analyze-test-rules :as atr])
@@ -16,7 +17,7 @@
 
 (deftest test-static-analysis-rules
   (testing "Traces RHS function calls and constructors programmatically"
-    (let [annotations (analyze/analyze-rules ["test/clara/server/tools/graph/rules/loan_doc_rules.clj"])]
+    (let [annotations (analyze/analyze-rules-from-paths {:paths ["test/clara/server/tools/graph/rules/loan_doc_rules.clj"]})]
       ;; Rule 1: collect-app-id-card-given-docs
       (let [ann-1 (get annotations `ldr/collect-app-id-card-given-docs)]
         (is (some? ann-1) "Should find collect-app-id-card-given-docs")
@@ -58,7 +59,7 @@
 
 (deftest test-static-analysis-edge-cases
   (testing "Traces different Clojure and Java constructor patterns and helpers"
-    (let [annotations (analyze/analyze-rules ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"])]
+    (let [annotations (analyze/analyze-rules-from-paths {:paths ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]})]
       ;; Rule A: standard Clojure record constructor
       (let [ann-a (get annotations `atr/rule-record-constructor)]
         (is (some? ann-a))
@@ -201,8 +202,8 @@
             "Should identify LocalDummyRecord from insert-all-unconditional! usage"))
       
       ;; Test filter and no-output-types generation
-      (let [annotations-filtered (analyze/analyze-rules ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]
-                                                        [`atr/rule-side-effect-only])
+      (let [annotations-filtered (analyze/analyze-rules-from-paths {:paths ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]
+                                                                     :rules-filter [`atr/rule-side-effect-only]})
             ann-h6 (get annotations-filtered `atr/rule-side-effect-only)]
         (is (some? ann-h6) "Should keep rule-side-effect-only when it is in rules-filter")
         (is (true? (:clara-rules/no-output-types ann-h6))
@@ -230,3 +231,62 @@
         (is (= '[AllGivenDocuments]
                (get-in merged-str ["clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs" :clara-rules/insert-types]))
             "Existing string annotations should be preserved over generated ones")))))
+
+(deftest test-classpath-resolution-and-caching
+  (testing "Namespace path conversion"
+    (is (= "clara/server/tools/graph/rules/analyze_test_rules"
+           (analyze/ns->resource-base 'clara.server.tools.graph.rules.analyze-test-rules))))
+
+  (testing "Resource finding"
+    (is (some? (analyze/find-ns-resource 'clara.server.tools.graph.rules.analyze-test-rules)))
+    (is (nil? (analyze/find-ns-resource 'non-existent-ns.fake))))
+
+  (testing "Build analysis from namespaces with custom cache"
+    (let [cache (atom {})
+          project-prefix "clara.server.tools.graph.rules"
+          merged (analyze/build-analysis-from-namespaces {:starting-namespaces ['clara.server.tools.graph.rules.analyze-test-rules]
+                                                           :include-ns-prefixes [project-prefix]
+                                                           :cache-atom cache})]
+      ;; Verify that the starting namespace was analyzed and stored in cache
+      (is (contains? @cache 'clara.server.tools.graph.rules.analyze-test-rules))
+      ;; Verify that dependencies (e.g. loan-app-facts) were transitively analyzed and cached
+      (is (contains? @cache 'clara.server.tools.graph.rules.loan-app-facts))
+      ;; Verify that the merged analysis contains expected var definitions
+      (let [var-defs (set (map :name (:var-definitions merged)))]
+        (is (contains? var-defs 'make-document-check))
+        (is (contains? var-defs 'rule-record-constructor)))))
+
+  (testing "Build analysis from namespaces with global cache"
+    (analyze/clear-global-analysis-cache!)
+    (let [project-prefix "clara.server.tools.graph.rules"
+          _ (analyze/build-analysis-from-namespaces {:starting-namespaces ['clara.server.tools.graph.rules.analyze-test-rules]
+                                                      :include-ns-prefixes [project-prefix]})]
+      ;; Verify the global cache is populated
+      (is (not-empty @@#'analyze/global-analysis-cache))
+      
+      (analyze/clear-global-analysis-cache!)
+      ;; Verify the global cache is cleared
+      (is (empty? @@#'analyze/global-analysis-cache))))
+
+  (testing "Resolve, ingest, and analyze rules together (production style)"
+    (let [project-prefix "clara.server.tools.graph.rules"
+          merged-analysis (analyze/build-analysis-from-namespaces {:starting-namespaces ['clara.server.tools.graph.rules.analyze-test-rules]
+                                                                    :include-ns-prefixes [project-prefix]})
+          annotations (analyze/analyze-rules {:analysis merged-analysis})]
+      (is (some? (get annotations `atr/rule-record-constructor)))
+      (is (= [`LocalDummyRecord]
+             (get-in annotations [`atr/rule-record-constructor :clara-rules/insert-types])))))
+
+  (testing "Analyze session rules directly (high-level API)"
+    (let [session (r/mk-session 'clara.server.tools.graph.rules.analyze-test-rules)
+          project-prefix "clara.server.tools.graph.rules"
+          annotations (analyze/analyze-session-rules {:session-or-rulebase session
+                                                       :include-ns-prefixes [project-prefix]})]
+      (is (some? (get annotations `atr/rule-record-constructor)))
+      (is (= [`LocalDummyRecord]
+             (get-in annotations [`atr/rule-record-constructor :clara-rules/insert-types])))
+      (is (some? (get annotations `atr/rule-insert-varargs)))
+      (is (= [`LocalDummyRecord]
+             (get-in annotations [`atr/rule-insert-varargs :clara-rules/insert-types]))))))
+
+

@@ -5,27 +5,17 @@
             [clojure.string :as str]
             [clojure.set :as set]
             [clojure.java.io :as io]
-            [clojure.pprint :as pp]))
+            [clojure.pprint :as pp]
+            [clara.rules.engine :as eng])
+  (:import [clara.rules.engine LocalSession]))
 
-(defn- fq-name-sym [ns name]
-  (symbol (str ns) (str name)))
+(declare ns->resource-base)
 
-(defn- normalize-key [k]
-  (if (string? k)
-    (symbol k)
-    k))
+;;
+;; Private Helpers
+;;
 
-(defn constructor->fact-type
-  "Maps a record constructor function name to its fully qualified record class symbol.
-   Uses clojure.core/munge to handle namespace symbol munging."
-  [ns name-str]
-  (let [record-name (cond
-                      (str/starts-with? name-str "map->") (subs name-str 5)
-                      (str/starts-with? name-str "->") (subs name-str 2)
-                      :else nil)]
-    (when record-name
-      (let [ns-pkg (munge (str ns))]
-        (symbol (str ns-pkg "." record-name))))))
+(defonce ^:private global-analysis-cache (atom {}))
 
 (def ^:private insert-fns
   #{'clara.rules/insert!
@@ -42,10 +32,30 @@
     'clara.rules.engine/rhs-retract-facts!
     'clara.rules/retract})
 
+(defn- fq-name-sym [ns name]
+  (symbol (str ns) (str name)))
+
+(defn- normalize-key [k]
+  (if (string? k)
+    (symbol k)
+    k))
+
 (defn- java-class? [class-str]
   (let [last-segment (last (str/split class-str #"\."))]
     (and (seq last-segment)
          (Character/isUpperCase ^Character (first last-segment)))))
+
+(defn- constructor->fact-type
+  "Maps a record constructor function name to its fully qualified record class symbol.
+   Uses clojure.core/munge to handle namespace symbol munging."
+  [ns name-str]
+  (let [record-name (cond
+                      (str/starts-with? name-str "map->") (subs name-str 5)
+                      (str/starts-with? name-str "->") (subs name-str 2)
+                      :else nil)]
+    (when record-name
+      (let [ns-pkg (munge (str ns))]
+        (symbol (str ns-pkg "." record-name))))))
 
 (defn- build-graph [analysis]
   (reduce (fn [acc {:keys [from from-var to name]}]
@@ -89,15 +99,15 @@
                                       (str/starts-with? method-name "map->")
                                       (let [record-name (subs method-name 5)]
                                         (symbol (str (:class u) "." record-name)))
-                                      
+
                                       (str/starts-with? method-name "->")
                                       (let [record-name (subs method-name 2)]
                                         (symbol (str (:class u) "." record-name)))
-                                      
+
                                       (= method-name "new")
                                       (when (java-class? (:class u))
                                         (symbol (:class u)))
-                                      
+
                                       :else nil)
                                     (when (java-class? (:class u))
                                       (symbol (:class u))))))
@@ -119,57 +129,202 @@
             unvisited (set/difference next-vars seen)]
         (recur seen unvisited)))))
 
+(defn- extract-required-namespaces [analysis]
+  (->> (:namespace-usages analysis)
+       (map :to)
+       (distinct)))
+
+(defn- analyze-ns-source [ns-sym resource-url]
+  (let [source-code (slurp resource-url)
+        extension (if (str/ends-with? (str resource-url) ".cljc") ".cljc" ".clj")
+        resource-path (str (ns->resource-base ns-sym) extension)]
+    (with-in-str source-code
+      (kondo/run!
+       {:lint ["-"]
+        :lang :clj
+        :filename resource-path
+        :config {:analysis {:var-definitions true
+                            :var-usages true
+                            :java-class-usages true}}}))))
+
+(defn- get-rulebase [session-or-rulebase]
+  (if (instance? LocalSession session-or-rulebase)
+    (-> session-or-rulebase eng/components :rulebase)
+    session-or-rulebase))
+
+;;
+;; Public API
+;;
+
+(defn clear-global-analysis-cache!
+  "Clears the global analysis cache to prevent memory leaks or stale state."
+  []
+  (reset! global-analysis-cache {}))
+
+(defn ns->resource-base
+  "Mimics Clojure's core root-resource logic (without a leading slash)
+   to map a namespace symbol to a base path."
+  [ns-sym]
+  (-> (name ns-sym)
+      (str/replace "-" "_")
+      (str/replace "." "/")))
+
+(defn find-ns-resource
+  "Finds the resource URL on the classpath for a Clojure namespace symbol,
+   checking both .clj and .cljc extensions sequentially."
+  [ns-sym]
+  (let [base-path (ns->resource-base ns-sym)]
+    (or (io/resource (str base-path ".clj"))
+        (io/resource (str base-path ".cljc")))))
+
+(defn build-analysis-from-namespaces
+  "Resolves transitive dependencies on the classpath for starting namespaces,
+   optionally filtering by include-ns-prefixes, runs clj-kondo against them
+   (using the cache), and returns a merged analysis map.
+
+   Options:
+     :starting-namespaces  - coll of namespace symbols to start from (required)
+     :include-ns-prefixes   - optional coll of ns prefix strings; when nil,
+                              all transitive dependencies are followed (no filtering).
+     :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache."
+  [{:keys [starting-namespaces include-ns-prefixes cache-atom]
+    :or {cache-atom global-analysis-cache}}]
+  (let [ns-matches-prefix? (if include-ns-prefixes
+                             (fn [ns-sym]
+                               (let [ns-str (str ns-sym)]
+                                 (some #(str/starts-with? ns-str (str %)) include-ns-prefixes)))
+                             (constantly true))]
+    (loop [queue (set starting-namespaces)
+           processed #{}
+           merged-analysis {}]
+      (if (empty? queue)
+        merged-analysis
+        (let [ns-sym (first queue)
+              remaining (disj queue ns-sym)]
+          (if (contains? processed ns-sym)
+            (recur remaining processed merged-analysis)
+            (if-let [resource-url (find-ns-resource ns-sym)]
+              (let [cached-entry (when cache-atom (get @cache-atom ns-sym))
+                    analysis (if cached-entry
+                               cached-entry
+                               (let [res (:analysis (analyze-ns-source ns-sym resource-url))]
+                                 (when cache-atom
+                                   (swap! cache-atom assoc ns-sym res))
+                                 res))
+                    dependencies (->> (extract-required-namespaces analysis)
+                                      (filter ns-matches-prefix?))]
+                (recur (into remaining dependencies)
+                       (conj processed ns-sym)
+                       (merge-with into merged-analysis analysis)))
+              ;; Resource not found on classpath, skip
+              (recur remaining (conj processed ns-sym) merged-analysis))))))))
+
 (defn analyze-rules
-  "Runs clj-kondo on the specified paths, builds the call graph,
-   and returns a map of rule FQ-name symbols to their inferred annotations."
-  ([paths]
-   (analyze-rules paths nil))
-  ([paths rules-filter]
-   (let [res (kondo/run! {:lint paths
-                          :config {:analysis {:var-definitions true
-                                              :var-usages true
-                                              :java-class-usages true}}})
-         analysis (:analysis res)
-         graph (build-graph analysis)
-         constructors (build-constructors analysis)
-         java-constructors (build-java-constructors analysis)
-         project-vars (keys graph)
+  "Builds the call graph from a pre-computed clj-kondo analysis map,
+   and returns a map of rule FQ-name symbols to their inferred annotations.
+
+   Options:
+     :analysis     - the clj-kondo analysis map (required)
+     :rules-filter - optional coll of rule symbols to filter by; when nil,
+                     all project vars are analyzed."
+  [{:keys [analysis rules-filter]}]
+  (let [graph (build-graph analysis)
+        constructors (build-constructors analysis)
+        java-constructors (build-java-constructors analysis)
+        project-vars (keys graph)
 
          ;; Find all project vars that directly call insert/retract
-         direct-inserters (into #{} (filter (fn [v] (some insert-fns (get graph v))) project-vars))
-         direct-retractors (into #{} (filter (fn [v] (some retract-fns (get graph v))) project-vars))
+        direct-inserters (into #{} (filter (fn [v] (some insert-fns (get graph v))) project-vars))
+        direct-retractors (into #{} (filter (fn [v] (some retract-fns (get graph v))) project-vars))
 
          ;; For each project var, compute transitive insert/retract flag
          ;; and collected fact types.
-         annotations
-         (into {}
-               (for [v (if (seq rules-filter)
-                         (map normalize-key rules-filter)
-                         project-vars)
-                     :let [reachable (transitive-reachability graph [v])
-                           is-inserter? (some #(or (contains? insert-fns %) (contains? direct-inserters %)) reachable)
-                           is-retractor? (some #(or (contains? retract-fns %) (contains? direct-retractors %)) reachable)
-                           types (set/union (into #{} (mapcat constructors reachable))
-                                            (into #{} (mapcat java-constructors reachable)))]
-                     :when (or is-inserter? is-retractor? (seq rules-filter))]
-                 [v (cond
-                      (or is-inserter? is-retractor?)
-                      (cond-> {}
-                        is-inserter?
-                        (assoc :clara-rules/insert-types (vec (sort (map symbol types))))
-                        
-                        (and is-inserter? (empty? types))
-                        (assoc :clara-rules/dynamic-insert-types-detected true)
-                        
-                        is-retractor?
-                        (assoc :clara-rules/retract-types (vec (sort (map symbol types))))
-                        
-                        (and is-retractor? (empty? types))
-                        (assoc :clara-rules/dynamic-retract-types-detected true))
-                      
-                      :else
-                      {:clara-rules/no-output-types true})]))]
-     annotations)))
+        annotations
+        (into {}
+              (for [v (if (seq rules-filter)
+                        (map normalize-key rules-filter)
+                        project-vars)
+                    :let [reachable (transitive-reachability graph [v])
+                          is-inserter? (some #(or (contains? insert-fns %) (contains? direct-inserters %)) reachable)
+                          is-retractor? (some #(or (contains? retract-fns %) (contains? direct-retractors %)) reachable)
+                          types (set/union (into #{} (mapcat constructors reachable))
+                                           (into #{} (mapcat java-constructors reachable)))]
+                    :when (or is-inserter? is-retractor? (seq rules-filter))]
+                [v (cond
+                     (or is-inserter? is-retractor?)
+                     (cond-> {}
+                       is-inserter?
+                       (assoc :clara-rules/insert-types (vec (sort (map symbol types))))
+
+                       (and is-inserter? (empty? types))
+                       (assoc :clara-rules/dynamic-insert-types-detected true)
+
+                       is-retractor?
+                       (assoc :clara-rules/retract-types (vec (sort (map symbol types))))
+
+                       (and is-retractor? (empty? types))
+                       (assoc :clara-rules/dynamic-retract-types-detected true))
+
+                     :else
+                     {:clara-rules/no-output-types true})]))]
+    annotations))
+
+(defn extract-session-rule-names
+  "Extracts all rule and query names (symbols) from a Clara session or rulebase."
+  [session-or-rulebase]
+  (let [{:keys [productions]} (get-rulebase session-or-rulebase)]
+    (into []
+          (comp (map :name)
+                (distinct))
+          productions)))
+
+(defn extract-session-namespaces
+  "Extracts all namespace symbols where rules or queries in the session are defined."
+  [session-or-rulebase]
+  (->> session-or-rulebase
+       extract-session-rule-names
+       (into []
+             (comp (map normalize-key)
+                   (keep namespace)
+                   (map symbol)
+                   (distinct)))))
+
+(defn analyze-session-rules
+  "Analyzes the rules in a Clara session or rulebase by:
+   1. Extracting the namespaces and rule names from the session.
+   2. Building a unified clj-kondo analysis map from the classpath (using the cache).
+   3. Running call-graph analysis to infer insert/retract annotations.
+
+   Returns a map of rule FQ-name symbols to their inferred annotations.
+
+   Options:
+     :session-or-rulebase   - Clara session or rulebase (required)
+     :include-ns-prefixes   - optional coll of ns prefix strings; passed to build-analysis-from-namespaces
+     :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache."
+  [{:keys [session-or-rulebase include-ns-prefixes cache-atom]
+    :or {cache-atom global-analysis-cache}}]
+  (let [rule-names (extract-session-rule-names session-or-rulebase)
+        namespaces (extract-session-namespaces session-or-rulebase)
+        merged-analysis (build-analysis-from-namespaces
+                         {:starting-namespaces namespaces
+                          :include-ns-prefixes include-ns-prefixes
+                          :cache-atom cache-atom})]
+    (analyze-rules {:analysis merged-analysis :rules-filter rule-names})))
+
+(defn analyze-rules-from-paths
+  "Runs clj-kondo on the specified paths to generate an analysis map,
+   then analyzes rules and returns their inferred annotations.
+
+   Options:
+     :paths        - paths to analyze (required)
+     :rules-filter - optional coll of rule symbols to filter by; when nil,
+                     all project vars are analyzed."
+  [{:keys [paths rules-filter]}]
+  (let [res (kondo/run! {:lint paths
+                         :config {:analysis {:var-definitions true
+                                             :var-usages true
+                                             :java-class-usages true}}})]
+    (analyze-rules {:analysis (:analysis res) :rules-filter rules-filter})))
 
 (defn merge-annotations
   "Merges existing annotations with generated annotations.
