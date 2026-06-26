@@ -1,5 +1,6 @@
 (ns clara.server.tools.graph.rules.analyze-test-rules
-  (:require [clara.rules :as r])
+  (:require [clara.rules :as r]
+            [clara.server.tools.graph.rules.loan-app-facts :as laf])
   (:import [clara.server.tools.graph.rules.loan_app_facts
             Application
             DocumentCheck]))
@@ -7,9 +8,11 @@
 ;; A dummy record locally defined for testing
 (defrecord LocalDummyRecord [id value])
 
+(def side-effect-counter (atom 0))
+
 ;; 1. Helper function that constructs a record
 (defn make-document-check [app-id]
-  (clara.server.tools.graph.rules.loan_app_facts/map->DocumentCheck
+  (laf/map->DocumentCheck
    {:app-id app-id :status :pass :message "Passed via helper"}))
 
 ;; 2. Helper function that calls another helper function to construct a record
@@ -23,6 +26,24 @@
 ;; 4. Helper function that calls another helper function to construct a Java class
 (defn make-java-document-check-nested [app-id]
   (make-java-document-check app-id))
+
+;; 5. Helper function that performs constructor and insertion
+(defn insert-document-check-helper [app-id]
+  (r/insert! (clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new app-id :pass "helper-insert" nil nil)))
+
+;; 6. Helper function that constructs a collection of records
+(defn make-facts [app-id]
+  [(map->LocalDummyRecord {:id app-id :value "helper-all-1"})
+   (map->LocalDummyRecord {:id app-id :value "helper-all-2"})])
+
+;; 7. Helper function that constructs a heterogeneous collection of records and Java classes
+(defn make-heterogeneous-facts [app-id]
+  [(map->LocalDummyRecord {:id app-id :value "helper-mixed-1"})
+   (clara.server.tools.graph.rules.loan_app_facts.DocumentCheck. app-id :pass "helper-mixed-2" nil nil)])
+
+;;
+;; Rules
+;;
 
 ;; Rule A: Standard Clojure record constructor
 (r/defrule rule-record-constructor
@@ -84,12 +105,6 @@
   =>
   (r/insert! (make-java-document-check-nested ?app-id)))
 
-(def side-effect-counter (atom 0))
-
-;; 5. Helper function that performs constructor and insertion
-(defn insert-document-check-helper [app-id]
-  (r/insert! (clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new app-id :pass "helper-insert" nil nil)))
-
 ;; Rule H1: insert-all! with a collection of constructed records
 (r/defrule rule-insert-all-collection
   [Application (= ?app-id app-id)]
@@ -131,24 +146,26 @@
   =>
   (swap! side-effect-counter inc))
 
-;; 6. Helper function that constructs a collection of records
-(defn make-facts [app-id]
-  [(map->LocalDummyRecord {:id app-id :value "helper-all-1"})
-   (map->LocalDummyRecord {:id app-id :value "helper-all-2"})])
-
 ;; Rule H7: insert-all! with collection constructed by helper function
 (r/defrule rule-insert-all-helper
   [Application (= ?app-id app-id)]
   =>
   (r/insert-all! (make-facts ?app-id)))
 
-;; 7. Helper function that constructs a heterogeneous collection of records and Java classes
-(defn make-heterogeneous-facts [app-id]
-  [(map->LocalDummyRecord {:id app-id :value "helper-mixed-1"})
-   (clara.server.tools.graph.rules.loan_app_facts.DocumentCheck. app-id :pass "helper-mixed-2" nil nil)])
-
 ;; Rule H8: insert-all! with a heterogeneous collection constructed by helper function
 (r/defrule rule-insert-all-heterogeneous
   [Application (= ?app-id app-id)]
   =>
   (r/insert-all! (make-heterogeneous-facts ?app-id)))
+
+;; Rule H9: insert-unconditional! usage
+(r/defrule rule-insert-unconditional
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert-unconditional! (map->LocalDummyRecord {:id ?app-id :value "unconditional"})))
+
+;; Rule H10: insert-all-unconditional! usage
+(r/defrule rule-insert-all-unconditional
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert-all-unconditional! [(map->LocalDummyRecord {:id ?app-id :value "all-unconditional"})]))
