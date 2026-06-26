@@ -130,9 +130,10 @@
         (recur seen unvisited)))))
 
 (defn- extract-required-namespaces [analysis]
-  (->> (:namespace-usages analysis)
-       (map :to)
-       (distinct)))
+  (into []
+        (comp (map :to)
+              (distinct))
+        (:namespace-usages analysis)))
 
 (defn- analyze-ns-source [ns-sym resource-url]
   (let [source-code (slurp resource-url)
@@ -219,6 +220,54 @@
               ;; Resource not found on classpath, skip
               (recur remaining (conj processed ns-sym) merged-analysis))))))))
 
+(defn- direct-callers
+  "Returns the set of vars in `vars` that directly call any function in `target-fns`
+   according to the call `graph`."
+  [graph vars target-fns]
+  (into #{}
+        (filter (fn [v] (some target-fns (get graph v))))
+        vars))
+
+(defn- var-reachability
+  "For a given var, returns a map of:
+     :reachable      - set of all transitively reachable vars
+     :is-inserter?   - true if reachable set includes an insert fn or a direct inserter
+     :is-retractor?  - true if reachable set includes a retract fn or a direct retractor
+     :types          - set of fact types reachable through constructors"
+  [v
+   {:keys [graph constructors java-constructors
+           insert-fns retract-fns
+           direct-inserters direct-retractors]}]
+  (let [reachable (transitive-reachability graph [v])
+        is-inserter? (some #(or (contains? insert-fns %)
+                                (contains? direct-inserters %))
+                           reachable)
+        is-retractor? (some #(or (contains? retract-fns %)
+                                 (contains? direct-retractors %))
+                            reachable)
+        types (set/union (into #{} (mapcat constructors reachable))
+                         (into #{} (mapcat java-constructors reachable)))]
+    {:reachable reachable
+     :is-inserter? is-inserter?
+     :is-retractor? is-retractor?
+     :types types}))
+
+(defn- var-annotation
+  "Returns a [var-key annotation-map] pair for the given var when it inserts or
+   retracts fact types. Returns nil when the var has no output side-effects."
+  [v ctx]
+  (let [{:keys [is-inserter? is-retractor? types]} (var-reachability v ctx)]
+    (when (or is-inserter? is-retractor?)
+      [v (cond-> {}
+           is-inserter?
+           (assoc :clara-rules/insert-types (vec (sort (map symbol types))))
+           (and is-inserter? (empty? types))
+           (assoc :clara-rules/dynamic-insert-types-detected true)
+           is-retractor?
+           (assoc :clara-rules/retract-types (vec (sort (map symbol types))))
+           (and is-retractor? (empty? types))
+           (assoc :clara-rules/dynamic-retract-types-detected true))])))
+
 (defn analyze-rules
   "Builds the call graph from a pre-computed clj-kondo analysis map,
    and returns a map of rule FQ-name symbols to their inferred annotations.
@@ -233,40 +282,29 @@
         java-constructors (build-java-constructors analysis)
         project-vars (keys graph)
 
-         ;; Find all project vars that directly call insert/retract
-        direct-inserters (into #{} (filter (fn [v] (some insert-fns (get graph v))) project-vars))
-        direct-retractors (into #{} (filter (fn [v] (some retract-fns (get graph v))) project-vars))
+        direct-inserters (direct-callers graph project-vars insert-fns)
+        direct-retractors (direct-callers graph project-vars retract-fns)
 
-         ;; For each project var, compute transitive insert/retract flag
-         ;; and collected fact types.
+        var-seq (if (seq rules-filter)
+                  (map normalize-key rules-filter)
+                  project-vars)
+
         annotations
         (into {}
-              (for [v (if (seq rules-filter)
-                        (map normalize-key rules-filter)
-                        project-vars)
-                    :let [reachable (transitive-reachability graph [v])
-                          is-inserter? (some #(or (contains? insert-fns %) (contains? direct-inserters %)) reachable)
-                          is-retractor? (some #(or (contains? retract-fns %) (contains? direct-retractors %)) reachable)
-                          types (set/union (into #{} (mapcat constructors reachable))
-                                           (into #{} (mapcat java-constructors reachable)))]
-                    :when (or is-inserter? is-retractor? (seq rules-filter))]
-                [v (cond
-                     (or is-inserter? is-retractor?)
-                     (cond-> {}
-                       is-inserter?
-                       (assoc :clara-rules/insert-types (vec (sort (map symbol types))))
-
-                       (and is-inserter? (empty? types))
-                       (assoc :clara-rules/dynamic-insert-types-detected true)
-
-                       is-retractor?
-                       (assoc :clara-rules/retract-types (vec (sort (map symbol types))))
-
-                       (and is-retractor? (empty? types))
-                       (assoc :clara-rules/dynamic-retract-types-detected true))
-
-                     :else
-                     {:clara-rules/no-output-types true})]))]
+              (keep (fn [v]
+                      (if-let [pair (var-annotation
+                                     v
+                                     {:graph graph
+                                      :constructors constructors
+                                      :java-constructors java-constructors
+                                      :insert-fns insert-fns
+                                      :retract-fns retract-fns
+                                      :direct-inserters direct-inserters
+                                      :direct-retractors direct-retractors})]
+                        pair
+                        (when (seq rules-filter)
+                          [v {:clara-rules/no-output-types true}]))))
+              var-seq)]
     annotations))
 
 (defn extract-session-rule-names
