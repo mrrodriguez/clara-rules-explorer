@@ -52,7 +52,9 @@
         (is (some? ann-a))
         (is (= ['clara.server.tools.graph.rules.analyze_test_rules.LocalDummyRecord]
                (:clara-rules/insert-types ann-a))
-            "Should identify the locally defined LocalDummyRecord class"))
+            "Should identify the locally defined LocalDummyRecord class")
+        (is (nil? (:clara-rules/dynamic-insert-types-detected ann-a))
+            "Should not set dynamic-insert-types-detected when types are statically resolved"))
 
       ;; Rule B: Java constructor style (Class. ...)
       (let [ann-b (get annotations 'clara.server.tools.graph.rules.analyze-test-rules/rule-java-constructor-dot)]
@@ -77,9 +79,11 @@
 
       ;; Rule E: Map facts with metadata (highly dynamic)
       (let [ann-e (get annotations 'clara.server.tools.graph.rules.analyze-test-rules/rule-metadata-map-fact)]
-        (is (some? ann-e))
-        (is (empty? (:clara-rules/insert-types ann-e))
-            "Should be an empty insert-types vector because map-with-metadata is too dynamic to resolve statically"))
+        (is (some? ann-e) "Should recognize rule-metadata-map-fact as an inserter")
+        (is (= [] (:clara-rules/insert-types ann-e))
+            "Should infer an empty insert-types vector because metadata map facts are too dynamic to resolve statically")
+        (is (true? (:clara-rules/dynamic-insert-types-detected ann-e))
+            "Should tag the rule with dynamic-insert-types-detected as true since we have no statically inferred types"))
 
       ;; Rule B2: Fully-qualified Class. constructor
       (let [ann-b2 (get annotations 'clara.server.tools.graph.rules.analyze-test-rules/rule-java-constructor-fq-dot)]
@@ -168,7 +172,15 @@
         (is (= ['clara.server.tools.graph.rules.analyze_test_rules.LocalDummyRecord
                 'clara.server.tools.graph.rules.loan_app_facts.DocumentCheck]
                (:clara-rules/insert-types ann-h8))
-            "Should identify multiple different fact types constructed and inserted via a collection helper")))))
+            "Should identify multiple different fact types constructed and inserted via a collection helper"))
+      
+      ;; Test filter and no-output-types generation
+      (let [annotations-filtered (analyze/analyze-rules ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]
+                                                        ['clara.server.tools.graph.rules.analyze-test-rules/rule-side-effect-only])
+            ann-h6 (get annotations-filtered 'clara.server.tools.graph.rules.analyze-test-rules/rule-side-effect-only)]
+        (is (some? ann-h6) "Should keep rule-side-effect-only when it is in rules-filter")
+        (is (true? (:clara-rules/no-output-types ann-h6))
+            "Should mark rules that don't insert/retract at all as no-output-types true")))))
 
 (deftest test-merge-annotations
   (testing "Merging existing annotations with newly generated annotations"

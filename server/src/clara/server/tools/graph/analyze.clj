@@ -143,20 +143,33 @@
          ;; and collected fact types.
          annotations
          (into {}
-               (for [v project-vars
+               (for [v (if (seq rules-filter)
+                         (map normalize-key rules-filter)
+                         project-vars)
                      :let [reachable (transitive-reachability graph [v])
                            is-inserter? (some #(or (contains? insert-fns %) (contains? direct-inserters %)) reachable)
                            is-retractor? (some #(or (contains? retract-fns %) (contains? direct-retractors %)) reachable)
                            types (set/union (into #{} (mapcat constructors reachable))
                                             (into #{} (mapcat java-constructors reachable)))]
-                     :when (or is-inserter? is-retractor?)]
-                 [v (cond-> {}
-                      is-inserter? (assoc :clara-rules/insert-types (vec (sort (map symbol types))))
-                      is-retractor? (assoc :clara-rules/retract-types (vec (sort (map symbol types)))))]))]
-     ;; If rules-filter is provided, filter the results to only include those rules
-     (if (seq rules-filter)
-       (select-keys annotations (map normalize-key rules-filter))
-       annotations))))
+                     :when (or is-inserter? is-retractor? (seq rules-filter))]
+                 [v (cond
+                      (or is-inserter? is-retractor?)
+                      (cond-> {}
+                        is-inserter?
+                        (assoc :clara-rules/insert-types (vec (sort (map symbol types))))
+                        
+                        (and is-inserter? (empty? types))
+                        (assoc :clara-rules/dynamic-insert-types-detected true)
+                        
+                        is-retractor?
+                        (assoc :clara-rules/retract-types (vec (sort (map symbol types))))
+                        
+                        (and is-retractor? (empty? types))
+                        (assoc :clara-rules/dynamic-retract-types-detected true))
+                      
+                      :else
+                      {:clara-rules/no-output-types true})]))]
+     annotations)))
 
 (defn merge-annotations
   "Merges existing annotations with generated annotations.
@@ -176,6 +189,16 @@
                                        (and (not (contains? orig-val :clara-rules/retract-types))
                                             (seq (:clara-rules/retract-types gen-val)))
                                        (assoc :clara-rules/retract-types (:clara-rules/retract-types gen-val))
+
+                                       (and (not (contains? orig-val :clara-rules/dynamic-insert-types-detected))
+                                            (contains? gen-val :clara-rules/dynamic-insert-types-detected)
+                                            (not (seq (:clara-rules/insert-types orig-val))))
+                                       (assoc :clara-rules/dynamic-insert-types-detected (:clara-rules/dynamic-insert-types-detected gen-val))
+
+                                       (and (not (contains? orig-val :clara-rules/dynamic-retract-types-detected))
+                                            (contains? gen-val :clara-rules/dynamic-retract-types-detected)
+                                            (not (seq (:clara-rules/retract-types orig-val))))
+                                       (assoc :clara-rules/dynamic-retract-types-detected (:clara-rules/dynamic-retract-types-detected gen-val))
 
                                        (and (not (contains? orig-val :clara-rules/no-output-types))
                                             (:clara-rules/no-output-types gen-val)
