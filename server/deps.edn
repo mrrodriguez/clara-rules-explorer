@@ -6,15 +6,20 @@
         metosin/jsonista {:mvn/version "1.0.0"}
         metosin/muuntaja {:mvn/version "0.6.11"}
         ring/ring-jetty-adapter {:mvn/version "1.15.4"}
-        org.clojure/tools.cli {:mvn/version "1.0.214"}}
+        org.clojure/tools.cli {:mvn/version "1.0.214"}
+        clj-kondo/clj-kondo {:mvn/version "2026.05.25"}}
 
  :aliases
- {:test {:extra-paths ["test" "test-resources"]
+ {:lint {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2026.05.25"}}
+         :main-opts ["-m" "clj-kondo.main"]}
+
+  :test {:extra-paths ["test" "test-resources"]
          :extra-deps {ring/ring-mock {:mvn/version "0.6.2"}
                       clj-http/clj-http {:mvn/version "3.13.1"}}}
 
   :dev {:extra-paths ["dev" "test-resources"]
-        :extra-deps {vvvvalvalval/scope-capture {:mvn/version "0.3.3"}}}
+        :extra-deps {vvvvalvalval/scope-capture {:mvn/version "0.3.3"}
+                     io.github.tonsky/clj-reload {:mvn/version "1.0.0"}}}
 
   :demo-setup {:extra-paths ["dev" "test" "test-resources"]
                :main-opts ["-m" "clara.server.graph.demo-setup"]}

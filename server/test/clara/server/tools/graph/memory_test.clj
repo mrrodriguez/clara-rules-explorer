@@ -22,10 +22,10 @@
           snapshot (memory/session-snapshot session)
           facts (:facts snapshot)
           ids (keys facts)]
-      
+
       (is (seq ids) "Snapshot should contain facts")
       (is (= (set (range 1 (inc (count facts)))) (set ids)) "IDs should be 1 to N")
-      
+
       (let [app-1-data (serialize/prune-fns app-1)
             app-2-data (serialize/prune-fns app-2)
             app-1-id (some (fn [[id f]] (when (= (:data f) app-1-data) id)) facts)
@@ -40,7 +40,7 @@
           app-b (laf/map->Application {:app-id "equal"})
           _ (assert (not (identical? app-a app-b)) "Test setup: facts must be distinct instances")
           _ (assert (= app-a app-b) "Test setup: facts must be equal by value")
-          
+
           session (-> (->test-session)
                       (r/insert app-a app-b)
                       (r/fire-rules))
@@ -48,7 +48,7 @@
           facts (:facts snapshot)
           app-data (serialize/prune-fns app-a)
           instances (filter #(= (:data (val %)) app-data) facts)]
-      
+
       (is (= 2 (count instances)) "Both equal facts should be in the snapshot")
       (is (not= (first (keys instances)) (second (keys instances))) "They must have different IDs"))))
 
@@ -62,7 +62,7 @@
           app-data (serialize/prune-fns app)
           fact-id (some (fn [[id f]] (when (= (:data f) app-data) id)) (:facts snapshot))
           used-by (get-in snapshot [:used-by fact-id])]
-      
+
       (is (seq used-by) "Fact should be used by some rules/queries")
       (is (some #(= (:name %) "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs") used-by)))))
 
@@ -74,17 +74,16 @@
                       (r/fire-rules))
           snapshot (memory/session-snapshot session)
           ;; Find a fact that was inserted by a rule, e.g., AllRequiredDocuments
-          inserted-fact-entry (some (fn [[id f]] 
+          inserted-fact-entry (some (fn [[id f]]
                                       (when (= (:type f) "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments")
                                         [id f]))
                                     (:facts snapshot))]
-      
+
       (when inserted-fact-entry
         (let [[id _] inserted-fact-entry
               origins (get-in snapshot [:origin id])]
           (is (seq origins) "Inserted fact should have an origin")
           (is (= "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs" (:name (first origins)))))))))
-
 
 (deftest test-enriched-snapshot
   (testing "Snapshot contains enriched fact-table and rule-centric groupings"
@@ -93,7 +92,7 @@
                       (r/insert app)
                       (r/fire-rules))
           snapshot (memory/session-snapshot session)
-          
+
           ;; 1. Verify Enriched Fact Table
           app-data (serialize/prune-fns app)
           fact (some #(when (= (:data %) app-data) %) (vals (:facts snapshot)))]
@@ -102,7 +101,7 @@
       (is (vector? (:used-by fact)))
       (is (empty? (:inserted-from fact)) "Root fact should have no origins in origin-map")
       (is (seq (:used-by fact)) "Fact should be used by rules/queries")
-      
+
       ;; 2. Verify Rule-Centric Index
       (let [type-info (get-in snapshot [:fact-types "clara.server.tools.graph.rules.loan_app_facts.Application"])]
         (is (seq (:inserted-from type-info)) "Type info should have rule-centric inserted-from")
@@ -121,7 +120,7 @@
                       (r/insert app)
                       (r/fire-rules))
           snapshot (memory/session-snapshot session)
-          
+
           ;; 1. Verify Rule Activity
           rule-name "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
           rule-info (get-in snapshot [:rule-matches rule-name])]
@@ -137,7 +136,7 @@
         (is (contains? match :is-root) "Match entry should have :is-root")
         (is (vector? (:inserted-from match)) "Match entry should have :inserted-from")
         (is (vector? (:used-by match)) "Match entry should have :used-by"))
-      
+
       ;; 2. Verify Query Activity
       (let [query-name "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"
             query-info (get-in snapshot [:query-matches query-name])]
@@ -147,7 +146,7 @@
         (when-let [qmatch (first (:matches query-info))]
           (is (int? (:id qmatch)) "Query match entry should have integer :id")
           (is (string? (:type qmatch)) "Query match entry should have :type")
-          (is (map? (:data qmatch)) "Query match entry should have :data (bindings)")))))
+          (is (map? (:data qmatch)) "Query match entry should have :data (bindings)"))))))
 
 (deftest test-multi-fact-match-flattening
   (testing "Multi-fact rule matches are flattened to one SessionFact entry per fact-id"
@@ -181,23 +180,23 @@
       ;; Verify all match entries share the same bindings data
       (let [bindings (map :data matches)]
         (is (apply = bindings) "All match entries should share identical bindings")))))
-  (testing "Fact IDs are stable and deterministic based on sort criteria"
-    (let [app-1 (laf/map->Application {:app-id "app-1"})
-          app-2 (laf/map->Application {:app-id "app-2"})
-          
-          ;; Create two snapshots of identical sessions
-          make-snapshot (fn []
-                          (-> (->test-session)
-                              (r/insert app-1 app-2)
-                              (r/fire-rules)
-                              (memory/session-snapshot)))
-          
-          snapshot-1 (make-snapshot)
-          snapshot-2 (make-snapshot)]
-      
-      (is (= (keys (:facts snapshot-1)) (keys (:facts snapshot-2))) "ID keys should be identical")
-      (is (= (map :data (vals (:facts snapshot-1))) 
-             (map :data (vals (:facts snapshot-2)))) "Fact data order should be identical"))))
+(testing "Fact IDs are stable and deterministic based on sort criteria"
+  (let [app-1 (laf/map->Application {:app-id "app-1"})
+        app-2 (laf/map->Application {:app-id "app-2"})
+
+        ;; Create two snapshots of identical sessions
+        make-snapshot (fn []
+                        (-> (->test-session)
+                            (r/insert app-1 app-2)
+                            (r/fire-rules)
+                            (memory/session-snapshot)))
+
+        snapshot-1 (make-snapshot)
+        snapshot-2 (make-snapshot)]
+
+    (is (= (keys (:facts snapshot-1)) (keys (:facts snapshot-2))) "ID keys should be identical")
+    (is (= (map :data (vals (:facts snapshot-1)))
+           (map :data (vals (:facts snapshot-2)))) "Fact data order should be identical")))
 
 (deftest test-accumulator-fact-extraction
   (testing "Accumulator results (like vectors) are not treated as facts"

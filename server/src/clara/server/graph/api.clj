@@ -61,7 +61,7 @@
    :source-rule   s/Bool
    :sink-rule     s/Bool
    (s/optional-key :unlinked-rule) (s/maybe {:downstream (s/enum :unknown)
-                                              :reason s/Str})
+                                             :reason s/Str})
    (s/optional-key :no-output-types) s/Bool
    (s/optional-key :upstream)   [ProductionDep]
    (s/optional-key :downstream) [ProductionDep]})

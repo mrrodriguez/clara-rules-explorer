@@ -43,7 +43,13 @@ The repository is organized as follows:
 ### Prerequisites
 
 - **Server:** Java 11+ and [Clojure CLI tools](https://clojure.org/guides/install_clojure).
-- **UI:** [Node.js](https://nodejs.org/) (v20+) and `pnpm`.
+- **UI:** [Node.js](https://nodejs.org/) (v24+) and `pnpm`.
+- **Optional (Recommended for development):**
+  - [direnv](https://direnv.net/) - Automates environment and path configuration on directory change.
+  - [GNU make](https://www.gnu.org/software/make/) (v4+) - Used to run unified build, lint, and test targets. On macOS, this can be installed via Homebrew (`brew install make`).
+
+> [!NOTE]
+> The environment configurations in this repo are designed to work automatically if you use `direnv`. However, you can still build and run the project manually without it, provided you have the correct versions of the prerequisites (including GNU `make` v4+ and `pnpm`) installed globally.
 
 ### Quick Start
 

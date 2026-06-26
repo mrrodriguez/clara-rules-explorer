@@ -94,7 +94,9 @@
                        (empty? (:insert-types ann))
                        (empty? (:retract-types ann)))
         source-rule? (rule-is-source? production dep-graph)
-        sink-rule? (and (not unlinked?) (rule-is-sink? production dep-graph production-map))
+        sink-rule? (and (not unlinked?)
+                        (not (:no-output-types ann))
+                        (rule-is-sink? production dep-graph production-map))
         summary
         (cond-> {:name               p-name
                  :ns                 (str p-ns-name)
