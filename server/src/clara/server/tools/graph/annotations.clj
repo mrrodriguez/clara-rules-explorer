@@ -138,6 +138,12 @@
     (symbol k)
     k))
 
+(defn- unqualify-keyword
+  [kw]
+  (if (and (keyword? kw) (namespace kw))
+    (keyword (name kw))
+    kw))
+
 (defn normalize-annotations
   "Normalizes an annotations map to canonical form.
    String keys are converted to symbols."
@@ -216,13 +222,18 @@
                           :has-props-no-output-types (some? (get props :clara-rules/no-output-types))
                           :has-sidecar-no-output-types (some? (get sidecar :clara-rules/no-output-types))
                           :has-props-notes (some? (get props :clara-rules/notes))
-                          :has-sidecar-notes (some? (get sidecar :clara-rules/notes))})]
+                          :has-sidecar-notes (some? (get sidecar :clara-rules/notes))})
+        annotation-sources (into []
+                                 (keep (fn [[k v]] (when v k)))
+                                 annotation-data)]
 
-    {:insert-types                   (:clara-rules/insert-types merged)
-     :retract-types                  (:clara-rules/retract-types merged)
-     :no-output-types                (:clara-rules/no-output-types merged)
-     :notes                          (:clara-rules/notes merged)
-     :dynamic-insert-types-detected  (:clara-rules/dynamic-insert-types-detected merged)
-     :dynamic-retract-types-detected (:clara-rules/dynamic-retract-types-detected merged)
-     :annotation-sources             (into [] (keep (fn [[k v]] (when v k))) annotation-data)
-     :resolved-annotation-data       annotation-data}))
+    (-> merged
+        (select-keys #{:clara-rules/insert-types
+                       :clara-rules/retract-types
+                       :clara-rules/no-output-types
+                       :clara-rules/notes
+                       :clara-rules/dynamic-insert-types-detected
+                       :clara-rules/dynamic-retract-types-detected})
+        (update-keys unqualify-keyword)
+        (assoc :annotation-sources annotation-sources
+               :resolved-annotation-data annotation-data))))
