@@ -6,7 +6,10 @@
             [clara.rules.durability.fressian :as df]
             [clojure.data.fressian :as fres]
             [clojure.java.io :as io]
-            [clojure.tools.cli :refer [parse-opts]])
+            [clojure.string :as str]
+            [clojure.tools.cli :refer [parse-opts]]
+            [clara.server.tools.graph.analyze :as analyze]
+            [clojure.pprint :as pprint])
   (:import [java.io EOFException]))
 
 ;; ---------------------------------------------------------------------------
@@ -35,7 +38,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def cli-options
-  [["-s" "--session PATH" "Path to serialized Clara session file (required)."]
+  [["-s" "--session PATH" "Path to serialized Clara session file."]
    ["-a" "--annotations PATH" "Path to an EDN sidecar annotations file."
     :default nil]
    ["-f" "--facts PATH" (str "Path to serialized facts file."
@@ -45,6 +48,8 @@
     :default 9999
     :parse-fn #(Integer/parseInt %)
     :validate [#(< 0 % 65536) "Port must be between 1 and 65535"]]
+   ["-g" "--generate-annotations PATHS" "Generate annotations EDN for Clojure source paths (comma-separated)."
+    :parse-fn #(str/split % #",")]
    ["-h" "--help" "Print this help."]])
 
 (defn- usage [summary]
@@ -52,8 +57,9 @@
   (println "Usage: clojure -M -m clara.server.graph.main [options]\n")
   (println "Options:")
   (println summary)
-  (println "\nExample:")
+  (println "\nExamples:")
   (println "  clojure -M -m clara.server.graph.main -s session.bin -a annotations.edn")
+  (println "  clojure -M -m clara.server.graph.main -g src/my_rules.clj,src/other_rules.clj")
   (println))
 
 ;; ---------------------------------------------------------------------------
@@ -77,12 +83,12 @@
 ;; ---------------------------------------------------------------------------
 
 (defn -main
-  "Loads a serialized Clara session and starts the explorer server.
-   The session is deserialized via clara.rules.durability using the Fressian
-   serialization format.
+  "Loads a serialized Clara session and starts the explorer server, or generates
+   rule annotations directly from source files.
 
-   Required:
-     -s, --session PATH   Serialized session file (Fressian).
+   Required (either one):
+     -s, --session PATH              Serialized session file (Fressian) to run server.
+     -g, --generate-annotations PATHS Clojure source paths (comma-separated) to print annotations.
 
    Optional:
      -a, --annotations PATH  EDN sidecar annotations file.
@@ -100,47 +106,52 @@
       (println)
       (System/exit 1))
 
-    (let [{:keys [session annotations facts port]} options]
-      (when-not session
-        (println "Error: --session is required.")
-        (usage summary)
-        (System/exit 1))
+    (let [{:keys [session annotations facts port generate-annotations]} options]
+      (if generate-annotations
+        (let [res (analyze/generate-annotations-from-paths {:paths generate-annotations})]
+          (pprint/pprint res)
+          (System/exit 0))
+        (do
+          (when-not session
+            (println "Error: Either --session or --generate-annotations is required.")
+            (usage summary)
+            (System/exit 1))
 
-      (when-not (file-exists? session)
-        (println (str "Error: session file not found: " session))
-        (System/exit 1))
+          (when-not (file-exists? session)
+            (println (str "Error: session file not found: " session))
+            (System/exit 1))
 
-      (let [facts-path (resolve-facts-path session facts)]
-        (when-not (file-exists? facts-path)
-          (println (str "Error: facts file not found: " facts-path
-                        "  (use --facts to specify a different path)"))
-          (System/exit 1))
+          (let [facts-path (resolve-facts-path session facts)]
+            (when-not (file-exists? facts-path)
+              (println (str "Error: facts file not found: " facts-path
+                            "  (use --facts to specify a different path)"))
+              (System/exit 1))
 
-        (println "Loading session from:" session)
-        (println "Loading facts from:   " facts-path)
+            (println "Loading session from:" session)
+            (println "Loading facts from:   " facts-path)
 
-        (when annotations
-          (if (file-exists? annotations)
-            (println "Loading annotations:" annotations)
-            (println (str "Warning: annotations file not found: " annotations))))
+            (when annotations
+              (if (file-exists? annotations)
+                (println "Loading annotations:" annotations)
+                (println (str "Warning: annotations file not found: " annotations))))
 
-        (let [session-stream (io/input-stream session)
-              facts-stream (io/input-stream facts-path)
-              session-serializer (df/create-session-serializer session-stream)
-              mem-serializer (->FressianFactReader facts-stream)
-              loaded-session (d/deserialize-session-state session-serializer mem-serializer)]
+            (let [session-stream (io/input-stream session)
+                  facts-stream (io/input-stream facts-path)
+                  session-serializer (df/create-session-serializer session-stream)
+                  mem-serializer (->FressianFactReader facts-stream)
+                  loaded-session (d/deserialize-session-state session-serializer mem-serializer)]
 
-          (println "Session deserialized. Starting server on port" port "...")
+              (println "Session deserialized. Starting server on port" port "...")
 
-          (server/start!
-           (cond-> {:session loaded-session
-                    :port port}
-             (and annotations (file-exists? annotations))
-             (assoc :annotations-file annotations)))
+              (server/start!
+               (cond-> {:session loaded-session
+                        :port port}
+                 (and annotations (file-exists? annotations))
+                 (assoc :annotations-file annotations)))
 
-          (println (str "Clara Graph Server running at http://localhost:" port))
-          (println "API endpoints at http://localhost:" port "/v1/")
-          (println "Press Ctrl+C to stop.")
+              (println (str "Clara Graph Server running at http://localhost:" port))
+              (println "API endpoints at http://localhost:" port "/v1/")
+              (println "Press Ctrl+C to stop.")
 
-          ;; Block the main thread to keep the server alive.
-          @(promise))))))
+              ;; Block the main thread to keep the server alive.
+              @(promise))))))))

@@ -98,3 +98,92 @@ Each entry in the `:callsites` vector is a map containing:
 * **`:source-str`**: The exact string of the extracted Clojure argument form passed to the insertion or retraction callsite.
 * **`:ns-name-sym`**: The symbol of the namespace where the callsite was located.
 * **`:filename`**: The path to the file containing the callsite.
+
+---
+
+## CLI and Standalone Usage
+
+The static analysis tools can be run as a standalone utility to generate annotations from source files or run programmatically against in-memory rule sessions.
+
+### 1. Generating Annotations via CLI (Primary)
+
+The server CLI supports a `-g` (or `--generate-annotations`) flag which accepts one or more Clojure source files and prints the resolved annotations EDN map directly to `stdout`. This does not require starting a web server or loading a serialized session.
+
+```bash
+# Analyze a single rule file
+clojure -M -m clara.server.graph.main -g path/to/my_rules.clj
+
+# Analyze multiple files (comma-separated)
+clojure -M -m clara.server.graph.main -g path/to/my_rules.clj,path/to/other_rules.clj
+```
+
+**Example Output:**
+```edn
+{my.ns/cold-rule
+ #:clara-rules{:insert-types [my.ns.Cold]}
+
+ my.ns/orphan-rule
+ #:clara-rules{:insert-types [],
+               :dynamic-insert-types-detected
+               {:callsites
+                [{:source-str "(with-meta {:app-id ?app-id} {:type :custom-type})"
+                  :ns-name-sym my.ns
+                  :filename "path/to/my_rules.clj"}]}}}
+```
+
+### 2. Programmatic In-Memory Analysis (REPL Injection)
+
+If you are running a JVM REPL in an existing project that compiles Clara rules, you can inject the Explorer server library onto your classpath dynamically to analyze in-memory sessions.
+
+#### A. Inject Library to Classpath
+
+* **Clojure 1.12+ Dynamic Loading**:
+  Load the explorer library directly in your active REPL session using `add-libs`:
+  ```clojure
+  (require '[clojure.repl.deps :as deps])
+  
+  ;; For local reference
+  (deps/add-libs '{mrrodriguez/clara-rules-explorer-server 
+                   {:local/root "/absolute/path/to/clara-rules-explorer/server"}})
+  
+  ;; Or via git dependency
+  (deps/add-libs '{io.github.mrrodriguez/clara-rules-explorer 
+                   {:git/url "https://github.com/mrrodriguez/clara-rules-explorer"
+                    :sha "<git-commit-sha>"
+                    :deps/root "server"}})
+  ```
+
+* **Via `deps.edn` `:local/root`**:
+  Alternatively, add it under an alias in your project's `deps.edn`:
+  ```clojure
+  :aliases
+  {:explorer
+   {:extra-deps {mrrodriguez/clara-rules-explorer-server 
+                 {:local/root "/absolute/path/to/clara-rules-explorer/server"}}}}
+  ```
+
+#### B. Execute Analysis in REPL
+
+Once the server classes are loaded on the classpath, you can use [clara.server.tools.graph.analyze](file:///Users/mrrodriguez/Projects/clara-rules-explorer/server/src/clara/server/tools/graph/analyze.clj) to inspect any active in-memory session or rulebase:
+
+```clojure
+(require '[clara.server.tools.graph.analyze :as analyze])
+
+;; Build the merged clj-kondo analysis map from the session's namespaces
+(let [analysis (analyze/analyze-session-rules 
+                {:session-or-rulebase my-session
+                 :include-ns-prefixes ["my.project.rules"]})
+      ;; Generate the rule annotations map
+      annotations (analyze/generate-annotations-from-analysis 
+                   {:analysis analysis})]
+  (clojure.pprint/pprint annotations))
+```
+
+To start the interactive web-based UI server for your live in-memory session, invoke [clara.server.graph.server/start!](file:///Users/mrrodriguez/Projects/clara-rules-explorer/server/src/clara/server/graph/server.clj):
+
+```clojure
+(require '[clara.server.graph.server :as server])
+
+(server/start! {:session my-session
+                :port 9999})
+```
