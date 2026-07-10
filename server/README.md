@@ -59,7 +59,7 @@ clojure -M -m clara.server.graph.main -s path/to/session.bin [-a path/to/annotat
 
 When `--session` is provided, the server uses `clara.rules.durability` to deserialize the session from disk. The session is expected to have been serialized with `{:with-rulebase? true}` so that the compiled rulebase is embedded — this is required for static rulebase analysis.
 
-The `--annotations` file follows the [sidecar EDN format](../docs/explorer-graph-api.md#path-b--sidecar-edn-file), keyed by rule FQ-name, to declare insert/retract types and notes for dependency graph construction.
+The `--annotations` file follows the [sidecar EDN format](../docs/rule-annotations.md), keyed by rule FQ-name, to declare insert/retract types and notes for dependency graph construction.
 
 ## API Endpoints
 

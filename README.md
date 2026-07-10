@@ -76,6 +76,7 @@ The repository is organized as follows:
 
 - [Explorer Graph API](./docs/explorer-graph-api.md)
 - [Explorer API Reference](./docs/explorer-api-reference.md)
+- [Rule Annotations](./docs/rule-annotations.md)
 - [UI Architecture](./ui/docs/app-arch.md)
 
 ## License

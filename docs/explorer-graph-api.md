@@ -486,34 +486,11 @@ IDs are stable **within a single snapshot** and deterministic for the same sessi
 
 ## Annotations & Metadata
 
-The API supports two paths for declaring rule metadata used in dependency graph construction:
+The API supports inline rule `:props` maps and sidecar EDN files to declare rule metadata (such as insert and retract types). 
 
-### Path A — Rule `:props` map
+For the complete schema, merge configurations, and dynamic callsite details, refer to the dedicated [Rule Annotations Documentation](file:///Users/mrrodriguez/Projects/clara-rules-explorer/docs/rule-annotations.md).
 
-Keys in the `defrule` body `:props` map:
-- `:clara-rules/insert-types` — types the RHS may insert
-- `:clara-rules/retract-types` — types the RHS may retract
-- `:clara-rules/no-output-types` — boolean; when `true`, marks the rule as a pure side-effect rule with no downstream inserts/retracts (suppresses unlinked-rule detection)
-- `:clara-rules/notes` — free-form documentation
-
-### Path B — Sidecar EDN file
-
-Keyed by rule FQ-name with `clara-rules/` qualified keys:
-
-```edn
-{"my.app/cool-customer" {:clara-rules/insert-types [my.app.HappyCustomer]
-                          :clara-rules/notes "auto-generated"}
- "my.app/legacy-rule"   {:clara-rules/insert-types [my.app.V2Fact]
-                          :clara-rules/merge-props {:clara-rules/insert-types :replace}}}
-```
-
-**Precedence**: By default, sidecar `insert-types` and `retract-types` are **merged** (unioned) with props. Use `:clara-rules/merge-props` with a per-category map to override the strategy per type:
-
-| Key | Value | Description |
-|-----|-------|-------------|
-| `:clara-rules/merge-props` | map | Per-category merge strategy. Each key is an annotation category (`:clara-rules/insert-types`, `:clara-rules/retract-types`), each value is `:merge` (default) or `:replace`. |
-
-Notes always use override semantics: sidecar note wins if present, otherwise falls back to props.
+### Annotation Resolution Status
 
 The `resolved-annotation-data` field on each rule/query maps each annotation key to its resolution status:
 
