@@ -42,7 +42,8 @@
 (defn- java-class? [class-str]
   (let [last-segment (last (str/split class-str #"\."))]
     (and (seq last-segment)
-         (Character/isUpperCase ^Character (first last-segment)))))
+         (let [^Character first-char (first last-segment)]
+           (Character/isUpperCase first-char)))))
 
 (defn- constructor->fact-type
   "Maps a record constructor function name to its fully qualified record class symbol.
@@ -54,7 +55,7 @@
                       :else nil)]
     (when record-name
       (let [ns-pkg (munge (str ns))]
-        (symbol (str ns-pkg "." record-name))))))
+        (symbol (format "%s.%s" ns-pkg record-name))))))
 
 (defn- build-graph [analysis]
   (reduce (fn [acc {:keys [from from-var to name]}]
@@ -78,6 +79,25 @@
           {}
           (:var-usages analysis)))
 
+(defn- usage->fact-type [u]
+  (if-let [method-name (:method-name u)]
+    (cond
+      (str/starts-with? method-name "map->")
+      (let [record-name (subs method-name 5)]
+        (symbol (format "%s.%s" (:class u) record-name)))
+
+      (str/starts-with? method-name "->")
+      (let [record-name (subs method-name 2)]
+        (symbol (format "%s.%s" (:class u) record-name)))
+
+      (= method-name "new")
+      (when (java-class? (:class u))
+        (symbol (:class u)))
+
+      :else nil)
+    (when (java-class? (:class u))
+      (symbol (:class u)))))
+
 (defn- build-java-constructors [analysis]
   (let [defs (:var-definitions analysis)
         java-usages (:java-class-usages analysis)]
@@ -87,32 +107,17 @@
                     end-row (:end-row d)]
                 (if (and start-row end-row)
                   (let [contained-classes
-                        (keep (fn [u]
-                                (when (and (:row u)
-                                           (<= start-row (:row u))
-                                           (<= (:row u) end-row)
-                                           (not (:import u))
-                                           (not= (:col u) (:name-col u)))
-                                  (if-let [method-name (:method-name u)]
-                                    (cond
-                                      (str/starts-with? method-name "map->")
-                                      (let [record-name (subs method-name 5)]
-                                        (symbol (str (:class u) "." record-name)))
-
-                                      (str/starts-with? method-name "->")
-                                      (let [record-name (subs method-name 2)]
-                                        (symbol (str (:class u) "." record-name)))
-
-                                      (= method-name "new")
-                                      (when (java-class? (:class u))
-                                        (symbol (:class u)))
-
-                                      :else nil)
-                                    (when (java-class? (:class u))
-                                      (symbol (:class u))))))
+                        (into #{}
+                              (keep (fn [u]
+                                      (when (and (:row u)
+                                                 (<= start-row (:row u))
+                                                 (<= (:row u) end-row)
+                                                 (not (:import u))
+                                                 (not= (:col u) (:name-col u)))
+                                        (usage->fact-type u))))
                               java-usages)]
                     (if (seq contained-classes)
-                      (update acc caller (fnil set/union #{}) (set contained-classes))
+                      (update acc caller (fnil set/union #{}) contained-classes)
                       acc))
                   acc)))
             {}
@@ -137,7 +142,7 @@
 (defn- analyze-ns-source [ns-sym resource-url]
   (let [source-code (slurp resource-url)
         extension (if (str/ends-with? (str resource-url) ".cljc") ".cljc" ".clj")
-        resource-path (str (ns->resource-base ns-sym) extension)]
+        resource-path (format "%s%s" (ns->resource-base ns-sym) extension)]
     (with-in-str source-code
       (kondo/run!
        {:lint ["-"]
@@ -181,8 +186,8 @@
         is-retractor? (some #(or (contains? retract-fns %)
                                  (contains? direct-retractors %))
                             reachable)
-        types (set/union (into #{} (mapcat constructors reachable))
-                         (into #{} (mapcat java-constructors reachable)))]
+        types (set/union (into #{} (mapcat constructors) reachable)
+                         (into #{} (mapcat java-constructors) reachable))]
     {:reachable reachable
      :is-inserter? is-inserter?
      :is-retractor? is-retractor?
@@ -226,8 +231,16 @@
    checking both .clj and .cljc extensions sequentially."
   [ns-sym]
   (let [base-path (ns->resource-base ns-sym)]
-    (or (io/resource (str base-path ".clj"))
-        (io/resource (str base-path ".cljc")))))
+    (or (io/resource (format "%s.clj" base-path))
+        (io/resource (format "%s.cljc" base-path)))))
+
+(defn- get-or-analyze-ns-analysis [ns-sym resource-url cache-atom]
+  (if-let [cached-entry (when cache-atom (get @cache-atom ns-sym))]
+    cached-entry
+    (let [res (:analysis (analyze-ns-source ns-sym resource-url))]
+      (when cache-atom
+        (swap! cache-atom assoc ns-sym res))
+      res)))
 
 (defn build-analysis-from-namespaces
   "Resolves transitive dependencies on the classpath for starting namespaces,
@@ -256,16 +269,9 @@
           (if (contains? processed ns-sym)
             (recur remaining processed merged-analysis)
             (if-let [resource-url (find-ns-resource ns-sym)]
-              (let [cached-entry (when cache-atom (get @cache-atom ns-sym))
-                    analysis (if cached-entry
-                               cached-entry
-                               (let [res (:analysis (analyze-ns-source ns-sym resource-url))]
-                                 (when cache-atom
-                                   (swap! cache-atom assoc ns-sym res))
-                                 res))
-                    dependencies (->> (extract-required-namespaces analysis)
-                                      (filter ns-matches-prefix?))]
-                (recur (into remaining dependencies)
+              (let [analysis (get-or-analyze-ns-analysis ns-sym resource-url cache-atom)
+                    dependencies (extract-required-namespaces analysis)]
+                (recur (into remaining (filter ns-matches-prefix?) dependencies)
                        (conj processed ns-sym)
                        (merge-with into merged-analysis analysis)))
               ;; Resource not found on classpath, skip
