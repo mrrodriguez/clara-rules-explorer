@@ -94,8 +94,9 @@
         (is (some? ann-e) "Should recognize rule-metadata-map-fact as an inserter")
         (is (= [] (:clara-rules/insert-types ann-e))
             "Should infer an empty insert-types vector because metadata map facts are too dynamic to resolve statically")
-        (is (true? (:clara-rules/dynamic-insert-types-detected ann-e))
-            "Should tag the rule with dynamic-insert-types-detected as true since we have no statically inferred types"))
+        (is (= ["(with-meta {:app-id ?app-id, :status :pass} {:type :custom-map-type})"]
+               (:clara-rules/dynamic-insert-types-detected ann-e))
+            "Should tag the rule with dynamic-insert-types-detected containing the dynamic form string since we have no statically inferred types"))
 
       ;; Rule B2: Fully-qualified Class. constructor
       (let [ann-b2 (get annotations `atr/rule-java-constructor-fq-dot)]

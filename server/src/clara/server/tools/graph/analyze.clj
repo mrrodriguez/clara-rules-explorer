@@ -165,6 +165,57 @@
         (filter (fn [var-name] (some target-fns (get graph var-name))))
         var-names))
 
+(defn- extract-form-from-source [source-str row col end-row end-col]
+  (try
+    (let [lines (str/split-lines source-str)]
+      (when (and row col end-row end-col
+                 (<= 1 row (count lines))
+                 (<= 1 end-row (count lines))
+                 (<= row end-row))
+        (let [relevant-lines (subvec (vec lines) (dec row) end-row)]
+          (if (= (count relevant-lines) 1)
+            (let [line (first relevant-lines)]
+              (when (and (<= 0 (dec col) (count line))
+                         (<= 0 (dec end-col) (count line))
+                         (<= col end-col))
+                (subs line (dec col) (dec end-col))))
+            (let [first-line (first relevant-lines)
+                  last-line (last relevant-lines)
+                  middle-lines (subvec relevant-lines 1 (dec (count relevant-lines)))
+                  trimmed-first (if (<= 0 (dec col) (count first-line))
+                                  (subs first-line (dec col))
+                                  first-line)
+                  trimmed-last (if (<= 0 (dec end-col) (count last-line))
+                                 (subs last-line 0 (dec end-col))
+                                 last-line)]
+              (str/join "\n" (concat [trimmed-first] middle-lines [trimmed-last])))))))
+    (catch Exception _
+      nil)))
+
+(defn- extract-insert-args-from-call [call-str]
+  (try
+    (let [form (read-string call-str)
+          args (rest form)]
+      (mapv pr-str args))
+    (catch Exception _
+      [call-str])))
+
+(defn- dynamic-forms-for-var [reachable target-fns {:keys [analysis get-source]}]
+  (let [usages (:var-usages analysis)]
+    (into []
+          (comp
+           (filter (fn [u]
+                     (and (contains? reachable (symbol (str (:from u)) (str (:from-var u))))
+                          (contains? target-fns (symbol (str (:to u)) (str (:name u)))))))
+           (mapcat (fn [u]
+                     (let [source (get-source (:from u) (:filename u))
+                           call-str (extract-form-from-source source (:row u) (:col u) (:end-row u) (:end-col u))]
+                       (if call-str
+                         (extract-insert-args-from-call call-str)
+                         []))))
+           (distinct))
+          usages)))
+
 (defn- var-reachability
   "For a given `var-name`, returns a map of:
 
@@ -197,17 +248,19 @@
   "Returns an annotation map for the var referred to by the given `var-name` when it inserts or
   retracts fact types. Returns nil when the var has no output side-effects."
   [var-name ctx]
-  (let [{:keys [is-inserter? is-retractor? types]} (var-reachability var-name ctx)]
+  (let [{:keys [is-inserter? is-retractor? types reachable]} (var-reachability var-name ctx)]
     (when (or is-inserter? is-retractor?)
       (cond-> {}
         is-inserter?
         (assoc :clara-rules/insert-types (vec (sort (map symbol types))))
         (and is-inserter? (empty? types))
-        (assoc :clara-rules/dynamic-insert-types-detected true)
+        (assoc :clara-rules/dynamic-insert-types-detected
+               (dynamic-forms-for-var reachable (:insert-fns ctx) ctx))
         is-retractor?
         (assoc :clara-rules/retract-types (vec (sort (map symbol types))))
         (and is-retractor? (empty? types))
-        (assoc :clara-rules/dynamic-retract-types-detected true)))))
+        (assoc :clara-rules/dynamic-retract-types-detected
+               (dynamic-forms-for-var reachable (:retract-fns ctx) ctx))))))
 
 ;;
 ;; API
@@ -298,6 +351,22 @@
                   (map normalize-key rules-filter)
                   project-vars)
 
+        source-cache (atom {})
+        get-source (fn [ns-sym filename]
+                     (let [k (or ns-sym filename)]
+                       (if-let [cached (get @source-cache k)]
+                         cached
+                         (let [source (try
+                                        (if-let [res (and ns-sym (find-ns-resource ns-sym))]
+                                          (slurp res)
+                                          (when filename
+                                            (let [^java.io.File file (io/as-file filename)]
+                                              (when (.exists file)
+                                                (slurp file)))))
+                                        (catch Exception _ nil))]
+                           (swap! source-cache assoc k source)
+                           source))))
+
         annotations
         (into (sorted-map)
               (keep (fn [v]
@@ -309,7 +378,9 @@
                                             :insert-fns insert-fns
                                             :retract-fns retract-fns
                                             :direct-inserters direct-inserters
-                                            :direct-retractors direct-retractors})]
+                                            :direct-retractors direct-retractors
+                                            :analysis analysis
+                                            :get-source get-source})]
                         [v annotation]
                         (when (seq rules-filter)
                           [v {:clara-rules/no-output-types true}]))))
