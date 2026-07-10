@@ -201,20 +201,27 @@
       [call-str])))
 
 (defn- dynamic-forms-for-var [reachable target-fns {:keys [analysis get-source]}]
-  (let [usages (:var-usages analysis)]
-    (into []
-          (comp
-           (filter (fn [u]
-                     (and (contains? reachable (symbol (str (:from u)) (str (:from-var u))))
-                          (contains? target-fns (symbol (str (:to u)) (str (:name u)))))))
-           (mapcat (fn [u]
-                     (let [source (get-source (:from u) (:filename u))
-                           call-str (extract-form-from-source source (:row u) (:col u) (:end-row u) (:end-col u))]
-                       (if call-str
-                         (extract-insert-args-from-call call-str)
-                         []))))
-           (distinct))
-          usages)))
+  (let [usages (:var-usages analysis)
+        callsites (into []
+                        (comp
+                         (filter (fn [u]
+                                   (and (contains? reachable (symbol (str (:from u)) (str (:from-var u))))
+                                        (contains? target-fns (symbol (str (:to u)) (str (:name u)))))))
+                         (mapcat (fn [u]
+                                   (let [source (get-source (:from u) (:filename u))
+                                         call-str (extract-form-from-source source (:row u) (:col u) (:end-row u) (:end-col u))]
+                                     (if call-str
+                                       (let [args (extract-insert-args-from-call call-str)]
+                                         (map (fn [arg]
+                                                {:source-str arg
+                                                 :ns-name-sym (:from u)
+                                                 :filename (:filename u)})
+                                              args))
+                                       []))))
+                         (distinct))
+                        usages)]
+    (when (seq callsites)
+      {:callsites callsites})))
 
 (defn- var-reachability
   "For a given `var-name`, returns a map of:

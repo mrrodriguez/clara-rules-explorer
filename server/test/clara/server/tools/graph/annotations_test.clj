@@ -180,18 +180,20 @@
 
     (testing "dynamic-insert-types-detected from annos2 flows through when annos1 lacks it"
       (let [annos1 {rule-a {}}
-            annos2 {rule-a {:clara-rules/dynamic-insert-types-detected true}}
+            annos2 {rule-a {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "form", :ns-name-sym 'ns, :filename "file"}]}}}
             merged (ann/merge-annotations annos1 annos2)]
-        (is (true? (:clara-rules/dynamic-insert-types-detected (get merged rule-a))))))
+        (is (= {:callsites [{:source-str "form", :ns-name-sym 'ns, :filename "file"}]}
+               (:clara-rules/dynamic-insert-types-detected (get merged rule-a))))))
 
     (testing "dynamic-insert-types-detected: annos2 controls — annos2's value wins"
-      (let [annos1 {rule-a {:clara-rules/dynamic-insert-types-detected false}}
-            annos2 {rule-a {:clara-rules/dynamic-insert-types-detected true}}
+      (let [annos1 {rule-a {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "form-1", :ns-name-sym 'ns, :filename "file"}]}}}
+            annos2 {rule-a {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "form-2", :ns-name-sym 'ns, :filename "file"}]}}}
             merged (ann/merge-annotations annos1 annos2)]
-        (is (true? (:clara-rules/dynamic-insert-types-detected (get merged rule-a))))))
+        (is (= {:callsites [{:source-str "form-2", :ns-name-sym 'ns, :filename "file"}]}
+               (:clara-rules/dynamic-insert-types-detected (get merged rule-a))))))
 
     (testing "dynamic-insert-types-detected: omitted when annos2 doesn't declare it"
-      (let [annos1 {rule-a {:clara-rules/dynamic-insert-types-detected true}}
+      (let [annos1 {rule-a {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "form", :ns-name-sym 'ns, :filename "file"}]}}}
             annos2 {rule-a {:clara-rules/insert-types [:TypeA]}}
             merged (ann/merge-annotations annos1 annos2)]
         (is (nil? (:clara-rules/dynamic-insert-types-detected (get merged rule-a))))))
