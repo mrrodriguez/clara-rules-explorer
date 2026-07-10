@@ -78,6 +78,52 @@
   [path]
   (.exists (io/file path)))
 
+(defn- run-generate-annotations [generate-annotations]
+  (let [res (analyze/generate-annotations-from-paths {:paths generate-annotations})]
+    (pprint/pprint res)))
+
+(defn- validate-server-options [options]
+  (let [{:keys [session facts]} options]
+    (cond
+      (not session)
+      {:error "Error: Either --session or --generate-annotations is required."
+       :show-usage? true}
+
+      (not (file-exists? session))
+      {:error (format "Error: session file not found: %s" session)}
+
+      :else
+      (let [facts-path (resolve-facts-path session facts)]
+        (if-not (file-exists? facts-path)
+          {:error (format "Error: facts file not found: %s  (use --facts to specify a different path)" facts-path)}
+          {:facts-path facts-path})))))
+
+(defn- load-session-state [session-path facts-path]
+  (with-open [session-stream (io/input-stream session-path)
+              facts-stream (io/input-stream facts-path)]
+    (let [session-serializer (df/create-session-serializer session-stream)
+          mem-serializer (->FressianFactReader facts-stream)]
+      (d/deserialize-session-state session-serializer mem-serializer))))
+
+(defn- run-explorer-server [options facts-path]
+  (let [{:keys [session annotations port]} options]
+    (println (format "Loading session from: %s" session))
+    (println (format "Loading facts from:   %s" facts-path))
+    (when annotations
+      (if (file-exists? annotations)
+        (println (format "Loading annotations: %s" annotations))
+        (println (format "Warning: annotations file not found: %s" annotations))))
+    (let [loaded-session (load-session-state session facts-path)]
+      (println (format "Session deserialized. Starting server on port %s ..." port))
+      (server/start!
+       (cond-> {:session loaded-session
+                :port port}
+         (and annotations (file-exists? annotations))
+         (assoc :annotations-file annotations)))
+      (println (format "Clara Graph Server running at http://localhost:%s" port))
+      (println (format "API endpoints at http://localhost:%s/v1/" port))
+      (println "Press Ctrl+C to stop."))))
+
 ;; ---------------------------------------------------------------------------
 ;; -main
 ;; ---------------------------------------------------------------------------
@@ -106,52 +152,19 @@
       (println)
       (System/exit 1))
 
-    (let [{:keys [session annotations facts port generate-annotations]} options]
+    (let [{:keys [generate-annotations]} options]
       (if generate-annotations
-        (let [res (analyze/generate-annotations-from-paths {:paths generate-annotations})]
-          (pprint/pprint res)
-          (System/exit 0))
         (do
-          (when-not session
-            (println "Error: Either --session or --generate-annotations is required.")
-            (usage summary)
-            (System/exit 1))
-
-          (when-not (file-exists? session)
-            (println (str "Error: session file not found: " session))
-            (System/exit 1))
-
-          (let [facts-path (resolve-facts-path session facts)]
-            (when-not (file-exists? facts-path)
-              (println (str "Error: facts file not found: " facts-path
-                            "  (use --facts to specify a different path)"))
+          (run-generate-annotations generate-annotations)
+          (System/exit 0))
+        (let [validation (validate-server-options options)]
+          (if-let [error (:error validation)]
+            (do
+              (println error)
+              (when (:show-usage? validation)
+                (usage summary))
               (System/exit 1))
-
-            (println "Loading session from:" session)
-            (println "Loading facts from:   " facts-path)
-
-            (when annotations
-              (if (file-exists? annotations)
-                (println "Loading annotations:" annotations)
-                (println (str "Warning: annotations file not found: " annotations))))
-
-            (let [session-stream (io/input-stream session)
-                  facts-stream (io/input-stream facts-path)
-                  session-serializer (df/create-session-serializer session-stream)
-                  mem-serializer (->FressianFactReader facts-stream)
-                  loaded-session (d/deserialize-session-state session-serializer mem-serializer)]
-
-              (println "Session deserialized. Starting server on port" port "...")
-
-              (server/start!
-               (cond-> {:session loaded-session
-                        :port port}
-                 (and annotations (file-exists? annotations))
-                 (assoc :annotations-file annotations)))
-
-              (println (str "Clara Graph Server running at http://localhost:" port))
-              (println "API endpoints at http://localhost:" port "/v1/")
-              (println "Press Ctrl+C to stop.")
-
+            (do
+              (run-explorer-server options (:facts-path validation))
               ;; Block the main thread to keep the server alive.
               @(promise))))))))
