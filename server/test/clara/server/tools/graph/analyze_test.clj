@@ -20,24 +20,22 @@
       ;; Rule 1: collect-app-id-card-given-docs
       (let [ann-1 (get annotations `ldr/collect-app-id-card-given-docs)]
         (is (some? ann-1) "Should find collect-app-id-card-given-docs")
-        ;; Includes Accumulator from expanded defrule LHS (known limitation of
-        ;; flat var-usages analysis — cannot distinguish RHS args from LHS calls)
-        (is (= #{`AllIdCardGivenDocuments 'clara.rules.engine.Accumulator}
-               (set (:clara-rules/insert-types ann-1)))
-            "Should identify AllIdCardGivenDocuments record type"))
+        (is (= [`AllIdCardGivenDocuments]
+               (:clara-rules/insert-types ann-1))
+            "Should identify the locally defined AllIdCardGivenDocuments record type"))
 
       ;; Rule 2: collect-app-given-docs
       (let [ann-2 (get annotations `ldr/collect-app-given-docs)]
         (is (some? ann-2))
-        (is (= #{`AllGivenDocuments 'clara.rules.engine.Accumulator}
-               (set (:clara-rules/insert-types ann-2)))
+        (is (= [`AllGivenDocuments]
+               (:clara-rules/insert-types ann-2))
             "Should identify AllGivenDocuments record type from foreign facts ns"))
 
       ;; Rule 3: collect-app-req-docs
       (let [ann-3 (get annotations `ldr/collect-app-req-docs)]
         (is (some? ann-3))
-        (is (= #{`AllRequiredDocuments 'clara.rules.engine.Accumulator}
-               (set (:clara-rules/insert-types ann-3)))
+        (is (= [`AllRequiredDocuments]
+               (:clara-rules/insert-types ann-3))
             "Should identify AllRequiredDocuments record type"))
 
       ;; Rule 4: collect-app-doc-check-input
