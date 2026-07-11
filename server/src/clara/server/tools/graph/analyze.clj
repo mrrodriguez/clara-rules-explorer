@@ -6,8 +6,7 @@
             [clojure.set :as set]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clara.rules.engine :as eng]
-            [clara.rules.compiler :as com])
+            [clara.rules.engine :as eng])
   (:import [clara.rules.engine LocalSession]))
 
 (declare ns->resource-base)
@@ -54,44 +53,7 @@
   #{'clojure.core/defrecord 'clojure.core/deftype
     'defrecord 'deftype})
 
-(defn- build-record-constructor-index [analysis]
-  (into #{}
-        (comp (filter (fn [d]
-                        (or (record-type-defining-macros (:defined-by d))
-                            (record-type-defining-macros (:defined-by->lint-as d)))))
-              (map (fn [d]
-                     [(:ns d) (:name d)])))
-        (:var-definitions analysis)))
 
-(defn- build-record-class-index [analysis]
-  (into #{}
-        (comp (filter (fn [d]
-                        (and (or (record-type-defining-macros (:defined-by d))
-                                 (record-type-defining-macros (:defined-by->lint-as d)))
-                             (let [n (str (:name d))]
-                               (not (or (str/starts-with? n "->")
-                                        (str/starts-with? n "map->")))))))
-              (map (fn [d]
-                     (symbol (str (munge (str (:ns d))) "." (:name d))))))
-        (:var-definitions analysis)))
-
-(defn- resolvable-fact-class [sym]
-  (try
-    (Class/forName ^String (str sym) false ^ClassLoader (clojure.lang.RT/baseLoader))
-    sym
-    (catch Throwable _ nil)))
-
-(defn- constructor->fact-type
-  "Maps a record constructor function name to its fully qualified record class symbol.
-   Uses clojure.core/munge to handle namespace symbol munging."
-  [ns name-str]
-  (let [record-name (cond
-                      (str/starts-with? name-str "map->") (subs name-str 5)
-                      (str/starts-with? name-str "->") (subs name-str 2)
-                      :else nil)]
-    (when record-name
-      (let [ns-pkg (munge (str ns))]
-        (symbol (format "%s.%s" ns-pkg record-name))))))
 
 (defn- build-graph [analysis]
   (reduce (fn [acc {:keys [from from-var to name]}]
@@ -103,79 +65,7 @@
           {}
           (:var-usages analysis)))
 
-(defn- build-constructors [analysis record-constructor-index]
-  (reduce (fn [acc {:keys [from from-var to name]}]
-            (if (and from-var (not= from-var 'nil))
-              (let [caller (fq-name-sym from from-var)
-                    name-str (str name)
-                    fact-type (when-let [class-sym (constructor->fact-type to name-str)]
-                                (when (or (contains? record-constructor-index [to name])
-                                          (resolvable-fact-class class-sym))
-                                  class-sym))]
-                (if fact-type
-                  (update acc caller (fnil conj #{}) fact-type)
-                  acc))
-              acc))
-          {}
-          (:var-usages analysis)))
 
-(defn- usage->fact-type [record-class-index u]
-  (let [class-str (:class u)
-        class-sym (symbol class-str)
-        is-class-candidate? (java-class? class-str)]
-    (when is-class-candidate?
-      (if-let [method-name (:method-name u)]
-        (cond
-          (str/starts-with? method-name "map->")
-          (let [record-name (subs method-name 5)
-                fq-class-sym (symbol (format "%s.%s" class-str record-name))]
-            (when (or (contains? record-class-index fq-class-sym)
-                      (resolvable-fact-class fq-class-sym))
-              fq-class-sym))
-
-          (str/starts-with? method-name "->")
-          (let [record-name (subs method-name 2)
-                fq-class-sym (symbol (format "%s.%s" class-str record-name))]
-            (when (or (contains? record-class-index fq-class-sym)
-                      (resolvable-fact-class fq-class-sym))
-              fq-class-sym))
-
-          (= method-name "new")
-          (when (or (contains? record-class-index class-sym)
-                    (resolvable-fact-class class-sym))
-            class-sym)
-
-          :else nil)
-        (when (or (contains? record-class-index class-sym)
-                  (resolvable-fact-class class-sym))
-          class-sym)))))
-
-(defn- build-java-constructors [analysis record-class-index]
-  (let [defs (:var-definitions analysis)
-        java-usages (:java-class-usages analysis)]
-    (reduce (fn [acc d]
-              (let [caller (fq-name-sym (:ns d) (:name d))
-                    start-row (:row d)
-                    end-row (:end-row d)
-                    def-filename (:filename d)]
-                (if (and start-row end-row)
-                  (let [contained-classes
-                        (into #{}
-                              (keep (fn [u]
-                                      (when (and (= (:filename u) def-filename)
-                                                 (:row u)
-                                                 (<= start-row (:row u))
-                                                 (<= (:row u) end-row)
-                                                 (not (:import u))
-                                                 (not= (:col u) (:name-col u)))
-                                        (usage->fact-type record-class-index u))))
-                              java-usages)]
-                    (if (seq contained-classes)
-                      (update acc caller (fnil set/union #{}) contained-classes)
-                      acc))
-                  acc)))
-            {}
-            defs)))
 
 (defn- transitive-reachability [graph start-vars]
   (loop [seen #{}
@@ -299,15 +189,91 @@
     (catch Exception _
       nil)))
 
-(defn- extract-insert-args-from-call [call-str]
+(defn- resolvable-fact-class [sym]
   (try
-    (let [form (read-string call-str)
-          args (rest form)]
-      (mapv pr-str args))
-    (catch Exception _
-      [call-str])))
+    (when (class? (resolve sym))
+      sym)
+    (catch Throwable _ nil)))
 
-(defn- dynamic-forms-for-var [reachable target-fns {:keys [analysis get-source]}]
+(defn- resolve-record-type [ns-sym class-sym]
+  (try
+    (if-let [resolved (ns-resolve (find-ns ns-sym) class-sym)]
+      (cond
+        (class? resolved)
+        (symbol (.getName ^Class resolved))
+
+        (var? resolved)
+        (let [v-meta (meta resolved)
+              ns-str (name (ns-name (:ns v-meta)))
+              fn-name (name (:name v-meta))
+              class-name (cond
+                           (str/starts-with? fn-name "->") (subs fn-name 2)
+                           (str/starts-with? fn-name "map->") (subs fn-name 5)
+                           :else nil)]
+          (when class-name
+            (let [fq-sym (symbol (str (str/replace ns-str "-" "_") "." class-name))]
+              (resolvable-fact-class fq-sym))))
+
+        :else nil)
+      nil)
+    (catch Exception _ nil)))
+
+(defn- extract-constructors-from-form
+  ([form ns-sym ctx]
+   (extract-constructors-from-form form ns-sym ctx #{}))
+  ([form ns-sym {:keys [analysis get-source] :as ctx} visited]
+   (cond
+     (and (list? form) (seq form))
+     (let [head (first form)
+           head-results
+           (cond
+             (= head 'new)
+             (let [clazz (second form)]
+               (if (and (symbol? clazz) (resolve-record-type ns-sym clazz))
+                 [(resolve-record-type ns-sym clazz)]
+                 []))
+
+             (symbol? head)
+             (let [s (name head)]
+               (cond
+                 (or (str/starts-with? s "->")
+                     (str/starts-with? s "map->"))
+                 (if-let [r (resolve-record-type ns-sym head)] [r] [])
+
+                 (str/ends-with? s ".")
+                 (if-let [r (resolve-record-type ns-sym (symbol (namespace head) (subs s 0 (dec (count s)))))] [r] [])
+
+                 (and (= s "new") (namespace head))
+                 (if-let [r (resolve-record-type ns-sym (symbol (namespace head)))] [r] [])
+
+                 :else
+                 (if-let [v (try (ns-resolve (find-ns ns-sym) head) (catch Exception _ nil))]
+                   (let [v-ns-sym (ns-name (:ns (meta v)))
+                         v-name (:name (meta v))
+                         v-fq (symbol (str v-ns-sym) (str v-name))]
+                     (if (not (contains? visited v-fq))
+                       (if-let [var-def (first (filter #(and (= (:ns %) v-ns-sym) (= (:name %) v-name)) (:var-definitions analysis)))]
+                         (let [source (get-source v-ns-sym (:filename var-def))
+                               body-str (extract-form-from-source source (:row var-def) (:col var-def) (:end-row var-def) (:end-col var-def))]
+                           (if body-str
+                             (extract-constructors-from-form
+                              (try (read-string body-str) (catch Exception _ nil))
+                              v-ns-sym
+                              ctx
+                              (conj visited v-fq))
+                             []))
+                         [])
+                       []))
+                   [])))
+             :else [])]
+       (vec (concat head-results (mapcat #(extract-constructors-from-form % ns-sym ctx visited) (rest form)))))
+
+     (coll? form)
+     (vec (mapcat #(extract-constructors-from-form % ns-sym ctx visited) form))
+
+     :else [])))
+
+(defn- extract-insert-types [reachable target-fns {:keys [analysis get-source]}]
   (let [usages (:var-usages analysis)
         callsites (into []
                         (comp
@@ -320,95 +286,26 @@
                                    (let [source (get-source (:from u) (:filename u))
                                          call-str (extract-form-from-source source (:row u) (:col u) (:end-row u) (:end-col u))]
                                      (if call-str
-                                       (let [args (extract-insert-args-from-call call-str)]
-                                         (map (fn [arg]
-                                                {:source-str arg
-                                                 :ns-name-sym (:from u)
-                                                 :filename (:filename u)})
-                                              args))
+                                       (try
+                                         (let [form (read-string call-str)
+                                               args (rest form)]
+                                           (mapcat (fn [arg]
+                                                     (let [statics (extract-constructors-from-form arg (:from u) {:analysis analysis :get-source get-source})]
+                                                       (if (seq statics)
+                                                         (map (fn [t] {:static t}) statics)
+                                                         [{:dynamic {:source-str (pr-str arg)
+                                                                     :ns-name-sym (:from u)
+                                                                     :filename (:filename u)}}])))
+                                                   args))
+                                         (catch Exception _ []))
                                        []))))
                          (distinct))
-                        usages)]
-    (when (seq callsites)
-      {:callsites callsites})))
+                        usages)
+        static-types (into #{} (keep :static) callsites)
+        dynamic-forms (into [] (keep :dynamic) callsites)]
+    {:static-types static-types
+     :dynamic-forms (when (seq dynamic-forms) {:callsites dynamic-forms})}))
 
-(defn- load-ns-rules [ns-sym]
-  (try
-    (require ns-sym)
-    (com/load-source ns-sym)
-    (catch Exception _
-      [])))
-
-(defn- resolve-symbol-in-ns [ns-sym s]
-  (try
-    (if-let [resolved (ns-resolve (find-ns ns-sym) s)]
-      (if (var? resolved)
-        (let [v-meta (meta resolved)]
-          (symbol (name (ns-name (:ns v-meta))) (name (:name v-meta))))
-        (symbol (str resolved)))
-      s)
-    (catch Exception _ s)))
-
-(defn- collect-rhs-resolved-symbols [ns-sym form]
-  (loop [to-visit [form]
-         resolved-symbols #{}]
-    (if (empty? to-visit)
-      resolved-symbols
-      (let [curr (first to-visit)
-            more (rest to-visit)]
-        (cond
-          (symbol? curr)
-          (let [resolved (resolve-symbol-in-ns ns-sym curr)
-                has-dot? (str/ends-with? (name curr) ".")
-                clean-sym (if has-dot?
-                            (symbol (str/replace (name curr) #"\.$" ""))
-                            curr)
-                resolved-clean (if has-dot? (resolve-symbol-in-ns ns-sym clean-sym) resolved)]
-            (recur more (conj resolved-symbols curr clean-sym resolved resolved-clean)))
-
-          (coll? curr)
-          (recur (concat more curr) resolved-symbols)
-
-          :else
-          (recur more resolved-symbols))))))
-
-(defn- build-rules-rhs-index [analysis]
-  (let [ns-symbols (into #{}
-                         (comp (filter :ns)
-                               (map (fn [d] (symbol (:ns d)))))
-                         (:var-definitions analysis))]
-    (reduce (fn [acc ns-sym]
-              (let [rules (load-ns-rules ns-sym)]
-                (reduce (fn [inner-acc p]
-                          (let [rule-sym (symbol (:name p))
-                                rhs-form (:rhs p)
-                                rhs-symbols (collect-rhs-resolved-symbols ns-sym rhs-form)]
-                            (assoc inner-acc rule-sym rhs-symbols)))
-                        acc
-                        rules)))
-            {}
-            ns-symbols)))
-
-(defn- sanitize-analysis [analysis _get-source]
-  (let [rhs-index (build-rules-rhs-index analysis)
-        lhs-u? (fn [u]
-                 (let [caller (fq-name-sym (:from u) (:from-var u))]
-                   (if-let [rhs-symbols (get rhs-index caller)]
-                     ;; It is a Clara rule. Check if the usage's target is in the RHS set.
-                     (let [u-target (if (:class u)
-                                      (symbol (:class u))
-                                      (fq-name-sym (:to u) (:name u)))
-                           ;; Resolve the usage target in the caller namespace context
-                           resolved-target (resolve-symbol-in-ns (:from u) u-target)
-                           name-sym (symbol (name (:name u)))]
-                       (not (or (contains? rhs-symbols u-target)
-                                (contains? rhs-symbols resolved-target)
-                                (contains? rhs-symbols name-sym))))
-                     ;; Not a Clara rule (e.g. a helper fn). Keep all its usages.
-                     false)))]
-    (-> analysis
-        (update :var-usages (fn [usages] (remove lhs-u? usages)))
-        (update :java-class-usages (fn [usages] (remove lhs-u? usages))))))
 
 (defn- var-reachability
   "For a given `var-name`, returns a map of:
@@ -417,12 +314,9 @@
 
   * :is-inserter? - true if reachable set includes an insert fn or a direct inserter
 
-  * :is-retractor? - true if reachable set includes a retract fn or a direct retractor
-
-  * :types - set of fact types reachable through constructors"
+  * :is-retractor? - true if reachable set includes a retract fn or a direct retractor"
   [var-name
-   {:keys [graph constructors java-constructors
-           insert-fns retract-fns
+   {:keys [graph insert-fns retract-fns
            direct-inserters direct-retractors]}]
   (let [reachable (transitive-reachability graph [var-name])
         is-inserter? (some #(or (contains? insert-fns %)
@@ -430,31 +324,29 @@
                            reachable)
         is-retractor? (some #(or (contains? retract-fns %)
                                  (contains? direct-retractors %))
-                            reachable)
-        types (set/union (into #{} (mapcat constructors) reachable)
-                         (into #{} (mapcat java-constructors) reachable))]
+                            reachable)]
     {:reachable reachable
      :is-inserter? is-inserter?
-     :is-retractor? is-retractor?
-     :types types}))
+     :is-retractor? is-retractor?}))
 
 (defn- infer-annotation-for-var
   "Returns an annotation map for the var referred to by the given `var-name` when it inserts or
   retracts fact types. Returns nil when the var has no output side-effects."
   [var-name ctx]
-  (let [{:keys [is-inserter? is-retractor? types reachable]} (var-reachability var-name ctx)]
+  (let [{:keys [is-inserter? is-retractor? reachable]} (var-reachability var-name ctx)]
     (when (or is-inserter? is-retractor?)
-      (cond-> {}
-        is-inserter?
-        (assoc :clara-rules/insert-types (vec (sort (map symbol types))))
-        (and is-inserter? (empty? types))
-        (assoc :clara-rules/dynamic-insert-types-detected
-               (dynamic-forms-for-var reachable (:insert-fns ctx) ctx))
-        is-retractor?
-        (assoc :clara-rules/retract-types (vec (sort (map symbol types))))
-        (and is-retractor? (empty? types))
-        (assoc :clara-rules/dynamic-retract-types-detected
-               (dynamic-forms-for-var reachable (:retract-fns ctx) ctx))))))
+      (let [inserts (when is-inserter? (extract-insert-types reachable (:insert-fns ctx) ctx))
+            retracts (when is-retractor? (extract-insert-types reachable (:retract-fns ctx) ctx))]
+        (cond-> {}
+          (seq (:static-types inserts))
+          (assoc :clara-rules/insert-types (vec (sort (map symbol (:static-types inserts)))))
+          (:dynamic-forms inserts)
+          (assoc :clara-rules/dynamic-insert-types-detected (:dynamic-forms inserts))
+
+          (seq (:static-types retracts))
+          (assoc :clara-rules/retract-types (vec (sort (map symbol (:static-types retracts)))))
+          (:dynamic-forms retracts)
+          (assoc :clara-rules/dynamic-retract-types-detected (:dynamic-forms retracts)))))))
 
 ;;
 ;; API
@@ -577,7 +469,11 @@
      :in-memory-sources  - optional map of {ns-symbol source-string} for dynamically
                            defined in-memory namespaces."
   [{:keys [analysis rules-filter in-memory-sources]}]
-  (let [source-cache (atom {})
+  (let [;; Ensure namespaces are loaded into the runtime so that `ns-resolve`
+        ;; and class resolution works for AST constructor extraction.
+        _ (doseq [ns-sym (distinct (keep :ns (:var-definitions analysis)))]
+            (try (require ns-sym) (catch Exception _ nil)))
+        source-cache (atom {})
         get-source (fn [ns-sym filename]
                      (let [k (or ns-sym filename)]
                        (if-let [cached (get @source-cache k)]
@@ -593,12 +489,7 @@
                                         (catch Exception _ nil))]
                            (swap! source-cache assoc k source)
                            source))))
-        sanitized-analysis (sanitize-analysis analysis get-source)
-        record-constructor-index (build-record-constructor-index sanitized-analysis)
-        record-class-index (build-record-class-index sanitized-analysis)
-        graph (build-graph sanitized-analysis)
-        constructors (build-constructors sanitized-analysis record-constructor-index)
-        java-constructors (build-java-constructors sanitized-analysis record-class-index)
+        graph (build-graph analysis)
         project-vars (keys graph)
 
         direct-inserters (direct-callers graph project-vars insert-fns)
@@ -614,13 +505,12 @@
                       (if-let [annotation (infer-annotation-for-var
                                            v
                                            {:graph graph
-                                            :constructors constructors
-                                            :java-constructors java-constructors
+
                                             :insert-fns insert-fns
                                             :retract-fns retract-fns
                                             :direct-inserters direct-inserters
                                             :direct-retractors direct-retractors
-                                            :analysis sanitized-analysis
+                                            :analysis analysis
                                             :get-source get-source})]
                         [v annotation]
                         (when (seq rules-filter)

@@ -115,8 +115,72 @@
 
 (defn post-annotations-reload []
   (-> (client/post (->url "/annotations/reload") {:accept :json})
-      :body
-      json/read-value))
+      :status))
+
+(def ^:dynamic *server* nil)
+
+(defn with-server [f]
+  (let [server (run-smoke-test)]
+    (binding [*server* server]
+      (try
+        (f)
+        (finally
+          (server/stop!))))))
+
+(clojure.test/use-fixtures :once with-server)
+
+(clojure.test/deftest test-rulebase-analysis-endpoints
+  (clojure.test/testing "Summary and analysis"
+    (let [summary (get-rulebase-summary)
+          analysis (get-analysis)]
+      (clojure.test/is (some? summary))
+      (clojure.test/is (some? analysis))))
+      
+  (clojure.test/testing "Rules endpoints"
+    (let [rules (get-rules)
+          rule (get-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved")]
+      (clojure.test/is (seq rules))
+      (clojure.test/is (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved" (get rule "name")))))
+
+  (clojure.test/testing "Queries endpoints"
+    (let [queries (get-queries)
+          query (get-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome")]
+      (clojure.test/is (seq queries))
+      (clojure.test/is (= "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome" (get query "name")))))
+
+  (clojure.test/testing "Fact types endpoints"
+    (let [fact-types (get-fact-types)
+          fact-type (get-fact-type "clara.server.tools.graph.rules.loan_app_facts.Application")]
+      (clojure.test/is (seq fact-types))
+      (clojure.test/is (= "clara.server.tools.graph.rules.loan_app_facts.Application" (get fact-type "name"))))))
+
+(clojure.test/deftest test-session-state-endpoints
+  (clojure.test/testing "Session snapshot and facts"
+    (let [ss (get-session-snapshot)
+          session-fact-types (get-session-fact-types)
+          session-fact-type (get-session-fact-type "clara.server.tools.graph.rules.loan_app_facts.Application")]
+      (clojure.test/is (some? ss))
+      (clojure.test/is (seq session-fact-types))
+      (clojure.test/is (= "clara.server.tools.graph.rules.loan_app_facts.Application" (get session-fact-type "name")))
+      
+      (clojure.test/testing "Individual fact retrieval"
+        (let [fact-id (ffirst (get ss "facts"))
+              fact (get-session-fact fact-id)]
+          (clojure.test/is (some? fact))
+          (clojure.test/is (= (str fact-id) (str (get fact "id"))))))))
+
+  (clojure.test/testing "Session rules and queries"
+    (let [session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved")
+          session-query (get-session-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome")]
+      (clojure.test/is (some? session-rule))
+      (clojure.test/is (some? session-query)))))
+
+(clojure.test/deftest test-annotations-endpoints
+  (clojure.test/testing "Annotations retrieval and reload"
+    (let [annotations (get-annotations)
+          annotations-reload (post-annotations-reload)]
+      (clojure.test/is (some? annotations))
+      (clojure.test/is (= 200 annotations-reload)))))
 
 (comment
   ;; Start the server with a pre-populated session

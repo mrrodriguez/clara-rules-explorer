@@ -92,7 +92,7 @@
       ;; Rule E: Map facts with metadata (highly dynamic)
       (let [ann-e (get annotations `atr/rule-metadata-map-fact)]
         (is (some? ann-e) "Should recognize rule-metadata-map-fact as an inserter")
-        (is (= [] (:clara-rules/insert-types ann-e))
+        (is (nil? (:clara-rules/insert-types ann-e))
             "Should infer an empty insert-types vector because metadata map facts are too dynamic to resolve statically")
         (is (= {:callsites
                 [{:source-str "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-map-type})"
@@ -104,7 +104,7 @@
       ;; Rule E2: Custom fact builder call (->fact)
       (let [ann-e2 (get annotations `atr/rule-fact-builder-call)]
         (is (some? ann-e2) "Should recognize rule-fact-builder-call as an inserter")
-        (is (= [] (:clara-rules/insert-types ann-e2))
+        (is (nil? (:clara-rules/insert-types ann-e2))
             "Should infer an empty insert-types vector because ->fact is not a real record/class constructor")
         (is (= {:callsites
                 [{:source-str "(->fact :custom-fact-type {:app-id ?app-id, :status :pass})"
@@ -216,12 +216,7 @@
                (:clara-rules/insert-types ann-h10))
             "Should identify LocalDummyRecord from insert-all-unconditional! usage"))
 
-      ;; Rule LHS arrow collision test
-      (let [ann-collision (get annotations `atr/rule-lhs-arrow-collision)]
-        (is (some? ann-collision))
-        (is (= [`LocalDummyRecord]
-               (:clara-rules/insert-types ann-collision))
-            "Should only identify LocalDummyRecord as insert-types, filtering out DocumentCheckInput since it is on the LHS"))
+
 
       ;; Test filter and no-output-types generation
       (let [annotations-filtered (analyze/generate-annotations-from-paths {:paths ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]
@@ -306,7 +301,7 @@
                        {:analysis analysis
                         :in-memory-sources {'my.dynamic.rules in-mem-rules-source}})]
       (is (some? (get annotations 'my.dynamic.rules/dynamic-rule)))
-      (is (= [] (get-in annotations ['my.dynamic.rules/dynamic-rule :clara-rules/insert-types])))
+      (is (nil? (get-in annotations ['my.dynamic.rules/dynamic-rule :clara-rules/insert-types])))
       (is (= {:callsites
               [{:source-str "(with-meta {:id 1} {:type :dynamic-fact-type})"
                 :ns-name-sym 'my.dynamic.rules

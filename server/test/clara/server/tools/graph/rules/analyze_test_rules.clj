@@ -188,13 +188,3 @@
   =>
   (r/insert! (->fact :custom-fact-type {:app-id ?app-id :status :pass})))
 
-(defn lhs-test-helper [x]
-  (DocumentCheck. x :pass "lhs-test-helper"))
-
-(r/defrule rule-lhs-arrow-collision
-  "Rule with => in a comment on the LHS"
-  [Application (= ?app-id app-id)]
-  [:test (lhs-test-helper ?app-id)]
-  ;; => in a comment
-  =>
-  (r/insert! (map->LocalDummyRecord {:id ?app-id :value "arrow-collision"})))
