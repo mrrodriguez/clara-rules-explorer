@@ -43,18 +43,6 @@
     (symbol k)
     k))
 
-(defn- java-class? [class-str]
-  (let [last-segment (last (str/split class-str #"\."))]
-    (and (seq last-segment)
-         (let [^Character first-char (first last-segment)]
-           (Character/isUpperCase first-char)))))
-
-(def ^:private record-type-defining-macros
-  #{'clojure.core/defrecord 'clojure.core/deftype
-    'defrecord 'deftype})
-
-
-
 (defn- build-graph [analysis]
   (reduce (fn [acc {:keys [from from-var to name]}]
             (if (and from-var (not= from-var 'nil))
@@ -64,8 +52,6 @@
               acc))
           {}
           (:var-usages analysis)))
-
-
 
 (defn- transitive-reachability [graph start-vars]
   (loop [seen #{}
@@ -162,7 +148,9 @@
         (filter (fn [var-name] (some target-fns (get graph var-name))))
         var-names))
 
-(defn- extract-form-from-source [source-str row col end-row end-col]
+(defn- source-text-at
+  "Extracts source text from a position range. Returns nil on any error."
+  [source-str row col end-row end-col]
   (try
     (let [lines (str/split-lines source-str)]
       (when (and row col end-row end-col
@@ -218,94 +206,107 @@
       nil)
     (catch Exception _ nil)))
 
-(defn- extract-constructors-from-form
-  ([form ns-sym ctx]
-   (extract-constructors-from-form form ns-sym ctx #{}))
-  ([form ns-sym {:keys [analysis get-source] :as ctx} visited]
-   (cond
-     (and (list? form) (seq form))
-     (let [head (first form)
-           head-results
-           (cond
-             (= head 'new)
-             (let [clazz (second form)]
-               (if (and (symbol? clazz) (resolve-record-type ns-sym clazz))
-                 [(resolve-record-type ns-sym clazz)]
-                 []))
+(defn- precompute-reachability
+  "Returns a map of {var-sym -> reachable-set} for every var in `graph`.
+   reachable-set is the transitive closure of callees, stopping at boundary-fns."
+  [graph vars]
+  (into {}
+        (map (fn [v] [v (transitive-reachability graph [v])]))
+        vars))
 
-             (symbol? head)
-             (let [s (name head)]
-               (cond
-                 (or (str/starts-with? s "->")
-                     (str/starts-with? s "map->"))
-                 (if-let [r (resolve-record-type ns-sym head)] [r] [])
+(defn- build-inserter-type-map
+  "Bottom-up: for every var that is a direct caller of a target fn,
+   find record constructors (map->X, ->X) in its reachable subtree.
 
-                 (str/ends-with? s ".")
-                 (if-let [r (resolve-record-type ns-sym (symbol (namespace head) (subs s 0 (dec (count s)))))] [r] [])
+   Returns {inserter-var -> #{type-symbols}}.
 
-                 (and (= s "new") (namespace head))
-                 (if-let [r (resolve-record-type ns-sym (symbol (namespace head)))] [r] [])
+   Note: because clj-kondo's flat var-usages analysis cannot distinguish
+   argument expressions within a callsite from independent calls in the
+   same function body, a var's reachable subtree may include constructors
+   from unrelated branches (e.g. accumulator constructors in expanded
+   defrule LHS code). Consumers should use manual annotations
+   (:clara-rules/no-output-types) to suppress false positives."
+  [direct-callers graph {:keys [var-usages]}]
+  (let [reachable-cache (precompute-reachability graph direct-callers)]
+    (into {}
+          (map (fn [v]
+                 (let [subtree (get reachable-cache v #{})
+                       ;; Find record constructors called from vars in this subtree
+                       types
+                       (into #{}
+                             (comp
+                              (filter (fn [^clojure.lang.IPersistentMap vu]
+                                        (let [caller (fq-name-sym (:from vu) (:from-var vu))
+                                              callee-name (name (:name vu))]
+                                          (and (contains? subtree caller)
+                                               (or (str/starts-with? callee-name "map->")
+                                                   (str/starts-with? callee-name "->"))))))
+                              (keep (fn [^clojure.lang.IPersistentMap vu]
+                                      (resolve-record-type (:to vu) (:name vu)))))
+                             var-usages)]
+                   [v types])))
+          direct-callers)))
 
-                 :else
-                 (if-let [v (try (ns-resolve (find-ns ns-sym) head) (catch Exception _ nil))]
-                   (let [v-ns-sym (ns-name (:ns (meta v)))
-                         v-name (:name (meta v))
-                         v-fq (symbol (str v-ns-sym) (str v-name))]
-                     (if (not (contains? visited v-fq))
-                       (if-let [var-def (first (filter #(and (= (:ns %) v-ns-sym) (= (:name %) v-name)) (:var-definitions analysis)))]
-                         (let [source (get-source v-ns-sym (:filename var-def))
-                               body-str (extract-form-from-source source (:row var-def) (:col var-def) (:end-row var-def) (:end-col var-def))]
-                           (if body-str
-                             (extract-constructors-from-form
-                              (try (read-string body-str) (catch Exception _ nil))
-                              v-ns-sym
-                              ctx
-                              (conj visited v-fq))
-                             []))
-                         [])
-                       []))
-                   [])))
-             :else [])]
-       (vec (concat head-results (mapcat #(extract-constructors-from-form % ns-sym ctx visited) (rest form)))))
+(defn- extract-constructor-types-from-reachable
+  "Top-down: given a rule var's reachable set, find which inserter vars are
+   in it and union their types from the precomputed inserter-type-map."
+  [reachable inserter-type-map]
+  (into #{}
+        (mapcat (fn [v] (get inserter-type-map v #{})))
+        reachable))
 
-     (coll? form)
-     (vec (mapcat #(extract-constructors-from-form % ns-sym ctx visited) form))
-
-     :else [])))
-
-(defn- extract-insert-types [reachable target-fns {:keys [analysis get-source]}]
+(defn- extract-insert-types [reachable target-fns {:keys [analysis inserter-type-map get-source]}]
   (let [usages (:var-usages analysis)
-        callsites (into []
-                        (comp
-                         (filter (fn [u]
-                                   (let [caller (symbol (str (:from u)) (str (:from-var u)))]
-                                     (and (contains? reachable caller)
-                                          (not (contains? target-fns caller))
-                                          (contains? target-fns (symbol (str (:to u)) (str (:name u))))))))
-                         (mapcat (fn [u]
-                                   (let [source (get-source (:from u) (:filename u))
-                                         call-str (extract-form-from-source source (:row u) (:col u) (:end-row u) (:end-col u))]
-                                     (if call-str
-                                       (try
-                                         (let [form (read-string call-str)
-                                               args (rest form)]
-                                           (mapcat (fn [arg]
-                                                     (let [statics (extract-constructors-from-form arg (:from u) {:analysis analysis :get-source get-source})]
-                                                       (if (seq statics)
-                                                         (map (fn [t] {:static t}) statics)
-                                                         [{:dynamic {:source-str (pr-str arg)
-                                                                     :ns-name-sym (:from u)
-                                                                     :filename (:filename u)}}])))
-                                                   args))
-                                         (catch Exception _ []))
-                                       []))))
-                         (distinct))
-                        usages)
-        static-types (into #{} (keep :static) callsites)
-        dynamic-forms (into [] (keep :dynamic) callsites)]
-    {:static-types static-types
-     :dynamic-forms (when (seq dynamic-forms) {:callsites dynamic-forms})}))
 
+        direct-caller? (fn [caller]
+                         (and (contains? reachable caller)
+                              (not (contains? target-fns caller))))
+
+        has-direct-callers?
+        (boolean
+         (some (fn [^clojure.lang.IPersistentMap u]
+                 (let [caller (fq-name-sym (:from u) (:from-var u))]
+                   (and (direct-caller? caller)
+                        (contains? target-fns (fq-name-sym (:to u) (:name u))))))
+               usages))]
+
+    (if-not has-direct-callers?
+      {:static-types #{}
+       :dynamic-forms nil}
+
+      ;; Top-down: look up types from the precomputed inserter-type-map
+      (let [static-types (extract-constructor-types-from-reachable
+                          reachable inserter-type-map)]
+        (if (seq static-types)
+          {:static-types static-types
+           :dynamic-forms nil}
+
+          ;; No static types resolvable -> dynamic annotation
+          (let [callsites
+                (into []
+                      (comp
+                       (filter (fn [^clojure.lang.IPersistentMap u]
+                                 (let [caller (fq-name-sym (:from u) (:from-var u))]
+                                   (and (direct-caller? caller)
+                                        (contains? target-fns (fq-name-sym (:to u) (:name u)))))))
+                       (mapcat (fn [^clojure.lang.IPersistentMap u]
+                                 (let [source (get-source (:from u) (:filename u))
+                                       call-str (source-text-at source (:row u) (:col u) (:end-row u) (:end-col u))]
+                                   (if call-str
+                                     (try
+                                       (let [form (read-string call-str)
+                                             args (rest form)]
+                                         (mapv (fn [arg]
+                                                 {:source-str (pr-str arg)
+                                                  :ns-name-sym (:from u)
+                                                  :filename (:filename u)})
+                                               args))
+                                       (catch Exception _ []))
+                                     []))))
+                       (distinct))
+                      usages)]
+            {:static-types #{}
+             :dynamic-forms (when (seq callsites) {:callsites callsites})}))))))
 
 (defn- var-reachability
   "For a given `var-name`, returns a map of:
@@ -331,12 +332,17 @@
 
 (defn- infer-annotation-for-var
   "Returns an annotation map for the var referred to by the given `var-name` when it inserts or
-  retracts fact types. Returns nil when the var has no output side-effects."
+  retracts fact types. Returns nil when the var has no output side-effects.
+
+  `ctx` must contain :graph, :insert-fns, :retract-fns, :direct-inserters, :direct-retractors,
+  :analysis, :inserter-type-map, :retractor-type-map, and :get-source."
   [var-name ctx]
   (let [{:keys [is-inserter? is-retractor? reachable]} (var-reachability var-name ctx)]
     (when (or is-inserter? is-retractor?)
-      (let [inserts (when is-inserter? (extract-insert-types reachable (:insert-fns ctx) ctx))
-            retracts (when is-retractor? (extract-insert-types reachable (:retract-fns ctx) ctx))]
+      (let [insert-ctx (assoc ctx :inserter-type-map (:inserter-type-map ctx))
+            retract-ctx (assoc ctx :inserter-type-map (:retractor-type-map ctx))
+            inserts (when is-inserter? (extract-insert-types reachable (:insert-fns ctx) insert-ctx))
+            retracts (when is-retractor? (extract-insert-types reachable (:retract-fns ctx) retract-ctx))]
         (cond-> {}
           (seq (:static-types inserts))
           (assoc :clara-rules/insert-types (vec (sort (map symbol (:static-types inserts)))))
@@ -499,18 +505,25 @@
                   (map normalize-key rules-filter)
                   project-vars)
 
+        ;; Bottom-up: precompute types per inserter/retractor var subtree
+        inserter-type-map
+        (build-inserter-type-map direct-inserters graph analysis)
+        retractor-type-map
+        (build-inserter-type-map direct-retractors graph analysis)
+
         annotations
         (into (sorted-map)
               (keep (fn [v]
                       (if-let [annotation (infer-annotation-for-var
                                            v
                                            {:graph graph
-
                                             :insert-fns insert-fns
                                             :retract-fns retract-fns
                                             :direct-inserters direct-inserters
                                             :direct-retractors direct-retractors
                                             :analysis analysis
+                                            :inserter-type-map inserter-type-map
+                                            :retractor-type-map retractor-type-map
                                             :get-source get-source})]
                         [v annotation]
                         (when (seq rules-filter)
