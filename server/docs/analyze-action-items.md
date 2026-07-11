@@ -181,7 +181,7 @@ resources path the analyzer reads at runtime — and to detect when it drifts.
 
 ---
 
-## Action Item 2 — Resolution-based constructor detection (drop naming heuristics)
+## Action Item 2 — Resolution-based constructor detection (drop naming heuristics)  ✅ DONE
 
 **Problem:** `constructor->fact-type` (`analyze.clj:48`) treats any `->name` /
 `map->name` as a record constructor, so `facts.model.core/->fact` is misread as
@@ -260,6 +260,33 @@ models while still rejecting `->fact`.
   `-g` do transitive analysis (resolve requires from the linted files, like the
   namespaces path does) or document the limitation. Recommend enabling
   transitive analysis for `-g`.
+
+### What was implemented
+
+1. **Static indices from analysis:**
+   - `build-record-constructor-index` collects all constructor var definitions (e.g. `->Foo`, `map->Foo`) defined via `defrecord` or `deftype` statically in the merged analysis.
+   - `build-record-class-index` collects all fully-qualified class symbols (e.g. `my_ns.Foo`) for defined records/deftypes statically in the analysis.
+
+2. **Resolution-based constructor filters:**
+   - Added `resolvable-fact-class` to perform dynamic resolution checks using `Class/forName` with the runtime classloader.
+   - `build-constructors` and `constructor->fact-type` only accept constructor candidates if they exist in the static constructor index or resolve as loaded classes at runtime.
+   - `usage->fact-type` and `build-java-constructors` now require constructor class symbols to be present in the static class index or resolvable at runtime, demoting the simple uppercase `java-class?` heuristic to a pre-filtering check.
+
+3. **CLI Transitive Analysis Parity:**
+   - Modified `generate-annotations-from-paths` to run a customizable transitive analysis via `build-analysis-from-namespaces`.
+   - Introduced a `default-exclude-ns-prefixes` list of namespaces that are known not to wrap Clara Rule insertion/retraction calls (e.g. `clojure.`, `schema.`, `potemkin.`, etc. - explicitly keeping `clara.rules` as it can contain library insertion wrapper functions).
+   - Exposed `:include-ns-prefixes` and `:exclude-ns-prefixes` options in both `generate-annotations-from-paths` and `analyze-session-rules` to allow complete user customization.
+   - Threaded the initial path linting results and processed namespace set to avoid duplicate analysis of rule paths, preserving classpath-relative file paths.
+
+4. **LHS Usage Sanitization:**
+   - Implemented `sanitize-analysis` which matches the position of the `=>` operator in each rule's source form and filters out any `:var-usages` or `:java-class-usages` occurring on the LHS of the rule.
+   - This prevents LHS condition constructs (like accumulators or matching patterns) from polluting the call graph of the rule, ensuring we naturally trace and identify only RHS constructors and java constructors without needing any class name blacklists.
+
+### Validation
+
+- Added mock custom fact builder `->fact` (mimicking `facts.model.core/->fact`) and corresponding `rule-fact-builder-call` test rule to `analyze_test_rules.clj`.
+- Added unit assertions in `analyze_test.clj` validating that `->fact` is correctly classified as a dynamic insert instead of an invalid class constructor, verifying it produces `:clara-rules/dynamic-insert-types-detected` callsites.
+- Ran the full test suite (`make test`), lint checks (`make lint`), and reflection checks (`make reflection-check`), passing all 331 assertions successfully with zero warnings/errors.
 
 ---
 

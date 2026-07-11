@@ -8,6 +8,11 @@
 ;; A dummy record locally defined for testing
 (defrecord LocalDummyRecord [id value])
 
+(defn ->fact
+  "A mock fact builder mimicking facts.model.core/->fact"
+  [type data]
+  (with-meta data {:type type}))
+
 (def side-effect-counter (atom 0))
 
 (defn make-document-check
@@ -176,3 +181,9 @@
   [Application (= ?app-id app-id)]
   =>
   (r/insert-all-unconditional! [(map->LocalDummyRecord {:id ?app-id :value "all-unconditional"})]))
+
+(r/defrule rule-fact-builder-call
+  "Rule E2: Insert using a custom function that has a constructor-like name but is not a record"
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (->fact :custom-fact-type {:app-id ?app-id :status :pass})))

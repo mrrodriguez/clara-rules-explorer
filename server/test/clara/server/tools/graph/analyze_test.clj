@@ -101,6 +101,18 @@
                (:clara-rules/dynamic-insert-types-detected ann-e))
             "Should tag the rule with dynamic-insert-types-detected containing callsite information since we have no statically inferred types"))
 
+      ;; Rule E2: Custom fact builder call (->fact)
+      (let [ann-e2 (get annotations `atr/rule-fact-builder-call)]
+        (is (some? ann-e2) "Should recognize rule-fact-builder-call as an inserter")
+        (is (= [] (:clara-rules/insert-types ann-e2))
+            "Should infer an empty insert-types vector because ->fact is not a real record/class constructor")
+        (is (= {:callsites
+                [{:source-str "(->fact :custom-fact-type {:app-id ?app-id, :status :pass})"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-insert-types-detected ann-e2))
+            "Should tag the rule with dynamic-insert-types-detected containing callsite information"))
+
       ;; Rule B2: Fully-qualified Class. constructor
       (let [ann-b2 (get annotations `atr/rule-java-constructor-fq-dot)]
         (is (some? ann-b2))

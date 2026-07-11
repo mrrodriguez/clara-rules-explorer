@@ -49,6 +49,37 @@
          (let [^Character first-char (first last-segment)]
            (Character/isUpperCase first-char)))))
 
+(def ^:private record-type-defining-macros
+  #{'clojure.core/defrecord 'clojure.core/deftype
+    'defrecord 'deftype})
+
+(defn- build-record-constructor-index [analysis]
+  (into #{}
+        (comp (filter (fn [d]
+                        (or (record-type-defining-macros (:defined-by d))
+                            (record-type-defining-macros (:defined-by->lint-as d)))))
+              (map (fn [d]
+                     [(:ns d) (:name d)])))
+        (:var-definitions analysis)))
+
+(defn- build-record-class-index [analysis]
+  (into #{}
+        (comp (filter (fn [d]
+                        (and (or (record-type-defining-macros (:defined-by d))
+                                 (record-type-defining-macros (:defined-by->lint-as d)))
+                             (let [n (str (:name d))]
+                               (not (or (str/starts-with? n "->")
+                                        (str/starts-with? n "map->")))))))
+              (map (fn [d]
+                     (symbol (str (munge (str (:ns d))) "." (:name d))))))
+        (:var-definitions analysis)))
+
+(defn- resolvable-fact-class [sym]
+  (try
+    (Class/forName ^String (str sym) false ^ClassLoader (clojure.lang.RT/baseLoader))
+    sym
+    (catch Throwable _ nil)))
+
 (defn- constructor->fact-type
   "Maps a record constructor function name to its fully qualified record class symbol.
    Uses clojure.core/munge to handle namespace symbol munging."
@@ -71,11 +102,15 @@
           {}
           (:var-usages analysis)))
 
-(defn- build-constructors [analysis]
+(defn- build-constructors [analysis record-constructor-index]
   (reduce (fn [acc {:keys [from from-var to name]}]
             (if (and from-var (not= from-var 'nil))
               (let [caller (fq-name-sym from from-var)
-                    fact-type (constructor->fact-type to (str name))]
+                    name-str (str name)
+                    fact-type (when-let [class-sym (constructor->fact-type to name-str)]
+                                (when (or (contains? record-constructor-index [to name])
+                                          (resolvable-fact-class class-sym))
+                                  class-sym))]
                 (if fact-type
                   (update acc caller (fnil conj #{}) fact-type)
                   acc))
@@ -83,26 +118,38 @@
           {}
           (:var-usages analysis)))
 
-(defn- usage->fact-type [u]
-  (if-let [method-name (:method-name u)]
-    (cond
-      (str/starts-with? method-name "map->")
-      (let [record-name (subs method-name 5)]
-        (symbol (format "%s.%s" (:class u) record-name)))
+(defn- usage->fact-type [record-class-index u]
+  (let [class-str (:class u)
+        class-sym (symbol class-str)
+        is-class-candidate? (java-class? class-str)]
+    (when is-class-candidate?
+      (if-let [method-name (:method-name u)]
+        (cond
+          (str/starts-with? method-name "map->")
+          (let [record-name (subs method-name 5)
+                fq-class-sym (symbol (format "%s.%s" class-str record-name))]
+            (when (or (contains? record-class-index fq-class-sym)
+                      (resolvable-fact-class fq-class-sym))
+              fq-class-sym))
 
-      (str/starts-with? method-name "->")
-      (let [record-name (subs method-name 2)]
-        (symbol (format "%s.%s" (:class u) record-name)))
+          (str/starts-with? method-name "->")
+          (let [record-name (subs method-name 2)
+                fq-class-sym (symbol (format "%s.%s" class-str record-name))]
+            (when (or (contains? record-class-index fq-class-sym)
+                      (resolvable-fact-class fq-class-sym))
+              fq-class-sym))
 
-      (= method-name "new")
-      (when (java-class? (:class u))
-        (symbol (:class u)))
+          (= method-name "new")
+          (when (or (contains? record-class-index class-sym)
+                    (resolvable-fact-class class-sym))
+            class-sym)
 
-      :else nil)
-    (when (java-class? (:class u))
-      (symbol (:class u)))))
+          :else nil)
+        (when (or (contains? record-class-index class-sym)
+                  (resolvable-fact-class class-sym))
+          class-sym)))))
 
-(defn- build-java-constructors [analysis]
+(defn- build-java-constructors [analysis record-class-index]
   (let [defs (:var-definitions analysis)
         java-usages (:java-class-usages analysis)]
     (reduce (fn [acc d]
@@ -120,7 +167,7 @@
                                                  (<= (:row u) end-row)
                                                  (not (:import u))
                                                  (not= (:col u) (:name-col u)))
-                                        (usage->fact-type u))))
+                                        (usage->fact-type record-class-index u))))
                               java-usages)]
                     (if (seq contained-classes)
                       (update acc caller (fnil set/union #{}) contained-classes)
@@ -284,6 +331,37 @@
     (when (seq callsites)
       {:callsites callsites})))
 
+(defn- find-arrow-pos [source-str start-row end-row]
+  (let [lines (str/split-lines source-str)]
+    (some (fn [r]
+            (let [line (nth lines (dec r))
+                  idx (str/index-of line "=>")]
+              (when idx
+                {:row r :col (inc idx)})))
+          (range start-row (inc end-row)))))
+
+(defn- lhs-usage? [u rule-defs get-source]
+  (let [caller (fq-name-sym (:from u) (:from-var u))]
+    (if-let [d (get rule-defs caller)]
+      (let [source (get-source (:ns d) (:filename d))
+            arrow (and source (find-arrow-pos source (:row d) (:end-row d)))]
+        (if arrow
+          (or (< (:row u) (:row arrow))
+              (and (= (:row u) (:row arrow))
+                   (< (:col u) (:col arrow))))
+          false))
+      false)))
+
+(defn- sanitize-analysis [analysis get-source]
+  (let [rule-defs (into {}
+                        (map (fn [d]
+                               [(fq-name-sym (:ns d) (:name d)) d]))
+                        (:var-definitions analysis))
+        lhs-u? (fn [u] (lhs-usage? u rule-defs get-source))]
+    (-> analysis
+        (update :var-usages (fn [usages] (remove lhs-u? usages)))
+        (update :java-class-usages (fn [usages] (remove lhs-u? usages))))))
+
 (defn- var-reachability
   "For a given `var-name`, returns a map of:
 
@@ -304,7 +382,7 @@
                            reachable)
         is-retractor? (some #(or (contains? retract-fns %)
                                  (contains? direct-retractors %))
-                            reachable)
+                             reachable)
         types (set/union (into #{} (mapcat constructors) reachable)
                          (into #{} (mapcat java-constructors) reachable))]
     {:reachable reachable
@@ -363,32 +441,63 @@
         (swap! cache-atom assoc ns-sym res))
       res)))
 
+(def ^:private default-exclude-ns-prefixes
+  #{"clojure."
+    "cljs."
+    "schema."
+    "ham-fisted."
+    "futurama."
+    "manifold."
+    "potemkin."
+    "riddley."
+    "clj-commons."
+    "clj-kondo."
+    "cider."
+    "nrepl."})
+
 (defn build-analysis-from-namespaces
   "Resolves transitive dependencies on the classpath for starting namespaces,
-   optionally filtering by include-ns-prefixes, runs clj-kondo against them
-   (using the cache), and returns a merged analysis map.
+   optionally filtering by include-ns-prefixes and exclude-ns-prefixes,
+   runs clj-kondo against them (using the cache), and returns a merged analysis map.
+
+   When both include-ns-prefixes and exclude-ns-prefixes are provided, a namespace is
+   included only if it matches include-ns-prefixes AND does not match exclude-ns-prefixes
+   (exclude-ns-prefixes takes precedence).
 
    Options:
      :starting-namespaces  - coll of namespace symbols to start from (required)
      :include-ns-prefixes   - optional coll of ns prefix strings; when nil,
                               all transitive dependencies are followed (no filtering).
+     :exclude-ns-prefixes   - optional coll of ns prefix strings; defaults to
+                              default-exclude-ns-prefixes.
      :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache.
      :in-memory-sources     - optional map of {ns-symbol source-string} for dynamically
                               defined in-memory namespaces.
      :config-dir            - optional clj-kondo config dir; defaults to the bundled
                               clara-rules hooks. Pass nil to disable (falls back to
-                              cwd-based `.clj-kondo` discovery)."
-  [{:keys [starting-namespaces include-ns-prefixes cache-atom in-memory-sources config-dir]
+                              cwd-based `.clj-kondo` discovery).
+     :initial-analysis      - optional map of analysis data to seed the merge with;
+                              defaults to nil.
+     :processed-namespaces  - optional coll of namespace symbols already processed;
+                              defaults to nil."
+  [{:keys [starting-namespaces include-ns-prefixes exclude-ns-prefixes cache-atom in-memory-sources config-dir
+           initial-analysis processed-namespaces]
     :or {cache-atom global-analysis-cache
-         config-dir @bundled-kondo-config-dir}}]
-  (let [ns-matches-prefix? (if include-ns-prefixes
-                             (fn [ns-sym]
-                               (let [ns-str (str ns-sym)]
-                                 (some #(str/starts-with? ns-str (str %)) include-ns-prefixes)))
-                             (constantly true))]
-    (loop [queue (set starting-namespaces)
-           processed #{}
-           merged-analysis {}]
+         config-dir @bundled-kondo-config-dir
+         exclude-ns-prefixes default-exclude-ns-prefixes}}]
+  (let [ns-matches-prefix? (fn [ns-sym]
+                             (let [ns-str (str ns-sym)]
+                               (and (if include-ns-prefixes
+                                      (some #(str/starts-with? ns-str (str %)) include-ns-prefixes)
+                                      true)
+                                    (if exclude-ns-prefixes
+                                      (not (some #(str/starts-with? ns-str (str %)) exclude-ns-prefixes))
+                                      true))))]
+    (loop [queue (into (set starting-namespaces)
+                       (filter ns-matches-prefix?)
+                       (extract-required-namespaces initial-analysis))
+           processed (set processed-namespaces)
+           merged-analysis (or initial-analysis {})]
       (if (empty? queue)
         merged-analysis
         (let [ns-sym (first queue)
@@ -420,9 +529,28 @@
      :in-memory-sources  - optional map of {ns-symbol source-string} for dynamically
                            defined in-memory namespaces."
   [{:keys [analysis rules-filter in-memory-sources]}]
-  (let [graph (build-graph analysis)
-        constructors (build-constructors analysis)
-        java-constructors (build-java-constructors analysis)
+  (let [source-cache (atom {})
+        get-source (fn [ns-sym filename]
+                     (let [k (or ns-sym filename)]
+                       (if-let [cached (get @source-cache k)]
+                         cached
+                         (let [source (try
+                                         (or (and ns-sym (get in-memory-sources ns-sym))
+                                             (if-let [res (and ns-sym (find-ns-resource ns-sym))]
+                                               (slurp res)
+                                               (when filename
+                                                 (let [^java.io.File file (io/as-file filename)]
+                                                   (when (.exists file)
+                                                     (slurp file))))))
+                                         (catch Exception _ nil))]
+                           (swap! source-cache assoc k source)
+                           source))))
+        sanitized-analysis (sanitize-analysis analysis get-source)
+        record-constructor-index (build-record-constructor-index sanitized-analysis)
+        record-class-index (build-record-class-index sanitized-analysis)
+        graph (build-graph sanitized-analysis)
+        constructors (build-constructors sanitized-analysis record-constructor-index)
+        java-constructors (build-java-constructors sanitized-analysis record-class-index)
         project-vars (keys graph)
 
         direct-inserters (direct-callers graph project-vars insert-fns)
@@ -431,23 +559,6 @@
         var-seq (if (seq rules-filter)
                   (map normalize-key rules-filter)
                   project-vars)
-
-        source-cache (atom {})
-        get-source (fn [ns-sym filename]
-                     (let [k (or ns-sym filename)]
-                       (if-let [cached (get @source-cache k)]
-                         cached
-                         (let [source (try
-                                        (or (and ns-sym (get in-memory-sources ns-sym))
-                                            (if-let [res (and ns-sym (find-ns-resource ns-sym))]
-                                              (slurp res)
-                                              (when filename
-                                                (let [^java.io.File file (io/as-file filename)]
-                                                  (when (.exists file)
-                                                    (slurp file))))))
-                                        (catch Exception _ nil))]
-                           (swap! source-cache assoc k source)
-                           source))))
 
         annotations
         (into (sorted-map)
@@ -461,7 +572,7 @@
                                             :retract-fns retract-fns
                                             :direct-inserters direct-inserters
                                             :direct-retractors direct-retractors
-                                            :analysis analysis
+                                            :analysis sanitized-analysis
                                             :get-source get-source})]
                         [v annotation]
                         (when (seq rules-filter)
@@ -502,21 +613,23 @@
    Options:
      :session-or-rulebase   - Clara session or rulebase (required)
      :include-ns-prefixes   - optional coll of ns prefix strings; passed to build-analysis-from-namespaces
+     :exclude-ns-prefixes   - optional coll of ns prefix strings; passed to build-analysis-from-namespaces
      :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache.
      :in-memory-sources     - optional map of {ns-symbol source-string} for dynamically
                               defined in-memory namespaces.
      :config-dir            - optional clj-kondo config dir; defaults to the bundled
                               clara-rules hooks (see build-analysis-from-namespaces)."
-  [{:keys [session-or-rulebase include-ns-prefixes cache-atom in-memory-sources config-dir]
+  [{:keys [session-or-rulebase include-ns-prefixes exclude-ns-prefixes cache-atom in-memory-sources config-dir]
     :or {cache-atom global-analysis-cache
          config-dir @bundled-kondo-config-dir}}]
   (let [namespaces (extract-session-namespaces session-or-rulebase)]
     (build-analysis-from-namespaces
-     {:starting-namespaces namespaces
-      :include-ns-prefixes include-ns-prefixes
-      :cache-atom cache-atom
-      :in-memory-sources in-memory-sources
-      :config-dir config-dir})))
+     (cond-> {:starting-namespaces namespaces
+              :cache-atom cache-atom
+              :in-memory-sources in-memory-sources
+              :config-dir config-dir}
+       include-ns-prefixes (assoc :include-ns-prefixes include-ns-prefixes)
+       exclude-ns-prefixes (assoc :exclude-ns-prefixes exclude-ns-prefixes)))))
 
 (defn generate-annotations-from-paths
   "Runs clj-kondo on the specified paths to generate an analysis map,
@@ -528,12 +641,25 @@
                      all project vars are analyzed.
      :config-dir   - optional clj-kondo config dir; defaults to the bundled
                      clara-rules hooks. Pass nil to disable (falls back to
-                     cwd-based `.clj-kondo` discovery)."
-  [{:keys [paths rules-filter config-dir]
+                     cwd-based `.clj-kondo` discovery).
+     :include-ns-prefixes - optional coll of ns prefix strings; passed to build-analysis-from-namespaces
+     :exclude-ns-prefixes - optional coll of ns prefix strings; passed to build-analysis-from-namespaces"
+  [{:keys [paths rules-filter config-dir include-ns-prefixes exclude-ns-prefixes]
     :or {config-dir @bundled-kondo-config-dir}}]
-  (let [res (kondo/run! (cond-> {:lint paths
-                                 :config {:analysis {:var-definitions true
-                                                     :var-usages true
-                                                     :java-class-usages true}}}
-                          config-dir (assoc :config-dir config-dir)))]
-    (generate-annotations-from-analysis {:analysis (:analysis res) :rules-filter rules-filter})))
+  (let [initial-res (kondo/run! (cond-> {:lint paths
+                                         :config {:analysis {:namespace-definitions true
+                                                             :var-definitions true
+                                                             :var-usages true
+                                                             :java-class-usages true}}}
+                                  config-dir (assoc :config-dir config-dir)))
+        starting-namespaces (map :name (get-in initial-res [:analysis :namespace-definitions]))
+        merged-analysis (if (seq starting-namespaces)
+                          (build-analysis-from-namespaces
+                           (cond-> {:starting-namespaces starting-namespaces
+                                    :config-dir config-dir
+                                    :initial-analysis (:analysis initial-res)
+                                    :processed-namespaces (set starting-namespaces)}
+                             include-ns-prefixes (assoc :include-ns-prefixes include-ns-prefixes)
+                             exclude-ns-prefixes (assoc :exclude-ns-prefixes exclude-ns-prefixes)))
+                          (:analysis initial-res))]
+    (generate-annotations-from-analysis {:analysis merged-analysis :rules-filter rules-filter})))
