@@ -50,6 +50,8 @@
     :validate [#(< 0 % 65536) "Port must be between 1 and 65535"]]
    ["-g" "--generate-annotations PATHS" "Generate annotations EDN for Clojure source paths (comma-separated)."
     :parse-fn #(str/split % #",")]
+   [nil "--load-session-state-fn SYMBOL" "Symbol naming a function to load the session state."
+    :parse-fn symbol]
    ["-h" "--help" "Print this help."]])
 
 (defn- usage [summary]
@@ -83,7 +85,7 @@
     (pprint/pprint res)))
 
 (defn- validate-server-options [options]
-  (let [{:keys [session facts]} options]
+  (let [{:keys [session facts load-session-state-fn]} options]
     (cond
       (not session)
       {:error "Error: Either --session or --generate-annotations is required."
@@ -94,26 +96,50 @@
 
       :else
       (let [facts-path (resolve-facts-path session facts)]
-        (if-not (file-exists? facts-path)
+        (if (and (not load-session-state-fn)
+                 (not (file-exists? facts-path)))
           {:error (format "Error: facts file not found: %s  (use --facts to specify a different path)" facts-path)}
           {:facts-path facts-path})))))
 
-(defn- load-session-state [session-path facts-path]
-  (with-open [session-stream (io/input-stream session-path)
-              facts-stream (io/input-stream facts-path)]
-    (let [session-serializer (df/create-session-serializer session-stream)
-          mem-serializer (->FressianFactReader facts-stream)]
-      (d/deserialize-session-state session-serializer mem-serializer))))
+(defn- resolve-fn [x]
+  (cond
+    (symbol? x) (let [resolved (try
+                                 (requiring-resolve x)
+                                 (catch Exception _
+                                   nil))]
+                  (if resolved
+                    resolved
+                    (throw (IllegalArgumentException. (format "Could not resolve function: %s" x)))))
+    (ifn? x) x
+    :else (throw (IllegalArgumentException. (format "Invalid :load-session-state-fn: %s" x)))))
 
-(defn- run-explorer-server [options facts-path]
-  (let [{:keys [session annotations port]} options]
+(defn load-session-state
+  "Loads the session state using the provided load-fn, or the default fressian deserializer if load-fn is not provided.
+   load-fn can be a symbol or an IFn."
+  ([session-path facts-path]
+   (load-session-state session-path facts-path nil))
+  ([session-path facts-path load-fn]
+   (if load-fn
+     (let [f (resolve-fn load-fn)]
+       (f session-path facts-path))
+     (with-open [session-stream (io/input-stream session-path)
+                 facts-stream (io/input-stream facts-path)]
+       (let [session-serializer (df/create-session-serializer session-stream)
+             mem-serializer (->FressianFactReader facts-stream)]
+         (d/deserialize-session-state session-serializer mem-serializer))))))
+
+(defn run-explorer-server
+  "Starts the explorer server with the given options."
+  [options facts-path]
+  (let [{:keys [session annotations port load-session-state-fn]} options]
     (println (format "Loading session from: %s" session))
-    (println (format "Loading facts from:   %s" facts-path))
+    (when (or (not load-session-state-fn) (file-exists? facts-path))
+      (println (format "Loading facts from:   %s" facts-path)))
     (when annotations
       (if (file-exists? annotations)
         (println (format "Loading annotations: %s" annotations))
         (println (format "Warning: annotations file not found: %s" annotations))))
-    (let [loaded-session (load-session-state session facts-path)]
+    (let [loaded-session (load-session-state session facts-path load-session-state-fn)]
       (println (format "Session deserialized. Starting server on port %s ..." port))
       (server/start!
        (cond-> {:session loaded-session
@@ -140,6 +166,7 @@
      -a, --annotations PATH  EDN sidecar annotations file.
      -f, --facts PATH        Serialized facts file (default: <session>.facts).
      -p, --port PORT         Server port (default: 9999).
+     --load-session-state-fn SYMBOL  Symbol naming a function to load the session state.
      -h, --help"
   [& args]
   (let [{:keys [options errors summary]} (parse-opts args cli-options)]
