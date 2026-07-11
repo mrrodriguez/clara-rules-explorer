@@ -4,6 +4,7 @@
   (:require [clj-kondo.core :as kondo]
             [clojure.string :as str]
             [clojure.set :as set]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clara.rules.engine :as eng])
   (:import [clara.rules.engine LocalSession]))
@@ -145,25 +146,70 @@
               (distinct))
         (:namespace-usages analysis)))
 
-(defn- analyze-source-code [source-code resource-path]
+;;
+;; Bundled clj-kondo config (clara-rules hooks)
+;;
+;; clj-kondo only produces var-definitions for def-macros it has a hook or
+;; :lint-as mapping for. Without the clara-rules hooks, `defrule`/`defquery`
+;; etc. are opaque calls, no rule gets a :from-var, and the call graph is empty.
+;;
+;; clj-kondo would normally load these hooks from a `.clj-kondo` dir discovered
+;; by walking up from the linted file's directory (see clj-kondo impl/core
+;; `config-dir`). That is cwd-dependent and unusable for a standalone tool run
+;; from a foreign working directory (CLI `-g`) or injected into a host JVM
+;; (`add-libs`). Instead we ship the clj-kondo import as classpath resources
+;; (mirrored by `clara.server.tools.graph.kondo-config-sync`), materialize it
+;; into a temp dir once per process, and pass it explicitly as `:config-dir`.
+
+(def ^:private bundled-kondo-config-resource
+  "Classpath resource base for the bundled clj-kondo config. Kept in sync with
+   `clara.server.tools.graph.kondo-config-sync`'s `default-resources-base`."
+  "clara/server/tools/graph/kondo-config")
+
+(defn- materialize-bundled-kondo-config!
+  "Copies the bundled clj-kondo config from classpath resources into a fresh
+   temp directory and returns its absolute path, suitable for `kondo/run!`
+   `:config-dir`. Returns nil if the bundled config is not on the classpath.
+
+   Materialization is required because resources may live inside a jar, which
+   cannot be handed to `:config-dir` directly."
+  []
+  (when-let [manifest-res (io/resource (str bundled-kondo-config-resource "/manifest.edn"))]
+    (let [manifest (edn/read-string (slurp manifest-res))
+          tmp-dir (.toFile (java.nio.file.Files/createTempDirectory
+                            "clara-explorer-kondo"
+                            (make-array java.nio.file.attribute.FileAttribute 0)))]
+      (doseq [rel (:files manifest)]
+        (when-let [res (io/resource (str bundled-kondo-config-resource "/" rel))]
+          (let [dest (io/file tmp-dir rel)]
+            (io/make-parents dest)
+            (with-open [in (io/input-stream res)]
+              (io/copy in dest)))))
+      (.getAbsolutePath tmp-dir))))
+
+(defonce ^:private bundled-kondo-config-dir
+  (delay (materialize-bundled-kondo-config!)))
+
+(defn- analyze-source-code [source-code resource-path config-dir]
   (with-in-str source-code
     (kondo/run!
-     {:lint ["-"]
-      :lang :clj
-      :filename resource-path
-      :config {:analysis {:var-definitions true
-                          :var-usages true
-                          :java-class-usages true}}})))
+     (cond-> {:lint ["-"]
+              :lang :clj
+              :filename resource-path
+              :config {:analysis {:var-definitions true
+                                  :var-usages true
+                                  :java-class-usages true}}}
+       config-dir (assoc :config-dir config-dir)))))
 
-(defn- analyze-ns-source [ns-sym resource-url]
+(defn- analyze-ns-source [ns-sym resource-url config-dir]
   (let [source-code (slurp resource-url)
         extension (if (str/ends-with? (str resource-url) ".cljc") ".cljc" ".clj")
         resource-path (format "%s%s" (ns->resource-base ns-sym) extension)]
-    (analyze-source-code source-code resource-path)))
+    (analyze-source-code source-code resource-path config-dir)))
 
-(defn- analyze-ns-string [ns-sym source-code]
+(defn- analyze-ns-string [ns-sym source-code config-dir]
   (let [resource-path (format "%s.clj" (ns->resource-base ns-sym))]
-    (analyze-source-code source-code resource-path)))
+    (analyze-source-code source-code resource-path config-dir)))
 
 (defn- get-rulebase [session-or-rulebase]
   (if (instance? LocalSession session-or-rulebase)
@@ -328,9 +374,13 @@
                               all transitive dependencies are followed (no filtering).
      :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache.
      :in-memory-sources     - optional map of {ns-symbol source-string} for dynamically
-                              defined in-memory namespaces."
-  [{:keys [starting-namespaces include-ns-prefixes cache-atom in-memory-sources]
-    :or {cache-atom global-analysis-cache}}]
+                              defined in-memory namespaces.
+     :config-dir            - optional clj-kondo config dir; defaults to the bundled
+                              clara-rules hooks. Pass nil to disable (falls back to
+                              cwd-based `.clj-kondo` discovery)."
+  [{:keys [starting-namespaces include-ns-prefixes cache-atom in-memory-sources config-dir]
+    :or {cache-atom global-analysis-cache
+         config-dir @bundled-kondo-config-dir}}]
   (let [ns-matches-prefix? (if include-ns-prefixes
                              (fn [ns-sym]
                                (let [ns-str (str ns-sym)]
@@ -349,8 +399,8 @@
                   resource-url (when-not in-mem-source (find-ns-resource ns-sym))]
               (if (or in-mem-source resource-url)
                 (let [analyze-fn (if in-mem-source
-                                   #(analyze-ns-string ns-sym in-mem-source)
-                                   #(analyze-ns-source ns-sym resource-url))
+                                   #(analyze-ns-string ns-sym in-mem-source config-dir)
+                                   #(analyze-ns-source ns-sym resource-url config-dir))
                       analysis (get-or-analyze-ns-analysis ns-sym analyze-fn cache-atom)
                       dependencies (extract-required-namespaces analysis)]
                   (recur (into remaining (filter ns-matches-prefix?) dependencies)
@@ -454,15 +504,19 @@
      :include-ns-prefixes   - optional coll of ns prefix strings; passed to build-analysis-from-namespaces
      :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache.
      :in-memory-sources     - optional map of {ns-symbol source-string} for dynamically
-                              defined in-memory namespaces."
-  [{:keys [session-or-rulebase include-ns-prefixes cache-atom in-memory-sources]
-    :or {cache-atom global-analysis-cache}}]
+                              defined in-memory namespaces.
+     :config-dir            - optional clj-kondo config dir; defaults to the bundled
+                              clara-rules hooks (see build-analysis-from-namespaces)."
+  [{:keys [session-or-rulebase include-ns-prefixes cache-atom in-memory-sources config-dir]
+    :or {cache-atom global-analysis-cache
+         config-dir @bundled-kondo-config-dir}}]
   (let [namespaces (extract-session-namespaces session-or-rulebase)]
     (build-analysis-from-namespaces
      {:starting-namespaces namespaces
       :include-ns-prefixes include-ns-prefixes
       :cache-atom cache-atom
-      :in-memory-sources in-memory-sources})))
+      :in-memory-sources in-memory-sources
+      :config-dir config-dir})))
 
 (defn generate-annotations-from-paths
   "Runs clj-kondo on the specified paths to generate an analysis map,
@@ -471,10 +525,15 @@
    Options:
      :paths        - paths to analyze (required)
      :rules-filter - optional coll of rule symbols to filter by; when nil,
-                     all project vars are analyzed."
-  [{:keys [paths rules-filter]}]
-  (let [res (kondo/run! {:lint paths
-                         :config {:analysis {:var-definitions true
-                                             :var-usages true
-                                             :java-class-usages true}}})]
+                     all project vars are analyzed.
+     :config-dir   - optional clj-kondo config dir; defaults to the bundled
+                     clara-rules hooks. Pass nil to disable (falls back to
+                     cwd-based `.clj-kondo` discovery)."
+  [{:keys [paths rules-filter config-dir]
+    :or {config-dir @bundled-kondo-config-dir}}]
+  (let [res (kondo/run! (cond-> {:lint paths
+                                 :config {:analysis {:var-definitions true
+                                                     :var-usages true
+                                                     :java-class-usages true}}}
+                          config-dir (assoc :config-dir config-dir)))]
     (generate-annotations-from-analysis {:analysis (:analysis res) :rules-filter rules-filter})))
