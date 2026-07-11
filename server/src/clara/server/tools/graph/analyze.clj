@@ -31,6 +31,9 @@
     'clara.rules.engine/rhs-retract-facts!
     'clara.rules/retract})
 
+(def ^:private boundary-fns
+  (clojure.set/union insert-fns retract-fns))
+
 (defn- fq-name-sym [ns name]
   (symbol (str ns) (str name)))
 
@@ -104,12 +107,14 @@
     (reduce (fn [acc d]
               (let [caller (fq-name-sym (:ns d) (:name d))
                     start-row (:row d)
-                    end-row (:end-row d)]
+                    end-row (:end-row d)
+                    def-filename (:filename d)]
                 (if (and start-row end-row)
                   (let [contained-classes
                         (into #{}
                               (keep (fn [u]
-                                      (when (and (:row u)
+                                      (when (and (= (:filename u) def-filename)
+                                                 (:row u)
                                                  (<= start-row (:row u))
                                                  (<= (:row u) end-row)
                                                  (not (:import u))
@@ -129,8 +134,9 @@
     (if (empty? todo)
       seen
       (let [seen (into seen todo)
-            next-vars (set (mapcat graph todo))
-            unvisited (set/difference next-vars seen)]
+            traversable (clojure.set/difference todo boundary-fns)
+            next-vars (set (mapcat graph traversable))
+            unvisited (clojure.set/difference next-vars seen)]
         (recur seen unvisited)))))
 
 (defn- extract-required-namespaces [analysis]
@@ -139,18 +145,25 @@
               (distinct))
         (:namespace-usages analysis)))
 
+(defn- analyze-source-code [source-code resource-path]
+  (with-in-str source-code
+    (kondo/run!
+     {:lint ["-"]
+      :lang :clj
+      :filename resource-path
+      :config {:analysis {:var-definitions true
+                          :var-usages true
+                          :java-class-usages true}}})))
+
 (defn- analyze-ns-source [ns-sym resource-url]
   (let [source-code (slurp resource-url)
         extension (if (str/ends-with? (str resource-url) ".cljc") ".cljc" ".clj")
         resource-path (format "%s%s" (ns->resource-base ns-sym) extension)]
-    (with-in-str source-code
-      (kondo/run!
-       {:lint ["-"]
-        :lang :clj
-        :filename resource-path
-        :config {:analysis {:var-definitions true
-                            :var-usages true
-                            :java-class-usages true}}}))))
+    (analyze-source-code source-code resource-path)))
+
+(defn- analyze-ns-string [ns-sym source-code]
+  (let [resource-path (format "%s.clj" (ns->resource-base ns-sym))]
+    (analyze-source-code source-code resource-path)))
 
 (defn- get-rulebase [session-or-rulebase]
   (if (instance? LocalSession session-or-rulebase)
@@ -205,8 +218,10 @@
         callsites (into []
                         (comp
                          (filter (fn [u]
-                                   (and (contains? reachable (symbol (str (:from u)) (str (:from-var u))))
-                                        (contains? target-fns (symbol (str (:to u)) (str (:name u)))))))
+                                   (let [caller (symbol (str (:from u)) (str (:from-var u)))]
+                                     (and (contains? reachable caller)
+                                          (not (contains? target-fns caller))
+                                          (contains? target-fns (symbol (str (:to u)) (str (:name u))))))))
                          (mapcat (fn [u]
                                    (let [source (get-source (:from u) (:filename u))
                                          call-str (extract-form-from-source source (:row u) (:col u) (:end-row u) (:end-col u))]
@@ -294,10 +309,10 @@
     (or (io/resource (format "%s.clj" base-path))
         (io/resource (format "%s.cljc" base-path)))))
 
-(defn- get-or-analyze-ns-analysis [ns-sym resource-url cache-atom]
+(defn- get-or-analyze-ns-analysis [ns-sym analyze-fn cache-atom]
   (if-let [cached-entry (when cache-atom (get @cache-atom ns-sym))]
     cached-entry
-    (let [res (:analysis (analyze-ns-source ns-sym resource-url))]
+    (let [res (:analysis (analyze-fn))]
       (when cache-atom
         (swap! cache-atom assoc ns-sym res))
       res)))
@@ -311,8 +326,10 @@
      :starting-namespaces  - coll of namespace symbols to start from (required)
      :include-ns-prefixes   - optional coll of ns prefix strings; when nil,
                               all transitive dependencies are followed (no filtering).
-     :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache."
-  [{:keys [starting-namespaces include-ns-prefixes cache-atom]
+     :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache.
+     :in-memory-sources     - optional map of {ns-symbol source-string} for dynamically
+                              defined in-memory namespaces."
+  [{:keys [starting-namespaces include-ns-prefixes cache-atom in-memory-sources]
     :or {cache-atom global-analysis-cache}}]
   (let [ns-matches-prefix? (if include-ns-prefixes
                              (fn [ns-sym]
@@ -328,24 +345,31 @@
               remaining (disj queue ns-sym)]
           (if (contains? processed ns-sym)
             (recur remaining processed merged-analysis)
-            (if-let [resource-url (find-ns-resource ns-sym)]
-              (let [analysis (get-or-analyze-ns-analysis ns-sym resource-url cache-atom)
-                    dependencies (extract-required-namespaces analysis)]
-                (recur (into remaining (filter ns-matches-prefix?) dependencies)
-                       (conj processed ns-sym)
-                       (merge-with into merged-analysis analysis)))
-              ;; Resource not found on classpath, skip
-              (recur remaining (conj processed ns-sym) merged-analysis))))))))
+            (let [in-mem-source (get in-memory-sources ns-sym)
+                  resource-url (when-not in-mem-source (find-ns-resource ns-sym))]
+              (if (or in-mem-source resource-url)
+                (let [analyze-fn (if in-mem-source
+                                   #(analyze-ns-string ns-sym in-mem-source)
+                                   #(analyze-ns-source ns-sym resource-url))
+                      analysis (get-or-analyze-ns-analysis ns-sym analyze-fn cache-atom)
+                      dependencies (extract-required-namespaces analysis)]
+                  (recur (into remaining (filter ns-matches-prefix?) dependencies)
+                         (conj processed ns-sym)
+                         (merge-with into merged-analysis analysis)))
+                ;; Resource not found on classpath or in-memory, skip
+                (recur remaining (conj processed ns-sym) merged-analysis)))))))))
 
 (defn generate-annotations-from-analysis
   "Generates rule annotations (insert/retract types etc.) from a pre-computed
    clj-kondo analysis map.
 
    Options:
-     :analysis     - the clj-kondo analysis map (required)
-     :rules-filter - optional coll of rule symbols to filter by; when nil,
-                     all project vars are analyzed."
-  [{:keys [analysis rules-filter]}]
+     :analysis           - the clj-kondo analysis map (required)
+     :rules-filter       - optional coll of rule symbols to filter by; when nil,
+                           all project vars are analyzed.
+     :in-memory-sources  - optional map of {ns-symbol source-string} for dynamically
+                           defined in-memory namespaces."
+  [{:keys [analysis rules-filter in-memory-sources]}]
   (let [graph (build-graph analysis)
         constructors (build-constructors analysis)
         java-constructors (build-java-constructors analysis)
@@ -364,12 +388,13 @@
                        (if-let [cached (get @source-cache k)]
                          cached
                          (let [source (try
-                                        (if-let [res (and ns-sym (find-ns-resource ns-sym))]
-                                          (slurp res)
-                                          (when filename
-                                            (let [^java.io.File file (io/as-file filename)]
-                                              (when (.exists file)
-                                                (slurp file)))))
+                                        (or (and ns-sym (get in-memory-sources ns-sym))
+                                            (if-let [res (and ns-sym (find-ns-resource ns-sym))]
+                                              (slurp res)
+                                              (when filename
+                                                (let [^java.io.File file (io/as-file filename)]
+                                                  (when (.exists file)
+                                                    (slurp file))))))
                                         (catch Exception _ nil))]
                            (swap! source-cache assoc k source)
                            source))))
@@ -427,14 +452,17 @@
    Options:
      :session-or-rulebase   - Clara session or rulebase (required)
      :include-ns-prefixes   - optional coll of ns prefix strings; passed to build-analysis-from-namespaces
-     :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache."
-  [{:keys [session-or-rulebase include-ns-prefixes cache-atom]
+     :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache.
+     :in-memory-sources     - optional map of {ns-symbol source-string} for dynamically
+                              defined in-memory namespaces."
+  [{:keys [session-or-rulebase include-ns-prefixes cache-atom in-memory-sources]
     :or {cache-atom global-analysis-cache}}]
   (let [namespaces (extract-session-namespaces session-or-rulebase)]
     (build-analysis-from-namespaces
      {:starting-namespaces namespaces
       :include-ns-prefixes include-ns-prefixes
-      :cache-atom cache-atom})))
+      :cache-atom cache-atom
+      :in-memory-sources in-memory-sources})))
 
 (defn generate-annotations-from-paths
   "Runs clj-kondo on the specified paths to generate an analysis map,

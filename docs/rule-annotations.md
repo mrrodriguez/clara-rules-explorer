@@ -187,3 +187,30 @@ To start the interactive web-based UI server for your live in-memory session, in
 (server/start! {:session my-session
                 :port 9999})
 ```
+
+#### C. Analyzing Dynamically Generated In-Memory Namespaces
+
+If you have namespaces dynamically defined fully in memory (with no matching files on the classpath or on disk), you can supply their source code maps using the `:in-memory-sources` option (a map of `{ns-symbol source-string}`).
+
+This instructs the static analyzer to run `clj-kondo` directly on the provided in-memory source strings and enables coordinate-based dynamic callsite form extraction from memory:
+
+```clojure
+(require '[clara.server.tools.graph.analyze :as analyze])
+
+(let [in-mem-source "(ns my.dynamic.rules
+                       (:require [clara.rules :as r]))
+                     (r/defrule dynamic-rule
+                       =>
+                       (r/insert! (with-meta {:id 1} {:type :dynamic-fact-type})))"
+      
+      ;; 1. Analyze the namespaces including the in-memory ones
+      analysis (analyze/build-analysis-from-namespaces
+                {:starting-namespaces ['my.dynamic.rules]
+                 :in-memory-sources {'my.dynamic.rules in-mem-source}})
+      
+      ;; 2. Generate annotations (passing in-memory-sources so callsites can be extracted)
+      annotations (analyze/generate-annotations-from-analysis
+                   {:analysis analysis
+                    :in-memory-sources {'my.dynamic.rules in-mem-source}})]
+  (clojure.pprint/pprint annotations))
+```

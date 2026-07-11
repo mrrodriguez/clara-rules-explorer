@@ -270,6 +270,28 @@
              (get-in annotations [`atr/rule-record-constructor :clara-rules/insert-types])))
       (is (some? (get annotations `atr/rule-insert-varargs)))
       (is (= [`LocalDummyRecord]
-             (get-in annotations [`atr/rule-insert-varargs :clara-rules/insert-types]))))))
+             (get-in annotations [`atr/rule-insert-varargs :clara-rules/insert-types])))))
+
+  (testing "Analyze dynamically defined in-memory namespaces (no physical files)"
+    (let [in-mem-rules-source
+          "(ns my.dynamic.rules
+             (:require [clara.rules :as r]))
+
+           (r/defrule dynamic-rule
+             =>
+             (r/insert! (with-meta {:id 1} {:type :dynamic-fact-type})))"
+          analysis (analyze/build-analysis-from-namespaces
+                    {:starting-namespaces ['my.dynamic.rules]
+                     :in-memory-sources {'my.dynamic.rules in-mem-rules-source}})
+          annotations (analyze/generate-annotations-from-analysis
+                       {:analysis analysis
+                        :in-memory-sources {'my.dynamic.rules in-mem-rules-source}})]
+      (is (some? (get annotations 'my.dynamic.rules/dynamic-rule)))
+      (is (= [] (get-in annotations ['my.dynamic.rules/dynamic-rule :clara-rules/insert-types])))
+      (is (= {:callsites
+              [{:source-str "(with-meta {:id 1} {:type :dynamic-fact-type})"
+                :ns-name-sym 'my.dynamic.rules
+                :filename "my/dynamic/rules.clj"}]}
+             (get-in annotations ['my.dynamic.rules/dynamic-rule :clara-rules/dynamic-insert-types-detected]))))))
 
 
