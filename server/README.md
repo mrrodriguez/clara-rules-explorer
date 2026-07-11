@@ -47,12 +47,17 @@ The explorer tools were originally part of the main `clara-rules` repository. Th
 The server provides a `-main` entry point:
 
 ```bash
+# Run the explorer server
 clojure -M -m clara.server.graph.main -s path/to/session.bin [-a path/to/annotations.edn] [-p 9999] [--load-session-state-fn my.namespace/my-fn]
+
+# Generate sidecar annotations statically from source paths
+clojure -M -m clara.server.graph.main -g path/to/rules.clj,path/to/other_rules.clj
 ```
 
 | Flag                        | Required | Description                                                                         |
 | --------------------------- | -------- | ----------------------------------------------------------------------------------- |
-| `-s` / `--session`          | **Yes**  | Path to a serialized Clara session file (Fressian format).                          |
+| `-s` / `--session`          | Yes (unless `-g` is given) | Path to a serialized Clara session file (Fressian format).                  |
+| `-g` / `--generate-annotations` | Yes (unless `-s` is given) | Generate annotations EDN for Clojure source paths (comma-separated).       |
 | `-f` / `--facts`            | No       | Path to the serialized facts file. Defaults to `<session-path>.facts` when omitted. |
 | `-a` / `--annotations`      | No       | Path to an EDN sidecar file with rule metadata annotations.                         |
 | `-p` / `--port`             | No       | Server port (default: `9999`).                                                      |
@@ -164,7 +169,9 @@ curl -s http://localhost:9999/v1/session/rules/clara.server.tools.graph.rules.lo
 Run the full project suite via CLI:
 
 ```bash
-clojure -M:test
+clojure -M:test:run-tests
+# Or using the Makefile:
+make test
 ```
 
 For iterative development, you can run targeted tests or use an nREPL-based workflow as described in [AGENTS.md](AGENTS.md).

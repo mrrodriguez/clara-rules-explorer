@@ -6,7 +6,8 @@
             [clojure.set :as set]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clara.rules.engine :as eng])
+            [clara.rules.engine :as eng]
+            [clara.rules.compiler :as com])
   (:import [clara.rules.engine LocalSession]))
 
 (declare ns->resource-base)
@@ -331,33 +332,80 @@
     (when (seq callsites)
       {:callsites callsites})))
 
-(defn- find-arrow-pos [source-str start-row end-row]
-  (let [lines (str/split-lines source-str)]
-    (some (fn [r]
-            (let [line (nth lines (dec r))
-                  idx (str/index-of line "=>")]
-              (when idx
-                {:row r :col (inc idx)})))
-          (range start-row (inc end-row)))))
+(defn- load-ns-rules [ns-sym]
+  (try
+    (require ns-sym)
+    (com/load-source ns-sym)
+    (catch Exception _
+      [])))
 
-(defn- lhs-usage? [u rule-defs get-source]
-  (let [caller (fq-name-sym (:from u) (:from-var u))]
-    (if-let [d (get rule-defs caller)]
-      (let [source (get-source (:ns d) (:filename d))
-            arrow (and source (find-arrow-pos source (:row d) (:end-row d)))]
-        (if arrow
-          (or (< (:row u) (:row arrow))
-              (and (= (:row u) (:row arrow))
-                   (< (:col u) (:col arrow))))
-          false))
-      false)))
+(defn- resolve-symbol-in-ns [ns-sym s]
+  (try
+    (if-let [resolved (ns-resolve (find-ns ns-sym) s)]
+      (if (var? resolved)
+        (let [v-meta (meta resolved)]
+          (symbol (name (ns-name (:ns v-meta))) (name (:name v-meta))))
+        (symbol (str resolved)))
+      s)
+    (catch Exception _ s)))
 
-(defn- sanitize-analysis [analysis get-source]
-  (let [rule-defs (into {}
-                        (map (fn [d]
-                               [(fq-name-sym (:ns d) (:name d)) d]))
-                        (:var-definitions analysis))
-        lhs-u? (fn [u] (lhs-usage? u rule-defs get-source))]
+(defn- collect-rhs-resolved-symbols [ns-sym form]
+  (loop [to-visit [form]
+         resolved-symbols #{}]
+    (if (empty? to-visit)
+      resolved-symbols
+      (let [curr (first to-visit)
+            more (rest to-visit)]
+        (cond
+          (symbol? curr)
+          (let [resolved (resolve-symbol-in-ns ns-sym curr)
+                has-dot? (str/ends-with? (name curr) ".")
+                clean-sym (if has-dot?
+                            (symbol (str/replace (name curr) #"\.$" ""))
+                            curr)
+                resolved-clean (if has-dot? (resolve-symbol-in-ns ns-sym clean-sym) resolved)]
+            (recur more (conj resolved-symbols curr clean-sym resolved resolved-clean)))
+
+          (coll? curr)
+          (recur (concat more curr) resolved-symbols)
+
+          :else
+          (recur more resolved-symbols))))))
+
+(defn- build-rules-rhs-index [analysis]
+  (let [ns-symbols (into #{}
+                         (comp (filter :ns)
+                               (map (fn [d] (symbol (:ns d)))))
+                         (:var-definitions analysis))]
+    (reduce (fn [acc ns-sym]
+              (let [rules (load-ns-rules ns-sym)]
+                (reduce (fn [inner-acc p]
+                          (let [rule-sym (symbol (:name p))
+                                rhs-form (:rhs p)
+                                rhs-symbols (collect-rhs-resolved-symbols ns-sym rhs-form)]
+                            (assoc inner-acc rule-sym rhs-symbols)))
+                        acc
+                        rules)))
+            {}
+            ns-symbols)))
+
+(defn- sanitize-analysis [analysis _get-source]
+  (let [rhs-index (build-rules-rhs-index analysis)
+        lhs-u? (fn [u]
+                 (let [caller (fq-name-sym (:from u) (:from-var u))]
+                   (if-let [rhs-symbols (get rhs-index caller)]
+                     ;; It is a Clara rule. Check if the usage's target is in the RHS set.
+                     (let [u-target (if (:class u)
+                                      (symbol (:class u))
+                                      (fq-name-sym (:to u) (:name u)))
+                           ;; Resolve the usage target in the caller namespace context
+                           resolved-target (resolve-symbol-in-ns (:from u) u-target)
+                           name-sym (symbol (name (:name u)))]
+                       (not (or (contains? rhs-symbols u-target)
+                                (contains? rhs-symbols resolved-target)
+                                (contains? rhs-symbols name-sym))))
+                     ;; Not a Clara rule (e.g. a helper fn). Keep all its usages.
+                     false)))]
     (-> analysis
         (update :var-usages (fn [usages] (remove lhs-u? usages)))
         (update :java-class-usages (fn [usages] (remove lhs-u? usages))))))
@@ -382,7 +430,7 @@
                            reachable)
         is-retractor? (some #(or (contains? retract-fns %)
                                  (contains? direct-retractors %))
-                             reachable)
+                            reachable)
         types (set/union (into #{} (mapcat constructors) reachable)
                          (into #{} (mapcat java-constructors) reachable))]
     {:reachable reachable
@@ -535,14 +583,14 @@
                        (if-let [cached (get @source-cache k)]
                          cached
                          (let [source (try
-                                         (or (and ns-sym (get in-memory-sources ns-sym))
-                                             (if-let [res (and ns-sym (find-ns-resource ns-sym))]
-                                               (slurp res)
-                                               (when filename
-                                                 (let [^java.io.File file (io/as-file filename)]
-                                                   (when (.exists file)
-                                                     (slurp file))))))
-                                         (catch Exception _ nil))]
+                                        (or (and ns-sym (get in-memory-sources ns-sym))
+                                            (if-let [res (and ns-sym (find-ns-resource ns-sym))]
+                                              (slurp res)
+                                              (when filename
+                                                (let [^java.io.File file (io/as-file filename)]
+                                                  (when (.exists file)
+                                                    (slurp file))))))
+                                        (catch Exception _ nil))]
                            (swap! source-cache assoc k source)
                            source))))
         sanitized-analysis (sanitize-analysis analysis get-source)

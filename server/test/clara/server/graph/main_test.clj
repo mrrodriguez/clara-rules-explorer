@@ -1,6 +1,7 @@
 (ns clara.server.graph.main-test
   (:require [clara.server.graph.main :as main]
             [clara.server.graph.server :as server]
+            [clojure.tools.cli :as cli]
             [clojure.test :refer [deftest is testing]]))
 
 (defn dummy-load-session [session-path facts-path]
@@ -71,3 +72,39 @@
       (is (= 8888 (:port @start-opts)))
       (is (= {:dummy-session true :session-path session-path :facts-path "some-facts.bin"}
              (:session @start-opts))))))
+
+(deftest test-cli-options-validation
+  (testing "cli-options parsing validations"
+    (let [parse-fn (fn [& args] (cli/parse-opts args main/cli-options))]
+      ;; Valid port
+      (is (nil? (:errors (parse-fn "-s" "s.bin" "-p" "8080"))))
+      ;; Port too high
+      (is (some? (:errors (parse-fn "-s" "s.bin" "-p" "70000"))))
+      ;; Port negative
+      (is (some? (:errors (parse-fn "-s" "s.bin" "-p" "-1"))))
+      ;; Port non-numeric
+      (is (some? (:errors (parse-fn "-s" "s.bin" "-p" "abc")))))))
+
+(deftest test-main-generate-annotations
+  (testing "-main with --generate-annotations routes and exits successfully"
+    (let [exit-code (atom nil)
+          gen-called? (atom false)
+          gen-paths (atom nil)]
+      (with-redefs [clara.server.graph.main/exit (fn [code] (reset! exit-code code))
+                    main/run-generate-annotations (fn [paths]
+                                                    (reset! gen-called? true)
+                                                    (reset! gen-paths paths))]
+        (main/-main "-g" "src/my_rules.clj,src/other_rules.clj")
+        (is @gen-called?)
+        (is (= ["src/my_rules.clj" "src/other_rules.clj"] @gen-paths))
+        (is (= 0 @exit-code))))))
+
+(deftest test-main-custom-loader-missing
+  (testing "-main with unresolvable custom loader exits with 1"
+    (let [exit-code (atom nil)
+          temp-session (doto (java.io.File/createTempFile "session-missing" ".bin")
+                         .deleteOnExit)
+          session-path (.getAbsolutePath temp-session)]
+      (with-redefs [clara.server.graph.main/exit (fn [code] (reset! exit-code code))]
+        (main/-main "-s" session-path "--load-session-state-fn" "nonexistent.ns/nonexistent-fn")
+        (is (= 1 @exit-code))))))

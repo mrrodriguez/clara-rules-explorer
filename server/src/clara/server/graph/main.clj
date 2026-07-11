@@ -63,6 +63,8 @@
   (println "  clojure -M -m clara.server.graph.main -s session.bin -a annotations.edn")
   (println "  clojure -M -m clara.server.graph.main -g src/my_rules.clj,src/other_rules.clj")
   (println))
+(defn- exit [code]
+  (System/exit code))
 
 ;; ---------------------------------------------------------------------------
 ;; Deserialization helpers
@@ -172,26 +174,29 @@
   (let [{:keys [options errors summary]} (parse-opts args cli-options)]
     (when (:help options)
       (usage summary)
-      (System/exit 0))
+      (exit 0))
 
     (when (seq errors)
       (doseq [e errors] (println e))
       (println)
-      (System/exit 1))
+      (exit 1))
 
     (let [{:keys [generate-annotations]} options]
       (if generate-annotations
         (do
           (run-generate-annotations generate-annotations)
-          (System/exit 0))
+          (exit 0))
         (let [validation (validate-server-options options)]
           (if-let [error (:error validation)]
             (do
               (println error)
               (when (:show-usage? validation)
                 (usage summary))
-              (System/exit 1))
-            (do
+              (exit 1))
+            (try
               (run-explorer-server options (:facts-path validation))
               ;; Block the main thread to keep the server alive.
-              @(promise))))))))
+              @(promise)
+              (catch Throwable t
+                (println (str "Error: " (.getMessage t)))
+                (exit 1)))))))))

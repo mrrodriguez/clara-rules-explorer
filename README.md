@@ -54,11 +54,12 @@ The repository is organized as follows:
 ### Quick Start
 
 1.  **Start the Server:**
-    Navigate to the `server/` directory and run the development server:
+    Navigate to the `server/` directory, generate the demo session, and run the development server:
 
     ```bash
     cd server
-    clj -M:dev -m clara.server.graph.main
+    clojure -M:demo-setup
+    clojure -M:dev -m clara.server.graph.main -s demo-data/session.bin
     ```
 
     _See [server/README.md](./server/README.md) for more details on configuration and API endpoints._

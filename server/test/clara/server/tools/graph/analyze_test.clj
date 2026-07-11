@@ -216,6 +216,13 @@
                (:clara-rules/insert-types ann-h10))
             "Should identify LocalDummyRecord from insert-all-unconditional! usage"))
 
+      ;; Rule LHS arrow collision test
+      (let [ann-collision (get annotations `atr/rule-lhs-arrow-collision)]
+        (is (some? ann-collision))
+        (is (= [`LocalDummyRecord]
+               (:clara-rules/insert-types ann-collision))
+            "Should only identify LocalDummyRecord as insert-types, filtering out DocumentCheckInput since it is on the LHS"))
+
       ;; Test filter and no-output-types generation
       (let [annotations-filtered (analyze/generate-annotations-from-paths {:paths ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]
                                                                            :rules-filter [`atr/rule-side-effect-only]})
