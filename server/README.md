@@ -47,15 +47,23 @@ The explorer tools were originally part of the main `clara-rules` repository. Th
 The server provides a `-main` entry point:
 
 ```bash
-clojure -M -m clara.server.graph.main -s path/to/session.bin [-a path/to/annotations.edn] [-p 9999]
+clojure -M -m clara.server.graph.main -s path/to/session.bin [-a path/to/annotations.edn] [-p 9999] [--load-session-state-fn my.namespace/my-fn]
 ```
 
-| Flag                   | Required | Description                                                                         |
-| ---------------------- | -------- | ----------------------------------------------------------------------------------- |
-| `-s` / `--session`     | **Yes**  | Path to a serialized Clara session file (Fressian format).                          |
-| `-f` / `--facts`       | No       | Path to the serialized facts file. Defaults to `<session-path>.facts` when omitted. |
-| `-a` / `--annotations` | No       | Path to an EDN sidecar file with rule metadata annotations.                         |
-| `-p` / `--port`        | No       | Server port (default: `9999`).                                                      |
+| Flag                        | Required | Description                                                                         |
+| --------------------------- | -------- | ----------------------------------------------------------------------------------- |
+| `-s` / `--session`          | **Yes**  | Path to a serialized Clara session file (Fressian format).                          |
+| `-f` / `--facts`            | No       | Path to the serialized facts file. Defaults to `<session-path>.facts` when omitted. |
+| `-a` / `--annotations`      | No       | Path to an EDN sidecar file with rule metadata annotations.                         |
+| `-p` / `--port`             | No       | Server port (default: `9999`).                                                      |
+| `--load-session-state-fn`   | No       | Fully qualified symbol naming a function to deserialize the session state.          |
+
+By default, the server uses Fressian deserialization to load the session state from disk. If you want to use your own deserializer (e.g. Nippy, transit, or a custom Fressian setup), you can pass a fully qualified symbol to `--load-session-state-fn`. This function must accept two arguments (`session-path` and `facts-path`) and return the deserialized Clara session.
+
+Example:
+```bash
+clojure -M -m clara.server.graph.main -s path/to/session.bin --load-session-state-fn my.namespace/load-session
+```
 
 When `--session` is provided, the server uses `clara.rules.durability` to deserialize the session from disk. The session is expected to have been serialized with `{:with-rulebase? true}` so that the compiled rulebase is embedded — this is required for static rulebase analysis.
 
