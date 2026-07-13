@@ -1,8 +1,8 @@
 (ns clara.server.graph.smoke-test
   (:require [clara.rules :as r]
-            [clj-http.client
-             :as client]
+            [clj-http.client :as client]
             [jsonista.core :as json]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clara.server.graph.server :as server]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
@@ -127,60 +127,60 @@
         (finally
           (server/stop!))))))
 
-(clojure.test/use-fixtures :once with-server)
+(use-fixtures :once with-server)
 
-(clojure.test/deftest test-rulebase-analysis-endpoints
-  (clojure.test/testing "Summary and analysis"
+(deftest test-rulebase-analysis-endpoints
+  (testing "Summary and analysis"
     (let [summary (get-rulebase-summary)
           analysis (get-analysis)]
-      (clojure.test/is (some? summary))
-      (clojure.test/is (some? analysis))))
+      (is (some? summary))
+      (is (some? analysis))))
 
-  (clojure.test/testing "Rules endpoints"
+  (testing "Rules endpoints"
     (let [rules (get-rules)
           rule (get-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved")]
-      (clojure.test/is (seq rules))
-      (clojure.test/is (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved" (get rule "name")))))
+      (is (seq rules))
+      (is (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved" (get rule "name")))))
 
-  (clojure.test/testing "Queries endpoints"
+  (testing "Queries endpoints"
     (let [queries (get-queries)
           query (get-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome")]
-      (clojure.test/is (seq queries))
-      (clojure.test/is (= "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome" (get query "name")))))
+      (is (seq queries))
+      (is (= "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome" (get query "name")))))
 
-  (clojure.test/testing "Fact types endpoints"
+  (testing "Fact types endpoints"
     (let [fact-types (get-fact-types)
           fact-type (get-fact-type "clara.server.tools.graph.rules.loan_app_facts.Application")]
-      (clojure.test/is (seq fact-types))
-      (clojure.test/is (= "clara.server.tools.graph.rules.loan_app_facts.Application" (get fact-type "name"))))))
+      (is (seq fact-types))
+      (is (= "clara.server.tools.graph.rules.loan_app_facts.Application" (get fact-type "name"))))))
 
-(clojure.test/deftest test-session-state-endpoints
-  (clojure.test/testing "Session snapshot and facts"
+(deftest test-session-state-endpoints
+  (testing "Session snapshot and facts"
     (let [ss (get-session-snapshot)
           session-fact-types (get-session-fact-types)
           session-fact-type (get-session-fact-type "clara.server.tools.graph.rules.loan_app_facts.Application")]
-      (clojure.test/is (some? ss))
-      (clojure.test/is (seq session-fact-types))
-      (clojure.test/is (= "clara.server.tools.graph.rules.loan_app_facts.Application" (get session-fact-type "name")))
+      (is (some? ss))
+      (is (seq session-fact-types))
+      (is (= "clara.server.tools.graph.rules.loan_app_facts.Application" (get session-fact-type "name")))
 
-      (clojure.test/testing "Individual fact retrieval"
+      (testing "Individual fact retrieval"
         (let [fact-id (ffirst (get ss "facts"))
               fact (get-session-fact fact-id)]
-          (clojure.test/is (some? fact))
-          (clojure.test/is (= (str fact-id) (str (get fact "id"))))))))
+          (is (some? fact))
+          (is (= (str fact-id) (str (get fact "id"))))))))
 
-  (clojure.test/testing "Session rules and queries"
+  (testing "Session rules and queries"
     (let [session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved")
           session-query (get-session-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome")]
-      (clojure.test/is (some? session-rule))
-      (clojure.test/is (some? session-query)))))
+      (is (some? session-rule))
+      (is (some? session-query)))))
 
-(clojure.test/deftest test-annotations-endpoints
-  (clojure.test/testing "Annotations retrieval and reload"
+(deftest test-annotations-endpoints
+  (testing "Annotations retrieval and reload"
     (let [annotations (get-annotations)
           annotations-reload (post-annotations-reload)]
-      (clojure.test/is (some? annotations))
-      (clojure.test/is (= 200 annotations-reload)))))
+      (is (some? annotations))
+      (is (= 200 annotations-reload)))))
 
 (comment
   ;; Start the server with a pre-populated session

@@ -25,8 +25,7 @@
      ;; 3. (CI) Verify the bundled resources are not stale:
      clojure -X:sync-kondo-config clara.server.tools.graph.kondo-config-sync/check"
   (:require [clojure.java.io :as io]
-            [clojure.pprint :as pp]
-            [clojure.string :as str])
+            [clojure.pprint :as pp])
   (:import [java.nio.file Files]))
 
 (def ^:private default-source-dir
