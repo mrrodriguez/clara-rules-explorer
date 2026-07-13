@@ -118,6 +118,12 @@ principle AI2 is built on. No test uses a lowercase type, so this is invisible.
 index / runtime resolution, as `build-constructors` does), or consciously
 document that lowercase Java-style constructors are unsupported.
 
+**Postscript (2026-07-12):** This is fully resolved. `usage->fact-type` and
+`is-class-candidate?` no longer exist. The current `build-inserter-type-map`
+uses pure `str/starts-with?` prefix matching (`"map->"`, `"->"`) — no casing
+gate. `resolve-record-type` likewise imposes no case restriction. A lowercase
+`(deftype bar ...)` → `->bar` is correctly detected and resolved.
+
 ---
 
 ## Finding 4 — test coverage gaps for the newly introduced behavior

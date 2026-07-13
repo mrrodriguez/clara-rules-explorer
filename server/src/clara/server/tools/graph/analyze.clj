@@ -260,9 +260,17 @@
    Note: because clj-kondo's flat var-usages analysis cannot distinguish
    argument expressions within a callsite from independent calls in the
    same function body, a var's reachable subtree may include constructors
-   from unrelated branches (e.g. accumulator constructors in expanded
-   defrule LHS code). Consumers should use manual annotations
-   (:clara-rules/no-output-types) to suppress false positives."
+   from unrelated RHS branches (e.g. a helper that builds both a fact and
+   an unrelated record value for a side computation). Consumers should use
+   manual annotations (:clara-rules/no-output-types) to suppress false
+   positives.
+
+   The LHS is expected to already be stripped by clj-kondo macro parsing
+   config — this function only sees RHS var-usages. By default this is
+   done via the strip_lhs hook at
+   resources/clara/server/tools/graph/kondo-config/hooks/strip_lhs.clj_kondo,
+   but callers can override it by passing a custom :config-dir (see the
+   namespace docstring)."
   [direct-callers graph {:keys [var-usages]}]
   (let [reachable-cache (precompute-reachability graph direct-callers)]
     (into {}
@@ -272,13 +280,13 @@
                        types
                        (into #{}
                              (comp
-                              (filter (fn [^clojure.lang.IPersistentMap vu]
+                              (filter (fn [vu]
                                         (let [caller (fq-name-sym (:from vu) (:from-var vu))
                                               callee-name (name (:name vu))]
                                           (and (contains? subtree caller)
                                                (or (str/starts-with? callee-name "map->")
                                                    (str/starts-with? callee-name "->"))))))
-                              (keep (fn [^clojure.lang.IPersistentMap vu]
+                              (keep (fn [vu]
                                       (resolve-record-type (:to vu) (:name vu)))))
                              var-usages)]
                    [v types])))
@@ -301,7 +309,7 @@
 
         has-direct-callers?
         (boolean
-         (some (fn [^clojure.lang.IPersistentMap u]
+         (some (fn [u]
                  (let [caller (fq-name-sym (:from u) (:from-var u))]
                    (and (direct-caller? caller)
                         (contains? target-fns (fq-name-sym (:to u) (:name u))))))
@@ -322,11 +330,11 @@
           (let [callsites
                 (into []
                       (comp
-                       (filter (fn [^clojure.lang.IPersistentMap u]
+                       (filter (fn [u]
                                  (let [caller (fq-name-sym (:from u) (:from-var u))]
                                    (and (direct-caller? caller)
                                         (contains? target-fns (fq-name-sym (:to u) (:name u)))))))
-                       (mapcat (fn [^clojure.lang.IPersistentMap u]
+                       (mapcat (fn [u]
                                  (let [source (get-source (:from u) (:filename u))
                                        call-str (source-text-at source (:row u) (:col u) (:end-row u) (:end-col u))]
                                    (if call-str
