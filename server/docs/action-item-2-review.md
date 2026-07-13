@@ -1,4 +1,17 @@
-# Action Item 2 — code review
+# Action Item 2 — code review ⚠️ OBSOLETE
+
+> **This review is obsolete.** The code it reviewed (commit `945a406`) has been
+> completely replaced. All the functions discussed below — `find-arrow-pos`,
+> `sanitize-analysis`, `lhs-usage?`, `usage->fact-type`, `is-class-candidate?`,
+> `extract-constructors-from-form`, `constructor->fact-type` — were removed in
+> commits `9846d5e` and `510484d` (2026-07-12). LHS stripping is now done
+> structurally at the clj-kondo hook level (`strip_lhs.clj_kondo`), eliminating
+> the entire bug class this review flagged (text-scan `=>` splitting,
+> casing-gated constructor detection, accidental accumulator leakage).
+>
+> This file is kept for historical context only.
+
+---
 
 Review of commit `945a40624a0c8387278e97f53b840ec5f7a80535`
 ("action item 2 for analysis fixes"), which addresses item 2 of

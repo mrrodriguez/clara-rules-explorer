@@ -10,19 +10,21 @@ Source under discussion: `src/clara/server/tools/graph/analyze.clj`.
 
 ---
 
-### Status update (2026-07-11)
+### Status update (2026-07-12)
 
-The analysis pipeline has been substantially refactored. The hand-rolled form parser
-(`extract-constructors-from-form`) and string-based LHS sanitization have been replaced
-with a clj-kondo-data-driven approach:
+The analysis pipeline uses a clj-kondo-data-driven approach throughout:
 
 - **Type detection**: Record constructors (`map->X`, `->X`) are detected from clj-kondo's
-  `:var-usages` analysis — no form parsing, no source reading.
-- **LHS stripping**: Handled at the kondo hook level via our override hook
-  (`hooks/strip_lhs.clj_kondo`), which emits only the RHS body for analysis.
+  `:var-usages` analysis via `build-inserter-type-map` — no form parsing, no source reading.
+  Types are resolved at runtime via `resolve-record-type`.
+- **LHS stripping**: Done structurally at the clj-kondo hook level via our override hook
+  (`hooks/strip_lhs.clj_kondo`). The hook finds the `=>` separator in the defrule form's
+  AST children, takes only the RHS body, and emits a synthetic `(def name {:production
+  (fn [input] (do ...rhs...))})`. This means clj-kondo's `:var-usages` only sees RHS code
+  — no LHS accumulators, fact-type patterns, or bindings pollute the call graph.
 - **Java constructors**: Deferred to dynamic types (clj-kondo does not expose them as
   structured data).
-- **Config composition**: Our hook override lives alongside synced clara-rules imports.
+- **Config composition**: Our override hook lives alongside synced clara-rules imports.
   See `analyze.clj` namespace docstring for custom config guidance.
 
 ## Background — what we observed
@@ -133,11 +135,17 @@ resources path the analyzer reads at runtime — and to detect when it drifts.
 
    ```
    resources/clara/server/tools/graph/kondo-config/
-     config.edn                                    ; top-level (minimal "{}")
-     imports/clara/rules/config.edn                ; :lint-as + :hooks map
+     config.edn                                    ; registers our strip_lhs hook for defrule
+     hooks/strip_lhs.clj_kondo                     ; structural LHS/RHS split (kondo-level)
+     imports/clara/rules/config.edn                ; synced :lint-as + :hooks from clara-rules
      imports/clara/rules/hooks/clara_rules.clj_kondo
      manifest.edn                                  ; {:files [...]} for jar-safe materialization
    ```
+
+   The `config.edn` registers our own `strip_lhs` hook on `clara.rules/defrule`.
+   Because command-line config has highest precedence, this overrides the
+   clara-rules import's defrule hook. The import's hooks for `defquery`,
+   `defhierarchy`, etc. are used unmodified.
 
 2. **Maintenance helper** `clara.server.tools.graph.kondo-config-sync`
    (`dev/…/kondo_config_sync.clj`, alias `:sync-kondo-config`):
@@ -201,31 +209,26 @@ resources path the analyzer reads at runtime — and to detect when it drifts.
 **Original problem:** `constructor->fact-type` treated any `->name` / `map->name`
 as a record constructor.
 
-**Resolution (2026-07-11):** Constructor detection is now driven entirely by
-clj-kondo's `:var-usages` analysis. For each var that is on a call-graph path
-under an insert/retract call, we collect `map->X` / `->X` var-usages and resolve
-them at runtime via `resolve-record-type`. This resolves true record types while
+**Resolution (2026-07-12):** Constructor detection is driven entirely by
+clj-kondo's `:var-usages` analysis. The LHS-stripping hook ensures only RHS
+usages appear in the call graph. `build-inserter-type-map` collects `map->X` /
+`->X` var-usages reachable from insert/retract calls, and resolves them at
+runtime via `resolve-record-type`. This resolves true record types while
 rejecting non-constructor functions like `->fact`. Java constructors
 (`ClassName.`, `new`, `Class/new`) are deferred to the dynamic fallback.
 
-The old `record-constructor-index`, `record-class-index`, and
-`extract-constructors-from-form` have been removed in favor of this simpler,
-clj-kondo-native approach.
+The old `record-constructor-index`, `record-class-index`,
+`extract-constructors-from-form`, `find-arrow-pos`, `sanitize-analysis`, and
+`lhs-usage?` have all been removed in favor of this simpler, hook-based approach.
 
 ---
 
-## Action Item 3 — Persist a diagnostic and fail loud on non-expansion
-
-2. Precompute a `record-constructor-index` from the merged analysis:
-`extract-constructor-types-from-reachable` (via clj-kondo var-usages) and
-`resolve-record-type`.
-
----
-
-## Action Item 3 — Persist a diagnostic and fail loud on non-expansion
+## Action Item 3 — Persist a diagnostic and fail loud on non-expansion  ⏳ PENDING
 
 **Problem:** when hooks are missing, the pipeline silently returns `{}` / empty
 annotations instead of signaling that clj-kondo never expanded the def-macros.
+The bundled config-dir default makes this less likely, but a user passing a
+custom `:config-dir` without a defrule hook would hit it silently.
 
 **Design:** add `diagnose-rule-ns-analysis` (prototyped in the nREPL) to
 `analyze.clj` and surface it. It reports, from a merged analysis:
@@ -239,9 +242,12 @@ Wire a guard into `generate-annotations-from-analysis` (or the session/paths
 entry points) that raises/logs the verdict when `:var-definitions` is 0 while
 rules were expected, so this failure mode is never silent again.
 
+**Status:** not yet implemented. The bundled config-dir default mitigates the
+risk for the default code path, but the guard is still needed.
+
 ---
 
-## Action Item 4 — Fix `::`-keyword rendering in dynamic callsites
+## Action Item 4 — Fix `::`-keyword rendering in dynamic callsites  ⏳ PENDING
 
 **Problem:** `extract-insert-types` uses `read-string` for dynamic annotation
 extraction, which resolves auto-resolved keywords (`::foo`) against the
@@ -252,6 +258,9 @@ the callsite's `:ns-name-sym` while reading, or (preferred) split the argument
 forms with `rewrite-clj`/clj-kondo node APIs so the original source text is
 preserved verbatim. Low priority (cosmetic for the dynamic bucket) but affects
 the fidelity of `:source-str`.
+
+**Status:** not yet implemented. `read-string` is still used at the callsite
+extraction point in `extract-insert-types`.
 
 ---
 
@@ -274,15 +283,19 @@ the fidelity of `:source-str`.
 
 ## Verification plan
 
-- Re-run the live checks used during investigation against
+- ✅ Re-run the live checks used during investigation against
   `gateless-product-ruleset.loan-data.income` (nREPL on the real classpath):
   expect 19 var-definitions, high `:from-var` coverage, and all 19 rules with
   `:clara-rules/insert-types []` + `:clara-rules/dynamic-insert-types-detected`.
-- Add an explorer regression test that runs the analyzer with the bundled
+- ✅ Keep the existing `analyze_test_rules` record-based assertions green
+  (`LocalDummyRecord`, `DocumentCheck`, etc.).
+- ✅ `->fact` (lowercase, unresolvable) is NOT treated as a constructor — handled
+  by `resolve-record-type` returning nil for non-class, non-var symbols.
+- ✅ LHS accumulators do not leak into insert-types — handled structurally by
+  the `strip_lhs` hook. The `collect-app-id-card-given-docs` test (which uses
+  `(acc/all)` in the LHS) correctly reports only `[AllIdCardGivenDocuments]`.
+- ⏳ Add an explorer regression test that runs the analyzer with the bundled
   config-dir default from an arbitrary working directory (assert it does NOT
   depend on cwd).
-- Keep the existing `analyze_test_rules` record-based assertions green
-  (resolution-based detection must still identify `LocalDummyRecord`,
-  `DocumentCheck`, etc.).
-- Add a unit assertion that `->fact` (lowercase, unresolvable) is NOT treated as
-  a constructor.
+- ⏳ Add a `=>`-in-docstring test case — the structural hook split makes this
+  safe, but it should be verified explicitly.
