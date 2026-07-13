@@ -29,13 +29,11 @@ The recent changes introduced:
 3. Transitive dependency analysis for CLI path linting.
 
 #### Test Coverage Gaps & Edge Cases
-* **LHS Sanitization with `=>` Operator Collisions:**
-  `find-arrow-pos` locates the RHS split point using `str/index-of line "=>"`.
-  * **The Bug:** If a rule contains the substring `=>` on its LHS (e.g., inside a comment like `;; => holds true` or a string literal like `[Fact (= ?x "=>")]`), `find-arrow-pos` will match that first occurrence instead of the rule's actual RHS separator arrow.
-  * **The Effect:** The LHS/RHS split index will be incorrectly shifted to the left, which will misclassify LHS conditions as RHS side-effects, polluting the call-graph and returning incorrect annotation outputs.
-  * **Proposed Solution (Remove LHS Sanitization Complexity):**
-    After evaluating the edge cases and the complexity of distinguishing LHS usages from RHS usages, we determined that defending against LHS usages polluting the call graph provides no meaningful gain. It is highly unlikely for an LHS condition to transitively call an insert or retract function (e.g., an accumulator function doesn't call insert). For LHS constructors (e.g., `Accumulator`), identifying them as reachable is acceptable and accurate. Therefore, the entire LHS sanitization logic (`find-arrow-pos`, `sanitize-analysis`, etc.) has been removed completely, drastically simplifying `analyze.clj` and avoiding any arrow parsing bugs natively.
-  * **Status:** Implemented. The LHS filtering logic was removed, and assertions in `analyze_test.clj` were updated to tolerate valid LHS-reachable types (like `clara.rules.engine.Accumulator`). The obsolete `rule-lhs-arrow-collision` test was deleted.
+* **LHS Stripping via Kondo Hooks:**
+  Previous approach used string-based `find-arrow-pos` to strip LHS before analysis — fragile against `=>` in comments/strings.
+  **Resolution (2026-07-11):** LHS exclusion is now handled at the clj-kondo hook level via our override hook
+  (`resources/.../hooks/strip_lhs.clj_kondo`). The hook emits only the RHS body for analysis, eliminating the need
+  for source-text parsing entirely. This is structural, not string-based.
 * **Namespace Filter Combinations:** `build-analysis-from-namespaces` allows filtering via both `:include-ns-prefixes` and `:exclude-ns-prefixes`. The tests cover `:include-ns-prefixes` but do not verify the combined effect or precedence when both include and exclude prefixes are provided.
 * **Missing Source Files Fallback:** If a namespace is loaded on the classpath but its source file is missing (e.g., it is a library compiled inside a JAR without source), `get-source` returns `nil`. When source is unavailable, LHS sanitization is bypassed (all usages are kept). This fallback path is not covered by any unit tests.
 

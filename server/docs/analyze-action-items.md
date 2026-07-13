@@ -10,6 +10,21 @@ Source under discussion: `src/clara/server/tools/graph/analyze.clj`.
 
 ---
 
+### Status update (2026-07-11)
+
+The analysis pipeline has been substantially refactored. The hand-rolled form parser
+(`extract-constructors-from-form`) and string-based LHS sanitization have been replaced
+with a clj-kondo-data-driven approach:
+
+- **Type detection**: Record constructors (`map->X`, `->X`) are detected from clj-kondo's
+  `:var-usages` analysis — no form parsing, no source reading.
+- **LHS stripping**: Handled at the kondo hook level via our override hook
+  (`hooks/strip_lhs.clj_kondo`), which emits only the RHS body for analysis.
+- **Java constructors**: Deferred to dynamic types (clj-kondo does not expose them as
+  structured data).
+- **Config composition**: Our hook override lives alongside synced clara-rules imports.
+  See `analyze.clj` namespace docstring for custom config guidance.
+
 ## Background — what we observed
 
 Running the existing pipeline on `income.clj` (via the live nREPL with the real
@@ -181,112 +196,29 @@ resources path the analyzer reads at runtime — and to detect when it drifts.
 
 ---
 
-## Action Item 2 — Resolution-based constructor detection (drop naming heuristics)  ✅ DONE
+## Action Item 2 — Resolution-based constructor detection  ✅ DONE (superseded)
 
-**Problem:** `constructor->fact-type` (`analyze.clj:48`) treats any `->name` /
-`map->name` as a record constructor, so `facts.model.core/->fact` is misread as
-a constructor for a nonexistent record class `facts.model.core.fact`. That puts
-a bogus type in `:clara-rules/insert-types` and prevents the rule from reaching
-`:clara-rules/dynamic-insert-types-detected`.
+**Original problem:** `constructor->fact-type` treated any `->name` / `map->name`
+as a record constructor.
 
-**Rejected fix:** gate on PascalCase. A `defrecord`/`deftype` name can be
-lowercase, so capitalization is not a sound signal. Proven with clj-kondo:
-`(deftype bar [b])` yields a `->bar` var-definition (lowercase, still a real
-type). Detection must be by whether the name denotes an actual record/type, not
-by its casing.
+**Resolution (2026-07-11):** Constructor detection is now driven entirely by
+clj-kondo's `:var-usages` analysis. For each var that is on a call-graph path
+under an insert/retract call, we collect `map->X` / `->X` var-usages and resolve
+them at runtime via `resolve-record-type`. This resolves true record types while
+rejecting non-constructor functions like `->fact`. Java constructors
+(`ClassName.`, `new`, `Class/new`) are deferred to the dynamic fallback.
 
-**Correct mechanism (two complementary signals, "resolves ⇒ real type"):**
+The old `record-constructor-index`, `record-class-index`, and
+`extract-constructors-from-form` have been removed in favor of this simpler,
+clj-kondo-native approach.
 
-- **Static signal (works in CLI `-g` and session models).** clj-kondo reports
-  the generated constructors of `defrecord`/`deftype` as `:var-definitions`
-  tagged with `:defined-by`:
+---
 
-  ```clojure
-  ;; from (ns x) (defrecord Foo [a]) (deftype bar [b])
-  {:name Foo,      :defined-by clojure.core/defrecord}
-  {:name ->Foo,    :defined-by clojure.core/defrecord}
-  {:name map->Foo, :defined-by clojure.core/defrecord}
-  {:name bar,      :defined-by clojure.core/deftype}
-  {:name ->bar,    :defined-by clojure.core/deftype}
-  ```
-
-  So a `->X` / `map->X` usage is a real constructor iff the merged analysis
-  contains a matching var-definition whose `:defined-by` is
-  `clojure.core/defrecord` or `clojure.core/deftype`. The class symbol is then
-  `<munge(defining-ns)>.X`. `->fact` has no such var-definition → not a
-  constructor → dynamic.
-
-- **Runtime fallback (session / REPL-injection model).** When the class is
-  loaded, confirm by resolution:
-
-  ```clojure
-  (defn- resolvable-fact-class [sym]
-    (try (Class/forName (str sym) false (clojure.lang.RT/baseLoader)) sym
-         (catch Throwable _ nil)))
-  ```
-
-  `facts.model.core.fact` never resolves; `...loan_app_facts.DocumentCheck` does.
-
-Treat **either** signal as sufficient, so detection is correct across both run
-models while still rejecting `->fact`.
-
-**Design:**
-
-1. `constructor->fact-type` (`analyze.clj:48`): compute the `map->`/`->`
-   candidate, then keep it only if the static `:defined-by` signal matches (look
-   up the name in the merged analysis' record/type constructor set) **or**
-   `resolvable-fact-class` succeeds. This requires threading the analysis
-   (or a precomputed record-constructor index) into the builder.
+## Action Item 3 — Persist a diagnostic and fail loud on non-expansion
 
 2. Precompute a `record-constructor-index` from the merged analysis:
-   the set of `[to name]` / class symbols whose `:var-definitions` `:defined-by`
-   is `defrecord`/`deftype`. `build-constructors` (`:70`) consults this instead
-   of the current naming rule.
-
-3. `usage->fact-type` (Java ctors, `:82`) and `build-java-constructors` (`:101`):
-   replace the `java-class?` first-letter-uppercase heuristic (`:42`) with the
-   same authority — the computed `:class` symbol must be a known record/type
-   class (static index) or resolvable at runtime.
-
-4. Once the index + resolution are the gate, remove `java-class?` (or demote it
-   to a cheap pre-filter only).
-
-**Caveats:**
-- Static signal fires only if the record/`deftype`-defining ns is **in the merged
-  analysis**. Session mode gets this via `build-analysis-from-namespaces`
-  transitive analysis. The CLI `-g` path currently lints only the given files
-  (`generate-annotations-from-paths`, `:439`), so records defined in other nses
-  won't be indexed and would degrade to dynamic. To give CLI parity, either make
-  `-g` do transitive analysis (resolve requires from the linted files, like the
-  namespaces path does) or document the limitation. Recommend enabling
-  transitive analysis for `-g`.
-
-### What was implemented
-
-1. **Static indices from analysis:**
-   - `build-record-constructor-index` collects all constructor var definitions (e.g. `->Foo`, `map->Foo`) defined via `defrecord` or `deftype` statically in the merged analysis.
-   - `build-record-class-index` collects all fully-qualified class symbols (e.g. `my_ns.Foo`) for defined records/deftypes statically in the analysis.
-
-2. **Resolution-based constructor filters:**
-   - Added `resolvable-fact-class` to perform dynamic resolution checks using `Class/forName` with the runtime classloader.
-   - `build-constructors` and `constructor->fact-type` only accept constructor candidates if they exist in the static constructor index or resolve as loaded classes at runtime.
-   - `usage->fact-type` and `build-java-constructors` now require constructor class symbols to be present in the static class index or resolvable at runtime, demoting the simple uppercase `java-class?` heuristic to a pre-filtering check.
-
-3. **CLI Transitive Analysis Parity:**
-   - Modified `generate-annotations-from-paths` to run a customizable transitive analysis via `build-analysis-from-namespaces`.
-   - Introduced a `default-exclude-ns-prefixes` list of namespaces that are known not to wrap Clara Rule insertion/retraction calls (e.g. `clojure.`, `schema.`, `potemkin.`, etc. - explicitly keeping `clara.rules` as it can contain library insertion wrapper functions).
-   - Exposed `:include-ns-prefixes` and `:exclude-ns-prefixes` options in both `generate-annotations-from-paths` and `analyze-session-rules` to allow complete user customization.
-   - Threaded the initial path linting results and processed namespace set to avoid duplicate analysis of rule paths, preserving classpath-relative file paths.
-
-4. **LHS Usage Sanitization:**
-   - Implemented `sanitize-analysis` which matches the position of the `=>` operator in each rule's source form and filters out any `:var-usages` or `:java-class-usages` occurring on the LHS of the rule.
-   - This prevents LHS condition constructs (like accumulators or matching patterns) from polluting the call graph of the rule, ensuring we naturally trace and identify only RHS constructors and java constructors without needing any class name blacklists.
-
-### Validation
-
-- Added mock custom fact builder `->fact` (mimicking `facts.model.core/->fact`) and corresponding `rule-fact-builder-call` test rule to `analyze_test_rules.clj`.
-- Added unit assertions in `analyze_test.clj` validating that `->fact` is correctly classified as a dynamic insert instead of an invalid class constructor, verifying it produces `:clara-rules/dynamic-insert-types-detected` callsites.
-- Ran the full test suite (`make test`), lint checks (`make lint`), and reflection checks (`make reflection-check`), passing all 331 assertions successfully with zero warnings/errors.
+`extract-constructor-types-from-reachable` (via clj-kondo var-usages) and
+`resolve-record-type`.
 
 ---
 
@@ -311,12 +243,9 @@ rules were expected, so this failure mode is never silent again.
 
 ## Action Item 4 — Fix `::`-keyword rendering in dynamic callsites
 
-**Problem:** `extract-insert-args-from-call` (`analyze.clj:195`) uses
-`read-string`, which resolves auto-resolved keywords (`::foo`) against the
-current `*ns*` at analysis time. Observed artifact:
-`(->fact ::verified-... ?prop-income)` rendered as
-`:gateless-product-ruleset.loan-data.income-test/verified-...` (wrong ns — the
-REPL's ns rather than the rule's ns).
+**Problem:** `extract-insert-types` uses `read-string` for dynamic annotation
+extraction, which resolves auto-resolved keywords (`::foo`) against the
+current `*ns*` at analysis time.
 
 **Design:** avoid `read-string` for splitting insert args. Either bind `*ns*` to
 the callsite's `:ns-name-sym` while reading, or (preferred) split the argument
