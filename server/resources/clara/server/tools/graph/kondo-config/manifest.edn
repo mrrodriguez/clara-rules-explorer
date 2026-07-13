@@ -1,5 +1,6 @@
 {:files
  ["config.edn"
+  "hooks/strip_lhs.clj_kondo"
   "imports/clara/rules/config.edn"
   "imports/clara/rules/hooks/clara_rules.clj_kondo"
   "manifest.edn"]}

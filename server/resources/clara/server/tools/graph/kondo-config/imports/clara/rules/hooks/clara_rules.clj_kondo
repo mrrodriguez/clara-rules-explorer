@@ -377,13 +377,14 @@
                                (remove fact-result-node?)
                                (set)
                                (sort-by node-value))
-        ;; Build the production result using ONLY the RHS body-seq
-        ;; wrapped in a `do`. The LHS (condition bindings, accumulator
-        ;; constructors) is stripped so clj-kondo only analyzes the RHS
-        ;; call graph. This prevents LHS-internal constructors
-        ;; (e.g. ->Accumulator) from being treated as fact types.
         production-result (api/list-node
-                           (list* (api/token-node 'do) body-seq))
+                           (list*
+                            (api/token-node 'let)
+                            (api/vector-node
+                             (vec production-bindings))
+                            (api/vector-node
+                             (vec production-output))
+                            body-seq))
         fn-node (api/list-node
                  (cond-> (list (api/token-node 'fn) production-name)
                    production-docs (concat [production-docs])

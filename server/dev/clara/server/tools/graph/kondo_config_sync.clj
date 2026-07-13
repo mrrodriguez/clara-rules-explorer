@@ -10,6 +10,10 @@
    classpath resources path that the analyzer materializes at runtime (see
    `clara.server.tools.graph.analyze`).
 
+   Our own override files (config.edn, hooks/strip_lhs.clj_kondo) live alongside
+   the synced imports in the resources tree. They are maintained by us, not
+   synced. See EXPLORER-OVERRIDE markers in this file and the hook file.
+
    Typical maintenance flow when the clara-rules dependency changes:
 
      ;; 1. Let clj-kondo regenerate .clj-kondo/imports from the dependencies:
@@ -21,7 +25,8 @@
      ;; 3. (CI) Verify the bundled resources are not stale:
      clojure -X:sync-kondo-config clara.server.tools.graph.kondo-config-sync/check"
   (:require [clojure.java.io :as io]
-            [clojure.pprint :as pp])
+            [clojure.pprint :as pp]
+            [clojure.string :as str])
   (:import [java.nio.file Files]))
 
 (def ^:private default-source-dir
@@ -37,6 +42,18 @@
   "Import subtrees (relative to the source dir) the analyzer needs. Only the
    clara-rules hooks are required to expand `defrule`/`defquery` etc."
   ["imports/clara/rules"])
+
+;; ═══════════════════════════════════════════════════════════════════════════════
+;; EXPLORER-OVERRIDE: files we maintain alongside the synced imports.
+;; These override or extend the clara-rules config (e.g. LHS-stripping hook).
+;; They are NOT synced from clara-rules — they live in the resources directory
+;; directly and are part of the manifest so they get materialized at runtime.
+;; ═══════════════════════════════════════════════════════════════════════════════
+
+(def ^:private override-files
+  "Override files (relative to resources-base) maintained by us, not synced."
+  ["config.edn"
+   "hooks/strip_lhs.clj_kondo"])
 
 (defn- rel-path [^java.io.File root ^java.io.File f]
   (str (.relativize (.toPath root) (.toPath f))))
@@ -67,18 +84,29 @@
 
 (defn- expected-layout
   "Computes the full {rel-path bytes} map the resources dir should contain,
-   including the top-level config.edn and the manifest."
+   including the top-level config.edn, override files, and the manifest."
   [^java.io.File src]
   (let [import-rels (source-files src)
-        base (into {"config.edn" (.getBytes "{}\n")}
+        base (into {"config.edn" (.getBytes "{:hooks {:analyze-call {clara.rules/defrule hooks.strip-lhs/analyze-defrule-macro}}}\n")}
                    (map (fn [rel] [rel (Files/readAllBytes (.toPath (io/file src rel)))]))
                    import-rels)
-        manifest {:files (vec (sort (conj (keys base) "manifest.edn")))}
+        ;; Add override file contents from the resources dir (if they exist)
+        dest-root (io/file default-resources-base)
+        base (reduce (fn [m rel]
+                       (let [f (io/file dest-root rel)]
+                         (if (.exists f)
+                           (assoc m rel (Files/readAllBytes (.toPath f)))
+                           m)))
+                     base
+                     override-files)
+        all-files (vec (sort (conj (keys base) "manifest.edn")))
+        manifest {:files all-files}
         manifest-bytes (.getBytes (with-out-str (pp/pprint manifest)))]
     (assoc base "manifest.edn" manifest-bytes)))
 
 (defn sync!
-  "Mirrors the clj-kondo import tree into the bundled resources path.
+  "Mirrors the clj-kondo import tree into the bundled resources path,
+   including our override files (config.edn, hooks/strip_lhs.clj_kondo).
 
    Options (all optional):
      :source-dir     - clj-kondo config dir to read from (default \".clj-kondo\")
@@ -102,8 +130,8 @@
      {:synced (count layout) :resources-base resources-base})))
 
 (defn check
-  "Verifies the bundled resources match the current clj-kondo import tree.
-   Throws (non-zero exit under -X) if they are stale, so it can gate CI."
+  "Verifies the bundled resources match the current clj-kondo import tree
+   plus our override files. Throws (non-zero exit under -X) if stale."
   ([] (check {}))
   ([{:keys [source-dir resources-base]
      :or {source-dir default-source-dir

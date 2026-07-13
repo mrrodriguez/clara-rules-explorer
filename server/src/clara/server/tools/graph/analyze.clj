@@ -1,6 +1,33 @@
 (ns clara.server.tools.graph.analyze
   "Static analysis tools for Clara rules using clj-kondo.
-   Traces rule RHS call graphs to auto-detect insert/retract fact types."
+   Traces rule RHS call graphs to auto-detect insert/retract fact types.
+
+   ## Custom kondo config
+
+   Callers can supply their own clj-kondo config via the `:config-dir` option
+   on `generate-annotations-from-paths` or `analyze-session-rules`. This
+   completely replaces the bundled config — useful for adding project-specific
+   hooks or overriding rule parsing.
+
+   The bundled config (used when no `:config-dir` is given) contains:
+     - config.edn          — registers our defrule hook (LHS-stripping)
+     - hooks/strip_lhs.clj_kondo — minimal defrule hook, only analyzes RHS
+     - imports/clara/rules/ — synced clara-rules hooks (defquery, defhierarchy, etc.)
+
+   To provide a custom config while keeping clara-rules support, copy the
+   bundled config as a base, modify as needed, and pass the directory as
+   `:config-dir`. At minimum, ensure your config registers a hook for
+   `clara.rules/defrule` that emits a `def` form whose function body
+   contains the rule's RHS (clj-kondo analyzes this for var-usages).
+
+   Example:
+     ;; Copy bundled config as a starting point
+     cp -r resources/clara/server/tools/graph/kondo-config my-kondo-config
+     ;; Edit my-kondo-config/config.edn to register your own hooks
+     ;; Pass it to the analysis:
+     (generate-annotations-from-paths
+       {:paths [\"src/rules\"]
+        :config-dir \"my-kondo-config\"})"
   (:require [clj-kondo.core :as kondo]
             [clojure.string :as str]
             [clojure.set :as set]
@@ -76,8 +103,11 @@
 ;; clj-kondo only produces var-definitions for def-macros it has a hook or
 ;; :lint-as mapping for. Without the clara-rules hooks, `defrule`/`defquery`
 ;; etc. are opaque calls, no rule gets a :from-var, and the call graph is empty.
-;;
-;; clj-kondo would normally load these hooks from a `.clj-kondo` dir discovered
+;; Resources that override or extend the synced clara-rules imports.
+;; These are maintained by us, not synced from clara-rules.
+(def ^:private bundled-override-files
+  ["config.edn"
+   "hooks/strip_lhs.clj_kondo"])
 ;; by walking up from the linted file's directory (see clj-kondo impl/core
 ;; `config-dir`). That is cwd-dependent and unusable for a standalone tool run
 ;; from a foreign working directory (CLI `-g`) or injected into a host JVM
@@ -104,6 +134,13 @@
                             "clara-explorer-kondo"
                             (make-array java.nio.file.attribute.FileAttribute 0)))]
       (doseq [rel (:files manifest)]
+        (when-let [res (io/resource (str bundled-kondo-config-resource "/" rel))]
+          (let [dest (io/file tmp-dir rel)]
+            (io/make-parents dest)
+            (with-open [in (io/input-stream res)]
+              (io/copy in dest)))))
+      ;; Copy override files (our hooks, config — not in the sync manifest)
+      (doseq [rel bundled-override-files]
         (when-let [res (io/resource (str bundled-kondo-config-resource "/" rel))]
           (let [dest (io/file tmp-dir rel)]
             (io/make-parents dest)

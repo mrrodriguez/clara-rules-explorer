@@ -1,0 +1,49 @@
+;; ═══════════════════════════════════════════════════════════════════════════════
+;; CLARA-RULES-EXPLORER: LHS-stripping defrule hook
+;;
+;; A minimal defrule hook that only analyzes the RHS (right-hand side).
+;;
+;; Strategy:
+;;   1. Find the `=>` separator in the defrule form's children.
+;;   2. Take everything after `=>` as the RHS body.
+;;   3. Emit `(def name {:production (fn [input] (do ...rhs...))})`
+;;
+;; The LHS (conditions, accumulators, bindings) is completely ignored.
+;; This prevents LHS-internal constructors (e.g. ->Accumulator) from
+;; appearing in clj-kondo's var-usages call graph.
+;;
+;; For full LHS-aware analysis (defquery, defhierarchy, etc.), the synced
+;; clara-rules hooks in imports/ are used unmodified.
+;;
+;; Reconciliation: this file is our own, not synced. When clara-rules
+;; updates, check if the defrule form structure changed (rare).
+;; ═══════════════════════════════════════════════════════════════════════════════
+(ns hooks.strip-lhs
+  (:require [clj-kondo.hooks-api :as api]))
+
+(defn analyze-defrule-macro
+  "Minimal defrule hook: skip LHS, analyze only RHS body."
+  [{:keys [node]}]
+  (let [children (rest (:children node))  ;; skip the `clara.rules/defrule` symbol
+        production-name (first children)
+
+        ;; Find the `=>` separator and split: everything after it is the RHS
+        rhs-children (->> children
+                          (drop-while #(not= '=> (api/sexpr %)))
+                          rest
+                          (remove nil?))
+
+        ;; Build the hook output: (def name {:production (fn [input] (do ...rhs...))})
+        input-token (api/token-node (gensym 'input))
+        input-args (api/vector-node [input-token])
+        body-node (api/list-node
+                   (list* (api/token-node 'do) rhs-children))
+        fn-node (api/list-node
+                 (list (api/token-node 'fn) production-name input-args body-node))
+        new-node (vary-meta
+                  (api/list-node
+                   (list (api/token-node 'def) production-name
+                         (api/map-node
+                          [(api/keyword-node :production) fn-node])))
+                  merge {:clj-kondo/ignore [:clojure-lsp/unused-public-var]})]
+    {:node new-node}))
