@@ -74,16 +74,24 @@
         (is (some? ann-b))
         (is (nil? (:clara-rules/insert-types ann-b))
             "Java constructors deferred to dynamic")
-        (is (some? (:clara-rules/dynamic-insert-types-detected ann-b))
-            "Should have dynamic insert types detected"))
+        (is (= {:callsites
+                [{:source-str "(DocumentCheck. ?app-id :pass \"dot-style\" nil nil)"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-insert-types-detected ann-b))
+            "Should capture dynamic callsite with source-str, ns-name-sym, and filename"))
 
       ;; Rule C: Java constructor style (new Class ...)
       (let [ann-c (get annotations `atr/rule-java-constructor-new)]
         (is (some? ann-c))
         (is (nil? (:clara-rules/insert-types ann-c))
             "Java constructors deferred to dynamic")
-        (is (some? (:clara-rules/dynamic-insert-types-detected ann-c))
-            "Should have dynamic insert types detected"))
+        (is (= {:callsites
+                [{:source-str "(new clara.server.tools.graph.rules.loan_app_facts.DocumentCheck ?app-id :pass \"new-style\" nil nil)"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-insert-types-detected ann-c))
+            "Should capture the dynamic callsite with source-str, ns-name-sym, and filename"))
 
       ;; Rule D: Tracing through helper function
       (let [ann-d (get annotations `atr/rule-nested-helper-call)]
@@ -121,40 +129,60 @@
         (is (some? ann-b2))
         (is (nil? (:clara-rules/insert-types ann-b2))
             "Java constructors deferred to dynamic")
-        (is (some? (:clara-rules/dynamic-insert-types-detected ann-b2))
-            "Should have dynamic insert types detected"))
+        (is (= {:callsites
+                [{:source-str "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck. ?app-id :pass \"fq-dot-style\" nil nil)"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-insert-types-detected ann-b2))
+            "Should capture the dynamic callsite with source-str, ns-name-sym, and filename"))
 
       ;; Rule C2: Short name new Class constructor (Java -> dynamic)
       (let [ann-c2 (get annotations `atr/rule-java-constructor-short-new)]
         (is (some? ann-c2))
         (is (nil? (:clara-rules/insert-types ann-c2))
             "Java constructors deferred to dynamic")
-        (is (some? (:clara-rules/dynamic-insert-types-detected ann-c2))
-            "Should have dynamic insert types detected"))
+        (is (= {:callsites
+                [{:source-str "(new DocumentCheck ?app-id :pass \"short-new-style\" nil nil)"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-insert-types-detected ann-c2))
+            "Should capture the dynamic callsite with source-str, ns-name-sym, and filename"))
 
       ;; Rule F1: Modern constructor syntax (Class/new) via short name (Java -> dynamic)
       (let [ann-f1 (get annotations `atr/rule-java-constructor-short-modern)]
         (is (some? ann-f1))
         (is (nil? (:clara-rules/insert-types ann-f1))
             "Java constructors deferred to dynamic")
-        (is (some? (:clara-rules/dynamic-insert-types-detected ann-f1))
-            "Should have dynamic insert types detected"))
+        (is (= {:callsites
+                [{:source-str "(DocumentCheck/new ?app-id :pass \"short-modern\" nil nil)"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-insert-types-detected ann-f1))
+            "Should capture the dynamic callsite with source-str, ns-name-sym, and filename"))
 
       ;; Rule F2: Modern constructor syntax (Class/new) via fully-qualified name (Java -> dynamic)
       (let [ann-f2 (get annotations `atr/rule-java-constructor-fq-modern)]
         (is (some? ann-f2))
         (is (nil? (:clara-rules/insert-types ann-f2))
             "Java constructors deferred to dynamic")
-        (is (some? (:clara-rules/dynamic-insert-types-detected ann-f2))
-            "Should have dynamic insert types detected"))
+        (is (= {:callsites
+                [{:source-str "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new ?app-id :pass \"fq-modern\" nil nil)"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-insert-types-detected ann-f2))
+            "Should capture the dynamic callsite with source-str, ns-name-sym, and filename"))
 
       ;; Rule G: Tracing helper function calling Java constructor (Java -> dynamic)
       (let [ann-g (get annotations `atr/rule-nested-java-helper-call)]
         (is (some? ann-g))
         (is (nil? (:clara-rules/insert-types ann-g))
             "Java constructors deferred to dynamic")
-        (is (some? (:clara-rules/dynamic-insert-types-detected ann-g))
-            "Should have dynamic insert types detected"))
+        (is (= {:callsites
+                [{:source-str "(make-java-document-check-nested ?app-id)"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-insert-types-detected ann-g))
+            "Should capture the helper call as dynamic callsite"))
 
       ;; Rule H1: insert-all! with collection of records
       (let [ann-h1 (get annotations `atr/rule-insert-all-collection)]
@@ -189,8 +217,12 @@
         (is (some? ann-h5))
         (is (nil? (:clara-rules/insert-types ann-h5))
             "Java constructors in helper deferred to dynamic")
-        (is (some? (:clara-rules/dynamic-insert-types-detected ann-h5))
-            "Should have dynamic insert types detected"))
+        (is (= {:callsites
+                [{:source-str "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new app-id :pass \"helper-insert\" nil nil)"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-insert-types-detected ann-h5))
+            "Should capture the Java constructor callsite traced through helper"))
 
       ;; Rule H6: Side-effect only rule
       (let [ann-h6 (get annotations `atr/rule-side-effect-only)]
@@ -223,6 +255,70 @@
         (is (= [`LocalDummyRecord]
                (:clara-rules/insert-types ann-h10))
             "Should identify LocalDummyRecord from insert-all-unconditional! usage"))
+
+      ;;
+      ;; Dynamic retract types — Java constructors and metadata map facts
+      ;;
+
+      ;; Rule I1: retract! with Java constructor (Class.)
+      (let [ann-i1 (get annotations `atr/rule-retract-java-dot)]
+        (is (some? ann-i1))
+        (is (nil? (:clara-rules/retract-types ann-i1))
+            "Java constructors deferred to dynamic for retract")
+        (is (= {:callsites
+                [{:source-str "(DocumentCheck. ?app-id :pass \"dot-retract\" nil nil)"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-retract-types-detected ann-i1))
+            "Should capture dynamic retract callsite for Class. syntax"))
+
+      ;; Rule I2: retract! with Java constructor (new Class)
+      (let [ann-i2 (get annotations `atr/rule-retract-java-new)]
+        (is (some? ann-i2))
+        (is (nil? (:clara-rules/retract-types ann-i2))
+            "Java constructors deferred to dynamic for retract")
+        (is (= {:callsites
+                [{:source-str "(new clara.server.tools.graph.rules.loan_app_facts.DocumentCheck ?app-id :pass \"new-retract\" nil nil)"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-retract-types-detected ann-i2))
+            "Should capture dynamic retract callsite for new Class syntax"))
+
+      ;; Rule I3: retract! with modern Java constructor (Class/new)
+      (let [ann-i3 (get annotations `atr/rule-retract-java-modern)]
+        (is (some? ann-i3))
+        (is (nil? (:clara-rules/retract-types ann-i3))
+            "Java constructors deferred to dynamic for retract")
+        (is (= {:callsites
+                [{:source-str "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new ?app-id :pass \"modern-retract\" nil nil)"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-retract-types-detected ann-i3))
+            "Should capture dynamic retract callsite for Class/new syntax"))
+
+      ;; Rule I4: retract! with metadata map fact (highly dynamic)
+      (let [ann-i4 (get annotations `atr/rule-retract-metadata-map)]
+        (is (some? ann-i4) "Should recognize rule-retract-metadata-map as a retractor")
+        (is (nil? (:clara-rules/retract-types ann-i4))
+            "Metadata map facts are too dynamic to resolve statically for retract")
+        (is (= {:callsites
+                [{:source-str "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-retract-type})"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-retract-types-detected ann-i4))
+            "Should capture dynamic retract callsite for metadata map facts"))
+
+      ;; Rule I5: retract! via helper function performing Java constructor + retract
+      (let [ann-i5 (get annotations `atr/rule-retract-helper-call)]
+        (is (some? ann-i5))
+        (is (nil? (:clara-rules/retract-types ann-i5))
+            "Java constructors in helper deferred to dynamic for retract")
+        (is (= {:callsites
+                [{:source-str "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new app-id :pass \"helper-retract\" nil nil)"
+                  :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                  :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}
+               (:clara-rules/dynamic-retract-types-detected ann-i5))
+            "Should capture dynamic retract callsite traced through helper"))
 
 ;; Test filter and no-output-types generation
       (let [annotations-filtered (analyze/generate-annotations-from-paths {:paths ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]

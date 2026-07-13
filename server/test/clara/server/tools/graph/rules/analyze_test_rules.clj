@@ -188,3 +188,41 @@
   =>
   (r/insert! (->fact :custom-fact-type {:app-id ?app-id :status :pass})))
 
+;; ---------------------------------------------------------------------------
+;; Dynamic retract rules
+
+(defn retract-document-check-helper
+  "Helper function that performs Java constructor and retraction"
+  [app-id]
+  (r/retract! (clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new app-id :pass "helper-retract" nil nil)))
+
+(r/defrule rule-retract-java-dot
+  "Rule I1: retract! with Java constructor (Class.)"
+  [Application (= ?app-id app-id)]
+  =>
+  (r/retract! (DocumentCheck. ?app-id :pass "dot-retract" nil nil)))
+
+(r/defrule rule-retract-java-new
+  "Rule I2: retract! with Java constructor (new Class)"
+  [Application (= ?app-id app-id)]
+  =>
+  (r/retract! (new clara.server.tools.graph.rules.loan_app_facts.DocumentCheck ?app-id :pass "new-retract" nil nil)))
+
+(r/defrule rule-retract-java-modern
+  "Rule I3: retract! with modern Java constructor (Class/new)"
+  [Application (= ?app-id app-id)]
+  =>
+  (r/retract! (clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new ?app-id :pass "modern-retract" nil nil)))
+
+(r/defrule rule-retract-metadata-map
+  "Rule I4: retract! with metadata map fact (highly dynamic)"
+  [Application (= ?app-id app-id)]
+  =>
+  (r/retract! (with-meta {:app-id ?app-id :status :pass} {:type :custom-retract-type})))
+
+(r/defrule rule-retract-helper-call
+  "Rule I5: retract! via helper function performing Java constructor + retract"
+  [Application (= ?app-id app-id)]
+  =>
+  (retract-document-check-helper ?app-id))
+
