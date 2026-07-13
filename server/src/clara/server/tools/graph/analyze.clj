@@ -65,6 +65,22 @@
 (defn- fq-name-sym [ns name]
   (symbol (str ns) (str name)))
 
+(defn- var-usage-caller
+  "Returns the fully-qualified caller symbol from a kondo var-usage map."
+  [usage]
+  (fq-name-sym (:from usage) (:from-var usage)))
+
+(defn- var-usage-callee
+  "Returns the fully-qualified callee symbol from a kondo var-usage map."
+  [usage]
+  (fq-name-sym (:to usage) (:name usage)))
+
+(defn- constructor-fn-name?
+  "True if the given fn-name string looks like a record constructor (->X or map->X)."
+  [fn-name]
+  (or (str/starts-with? fn-name "map->")
+      (str/starts-with? fn-name "->")))
+
 (defn- normalize-key [k]
   (if (string? k)
     (symbol k)
@@ -281,11 +297,8 @@
                        (into #{}
                              (comp
                               (filter (fn [vu]
-                                        (let [caller (fq-name-sym (:from vu) (:from-var vu))
-                                              callee-name (name (:name vu))]
-                                          (and (contains? subtree caller)
-                                               (or (str/starts-with? callee-name "map->")
-                                                   (str/starts-with? callee-name "->"))))))
+                                        (and (contains? subtree (var-usage-caller vu))
+                                             (constructor-fn-name? (name (:name vu))))))
                               (keep (fn [vu]
                                       (resolve-record-type (:to vu) (:name vu)))))
                              var-usages)]
@@ -300,56 +313,47 @@
         (mapcat (fn [v] (get inserter-type-map v #{})))
         reachable))
 
+(defn- callsite->dynamic-entries
+  "Extracts dynamic annotation entries from a single kondo var-usage.
+   Returns a vector of {:source-str :ns-name-sym :filename} maps, one per arg."
+  [usage get-source]
+  (let [source (get-source (:from usage) (:filename usage))
+        call-str (source-text-at source (:row usage) (:col usage) (:end-row usage) (:end-col usage))]
+    (if call-str
+      (try
+        (let [form (read-string call-str)
+              args (rest form)]
+          (mapv (fn [arg]
+                  {:source-str (pr-str arg)
+                   :ns-name-sym (:from usage)
+                   :filename (:filename usage)})
+                args))
+        (catch Exception _ []))
+      [])))
+
 (defn- extract-insert-types [reachable target-fns {:keys [analysis inserter-type-map get-source]}]
   (let [usages (:var-usages analysis)
-
         direct-caller? (fn [caller]
                          (and (contains? reachable caller)
                               (not (contains? target-fns caller))))
-
-        has-direct-callers?
-        (boolean
-         (some (fn [u]
-                 (let [caller (fq-name-sym (:from u) (:from-var u))]
-                   (and (direct-caller? caller)
-                        (contains? target-fns (fq-name-sym (:to u) (:name u))))))
-               usages))]
-
+        direct-target-call?
+        (fn [usage]
+          (and (direct-caller? (var-usage-caller usage))
+               (contains? target-fns (var-usage-callee usage))))
+        has-direct-callers? (boolean (some direct-target-call? usages))]
     (if-not has-direct-callers?
       {:static-types #{}
        :dynamic-forms nil}
-
-      ;; Top-down: look up types from the precomputed inserter-type-map
       (let [static-types (extract-constructor-types-from-reachable
                           reachable inserter-type-map)]
         (if (seq static-types)
           {:static-types static-types
            :dynamic-forms nil}
-
-          ;; No static types resolvable -> dynamic annotation
-          (let [callsites
-                (into []
-                      (comp
-                       (filter (fn [u]
-                                 (let [caller (fq-name-sym (:from u) (:from-var u))]
-                                   (and (direct-caller? caller)
-                                        (contains? target-fns (fq-name-sym (:to u) (:name u)))))))
-                       (mapcat (fn [u]
-                                 (let [source (get-source (:from u) (:filename u))
-                                       call-str (source-text-at source (:row u) (:col u) (:end-row u) (:end-col u))]
-                                   (if call-str
-                                     (try
-                                       (let [form (read-string call-str)
-                                             args (rest form)]
-                                         (mapv (fn [arg]
-                                                 {:source-str (pr-str arg)
-                                                  :ns-name-sym (:from u)
-                                                  :filename (:filename u)})
-                                               args))
-                                       (catch Exception _ []))
-                                     []))))
-                       (distinct))
-                      usages)]
+          (let [callsites (into []
+                               (comp (filter direct-target-call?)
+                                     (mapcat #(callsite->dynamic-entries % get-source))
+                                     (distinct))
+                               usages)]
             {:static-types #{}
              :dynamic-forms (when (seq callsites) {:callsites callsites})}))))))
 
@@ -384,9 +388,8 @@
   [var-name ctx]
   (let [{:keys [is-inserter? is-retractor? reachable]} (var-reachability var-name ctx)]
     (when (or is-inserter? is-retractor?)
-      (let [insert-ctx (assoc ctx :inserter-type-map (:inserter-type-map ctx))
-            retract-ctx (assoc ctx :inserter-type-map (:retractor-type-map ctx))
-            inserts (when is-inserter? (extract-insert-types reachable (:insert-fns ctx) insert-ctx))
+      (let [retract-ctx (assoc ctx :inserter-type-map (:retractor-type-map ctx))
+            inserts (when is-inserter? (extract-insert-types reachable (:insert-fns ctx) ctx))
             retracts (when is-retractor? (extract-insert-types reachable (:retract-fns ctx) retract-ctx))]
         (cond-> {}
           (seq (:static-types inserts))
@@ -409,8 +412,8 @@
   (reset! global-analysis-cache {}))
 
 (defn ns->resource-base
-  "Mimics Clojure's core root-resource logic (without a leading slash)
-   to map a namespace symbol to a base path."
+  "Maps a namespace symbol to a classpath resource path by converting
+   dots to slashes and hyphens to underscores (how Clojure resolves ns→file)."
   [ns-sym]
   (-> (name ns-sym)
       (str/replace "-" "_")
@@ -509,6 +512,39 @@
                 ;; Resource not found on classpath or in-memory, skip
                 (recur remaining (conj processed ns-sym) merged-analysis)))))))))
 
+(defn- build-source-loader
+  "Returns a (fn [ns-sym filename] -> source-str) that caches source lookups."
+  [in-memory-sources]
+  (let [cache (atom {})]
+    (fn [ns-sym filename]
+      (let [k (or ns-sym filename)]
+        (if-let [cached (get @cache k)]
+          cached
+          (let [source (try
+                         (or (and ns-sym (get in-memory-sources ns-sym))
+                             (if-let [res (and ns-sym (find-ns-resource ns-sym))]
+                               (slurp res)
+                               (when filename
+                                 (let [^java.io.File file (io/as-file filename)]
+                                   (when (.exists file)
+                                     (slurp file))))))
+                         (catch Exception _ nil))]
+            (swap! cache assoc k source)
+            source))))))
+
+(defn- build-infer-ctx
+  "Builds the context map passed to infer-annotation-for-var."
+  [graph analysis inserter-type-map retractor-type-map get-source]
+  {:graph graph
+   :insert-fns insert-fns
+   :retract-fns retract-fns
+   :direct-inserters (direct-callers graph (keys graph) insert-fns)
+   :direct-retractors (direct-callers graph (keys graph) retract-fns)
+   :analysis analysis
+   :inserter-type-map inserter-type-map
+   :retractor-type-map retractor-type-map
+   :get-source get-source})
+
 (defn generate-annotations-from-analysis
   "Generates rule annotations (insert/retract types etc.) from a pre-computed
    clj-kondo analysis map.
@@ -520,56 +556,25 @@
      :in-memory-sources  - optional map of {ns-symbol source-string} for dynamically
                            defined in-memory namespaces."
   [{:keys [analysis rules-filter in-memory-sources]}]
-  (let [;; Ensure namespaces are loaded into the runtime so that `ns-resolve`
-        ;; and class resolution works for AST constructor extraction.
-        _ (doseq [ns-sym (distinct (keep :ns (:var-definitions analysis)))]
+  (let [_ (doseq [ns-sym (distinct (keep :ns (:var-definitions analysis)))]
             (try (require ns-sym) (catch Exception _ nil)))
-        source-cache (atom {})
-        get-source (fn [ns-sym filename]
-                     (let [k (or ns-sym filename)]
-                       (if-let [cached (get @source-cache k)]
-                         cached
-                         (let [source (try
-                                        (or (and ns-sym (get in-memory-sources ns-sym))
-                                            (if-let [res (and ns-sym (find-ns-resource ns-sym))]
-                                              (slurp res)
-                                              (when filename
-                                                (let [^java.io.File file (io/as-file filename)]
-                                                  (when (.exists file)
-                                                    (slurp file))))))
-                                        (catch Exception _ nil))]
-                           (swap! source-cache assoc k source)
-                           source))))
+        get-source (build-source-loader in-memory-sources)
         graph (build-graph analysis)
         project-vars (keys graph)
-
-        direct-inserters (direct-callers graph project-vars insert-fns)
-        direct-retractors (direct-callers graph project-vars retract-fns)
-
         var-seq (if (seq rules-filter)
                   (map normalize-key rules-filter)
                   project-vars)
-
-        ;; Bottom-up: precompute types per inserter/retractor var subtree
-        inserter-type-map
-        (build-inserter-type-map direct-inserters graph analysis)
-        retractor-type-map
-        (build-inserter-type-map direct-retractors graph analysis)
-
+        inserter-type-map (build-inserter-type-map
+                           (direct-callers graph project-vars insert-fns)
+                           graph analysis)
+        retractor-type-map (build-inserter-type-map
+                            (direct-callers graph project-vars retract-fns)
+                            graph analysis)
+        infer-ctx (build-infer-ctx graph analysis inserter-type-map retractor-type-map get-source)
         annotations
         (into (sorted-map)
               (keep (fn [v]
-                      (if-let [annotation (infer-annotation-for-var
-                                           v
-                                           {:graph graph
-                                            :insert-fns insert-fns
-                                            :retract-fns retract-fns
-                                            :direct-inserters direct-inserters
-                                            :direct-retractors direct-retractors
-                                            :analysis analysis
-                                            :inserter-type-map inserter-type-map
-                                            :retractor-type-map retractor-type-map
-                                            :get-source get-source})]
+                      (if-let [annotation (infer-annotation-for-var v infer-ctx)]
                         [v annotation]
                         (when (seq rules-filter)
                           [v {:clara-rules/no-output-types true}]))))
