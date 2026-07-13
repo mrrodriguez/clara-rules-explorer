@@ -350,10 +350,10 @@
           {:static-types static-types
            :dynamic-forms nil}
           (let [callsites (into []
-                               (comp (filter direct-target-call?)
-                                     (mapcat #(callsite->dynamic-entries % get-source))
-                                     (distinct))
-                               usages)]
+                                (comp (filter direct-target-call?)
+                                      (mapcat #(callsite->dynamic-entries % get-source))
+                                      (distinct))
+                                usages)]
             {:static-types #{}
              :dynamic-forms (when (seq callsites) {:callsites callsites})}))))))
 
