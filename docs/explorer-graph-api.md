@@ -488,7 +488,7 @@ IDs are stable **within a single snapshot** and deterministic for the same sessi
 
 The API supports inline rule `:props` maps and sidecar EDN files to declare rule metadata (such as insert and retract types). 
 
-For the complete schema, merge configurations, and dynamic callsite details, refer to the dedicated [Rule Annotations Documentation](file:///Users/mrrodriguez/Projects/clara-rules-explorer/docs/rule-annotations.md).
+For the complete schema, merge configurations, and dynamic callsite details, refer to the dedicated [Rule Annotations Documentation](../server/docs/rule-annotations.md).
 
 ### Annotation Resolution Status
 

@@ -83,7 +83,7 @@ types (extracting the first arg of `->fact`) is deferred (see Item 5).
 
 ---
 
-## Run models (see `../docs/rule-annotations.md`)
+## Run models (see `./rule-annotations.md`)
 
 The two intended standalone run models both make a cwd/`.clj-kondo` dependency
 unacceptable and constrain constructor detection:

@@ -72,53 +72,17 @@ clojure -M -m clara.server.graph.main -s path/to/session.bin --load-session-stat
 
 When `--session` is provided, the server uses `clara.rules.durability` to deserialize the session from disk. The session is expected to have been serialized with `{:with-rulebase? true}` so that the compiled rulebase is embedded — this is required for static rulebase analysis.
 
-The `--annotations` file follows the [sidecar EDN format](../docs/rule-annotations.md), keyed by rule FQ-name, to declare insert/retract types and notes for dependency graph construction.
+The `--annotations` file follows the [sidecar EDN format](./docs/rule-annotations.md), keyed by rule FQ-name, to declare insert/retract types and notes for dependency graph construction.
 
 ## API Endpoints
 
-All endpoints are served under `/v1/`. See [explorer-graph-api.md](../docs/explorer-graph-api.md) for details.
-
-### Rulebase Analysis (static)
-
-| Method | Path                      | Description                          |
-| ------ | ------------------------- | ------------------------------------ |
-| `GET`  | `/v1/rulebase-summary`    | High-level dashboard counts          |
-| `GET`  | `/v1/analysis`            | Full static analysis of the rulebase |
-| `GET`  | `/v1/rules`               | List all rules                       |
-| `GET`  | `/v1/rules/:fq-name`      | Single rule detail                   |
-| `GET`  | `/v1/queries`             | List all queries                     |
-| `GET`  | `/v1/queries/:fq-name`    | Single query detail                  |
-| `GET`  | `/v1/fact-types`          | List all fact types                  |
-| `GET`  | `/v1/fact-types/:fq-name` | Single fact type detail              |
-
-### Session State (requires working memory)
-
-| Method | Path                              | Description                                      |
-| ------ | --------------------------------- | ------------------------------------------------ |
-| `GET`  | `/v1/session/fact-types`          | Fact types present in working memory with counts |
-| `GET`  | `/v1/session/fact-types/:fq-name` | Detailed fact type view with role groupings      |
-| `GET`  | `/v1/session/facts/:id`           | Single fact instance                             |
-| `GET`  | `/v1/session/rules/:fq-name`      | Rule activity (matches + insertions)             |
-| `GET`  | `/v1/session/queries/:fq-name`    | Query activity (matches)                         |
-
-### Annotations
-
-| Method | Path                     | Description                   |
-| ------ | ------------------------ | ----------------------------- |
-| `GET`  | `/v1/annotations`        | Current annotation map        |
-| `POST` | `/v1/annotations/reload` | Reload sidecar file from disk |
-
-### Other
-
-| Method | Path                   | Description                                         |
-| ------ | ---------------------- | --------------------------------------------------- |
-| `GET`  | `/v1/session-snapshot` | Full point-in-time working memory snapshot          |
+All endpoints are served under `/v1/`. The full endpoint reference — including
+request/response shapes, field descriptions, and JSON schemas — is documented in
+[`docs/explorer-graph-api.md`](../docs/explorer-graph-api.md).
 
 ## Demo Workflow
 
-A quick end-to-end demo using the loan application rules. The `demo-setup` alias
-serializes a pre-built session with working memory, and `main` serves it via the
-explorer API.
+A quick end-to-end demo using the loan application rules:
 
 ```bash
 # 1. Serialize the demo session
@@ -127,42 +91,10 @@ clojure -M:demo-setup
 # 2. Start the explorer server (annotations auto-loaded by demo-run)
 clojure -M:demo-run -s demo-data/session.bin
 ```
-# 3. Explore the API
 
-## Dashboard
-curl -s http://localhost:9999/v1/rulebase-summary | jq
-
-## Rulebase Analysis (static — no session required)
-
-### All rules and rule detail
-curl -s http://localhost:9999/v1/rules | jq '[.rules[] | {name, ns, "lhs-types", "insert-types"}]'
-curl -s http://localhost:9999/v1/rules/clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved \
-  | jq '{name, lhs, "rhs-form", "insert-types", upstream, downstream}'
-
-### All queries and query detail
-curl -s http://localhost:9999/v1/queries | jq
-curl -s http://localhost:9999/v1/queries/clara.server.tools.graph.rules.loan-app-rules.find-app-outcome \
-  | jq '{name, params, lhs, upstream}'
-
-### Fact types and fact type detail
-curl -s http://localhost:9999/v1/fact-types | jq '[.["fact-types"][] | {name, "used-by-rules", "inserted-by-rules"}]'
-curl -s http://localhost:9999/v1/fact-types/clara.server.tools.graph.rules.loan_app_facts.Application | jq
-
-## Session State (requires working memory)
-
-### Fact types present in working memory with counts
-curl -s http://localhost:9999/v1/session/fact-types | jq
-
-### Single fact type drilldown — role groupings (inserted-from / used-by)
-curl -s http://localhost:9999/v1/session/fact-types/clara.server.tools.graph.rules.loan_app_facts.DocumentCheck | jq
-
-### Full working memory snapshot
-curl -s http://localhost:9999/v1/session-snapshot | jq '{"total-facts": (.["facts"] | length), "fact-types": (.["fact-types"] | keys)}'
-
-### Rule activity — all matches and insertions for a rule
-curl -s http://localhost:9999/v1/session/rules/clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved \
-  | jq '{"match-count": (.matches | length), "inserted-count": (.["inserted-facts"] | length)}'
-```
+Once the server is running, explore the API with `curl` — see the
+[Graph API reference](../docs/explorer-graph-api.md) for example requests and
+response shapes.
 
 ## Running Tests
 
