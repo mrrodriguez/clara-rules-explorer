@@ -44,35 +44,50 @@ The explorer tools were originally part of the main `clara-rules` repository. Th
 
 ### CLI Entry Point
 
-The server provides a `-main` entry point:
+The server provides a `-main` entry point with three modes:
+
+| Mode | Flag | Needs session? |
+|------|------|---------------|
+| Start HTTP server | (default, or `-s`) | Yes |
+| Generate annotations to stdout | `-g` / `--generate-annotations` | No |
+| Static analysis dump to disk | `--generate-analysis` | Yes |
+
+**Flags reference:**
+
+| Flag | Description |
+|------|-------------|
+| `-s`, `--session PATH` | Serialized Clara session file (Fressian). Required for server and `--generate-analysis` modes. |
+| `-f`, `--facts PATH` | Serialized facts file. Defaults to `<session-path>.facts`. |
+| `-a`, `--annotations PATH` | EDN sidecar annotations file ([format](docs/rule-annotations.md#path-b--sidecar-edn-file)). |
+| `-p`, `--port PORT` | Server port (default: `9999`). |
+| `-g`, `--generate-annotations PATHS` | Comma-separated Clojure source paths for annotation generation. |
+| `--generate-analysis DIR` | Output directory for `annotations.edn` + `analysis.edn` dump. |
+| `--load-session-state-fn SYMBOL` | Fully qualified symbol for a custom session deserializer (see below). |
+
+**Quick examples:**
 
 ```bash
-# Run the explorer server
-clojure -M -m clara.server.graph.main -s path/to/session.bin [-a path/to/annotations.edn] [-p 9999] [--load-session-state-fn my.namespace/my-fn]
+# Start the explorer server
+clojure -M -m clara.server.graph.main -s session.bin -a annotations.edn
 
-# Generate sidecar annotations statically from source paths
-clojure -M -m clara.server.graph.main -g path/to/rules.clj,path/to/other_rules.clj
+# Print annotations to stdout (no session needed)
+clojure -M -m clara.server.graph.main -g src/my_rules.clj,src/other_rules.clj
+
+# Static dump: annotations + full analysis to disk
+clojure -M -m clara.server.graph.main --generate-analysis out -s session.bin -g src/my_rules.clj
 ```
 
-| Flag                        | Required | Description                                                                         |
-| --------------------------- | -------- | ----------------------------------------------------------------------------------- |
-| `-s` / `--session`          | Yes (unless `-g` is given) | Path to a serialized Clara session file (Fressian format).                  |
-| `-g` / `--generate-annotations` | Yes (unless `-s` is given) | Generate annotations EDN for Clojure source paths (comma-separated).       |
-| `-f` / `--facts`            | No       | Path to the serialized facts file. Defaults to `<session-path>.facts` when omitted. |
-| `-a` / `--annotations`      | No       | Path to an EDN sidecar file with rule metadata annotations.                         |
-| `-p` / `--port`             | No       | Server port (default: `9999`).                                                      |
-| `--load-session-state-fn`   | No       | Fully qualified symbol naming a function to deserialize the session state.          |
+For detailed CLI workflows and the programmatic REPL API, see [Rule Annotations → CLI and Standalone Usage](docs/rule-annotations.md#cli-and-standalone-usage).
 
-By default, the server uses Fressian deserialization to load the session state from disk. If you want to use your own deserializer (e.g. Nippy, transit, or a custom Fressian setup), you can pass a fully qualified symbol to `--load-session-state-fn`. This function must accept two arguments (`session-path` and `facts-path`) and return the deserialized Clara session.
+### Session Loading
 
-Example:
+By default, the session is deserialized from Fressian using `clara.rules.durability`. The session must have been serialized with `{:with-rulebase? true}` so the compiled rulebase is embedded — this is required for static rulebase analysis.
+
+To use a custom deserializer (e.g. Nippy, transit, or a custom Fressian setup), pass `--load-session-state-fn` with a fully qualified symbol. The function must accept `(session-path facts-path)` and return the deserialized Clara session:
+
 ```bash
-clojure -M -m clara.server.graph.main -s path/to/session.bin --load-session-state-fn my.namespace/load-session
+clojure -M -m clara.server.graph.main -s session.bin --load-session-state-fn my.namespace/load-session
 ```
-
-When `--session` is provided, the server uses `clara.rules.durability` to deserialize the session from disk. The session is expected to have been serialized with `{:with-rulebase? true}` so that the compiled rulebase is embedded — this is required for static rulebase analysis.
-
-The `--annotations` file follows the [sidecar EDN format](./docs/rule-annotations.md), keyed by rule FQ-name, to declare insert/retract types and notes for dependency graph construction.
 
 ## API Endpoints
 

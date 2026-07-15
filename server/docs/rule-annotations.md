@@ -131,7 +131,36 @@ clojure -M -m clara.server.graph.main -g path/to/my_rules.clj,path/to/other_rule
                   :filename "path/to/my_rules.clj"}]}}}
 ```
 
-### 2. Programmatic In-Memory Analysis (REPL Injection)
+### 2. Generating Static Analysis Dump via CLI
+
+The `--generate-analysis` flag produces a complete static analysis dump to disk — both annotations and full rulebase analysis — without starting an HTTP server. This is the recommended workflow when introspecting a new ruleset that hasn't been annotated yet: you get the auto-generated annotations (which you can save and iteratively refine) alongside the full analysis (rules, queries, fact-types, dependency graph, and unresolved detections).
+
+This mode requires a serialized session (`-s PATH`) and accepts the same session-loading arguments as the server mode (`-f`, `--load-session-state-fn`). Annotations are either generated from explicit source paths or auto-discovered from the session's compiled namespaces via clj-kondo.
+
+```bash
+# With explicit source paths for annotation generation
+clojure -M -m clara.server.graph.main --generate-analysis out \
+  -s path/to/session.bin -g path/to/my_rules.clj
+
+# Auto-discover annotations from session namespaces (sources must be on classpath)
+clojure -M -m clara.server.graph.main --generate-analysis out \
+  -s path/to/session.bin
+
+# With a custom session loader
+clojure -M -m clara.server.graph.main --generate-analysis out \
+  -s path/to/session.bin --load-session-state-fn my.app/load-session
+```
+
+Output:
+```
+out/
+├── annotations.edn   # Auto-generated sidecar annotations
+└── analysis.edn      # Full rulebase-analysis (rules, queries, fact-types, dep-graph, unresolved)
+```
+
+When `-g` source paths are omitted, annotations are auto-discovered from the session's compiled namespaces via clj-kondo (sources must be on the classpath).
+
+### 3. Programmatic In-Memory Analysis (REPL Injection)
 
 If you are running a JVM REPL in an existing project that compiles Clara rules, you can inject the Explorer server library onto your classpath dynamically to analyze in-memory sessions.
 
