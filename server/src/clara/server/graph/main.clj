@@ -11,7 +11,6 @@
             [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.annotations :as annotations]
             [clara.server.tools.graph.core :as core]
-            [clara.server.tools.graph.serialize :as serialize]
             [clojure.pprint :as pprint])
   (:import [java.io EOFException]))
 
