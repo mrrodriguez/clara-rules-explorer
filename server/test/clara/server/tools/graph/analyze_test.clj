@@ -1,5 +1,6 @@
 (ns clara.server.tools.graph.analyze-test
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [clara.rules :as r]
             [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
@@ -219,6 +220,28 @@
                            :ns-name-sym ns-sym :filename filename}]}
              (:clara-rules/dynamic-retract-types-detected (get ann `atr/rule-retract-helper-call))))
       (is (nil? (:clara-rules/retract-types (get ann `atr/rule-retract-helper-call)))))))
+
+(deftest test-generate-annotations--excludes-insert-retract-machinery
+  (testing "clara.rules insert!/retract! fns (and their non-! wrappers) never leak
+            in as their own empty annotation entries"
+    (let [ann edge-case-annotations
+          ;; The full set that used to leak: every insert/retract fn the analyzer
+          ;; recognizes, plus the non-! wrappers that reach them transitively.
+          machinery '#{clara.rules/insert clara.rules/insert!
+                       clara.rules/insert-unconditional clara.rules/insert-unconditional!
+                       clara.rules/insert-all clara.rules/insert-all!
+                       clara.rules/insert-all-unconditional!
+                       clara.rules/retract clara.rules/retract!
+                       clara.rules.engine/insert-facts!
+                       clara.rules.engine/rhs-retract-facts!}]
+      (is (empty? (filter machinery (keys ann)))
+          "insert/retract machinery fns must not appear as annotation keys")
+      (is (empty? (filter (fn [[_ v]] (and (map? v) (empty? v))) ann))
+          "no entry should be an empty {} annotation")
+      ;; Guard the general invariant: unfiltered output is real rules only.
+      (is (every? #(str/starts-with? (namespace %) "clara.server.tools.graph.rules")
+                  (keys ann))
+          "unfiltered annotations should contain only project rule vars"))))
 
 (deftest test-generate-annotations-from-paths--no-output-types-and-filter
   (let [ann edge-case-annotations

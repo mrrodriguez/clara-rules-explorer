@@ -574,10 +574,20 @@
         annotations
         (into (sorted-map)
               (keep (fn [v]
-                      (if-let [annotation (infer-annotation-for-var v infer-ctx)]
-                        [v annotation]
-                        (when (seq rules-filter)
-                          [v {:clara-rules/no-output-types true}]))))
+                      (let [annotation (infer-annotation-for-var v infer-ctx)]
+                        (cond
+                          ;; Real annotation with inferred insert/retract data.
+                          (seq annotation)   [v annotation]
+                          ;; Explicitly-requested rule that produces nothing: mark it.
+                          (seq rules-filter) [v {:clara-rules/no-output-types true}]
+                          ;; Otherwise drop it. `infer-annotation-for-var` returns an
+                          ;; empty map (truthy) for vars that classify as inserters/
+                          ;; retractors but carry no fact types or callsites -- i.e. the
+                          ;; clara.rules insert!/retract! machinery fns and their non-!
+                          ;; wrappers (insert/retract), which land in the call graph but
+                          ;; are not rules. A real rule always yields a type or a dynamic
+                          ;; callsite, so dropping empty {} annotations loses nothing.
+                          :else              nil))))
               var-seq)]
     annotations))
 
