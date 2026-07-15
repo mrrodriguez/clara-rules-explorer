@@ -179,15 +179,24 @@
     (binding [*print-meta* true]
       (pp/pprint annotations w))))
 
+(defn- ensure-unsorted-map
+  [m]
+  (if (and (sorted? m) (map? m))
+    (into {} m)
+    m))
+
 (defn resolve-annotations
   "Merges Path A (rule props) and Path B (sidecar) metadata for a production.
    Returns a map with resolved `:insert-types`, `:retract-types`,
    `:resolved-annotation-data`, and `:notes`."
   [production sidecar-annotations]
-  (let [fq-name (:name production)
+  ;; `sidecar-annotations` may be `sorted?` which will problem with heterogenous symbol vs keyword
+  ;; fully-qualified production names. So ensure it is unsorted here.
+  (let [sidecar-map (ensure-unsorted-map sidecar-annotations)
+        fq-name (:name production)
         props (:props production)
-        sidecar (or (get sidecar-annotations fq-name)
-                    (get sidecar-annotations (symbol fq-name)))
+        sidecar (or (get sidecar-map fq-name)
+                    (get sidecar-map (symbol fq-name)))
         production-ns (get-production-ns production)
 
         props-inserts   (resolve-types production-ns
