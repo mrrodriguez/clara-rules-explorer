@@ -175,7 +175,6 @@
 
             _ (println "Running rulebase analysis...")
             analysis (core/rulebase-analysis loaded-session annotations)
-            analysis' (serialize/prune-fns analysis)
 
             _ (.mkdirs (io/file generate-analysis-dir))
 
@@ -187,7 +186,7 @@
 
         (spit analysis-path
               (with-out-str
-                (pprint/pprint analysis')))
+                (pprint/pprint analysis)))
         (println (format "Analysis written to: %s" analysis-path))))))
 
 (defn run-explorer-server

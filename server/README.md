@@ -77,7 +77,7 @@ clojure -M -m clara.server.graph.main -g src/my_rules.clj,src/other_rules.clj
 clojure -M -m clara.server.graph.main --generate-analysis out -s session.bin -g src/my_rules.clj
 ```
 
-For detailed CLI workflows and the programmatic REPL API, see [Rule Annotations → CLI and Standalone Usage](docs/rule-annotations.md#cli-and-standalone-usage).
+For detailed CLI workflows and the programmatic REPL API, see [Rule Annotations → Usage Workflows](docs/rule-annotations.md#usage-workflows).
 
 ### Session Loading
 
