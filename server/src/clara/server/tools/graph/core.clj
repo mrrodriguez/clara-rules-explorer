@@ -8,15 +8,6 @@
             [clojure.string :as str])
   (:import [clara.rules.engine LocalSession]))
 
-(defn- remove-nil-vals
-  "Returns the map `m` with all entries whose value is nil removed."
-  [m]
-  (->> m
-       (reduce-kv (fn [m' k v]
-                    (if (nil? v) (dissoc! m' k) m'))
-                  (transient m))
-       persistent!))
-
 (defn- get-rulebase [session-or-rulebase]
   (if (instance? LocalSession session-or-rulebase)
     (-> session-or-rulebase eng/components :rulebase)
@@ -54,7 +45,7 @@
           (update :upstream serialize-deps)
           (update :downstream serialize-deps)
           (select-keys [:upstream :downstream])
-          remove-nil-vals))))
+          serialize/remove-nil-vals))))
 
 (defn- rule-is-source?
   [{p-name :name :keys [rhs] :as _production} dep-graph]
@@ -98,9 +89,9 @@
                         (not (:no-output-types ann))
                         (rule-is-sink? production dep-graph production-map))
         dynamic-inserts (some-> (:dynamic-insert-types-detected ann)
-                                serialize/serialize-dynamic-detection)
+                                (serialize/serialize-dynamic-detection p-ns-name))
         dynamic-retracts (some-> (:dynamic-retract-types-detected ann)
-                                 serialize/serialize-dynamic-detection)
+                                 (serialize/serialize-dynamic-detection p-ns-name))
         summary
         (cond-> {:name               p-name
                  :ns                 (str p-ns-name)
@@ -328,7 +319,9 @@
   [analysis]
   (mapv #(select-keys % [:name :ns :doc :lhs-types :insert-types :retract-types
                          :source-rule :sink-rule :unlinked-rule
-                         :no-output-types :upstream :downstream])
+                         :no-output-types :upstream :downstream
+                         :dynamic-insert-types-detected
+                         :dynamic-retract-types-detected])
         (vals (:rules analysis))))
 
 (defn queries-list

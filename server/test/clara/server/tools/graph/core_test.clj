@@ -371,3 +371,71 @@
       (is (empty? (:retract-types rule)))
       (is (false? (:sink-rule rule))
           "No-output rule should not be considered a sink"))))
+
+(deftest test-dynamic-detection-in-rules-list
+  (let [session (->test-session)
+        analysis (core/rulebase-analysis session loan-doc-annotations)
+        rule-list (core/rules-list analysis)
+        rule-by-name #(first (filter (fn [r] (= (:name r) %)) rule-list))]
+
+    (testing "Resolved dynamic-insert rule via Java constructor"
+      (let [rule (rule-by-name "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review")]
+        (is (= ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"]
+               (:insert-types rule)))
+        (let [dyn (:dynamic-insert-types-detected rule)]
+          (is (= :full (:resolution dyn)))
+          (is (= 1 (count (:callsites dyn))))
+          (is (= [{:source-str "(build-compliance-review ?app-id)"
+                   :ns "clara.server.tools.graph.rules.loan-doc-rules"
+                   :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
+                   :constructor "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"
+                   :status :resolved
+                   :resolved-types
+                   ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"]}]
+                 (:callsites dyn))))))
+
+    (testing "Resolved dynamic-insert rule via metadata-map"
+      (let [rule (rule-by-name "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata")]
+        (is (= ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"]
+               (:insert-types rule)))
+        (let [dyn (:dynamic-insert-types-detected rule)]
+          (is (= :full (:resolution dyn)))
+          (is (= 1 (count (:callsites dyn))))
+          (is (= [{:source-str "(build-compliance-via-metadata ?app-id)"
+                   :ns "clara.server.tools.graph.rules.loan-doc-rules"
+                   :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
+                   :status :resolved
+                   :resolved-types
+                   ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"]}]
+                 (:callsites dyn))))))
+
+    (testing "Resolved dynamic-retract rule"
+      (let [rule (rule-by-name "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice")]
+        (is (= ["clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"]
+               (:retract-types rule)))
+        (let [dyn (:dynamic-retract-types-detected rule)]
+          (is (= :full (:resolution dyn)))
+          (is (= 1 (count (:callsites dyn))))
+          (is (= [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
+                   :ns "clara.server.tools.graph.rules.loan-doc-rules"
+                   :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
+                   :constructor "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"
+                   :status :resolved
+                   :resolved-types
+                   ["clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"]}]
+                 (:callsites dyn))))))
+
+    (testing "Unresolved dynamic-insert rule has callsite info but no insert-types"
+      (let [rule (rule-by-name "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail")]
+        (is (contains? rule :unlinked-rule))
+        (is (empty? (:insert-types rule)))
+        (let [dyn (:dynamic-insert-types-detected rule)]
+          (is (= :none (:resolution dyn)))
+          (is (= 1 (count (:callsites dyn))))
+          (is (= [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
+                   :ns "clara.server.tools.graph.rules.loan-doc-rules"
+                   :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
+                   :constructor "clara.server.tools.graph.rules.loan-doc-rules/build-audit-trail-entry"
+                   :status :unresolved
+                   :reason :non-fact-constructor}]
+                 (:callsites dyn))))))))

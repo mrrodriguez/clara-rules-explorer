@@ -2,6 +2,7 @@
   "Helpers for serializing Clara rulebase structures to JSON-friendly formats."
   (:require
    [clojure.pprint :as pp]
+   [clojure.set :as set]
    [clojure.string :as str]
    [clojure.walk :as w]))
 
@@ -122,22 +123,42 @@
   [rhs-form]
   (with-out-str (pp/pprint rhs-form)))
 
+(defn remove-nil-vals
+  "Returns the map `m` with all entries whose value is nil removed."
+  [m]
+  (->> m
+       (reduce-kv (fn [m' k v]
+                    (if (nil? v) (dissoc! m' k) m'))
+                  (transient m))
+       persistent!))
+
 (defn serialize-dynamic-callsite
   "Serializes a dynamic callsite entry for JSON output.
-   Converts ns-name-sym to string, type-form to string (when present), and
-   resolves resolved-types to fully-qualified names (using the same
-   logic as serialize-fact-type)."
-  [callsite]
-  (cond-> (update callsite :ns-name-sym #(if (symbol? %) (str %) %))
-    (contains? callsite :type-form)
-    (update :type-form #(if (symbol? %) (str %) %))
-    (seq (:resolved-types callsite))
-    (update :resolved-types #(mapv (partial resolve-type nil) %))))
+   - :ns-name-sym → :ns (string).
+   - :constructor resolved via resolve-type if a symbol.
+   - :type-form stripped (annotation-only field).
+   - Other keys (:status, :reason, etc.) pass through as-is;
+     the JSON encoder handles keyword→string conversion.
+   ns-name is the production's namespace, used to resolve types."
+  [callsite ns-name]
+  (-> callsite
+      ;; rename :ns-name-sym → :ns, convert symbol → string
+      (set/rename-keys {:ns-name-sym :ns})
+      (update :ns #(if (symbol? %) (str %) %))
+      ;; resolve :constructor to a fully-qualified class name
+      (update :constructor #(if (symbol? %) (resolve-type ns-name %) %))
+      ;; strip annotation-only fields
+      (dissoc :type-form)
+      ;; resolve :resolved-types
+      (cond-> (seq (:resolved-types callsite))
+        (update :resolved-types #(mapv (partial resolve-type ns-name) %)))
+      remove-nil-vals))
 
 (defn serialize-dynamic-detection
   "Serializes a dynamic detection info map (:dynamic-insert-types-detected or
-   :dynamic-retract-types-detected) for JSON output."
-  [detection]
+   :dynamic-retract-types-detected) for JSON output.
+   ns-name is the production's namespace, used to resolve type symbols."
+  [detection ns-name]
   (cond-> detection
     (:callsites detection)
-    (update :callsites #(mapv serialize-dynamic-callsite %))))
+    (update :callsites (fn [callsites] (mapv #(serialize-dynamic-callsite % ns-name) callsites)))))

@@ -127,7 +127,7 @@ List of all rules with lightweight summaries (load order).
   "callsites": [
     {
       "source-str": "(with-meta {:app-id ?app-id} {:type :case/metadata-output})",
-      "ns-name-sym": "my.ns",
+      "ns": "my.ns",
       "filename": "src/my/ns.clj",
       "constructor": "fact-model.core/->fact",
       "status": "resolved",
@@ -147,7 +147,7 @@ List of all rules with lightweight summaries (load order).
 | Key | Type | Description |
 |-----|------|-------------|
 | `source-str` | string | The extracted Clojure argument form passed to `insert!`/`retract!`. |
-| `ns-name-sym` | string | Fully qualified namespace symbol string. |
+| `ns` | string | Fully qualified namespace string (e.g., `"my.ns"`). |
 | `filename` | string | Source file path where the callsite was detected. |
 | `constructor` | string? | When resolved, the fully-qualified constructor or builder function name (e.g., `"facts.model.core/->fact"`). |
 | `status` | string? | Resolution status of this callsite. `"resolved"` (single type), `"resolved-multi"` (multiple types), `"unresolved"` (could not determine). |
