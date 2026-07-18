@@ -16,6 +16,41 @@
 
 (defrecord AllIdCardGivenDocuments [app-id docs])
 
+;; ---------------------------------------------------------------------------
+;; Loan-processing fact types for dynamic-rule demo
+;; These fit the loan theme but are NOT consumed by other rules, so they
+;; don't interfere with existing behavioral tests.
+;; ---------------------------------------------------------------------------
+
+(defrecord ComplianceReview [app-id status reviewer])
+(defrecord StaleDocumentNotice [app-id doc-type reason])
+(defrecord AuditTrail [app-id action timestamp])
+
+;; ---------------------------------------------------------------------------
+;; Dynamic helper functions — demonstrate callsite capture
+;; ---------------------------------------------------------------------------
+
+(defn build-compliance-review
+  "Builds a ComplianceReview via Java constructor.
+   The analyzer cannot trace through a Java ctor, so this produces
+   a dynamic callsite that requires sidecar annotation to resolve."
+  [app-id]
+  (ComplianceReview. app-id :pass "automated-review"))
+
+(defn build-compliance-via-metadata
+  "Builds a ComplianceReview via metadata-map style.
+   The fact type is embedded in metadata — unresolvable statically."
+  [app-id]
+  (with-meta {:app-id app-id :status :pass :reviewer "metadata-review"}
+    {:type :compliance-review-result}))
+
+(defn build-audit-trail-entry
+  "Builds an AuditTrail via an opaque builder function.
+   The analyzer knows an insert happened but cannot determine the fact type
+   because the constructor is a custom fn with no recognisable pattern."
+  [app-id action]
+  (AuditTrail. app-id action (System/currentTimeMillis)))
+
 (r/defrule collect-app-id-card-given-docs
   [Application (= ?app-id app-id)]
   [?docs <- (acc/all) :from [GivenDocument (= ?app-id app-id)
@@ -79,3 +114,39 @@
 (r/defquery find-document-check
   [:?app-id]
   [?document-check <- DocumentCheck (= ?app-id app-id)])
+
+;; ---------------------------------------------------------------------------
+;; Dynamic rule examples — demonstrate callsite capture for the demo
+;; These fire after a document check passes and insert/retract loan-processing
+;; fact types via dynamic constructors (Java ctor, metadata-map, opaque builder).
+;; ---------------------------------------------------------------------------
+
+(r/defrule dynamic-insert-compliance-review
+  "After document checks pass, trigger a compliance review via Java constructor.
+   The analyzer sees the ComplianceReview. call but cannot statically determine
+   its return type — captured as a dynamic insert callsite."
+  [DocumentCheck (= ?app-id app-id) (= status :pass)]
+  =>
+  (r/insert! (build-compliance-review ?app-id)))
+
+(r/defrule dynamic-insert-compliance-metadata
+  "Same compliance review, but built via metadata-map style.
+   The analyzer captures the with-meta form as a dynamic callsite."
+  [DocumentCheck (= ?app-id app-id) (= status :pass)]
+  =>
+  (r/insert! (build-compliance-via-metadata ?app-id)))
+
+(r/defrule dynamic-retract-stale-notice
+  "When doc check passes, retract any stale-document notice via Java constructor.
+   The analyzer captures the retract callsite with source coordinates."
+  [DocumentCheck (= ?app-id app-id) (= status :pass)]
+  =>
+  (r/retract! (StaleDocumentNotice. ?app-id :paystub "no-longer-needed")))
+
+(r/defrule dynamic-insert-audit-trail
+  "After document checks pass, write an audit trail entry via opaque builder.
+   The analyzer detects an insert but cannot resolve the fact type — the
+   builder is a custom non-record function. This stays unresolved."
+  [DocumentCheck (= ?app-id app-id) (= status :pass)]
+  =>
+  (r/insert! (build-audit-trail-entry ?app-id :doc-check-passed)))

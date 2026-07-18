@@ -224,6 +224,10 @@
                #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"},
                :downstream
                #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
+                 "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
+                 "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata"
+                 "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
+                 "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
                  "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"}},
@@ -242,7 +246,19 @@
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"},
                :downstream
                #{"clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"}}}
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"}},
+              "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+              "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+              "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+              "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}}}
              graph)))))
 
 ;;;;
@@ -294,6 +310,8 @@
               "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"
               "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput"
               "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"
+              "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"
+              "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"
               "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"
               "clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
               "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"]

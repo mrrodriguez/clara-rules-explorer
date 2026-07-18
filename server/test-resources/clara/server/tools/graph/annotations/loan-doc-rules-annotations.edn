@@ -11,4 +11,71 @@
  {:clara-rules/insert-types [DocumentCheck]}
 
  clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs
- {:clara-rules/no-output-types true}}
+ {:clara-rules/no-output-types true}
+
+ ;; ---------------------------------------------------------------------------
+ ;; Dynamic rule annotations — enriched with callsite resolution info
+ ;;
+ ;; The analyzer detects dynamic insert!/retract! callsites but cannot
+ ;; statically determine fact types for Java constructors, metadata-map facts,
+ ;; or opaque builder functions. These sidecar annotations supply the resolved
+ ;; fact types AND the enriched dynamic-callsite info so the demo API shows
+ ;; both resolved types and callsite details side by side.
+ ;; ---------------------------------------------------------------------------
+
+ ;; Resolved: Java-constructor insert
+ clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review
+ {:clara-rules/insert-types [ComplianceReview]
+  :clara-rules/dynamic-insert-types-detected
+  {:callsites
+   [{:source-str "(build-compliance-review ?app-id)"
+     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
+     :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :constructor clara.server.tools.graph.rules.loan-doc-rules/ComplianceReview
+     :type-form clara.server.tools.graph.rules.loan-doc-rules/ComplianceReview
+     :status :resolved
+     :resolved-types [clara.server.tools.graph.rules.loan-doc-rules/ComplianceReview]}]
+   :resolution :full}
+  :clara-rules/notes "Compliance review inserted via Java constructor — fully resolved"}
+
+ ;; Resolved: metadata-map insert
+ clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata
+ {:clara-rules/insert-types [ComplianceReview]
+  :clara-rules/dynamic-insert-types-detected
+  {:callsites
+   [{:source-str "(build-compliance-via-metadata ?app-id)"
+     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
+     :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :status :resolved
+     :type-form :compliance-review-result
+     :resolved-types [clara.server.tools.graph.rules.loan-doc-rules/ComplianceReview]}]
+   :resolution :full}
+  :clara-rules/notes "Compliance review inserted via metadata-map — fully resolved"}
+
+ ;; Resolved: Java-constructor retract
+ clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice
+ {:clara-rules/retract-types [StaleDocumentNotice]
+  :clara-rules/dynamic-retract-types-detected
+  {:callsites
+   [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
+     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
+     :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :constructor "clara.server.tools.graph.rules.loan-doc-rules.StaleDocumentNotice"
+     :type-form clara.server.tools.graph.rules.loan-doc-rules/StaleDocumentNotice
+     :status :resolved
+     :resolved-types [clara.server.tools.graph.rules.loan-doc-rules/StaleDocumentNotice]}]
+   :resolution :full}
+  :clara-rules/notes "Stale document notice retracted via Java constructor — fully resolved"}
+
+ ;; Unresolved: opaque builder insert
+ clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail
+ {:clara-rules/dynamic-insert-types-detected
+  {:callsites
+   [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
+     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
+     :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :constructor "clara.server.tools.graph.rules.loan-doc-rules/build-audit-trail-entry"
+     :status :unresolved
+     :reason :non-fact-constructor}]
+   :resolution :none}
+  :clara-rules/notes "Audit trail insert via opaque builder — unresolved, type unknown"}}
