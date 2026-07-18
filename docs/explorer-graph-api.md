@@ -130,7 +130,6 @@ List of all rules with lightweight summaries (load order).
       "ns-name-sym": "my.ns",
       "filename": "src/my/ns.clj",
       "constructor": "fact-model.core/->fact",
-      "type-form": ":case/metadata-output",
       "status": "resolved",
       "resolved-types": [":case/metadata-output"]
     }
@@ -151,7 +150,6 @@ List of all rules with lightweight summaries (load order).
 | `ns-name-sym` | string | Fully qualified namespace symbol string. |
 | `filename` | string | Source file path where the callsite was detected. |
 | `constructor` | string? | When resolved, the fully-qualified constructor or builder function name (e.g., `"facts.model.core/->fact"`). |
-| `type-form` | string? | When resolved, the fact-type form captured at the callsite (e.g., `":case/metadata-output"` for a keyword, or a symbol that resolves to a fully-qualified class name). |
 | `status` | string? | Resolution status of this callsite. `"resolved"` (single type), `"resolved-multi"` (multiple types), `"unresolved"` (could not determine). |
 | `resolved-types` | string[]? | Concrete fact type(s) resolved for this callsite. Present when `status` is `"resolved"` or `"resolved-multi"`. |
 | `reason` | string? | Reason for `"unresolved"` status (e.g., `":non-fact-constructor"`). |
