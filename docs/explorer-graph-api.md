@@ -129,7 +129,6 @@ List of all rules with lightweight summaries (load order).
       "source-str": "(with-meta {:app-id ?app-id} {:type :case/metadata-output})",
       "ns": "my.ns",
       "filename": "src/my/ns.clj",
-      "constructor": "fact-model.core/->fact",
       "status": "resolved",
       "resolved-types": [":case/metadata-output"]
     }
@@ -149,10 +148,8 @@ List of all rules with lightweight summaries (load order).
 | `source-str` | string | The extracted Clojure argument form passed to `insert!`/`retract!`. |
 | `ns` | string | Fully qualified namespace string (e.g., `"my.ns"`). |
 | `filename` | string | Source file path where the callsite was detected. |
-| `constructor` | string? | When resolved, the fully-qualified constructor or builder function name (e.g., `"facts.model.core/->fact"`). |
 | `status` | string? | Resolution status of this callsite. `"resolved"` (single type), `"resolved-multi"` (multiple types), `"unresolved"` (could not determine). |
 | `resolved-types` | string[]? | Concrete fact type(s) resolved for this callsite. Present when `status` is `"resolved"` or `"resolved-multi"`. |
-| `reason` | string? | Reason for `"unresolved"` status (e.g., `":non-fact-constructor"`). |
 | `resolution-method` | string? | Method used for `"resolved-multi"` resolution (e.g., `":repl-config-enumeration"`). |
 
 **`unlinked-rule` object:**

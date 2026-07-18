@@ -135,20 +135,14 @@
 (defn serialize-dynamic-callsite
   "Serializes a dynamic callsite entry for JSON output.
    - :ns-name-sym → :ns (string).
-   - :constructor resolved via resolve-type if a symbol.
-   - :type-form stripped (annotation-only field).
-   - Other keys (:status, :reason, etc.) pass through as-is;
-     the JSON encoder handles keyword→string conversion.
+   - select-keys allowlist restricts to API-relevant keys.
    ns-name is the production's namespace, used to resolve types."
   [callsite ns-name]
   (-> callsite
       ;; rename :ns-name-sym → :ns, convert symbol → string
       (set/rename-keys {:ns-name-sym :ns})
       (update :ns #(if (symbol? %) (str %) %))
-      ;; resolve :constructor to a fully-qualified class name
-      (update :constructor #(if (symbol? %) (resolve-type ns-name %) %))
-      ;; strip annotation-only fields
-      (dissoc :type-form)
+      (select-keys #{:source-str :ns :filename :status :resolved-types :resolution-method})
       ;; resolve :resolved-types
       (cond-> (seq (:resolved-types callsite))
         (update :resolved-types #(mapv (partial resolve-type ns-name) %)))

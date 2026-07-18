@@ -56,10 +56,8 @@
   {:source-str s/Str
    :ns s/Str
    :filename s/Str
-   (s/optional-key :constructor) s/Str
    (s/optional-key :status) s/Keyword
    (s/optional-key :resolved-types) [s/Str]
-   (s/optional-key :reason) s/Keyword
    (s/optional-key :resolution-method) s/Str})
 
 (s/defschema DynamicDetectionInfo

@@ -388,7 +388,6 @@
           (is (= [{:source-str "(build-compliance-review ?app-id)"
                    :ns "clara.server.tools.graph.rules.loan-doc-rules"
                    :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
-                   :constructor "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"
                    :status :resolved
                    :resolved-types
                    ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"]}]
@@ -419,7 +418,6 @@
           (is (= [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
                    :ns "clara.server.tools.graph.rules.loan-doc-rules"
                    :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
-                   :constructor "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"
                    :status :resolved
                    :resolved-types
                    ["clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"]}]
@@ -435,7 +433,5 @@
           (is (= [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
                    :ns "clara.server.tools.graph.rules.loan-doc-rules"
                    :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
-                   :constructor "clara.server.tools.graph.rules.loan-doc-rules/build-audit-trail-entry"
-                   :status :unresolved
-                   :reason :non-fact-constructor}]
+                   :status :unresolved}]
                  (:callsites dyn))))))))
