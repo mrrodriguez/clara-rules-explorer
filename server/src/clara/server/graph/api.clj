@@ -57,7 +57,6 @@
    :ns-name-sym s/Str
    :filename s/Str
    (s/optional-key :constructor) s/Str
-   (s/optional-key :type-form) s/Str
    (s/optional-key :status) s/Str
    (s/optional-key :resolved-types) [s/Str]
    (s/optional-key :reason) s/Str
