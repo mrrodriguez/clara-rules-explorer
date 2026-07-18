@@ -50,6 +50,24 @@
    (s/optional-key :fact-binding) s/Any
    s/Keyword s/Any})
 
+(s/defschema DynamicCallsiteEntry
+  "A single dynamic-insert/retract callsite with source coordinates
+   and optional resolution info."
+  {:source-str s/Str
+   :ns-name-sym s/Str
+   :filename s/Str
+   (s/optional-key :constructor) s/Str
+   (s/optional-key :type-form) s/Str
+   (s/optional-key :status) s/Str
+   (s/optional-key :resolved-types) [s/Str]
+   (s/optional-key :reason) s/Str
+   (s/optional-key :resolution-method) s/Str})
+
+(s/defschema DynamicDetectionInfo
+  "Info about dynamic insert/retract callsites detected by the analyzer."
+  {:callsites [DynamicCallsiteEntry]
+   (s/optional-key :resolution) (s/enum :full :partial :none)})
+
 (s/defschema RuleListItem
   "Lightweight rule summary (list endpoint)."
   {:name          s/Str
@@ -64,7 +82,9 @@
                                              :reason s/Str})
    (s/optional-key :no-output-types) s/Bool
    (s/optional-key :upstream)   [ProductionDep]
-   (s/optional-key :downstream) [ProductionDep]})
+   (s/optional-key :downstream) [ProductionDep]
+   (s/optional-key :dynamic-insert-types-detected) DynamicDetectionInfo
+   (s/optional-key :dynamic-retract-types-detected) DynamicDetectionInfo})
 
 (s/defschema Rule
   "Full rule detail with LHS/RHS forms, props, and annotations."

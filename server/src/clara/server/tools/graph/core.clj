@@ -97,6 +97,10 @@
         sink-rule? (and (not unlinked?)
                         (not (:no-output-types ann))
                         (rule-is-sink? production dep-graph production-map))
+        dynamic-inserts (some-> (:dynamic-insert-types-detected ann)
+                                serialize/serialize-dynamic-detection)
+        dynamic-retracts (some-> (:dynamic-retract-types-detected ann)
+                                 serialize/serialize-dynamic-detection)
         summary
         (cond-> {:name               p-name
                  :ns                 (str p-ns-name)
@@ -132,7 +136,10 @@
           (assoc :params (serialize/stringify-idents-coll (:params production)))
 
           (seq upstream) (assoc :upstream upstream)
-          (seq downstream) (assoc :downstream downstream))]
+          (seq downstream) (assoc :downstream downstream)
+
+          (some? dynamic-inserts) (assoc :dynamic-insert-types-detected dynamic-inserts)
+          (some? dynamic-retracts) (assoc :dynamic-retract-types-detected dynamic-retracts))]
     summary))
 
 (defn- detect-unresolved

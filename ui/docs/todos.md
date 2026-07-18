@@ -1,9 +1,5 @@
-1. Our analyzed annotations format supports :clara-rules/dynamic-insert-types-detected and :clara-rules/dynamic-retract-types-detected . The UI should represent these and also be able to show callsite info for this and resolve info when available.
+1. Our analyzed annotations format supports :clara-rules/dynamic-insert-types-detected and :clara-rules/dynamic-retract-types-detected . The API should represent these and also be able to show callsite info for this and resolve info when available. We need to extend our graph API to show this and we need to keep in mind our API schema and docs involved. clara.server.tools.graph.analyze-test has good example dynamic rules. we'll need to add a few dynamic rule cases to our main smoke testing rules so we can see it in our demo. That'll involved /Users/mrrodriguez/Projects/clara-rules-explorer/server/test-resources/clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn and clara.server.tools.graph.rules.loan-doc-rules .
 
-2. The UI and API should be able to show details about the annotations dynamic type handling when
-   certain details are provided regarding resolved a dynamic type to its actual types for the graph
-   vs partial vs none.
-   
    Here is an example of a more sophisticated type of annotations we want to work with:
 ```
 #:gateless-product-ruleset.checksum-data.core{conditions-report-checksum-case-metadata-rule
@@ -70,3 +66,9 @@
                                                              :resolution
                                                              :none}}}
 ```
+
+
+2. The UI should be able to show details about the annotations dynamic type handling and resolution
+   results when that is what it is working with. certain details are provided regarding resolved a dynamic type to its actual types for the graph
+   vs partial vs none.
+   

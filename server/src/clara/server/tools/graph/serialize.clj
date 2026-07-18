@@ -121,3 +121,23 @@
 (defn serialize-rhs-form
   [rhs-form]
   (with-out-str (pp/pprint rhs-form)))
+
+(defn serialize-dynamic-callsite
+  "Serializes a dynamic callsite entry for JSON output.
+   Converts ns-name-sym to string, type-form to string (when present), and
+   resolves resolved-types to fully-qualified names (using the same
+   logic as serialize-fact-type)."
+  [callsite]
+  (cond-> (update callsite :ns-name-sym #(if (symbol? %) (str %) %))
+    (contains? callsite :type-form)
+    (update :type-form #(if (symbol? %) (str %) %))
+    (seq (:resolved-types callsite))
+    (update :resolved-types #(mapv (partial resolve-type nil) %))))
+
+(defn serialize-dynamic-detection
+  "Serializes a dynamic detection info map (:dynamic-insert-types-detected or
+   :dynamic-retract-types-detected) for JSON output."
+  [detection]
+  (cond-> detection
+    (:callsites detection)
+    (update :callsites #(mapv serialize-dynamic-callsite %))))

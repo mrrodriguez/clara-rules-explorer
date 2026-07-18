@@ -112,6 +112,51 @@ List of all rules with lightweight summaries (load order).
 | `upstream` | array? | Rules/query-names whose insert types feed this rule |
 | `downstream` | array? | Rules/queries that consume this rule's insert types |
 
+**Optional dynamic detection fields:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `dynamic-insert-types-detected` | object? | Present when the analyzer detected dynamic `insert!` callsites whose fact types cannot be statically resolved (Java constructors, metadata-map facts, custom builder fns). Contains structured callsite coordinates for manual resolution. |
+| `dynamic-retract-types-detected` | object? | Same as above, for `retract!` callsites. |
+
+**Dynamic detection object** (`dynamic-insert-types-detected` / `dynamic-retract-types-detected`):
+
+```json
+{
+  "resolution": "full",
+  "callsites": [
+    {
+      "source-str": "(with-meta {:app-id ?app-id} {:type :case/metadata-output})",
+      "ns-name-sym": "my.ns",
+      "filename": "src/my/ns.clj",
+      "constructor": "fact-model.core/->fact",
+      "type-form": ":case/metadata-output",
+      "status": "resolved",
+      "resolved-types": [":case/metadata-output"]
+    }
+  ]
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `resolution` | string? | Aggregate resolution status: `"full"` (all callsites resolved), `"partial"` (some resolved), `"none"` (none resolved). Omitted for plain (unprocessed) dynamic detections. |
+| `callsites` | object[] | One entry per dynamic `insert!`/`retract!` call site. |
+
+**Callsite entry:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `source-str` | string | The extracted Clojure argument form passed to `insert!`/`retract!`. |
+| `ns-name-sym` | string | Fully qualified namespace symbol string. |
+| `filename` | string | Source file path where the callsite was detected. |
+| `constructor` | string? | When resolved, the fully-qualified constructor or builder function name (e.g., `"facts.model.core/->fact"`). |
+| `type-form` | string? | When resolved, the fact-type form captured at the callsite (e.g., `":case/metadata-output"` for a keyword, or a symbol that resolves to a fully-qualified class name). |
+| `status` | string? | Resolution status of this callsite. `"resolved"` (single type), `"resolved-multi"` (multiple types), `"unresolved"` (could not determine). |
+| `resolved-types` | string[]? | Concrete fact type(s) resolved for this callsite. Present when `status` is `"resolved"` or `"resolved-multi"`. |
+| `reason` | string? | Reason for `"unresolved"` status (e.g., `":non-fact-constructor"`). |
+| `resolution-method` | string? | Method used for `"resolved-multi"` resolution (e.g., `":repl-config-enumeration"`). |
+
 **`unlinked-rule` object:**
 
 | Key | Type | Description |
