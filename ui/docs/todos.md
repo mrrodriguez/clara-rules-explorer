@@ -72,3 +72,8 @@
    results when that is what it is working with. certain details are provided regarding resolved a dynamic type to its actual types for the graph
    vs partial vs none.
    
+
+3. Setup an example of a special "functions as facts" to show how that can be discovered and tracked.
+
+4. Consider an extension to analyze that can take a given callsite and call a helper function to
+   resolve the type. Maybe use kondo for this too.

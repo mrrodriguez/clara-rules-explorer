@@ -13,6 +13,8 @@
 	import SourceSinkIndicators from '$lib/components/rulebase/SourceSinkIndicators.svelte';
 	import UnlinkedRuleIndicator from '$lib/components/rulebase/UnlinkedRuleIndicator.svelte';
 	import NoOutputTypesIndicator from '$lib/components/rulebase/NoOutputTypesIndicator.svelte';
+	import DynamicDetectionIndicator from '$lib/components/rulebase/DynamicDetectionIndicator.svelte';
+	import DynamicCallsiteList from '$lib/components/rulebase/DynamicCallsiteList.svelte';
 
 	interface Props {
 		rule: RuleSummary;
@@ -53,6 +55,11 @@
 		/>
 		<UnlinkedRuleIndicator unlinkedRule={rule['unlinked-rule']} variant="badge" />
 		<NoOutputTypesIndicator noOutputTypes={rule['no-output-types']} variant="badge" />
+		<DynamicDetectionIndicator detection={rule['dynamic-insert-types-detected']} label="Inserts" />
+		<DynamicDetectionIndicator
+			detection={rule['dynamic-retract-types-detected']}
+			label="Retracts"
+		/>
 	</RulebaseComponentSummaryHeader>
 
 	<div class="card-body p-2 p-md-3">
@@ -114,6 +121,9 @@
 				</div>
 
 				<SessionProductionActivity {activity} />
+
+				<DynamicCallsiteList detection={rule['dynamic-insert-types-detected']} label="Insert" />
+				<DynamicCallsiteList detection={rule['dynamic-retract-types-detected']} label="Retract" />
 			{:else}
 				<ProductionFullViewHint type="rule" />
 			{/if}

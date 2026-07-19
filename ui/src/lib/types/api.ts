@@ -32,6 +32,26 @@ export interface UnlinkedRuleInfo {
 }
 
 /**
+ * A single dynamic insert!/retract! callsite detected in rule source.
+ */
+export interface DynamicCallsiteEntry {
+	'source-str': string;
+	ns: string;
+	filename: string;
+	status?: string;
+	'resolved-types'?: string[];
+	'resolution-method'?: string;
+}
+
+/**
+ * Detection info for dynamic insert!/retract! callsites in a rule.
+ */
+export interface DynamicDetectionInfo {
+	resolution: 'full' | 'partial' | 'none';
+	callsites: DynamicCallsiteEntry[];
+}
+
+/**
  * Base properties shared by both Rules and Queries.
  */
 export interface BaseRuleOrQuery {
@@ -58,6 +78,8 @@ export interface RuleSummary extends BaseRuleOrQuery {
 	'sink-rule'?: boolean;
 	'unlinked-rule'?: UnlinkedRuleInfo | null;
 	'no-output-types'?: boolean | null;
+	'dynamic-insert-types-detected'?: DynamicDetectionInfo;
+	'dynamic-retract-types-detected'?: DynamicDetectionInfo;
 }
 
 /**
@@ -122,6 +144,8 @@ export interface RuleListItem {
 	'sink-rule'?: boolean;
 	'unlinked-rule'?: UnlinkedRuleInfo | null;
 	'no-output-types'?: boolean | null;
+	'dynamic-insert-types-detected'?: DynamicDetectionInfo;
+	'dynamic-retract-types-detected'?: DynamicDetectionInfo;
 	upstream?: ProductionReference[];
 	downstream?: ProductionReference[];
 }

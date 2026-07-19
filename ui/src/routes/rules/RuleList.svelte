@@ -3,6 +3,7 @@
 	import SourceSinkIndicators from '$lib/components/rulebase/SourceSinkIndicators.svelte';
 	import UnlinkedRuleIndicator from '$lib/components/rulebase/UnlinkedRuleIndicator.svelte';
 	import NoOutputTypesIndicator from '$lib/components/rulebase/NoOutputTypesIndicator.svelte';
+	import DynamicDetectionIndicator from '$lib/components/rulebase/DynamicDetectionIndicator.svelte';
 	import FilterableNavList from '$lib/components/nav/FilterableNavList.svelte';
 	import { rulePath } from '$lib/utils';
 
@@ -22,6 +23,16 @@
 		/>
 		<UnlinkedRuleIndicator unlinkedRule={rule['unlinked-rule']} variant="icon" />
 		<NoOutputTypesIndicator noOutputTypes={rule['no-output-types']} variant="icon" />
+		<DynamicDetectionIndicator
+			detection={rule['dynamic-insert-types-detected']}
+			label="Inserts"
+			variant="icon"
+		/>
+		<DynamicDetectionIndicator
+			detection={rule['dynamic-retract-types-detected']}
+			label="Retracts"
+			variant="icon"
+		/>
 	</div>
 {/snippet}
 
