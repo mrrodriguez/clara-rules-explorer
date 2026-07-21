@@ -5,6 +5,7 @@
 
 (defrecord GivenDocument [app-id doc-type])
 (defrecord AllGivenDocuments [app-id docs])
+(defrecord AllGivenDocumentsMeta [app-id doc-metas])
 
 (defrecord RequiredDocument [app-id doc-type])
 (defrecord AllRequiredDocuments [app-id docs])

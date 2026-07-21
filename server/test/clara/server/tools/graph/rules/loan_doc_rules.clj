@@ -31,7 +31,7 @@
 ;; Using custom macros that emit rules with var referenced functions as facts.
 ;; ---------------------------------------------------------------------------
 
-(h/def-fact-fn extract-doc-meta
+(h/def-fact-fn extract-doc-meta :extract-doc-meta
   [doc-fact]
   (let [doc-meta (-> doc-fact
                      meta
@@ -39,6 +39,18 @@
                      (or {::no-doc-meta true}))]
     (with-meta {:doc-meta doc-meta}
       {:type :extracted-doc-meta})))
+
+;; ---------------------------------------------------------------------------
+;; Using a "function as a fact" pattern in the RHS.
+;; ---------------------------------------------------------------------------
+
+(r/defrule collect-doc-meta
+  [Application (= ?app-id app-id)]
+  [?docs <- (acc/all) :from [GivenDocument (= ?app-id app-id)]]
+  [?extract-doc-meta <- :extract-doc-meta]
+  =>
+  (let [doc-metas (mapv ?extract-doc-meta ?docs)]
+    (r/insert! (laf/map->AllGivenDocumentsMeta {:app-id ?app-id :doc-metas doc-metas}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Dynamic helper functions — demonstrate callsite capture
