@@ -31,10 +31,13 @@
   (some-> (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn")
           .getPath))
 
+(defn run-rules []
+  (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                    'clara.server.tools.graph.rules.loan-app-rules)
+      run-app-outcome-approved))
+
 (defn run-smoke-test []
-  (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
-                                  'clara.server.tools.graph.rules.loan-app-rules)
-                    run-app-outcome-approved)
+  (let [session (run-rules)
         server (server/start! {:port port :session session :annotations-file loan-doc-annotations-path})]
     server))
 
