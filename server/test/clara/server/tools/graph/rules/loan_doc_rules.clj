@@ -1,5 +1,6 @@
 (ns clara.server.tools.graph.rules.loan-doc-rules
   (:require [clara.rules :as r]
+            [clara.server.tools.graph.rules.helpers :as h]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.rules.accumulators :as acc])
   (:import
@@ -25,6 +26,19 @@
 (defrecord ComplianceReview [app-id status reviewer])
 (defrecord StaleDocumentNotice [app-id doc-type reason])
 (defrecord AuditTrail [app-id action timestamp])
+
+;; ---------------------------------------------------------------------------
+;; Using custom macros that emit rules with var referenced functions as facts.
+;; ---------------------------------------------------------------------------
+
+(h/def-fact-fn extract-doc-meta
+  [doc-fact]
+  (let [doc-meta (-> doc-fact
+                     meta
+                     not-empty
+                     (or {::no-doc-meta true}))]
+    (with-meta {:doc-meta doc-meta}
+      {:type :extracted-doc-meta})))
 
 ;; ---------------------------------------------------------------------------
 ;; Dynamic helper functions — demonstrate callsite capture
