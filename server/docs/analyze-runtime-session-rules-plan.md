@@ -43,8 +43,8 @@ real Clojure compiler. The analyzer is built on that runtime truth.
    what we *know* the instance type of: deftype/defrecord constructors and Java
    constructors (including through let-bound locals, traced via kondo's `:locals`).
    Everything else — including the function-as-fact/var-as-fact pattern and
-   metadata-typed facts — belongs to caller-supplied resolution
-   (`:callsite-resolver-fn` and, later, structured caller guidance, §5.5).
+   metadata-typed facts — belongs to caller-supplied resolution: two pluggable
+   points, `:fact-type-spec-fn` and `:callsite-resolver-fn` (§5.5).
 6. **Greenfield API.** This branch evolves the API freely; no deprecation or
    backwards-compatibility scaffolding. Milestones exist only to make the
    implementation incrementally verifiable.
@@ -168,7 +168,7 @@ resolution (`map->X` tracing through helpers) is unchanged.
 | Caller macros that expand to *vars* | **Caller's `:config-dir`** (optional) |
 | `defrule`/`defquery` constructs produced by kondo hooks | **Pruned** (§5.3) — session is authoritative |
 | Constructor → fact-type tokens | **Automatic chain** (§5.4) |
-| Var-as-fact, metadata-typed facts, exotic shapes | **Caller-supplied resolution** (§5.5) |
+| Var-as-fact, metadata-typed facts, exotic shapes | **Caller-supplied resolution** (§5.5: `:fact-type-spec-fn` + `:callsite-resolver-fn`) |
 
 ## 5. Component Design
 
@@ -354,9 +354,65 @@ for their resolver. `pr-str` normalization (commas, single-line) is acceptable.
 
 ### 5.5 Caller-supplied resolution
 
-**`:callsite-resolver-fn`** — the general escape hatch, invoked once per
-unresolved arg form, after the automatic chain. Exceptions are contained
-(logged, treated as unresolved).
+Two pluggable points. The first teaches the analyzer about the *shape* of
+caller-specific fact patterns; the second resolves individual callsites.
+
+#### `:fact-type-spec-fn` — structured guidance for the var-as-fact pattern
+
+The function-as-fact (var-as-fact) pattern: a fact *is* a function var (e.g.
+`def-fact-fn` emitting `(insert! (var the-fn))` with the fact type on the var's
+`:type` meta), matched downstream by `[?f <- :the-type]` and invoked as a fn in
+the RHS (e.g. `collect-doc-meta` binds `?extract-doc-meta <- :extract-doc-meta`
+and calls `(mapv ?extract-doc-meta ?docs)`). Nothing about this is hardcoded;
+the caller declares the mapping:
+
+```clojure
+:fact-type-spec-fn
+(fn [fact-type]
+  ;; => spec map, or nil when the fact type follows no special pattern.
+  ;; Currently one key (the spec is open for extension):
+  {:aliases-var fully.qualified/var-name})
+```
+
+**Mechanism** (per rule production, when a spec fn is supplied):
+
+1. Scan the rule's `:lhs` (constrained DSL data — already walked by
+   `core/extract-lhs-fact-types`) for bindings of alias-mapped fact types:
+   `:fact-binding ?sym` on fact conditions and `:result-binding ?sym` on
+   accumulator conditions (`:from {:type t}`). (`:result-binding` binds a
+   collection; both shapes are supported.)
+2. When `(fact-type-spec-fn t) ⇒ {:aliases-var v}`, determine whether `?sym` is
+   *used in the RHS*. Only RHS usage can influence inserts/retracts, so this is
+   the usage that matters. Detection needs no form-walking: in the rule's
+   snippet, kondo records free `?sym` occurrences as var-usages
+   (`:name ?sym`, `:to :clj-kondo/unknown-namespace` — verified shape, incl.
+   `:arity 1` in fn position). A `?sym` usage attributed to the rule's snippet
+   var ⇒ used.
+3. If used, inject a **synthetic var-usage** into the merged analysis —
+   `{:from rule-ns :from-var rule-snippet-var :to (namespace v) :name (name v)}`
+   tagged with `{:via-var-alias {:fact-type t :fact-type-spec spec :var v}}` —
+   so the existing reachability explores `v`'s whole call chain for boundary
+   fns. (If `v` is invisible to kondo — macro-emitted, unhooked — its chain is
+   empty and nothing is found; that is the caller `:config-dir` situation from
+   §5.3.)
+4. Dynamic callsites reached *through* an alias-tagged usage are **added to the
+   consuming rule's detection but never automatically resolved** — they bypass
+   the ctor chain of §5.4 and are recorded `:status :unresolved` with the
+   alias context attached (`:fact-type`, `:fact-type-spec`, plus the callsite's
+   own `:ns-name-sym`/`:filename` pointing at where the boundary call lives,
+   possibly another ns).
+5. Those callsites are then offered to `:callsite-resolver-fn` with the
+   alias context included (below).
+
+This is how `extract-doc-meta` and fns like it become visible to downstream
+rules' dynamic analysis without any special-casing of `clojure.core/var` or
+`with-meta` in the automatic chain.
+
+#### `:callsite-resolver-fn` — per-callsite escape hatch
+
+Invoked once per unresolved arg form, after the automatic chain (and for
+alias-discovered callsites, immediately). Exceptions are contained (logged,
+treated as unresolved).
 
 ```clojure
 (fn [{:keys [rule           ; map     — the FULL production (:name :ns-name :lhs :rhs :props :env …)
@@ -365,7 +421,12 @@ unresolved arg form, after the automatic chain. Exceptions are contained
              boundary-fn    ; symbol  — e.g. clara.rules/insert!
              arg-form       ; data    — the unresolved argument form
              source-str     ; string
-             filename]      ; string
+             filename       ; string
+             ;; present when the callsite was discovered via a var-alias chain:
+             fact-type      ; the LHS-bound fact type that linked the aliased var
+             fact-type-spec ; map     — the spec returned for that fact type,
+                             ;           e.g. {:aliases-var some.ns/the-fn}
+             ]
       :as callsite}]
   ;; nil ⇒ still unresolved, or:
   {:resolved-types […]      ; symbols, keywords, classes — any fact-type tokens
@@ -373,16 +434,17 @@ unresolved arg form, after the automatic chain. Exceptions are contained
 ```
 
 The full production gives resolvers complete context — including `:env` for
-macro-captured closures and `:lhs` for matching conventions.
+macro-captured closures and `:lhs` for matching conventions. `:fact-type` /
+`:fact-type-spec` tell the resolver *why* the aliased var is in the chain, so
+it can decide whether the callsite is resolvable in that context. These two
+keys are part of the contract from the start; they are simply absent until a
+`:fact-type-spec-fn` is supplied.
 
-**Function-as-fact / var-as-fact (later milestone — noted, not hardcoded):**
-the pattern where a fact *is* a function var (e.g. `def-fact-fn` emitting
-`(insert! (var the-fn))` with the fact type on the var's `:type` meta, matched
-downstream by `[?f <- :the-type]` and invoked as a fn). Supporting this well
-needs **caller-supplied guidance**: a declarative way for the caller to state
-that certain fact types, when bound as RHS locals, alias an underlying var so
-the resolution chain can trace into that var. Design of that guidance API is
-deferred to the later milestone (M4); until then the resolver-fn covers it.
+The *producing* side of the var-as-fact pattern (a rule inserting the var
+itself, e.g. `extract-doc-meta-rule`'s `(insert! (var the-fn))`) is also a
+resolver-fn concern: the callsite arg form `(var the-fn)` is passed through and
+the caller's resolver can resolve the var and return its fact type. No alias
+context keys in that direction — no alias chain is involved.
 
 ### 5.6 Caching
 
@@ -411,7 +473,8 @@ multiple dependency paths.
    :session-or-rulebase session      ; required — runtime resolution, fact-type-fn,
                                      ;   default :rules-filter (rules only, not queries)
    :rules-filter [...]               ; optional override
-   :callsite-resolver-fn f})         ; optional
+   :callsite-resolver-fn f})         ; optional — §5.5
+   :fact-type-spec-fn f})            ; optional — §5.5 var-as-fact guidance
 ;; => annotations map
 ```
 
@@ -444,8 +507,9 @@ Removed from the namespace: `generate-annotations-from-paths`,
   invariants; `:no-output-types` via `:rules-filter`.
 - **New:**
   - `extract-doc-meta-rule` appears as a **captured** dynamic callsite by
-    default (automatic chain does not hardcode var-as-fact); resolves once a
-    `:callsite-resolver-fn` (M2) or the M4 guidance mechanism is supplied.
+    default (automatic chain does not hardcode var-as-fact); resolves via a
+    test-supplied `:callsite-resolver-fn` (M2); downstream alias-chain
+    visibility comes from `:fact-type-spec-fn` (M4).
   - Locals-chain resolution of ctor forms is gensym-name independent (assert
     resolution, never specific gensym strings).
   - Java-ctor rules (`rule-java-constructor-*`, `rule-retract-java-*`,
@@ -461,7 +525,9 @@ Removed from the namespace: `generate-annotations-from-paths`,
     stays exact (e.g. a name containing a space must not leak into a `def`).
   - Record-literal arg form ⇒ classified via session `fact-type-fn`.
   - `:callsite-resolver-fn`: receives the full production; result promotion;
-    throwing resolver degrades to unresolved capture.
+    throwing resolver degrades to unresolved capture; alias-context keys
+    (`:fact-type`/`:fact-type-spec`) are absent without a spec fn and present
+    on alias-discovered callsites (M4).
   - No-source fallback: reconstructed ns (aliases, refers, imports,
     `:refer-clojure` deviation detection) still yields annotations.
   - Queries produce **no** annotation entries (rules-only `:rules-filter`
@@ -545,13 +611,19 @@ checkable state (`make test` + named REPL probes).
 - **Check:** no references to removed entry points; full quality gates green
   (`make test format-check lint reflection-check`).
 
-### M4 (later) — Caller-guided var-as-fact resolution
+### M4 (later) — `:fact-type-spec-fn` var-alias chains
 
-- Design the declarative guidance API for the function-as-fact pattern
-  (RHS-local ⇒ underlying var aliasing), per §5.5.
-- **Check:** `extract-doc-meta-rule` resolves to `:extract-doc-meta` via the
-  guidance mechanism (no resolver-fn needed for this pattern); dep-graph edge
-  to `collect-doc-meta`.
+- Implement the `:fact-type-spec-fn` mechanism of §5.5: LHS binding scan,
+  RHS usage detection via snippet var-usages, synthetic alias-tagged var-usage
+  injection, alias-discovered callsites recorded unresolved with
+  `:fact-type`/`:fact-type-spec` context, resolver-fn handoff.
+- Test fixture: a var-fact fn whose body performs a dynamic insert, consumed
+  by a rule that binds it (`[?f <- :the-type]`) and calls it in the RHS.
+- **Check:** with a spec fn mapping `:extract-doc-meta ⇒ {:aliases-var
+  …/extract-doc-meta}`, a dynamic callsite inside the aliased var's chain is
+  attached to the consuming rule as `:status :unresolved` with the fact-type
+  and spec attached; the resolver-fn receives those keys; without a spec fn,
+  nothing alias-derived appears.
 
 ## 10. Edge Cases & Open Questions (resolved per feedback round 2)
 
@@ -643,3 +715,13 @@ Key evidence:
 | 6b | Record literals — how encountered? support them | §10.3: hypothetical, now verified supported by construction |
 | 6c | Arbitrary fact-type shapes (e.g. `[:vector :type :thing]`) | §2.4 + §10.4: publish ctor instance types only; session `ancestors-fn` decides LHS connectivity; `my-rule-test1` fixture |
 | 6d | Intern stubs — elaborate | §10.6: dropped; superseded by live caller-ns resolution |
+
+### Round 3 (var-as-fact design refinement)
+
+| # | Feedback | Design response |
+|---|---|---|
+| 1 | `:callsite-resolver-fn` is not the only pluggable point for locals bound to facts and called as fns | §5.5 split into two pluggable points: `:fact-type-spec-fn` + `:callsite-resolver-fn` |
+| 2 | Caller maps fact-types → spec `{:aliases-var fq/var}` | §5.5 `:fact-type-spec-fn` contract; spec map open for extension |
+| 3 | Fact types bound as result bindings & used as locals ⇒ treat as var usages; explore the var's call chain for dynamic callsites | §5.5 mechanism: LHS binding scan (`:fact-binding`/`:result-binding`), RHS usage via snippet var-usages, synthetic alias-tagged usage injection into the existing reachability |
+| 4 | Alias-discovered callsites are added but NOT automatically resolved | §5.5 step 4: bypass ctor chain, recorded `:status :unresolved` with alias context |
+| 5 | Resolver-fn must receive the fact-type and the spec returned for it | §5.5 contract: optional `:fact-type` / `:fact-type-spec` keys, in the contract from the start (absent until a spec fn is supplied) |
