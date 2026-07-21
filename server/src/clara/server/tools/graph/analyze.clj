@@ -33,6 +33,9 @@
             [clojure.set :as set]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clara.server.tools.graph.serialize :as serialize]
+            [clara.server.tools.graph.memory :as memory]
+            [clara.server.tools.graph.annotations :as ann]
             [clara.rules.engine :as eng])
   (:import [clara.rules.engine LocalSession]))
 
@@ -641,6 +644,130 @@
               :config-dir config-dir}
        include-ns-prefixes (assoc :include-ns-prefixes include-ns-prefixes)
        exclude-ns-prefixes (assoc :exclude-ns-prefixes exclude-ns-prefixes)))))
+
+;; ---------------------------------------------------------------------------
+;; Helpers for add-auto-detected-annotations / enrich-annotations-from-session
+;; ---------------------------------------------------------------------------
+
+(defn- annot-type->str
+  "Convert an annotation type value (Class, String, Symbol, etc.) to its
+   canonical string form for comparison with serialized session fact-types."
+  [ns-name type-val]
+  (serialize/resolve-type ns-name type-val))
+
+(defn- fq-name->namespace
+  "Extract the namespace portion from a fully-qualified rule name string like
+   \"some.ns/rule-name\".  Returns a symbol, or nil if the name has no
+   namespace segment."
+  [fq-str]
+  (some-> fq-str symbol namespace symbol))
+
+(defn add-auto-detected-annotations
+  "Takes a session-analysis structure (from memory/session-snapshot) and an
+   annotations map.  Returns the annotations map updated with
+   :clara-rules/dynamic-insert-types-detected entries for rules whose working-
+   memory fact types are not already declared in the annotations.
+
+   Each new entry carries :fact-instance-derived-types and :resolution :partial.
+   Rules whose session-derived types are already covered by the annotations are
+   left unchanged.
+
+   NOTE: This function only compares against the annotations map — it does NOT
+   check rule :props.  Use `enrich-annotations-from-session` for the full
+   pipeline that also deduplicates against :props."
+  [session-analysis annotations]
+  (let [rule->session-types
+        (reduce-kv (fn [acc _id {:keys [type inserted-from]}]
+                     (reduce (fn [acc' {:keys [name]}]
+                               (update acc' name (fnil conj #{}) type))
+                             acc
+                             inserted-from))
+                   {}
+                   (:facts session-analysis))
+
+        annotations'
+        (reduce-kv (fn [acc rule-fq-str session-type-strs]
+                     (let [rule-ns       (fq-name->namespace rule-fq-str)
+                           rule-ann      (get acc rule-fq-str)
+                           existing      (get rule-ann :clara-rules/insert-types)
+                           existing-strs (set (map (partial annot-type->str rule-ns)
+                                                   existing))
+                           new-types     (sort (set/difference session-type-strs
+                                                               existing-strs))]
+                       (if (seq new-types)
+                         (let [existing-dynamic (get rule-ann :clara-rules/dynamic-insert-types-detected)
+                               derived-entry    {:fact-instance-derived-types (vec new-types)
+                                                 :resolution :partial}
+                               updated-dynamic  (if existing-dynamic
+                                                   (merge existing-dynamic derived-entry)
+                                                   derived-entry)]
+                           (assoc acc rule-fq-str
+                                  (assoc (or rule-ann {})
+                                         :clara-rules/dynamic-insert-types-detected
+                                         updated-dynamic)))
+                         acc)))
+                   annotations
+                   rule->session-types)]
+    annotations'))
+
+(defn enrich-annotations-from-session
+  "Enriches the given annotations map with fact-type provenance from a live
+   Clara session's working memory.
+
+   1. Takes a session snapshot and runs `add-auto-detected-annotations` to
+      detect fact types inserted by rules at runtime.
+   2. Builds a production-annotation-map from the session's rulebase and the
+      enriched annotations to identify types already declared in rule :props
+      or sidecar annotations.
+   3. Merges truly-new derived types into each rule's :clara-rules/insert-types
+      so they connect in the dependency graph.
+   4. For rules whose derived types are already fully covered, restores the
+      original pre-enrichment annotation (preserving any pre-existing dynamic
+      detection keys such as :callsites from static analysis).
+
+   Returns the enriched annotations map suitable for passing to
+   `rulebase-analysis`."
+  [session annotations]
+  (let [original     annotations
+        snapshot     (memory/session-snapshot session)
+        enriched     (add-auto-detected-annotations snapshot annotations)
+        rulebase     (-> session eng/components :rulebase)
+        productions  (:productions rulebase)
+
+        pam
+        (into {}
+              (for [p productions]
+                [(:name p)
+                 (ann/resolve-annotations p enriched)]))
+
+        result
+        (reduce-kv (fn [acc p-name resolved-ann]
+                     (let [raw-entry      (get acc p-name)
+                           resolved-strs  (set (map (partial annot-type->str nil)
+                                                    (:insert-types resolved-ann)))
+                           dynamic        (:dynamic-insert-types-detected resolved-ann)
+                           derived-types  (set (:fact-instance-derived-types dynamic))
+                           truly-new      (set/difference derived-types resolved-strs)]
+                       (if dynamic
+                         (if (seq truly-new)
+                           (let [raw-inserts (:clara-rules/insert-types raw-entry)
+                                 merged      (into (vec raw-inserts) truly-new)]
+                             (-> acc
+                                 (assoc-in [p-name :clara-rules/insert-types] merged)
+                                 (assoc-in [p-name :clara-rules/dynamic-insert-types-detected
+                                            :fact-instance-derived-types]
+                                           (vec truly-new))))
+                           ;; No truly-new types from this enrichment pass.
+                           ;; Restore the original annotation for this rule to
+                           ;; preserve any pre-existing dynamic detection
+                           ;; (e.g. :callsites from static analysis).
+                           (if-let [orig (get original p-name)]
+                             (assoc acc p-name orig)
+                             (dissoc acc p-name)))
+                         acc)))
+                   enriched
+                   pam)]
+    result))
 
 (defn generate-annotations-from-paths
   "Runs clj-kondo on the specified paths to generate an analysis map,

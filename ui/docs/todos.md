@@ -94,6 +94,15 @@ Make use of a running clara-rules-explorer server clj-nrepl-eval repl instance t
 be sure to understand the API and the data structures involved. We have @server/README.md that may
 help and also any docs/* directory details relevant. 
 
+Special note: I am working on another orthogonal feature in parallel right now that involves a few functions:
+* clara.server.graph.api/enriched-annotations
+* clara.server.tools.graph.analyze/enrich-annotations-from-session
+* clara.server.tools.graph.analyze/add-auto-detected-annotations
+
+I want you to not focus on them in your implementation. They are in flux and subject to change. They
+are only concerned with deriving new annotations from working memor fact instance information (when
+available). This is unrelated to the goals scope of the work I've presented for you to plan here.
+
 
 2. Setup an example of a special "functions as facts" to show how that can be discovered and tracked.
 

@@ -3,7 +3,10 @@
             [clojure.string :as str]
             [clara.rules :as r]
             [clara.server.tools.graph.analyze :as analyze]
+            [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
+            [clara.server.tools.graph.rules.loan-app-rules]
+            [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.analyze-test-rules :as atr])
   (:import [clara.server.tools.graph.rules.loan_app_facts
             AllGivenDocuments
@@ -349,3 +352,118 @@
     (is (some? (get annotations `atr/rule-insert-varargs)))
     (is (= [`LocalDummyRecord]
            (get-in annotations [`atr/rule-insert-varargs :clara-rules/insert-types])))))
+
+;; ---------------------------------------------------------------------------
+;; add-auto-detected-annotations
+;; ---------------------------------------------------------------------------
+
+(deftest test-add-auto-detected-annotations--base-case
+  (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                                   'clara.server.tools.graph.rules.loan-app-rules)
+                    (r/insert (laf/map->Application {:app-id "app-1"})
+                              (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                              (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
+                    (r/fire-rules))
+        snapshot (memory/session-snapshot session)
+        enriched (analyze/add-auto-detected-annotations snapshot {})]
+    (testing "Detects fact types from working memory"
+      (let [crd (get enriched "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
+        (is (some? (:clara-rules/dynamic-insert-types-detected crd)))
+        (is (= {:fact-instance-derived-types
+                ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"]
+                :resolution :partial}
+               (:clara-rules/dynamic-insert-types-detected crd))))
+      ;; No insert-types added (that is enrich-annotations-from-session's job)
+      (is (nil? (:clara-rules/insert-types
+                  (get enriched "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"))))
+
+  (testing "Does not add dynamic detection when annotation already covers the type"
+    (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                                     'clara.server.tools.graph.rules.loan-app-rules)
+                      (r/insert (laf/map->Application {:app-id "app-1"})
+                                (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                                (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
+                      (r/fire-rules))
+          snapshot (memory/session-snapshot session)
+          existing-annos
+          {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
+           {:clara-rules/insert-types
+            ['clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments]}}
+          enriched (analyze/add-auto-detected-annotations snapshot existing-annos)]
+      (let [crd (get enriched "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
+        (is (nil? (:clara-rules/dynamic-insert-types-detected crd))
+            "Should NOT add dynamic detection when annotation already has the type"))))))
+
+;; ---------------------------------------------------------------------------
+;; enrich-annotations-from-session
+;; ---------------------------------------------------------------------------
+
+(deftest test-enrich-annotations-from-session--base-case
+  (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                                   'clara.server.tools.graph.rules.loan-app-rules)
+                    (r/insert (laf/map->Application {:app-id "app-1"})
+                              (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                              (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
+                    (r/fire-rules))
+        fe      (analyze/enrich-annotations-from-session session {})]
+    (testing "Adds insert-types and dynamic detection for rules with session-derived facts"
+      (let [crd (get fe "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
+        (is (= ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"]
+               (:clara-rules/insert-types crd))
+            "Should add the fact type to insert-types")
+        (is (= {:fact-instance-derived-types
+                ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"]
+                :resolution :partial}
+               (:clara-rules/dynamic-insert-types-detected crd))
+            "Should add dynamic detection")))
+
+    (testing "Does NOT add dynamic detection for rules whose types are already in :props"
+      (let [aop (get fe "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending")]
+        (is (nil? (:clara-rules/dynamic-insert-types-detected aop))
+            "app-outcome-pending has ApplicationOutcome in its :props")
+        ;; insert-types should NOT include the session-derived type (props covers it)
+        (is (nil? (:clara-rules/insert-types aop))
+            "Should not add insert-types when :props already covers it"))))))
+
+(deftest test-enrich-annotations-from-session--preserves-callsites
+  (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                                   'clara.server.tools.graph.rules.loan-app-rules)
+                    (r/insert (laf/map->Application {:app-id "app-1"})
+                              (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                              (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
+                    (r/fire-rules))
+        existing-annos
+        {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
+         {:clara-rules/insert-types
+          ['clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments]
+          :clara-rules/dynamic-insert-types-detected
+          {:callsites [{:source-str "(->fact ...)"
+                        :ns-name-sym 'some.ns
+                        :filename "some/ns.clj"}]
+           :resolution :full}}}
+        fe  (analyze/enrich-annotations-from-session session existing-annos)
+        crd (get fe "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
+    (testing "Preserves pre-existing :callsites when no new types detected"
+      (let [dyn (:clara-rules/dynamic-insert-types-detected crd)]
+        (is (some? dyn))
+        (is (contains? dyn :callsites)
+            "Should preserve :callsites from original annotations")
+        (is (not (contains? dyn :fact-instance-derived-types))
+            "Should NOT add :fact-instance-derived-types (types already known)")
+        (is (= :full (:resolution dyn))
+            "Should keep original :resolution")))))
+
+(deftest test-enrich-annotations-from-session--dedup-against-props
+  (testing "Session-derived types already in :props are not flagged as dynamic"
+    (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                                     'clara.server.tools.graph.rules.loan-app-rules)
+                      (r/insert (laf/map->Application {:app-id "app-1"})
+                                (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                                (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
+                      (r/fire-rules))
+          fe      (analyze/enrich-annotations-from-session session {})
+          aop     (get fe "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending")]
+      (is (nil? (:clara-rules/dynamic-insert-types-detected aop))
+          "app-outcome-pending declares ApplicationOutcome in its :props")
+      (is (nil? (:clara-rules/insert-types aop))
+          "No insert-types added since :props already covers them"))))

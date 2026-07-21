@@ -7,6 +7,7 @@
             [schema.core :as s]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.memory :as memory]
+            [clara.server.tools.graph.analyze :as analyze]
             [clojure.string :as str]))
 
 (defn- json-mapper []
@@ -62,8 +63,9 @@
 
 (s/defschema DynamicDetectionInfo
   "Info about dynamic insert/retract callsites detected by the analyzer."
-  {:callsites [DynamicCallsiteEntry]
-   (s/optional-key :resolution) (s/enum :full :partial :none)})
+  {(s/optional-key :callsites) [DynamicCallsiteEntry]
+   (s/optional-key :resolution) (s/enum :full :partial :none)
+   (s/optional-key :fact-instance-derived-types) [s/Str]})
 
 (s/defschema RuleListItem
   "Lightweight rule summary (list endpoint)."
@@ -213,27 +215,45 @@
         (reset! snapshot-cache {:session session :snapshot snapshot})
         snapshot))))
 
+(defn- enriched-annotations
+  "Returns annotations enriched with fact-type provenance from the session's
+   working memory when a live session is available.  Takes already-derefed
+   values (not atoms) to make it clear this is a pure function."
+  [session annotations]
+  (if (instance? clara.rules.engine.LocalSession session)
+    (analyze/enrich-annotations-from-session session annotations)
+    annotations))
+
 (s/defn handle-get-rulebase-summary :- {:status (s/eq 200) :body RulebaseSummary}
   [session-atom annotations-atom _req]
-  (let [analysis (core/rulebase-analysis @session-atom @annotations-atom)]
+  (let [session @session-atom
+        annotations @annotations-atom
+        analysis (core/rulebase-analysis session
+                                         (enriched-annotations session annotations))]
     {:status 200
      :body (core/rulebase-summary analysis)}))
 
 (defn- handle-get-analysis
   [session-atom annotations-atom _req]
-  {:status 200
-   :body (core/rulebase-analysis @session-atom @annotations-atom)})
+  (let [session @session-atom
+        annotations @annotations-atom]
+    {:status 200
+     :body (core/rulebase-analysis session (enriched-annotations session annotations))}))
 
 (s/defn handle-get-rules :- {:status (s/eq 200) :body {:rules [RuleListItem]}}
   [session-atom annotations-atom _req]
-  (let [analysis (core/rulebase-analysis @session-atom @annotations-atom)]
+  (let [session @session-atom
+        annotations @annotations-atom
+        analysis (core/rulebase-analysis session (enriched-annotations session annotations))]
     {:status 200
      :body {:rules (core/rules-list analysis)}}))
 
 (s/defn handle-get-rule :- GetRuleResponse
   [session-atom annotations-atom req]
-  (let [fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
-        analysis (core/rulebase-analysis @session-atom @annotations-atom)
+  (let [session @session-atom
+        annotations @annotations-atom
+        fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
+        analysis (core/rulebase-analysis session (enriched-annotations session annotations))
         rule (get-in analysis [:rules fq-name])]
     (if rule
       {:status 200 :body rule}
@@ -241,14 +261,18 @@
 
 (s/defn handle-get-queries :- {:status (s/eq 200) :body {:queries [QueryListItem]}}
   [session-atom annotations-atom _req]
-  (let [analysis (core/rulebase-analysis @session-atom @annotations-atom)]
+  (let [session @session-atom
+        annotations @annotations-atom
+        analysis (core/rulebase-analysis session (enriched-annotations session annotations))]
     {:status 200
      :body {:queries (core/queries-list analysis)}}))
 
 (s/defn handle-get-query :- GetQueryResponse
   [session-atom annotations-atom req]
-  (let [fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
-        analysis (core/rulebase-analysis @session-atom @annotations-atom)
+  (let [session @session-atom
+        annotations @annotations-atom
+        fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
+        analysis (core/rulebase-analysis session (enriched-annotations session annotations))
         query (get-in analysis [:queries fq-name])]
     (if query
       {:status 200 :body query}
@@ -256,14 +280,18 @@
 
 (s/defn handle-get-fact-types :- {:status (s/eq 200) :body {:fact-types [FactTypeListItem]}}
   [session-atom annotations-atom _req]
-  (let [analysis (core/rulebase-analysis @session-atom @annotations-atom)]
+  (let [session @session-atom
+        annotations @annotations-atom
+        analysis (core/rulebase-analysis session (enriched-annotations session annotations))]
     {:status 200
      :body {:fact-types (core/fact-types-list analysis)}}))
 
 (s/defn handle-get-fact-type :- GetFactTypeResponse
   [session-atom annotations-atom req]
-  (let [p (get-in req [:path-params :fq-name])
-        analysis (core/rulebase-analysis @session-atom @annotations-atom)
+  (let [session @session-atom
+        annotations @annotations-atom
+        p (get-in req [:path-params :fq-name])
+        analysis (core/rulebase-analysis session (enriched-annotations session annotations))
         fact-types (:fact-types analysis)
         fact-type (or (get fact-types p)
                       (get fact-types (fq-name-from-param p)))]
