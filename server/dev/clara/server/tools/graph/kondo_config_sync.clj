@@ -10,9 +10,9 @@
    classpath resources path that the analyzer materializes at runtime (see
    `clara.server.tools.graph.analyze`).
 
-   Our own override files (config.edn, hooks/strip_lhs.clj_kondo) live alongside
-   the synced imports in the resources tree. They are maintained by us, not
-   synced. See EXPLORER-OVERRIDE markers in this file and the hook file.
+   Our own root config.edn lives alongside the synced imports in the resources
+   tree. It is maintained by us, not synced. See the EXPLORER-OVERRIDE marker
+   in this file.
 
    Typical maintenance flow when the clara-rules dependency changes:
 
@@ -44,15 +44,15 @@
 
 ;; ═══════════════════════════════════════════════════════════════════════════════
 ;; EXPLORER-OVERRIDE: files we maintain alongside the synced imports.
-;; These override or extend the clara-rules config (e.g. LHS-stripping hook).
-;; They are NOT synced from clara-rules — they live in the resources directory
-;; directly and are part of the manifest so they get materialized at runtime.
+;; The root config.edn is intentionally empty: the verbatim clara-rules import
+;; is the whole bundled config. It is NOT synced from clara-rules — it lives in
+;; the resources directory directly and is part of the manifest so it gets
+;; materialized at runtime.
 ;; ═══════════════════════════════════════════════════════════════════════════════
 
 (def ^:private override-files
   "Override files (relative to resources-base) maintained by us, not synced."
-  ["config.edn"
-   "hooks/strip_lhs.clj_kondo"])
+  ["config.edn"])
 
 (defn- rel-path [^java.io.File root ^java.io.File f]
   (str (.relativize (.toPath root) (.toPath f))))
@@ -86,7 +86,7 @@
    including the top-level config.edn, override files, and the manifest."
   [^java.io.File src]
   (let [import-rels (source-files src)
-        base (into {"config.edn" (.getBytes "{:hooks {:analyze-call {clara.rules/defrule hooks.strip-lhs/analyze-defrule-macro}}}\n")}
+        base (into {"config.edn" (.getBytes "{}\n")}
                    (map (fn [rel] [rel (Files/readAllBytes (.toPath (io/file src rel)))]))
                    import-rels)
         ;; Add override file contents from the resources dir (if they exist)
@@ -105,7 +105,7 @@
 
 (defn sync!
   "Mirrors the clj-kondo import tree into the bundled resources path,
-   including our override files (config.edn, hooks/strip_lhs.clj_kondo).
+   including our override files (config.edn).
 
    Options (all optional):
      :source-dir     - clj-kondo config dir to read from (default \".clj-kondo\")

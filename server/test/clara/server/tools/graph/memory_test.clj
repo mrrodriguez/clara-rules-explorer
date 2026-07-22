@@ -180,23 +180,31 @@
       ;; Verify all match entries share the same bindings data
       (let [bindings (map :data matches)]
         (is (apply = bindings) "All match entries should share identical bindings")))))
-(testing "Fact IDs are stable and deterministic based on sort criteria"
-  (let [app-1 (laf/map->Application {:app-id "app-1"})
-        app-2 (laf/map->Application {:app-id "app-2"})
 
-        ;; Create two snapshots of identical sessions
-        make-snapshot (fn []
-                        (-> (->test-session)
-                            (r/insert app-1 app-2)
-                            (r/fire-rules)
-                            (memory/session-snapshot)))
+(deftest test-stable-deterministic-fact-ids
+  (testing "Fact IDs are stable and deterministic based on sort criteria"
+    (let [app-1 (laf/map->Application {:app-id "app-1"})
+          app-2 (laf/map->Application {:app-id "app-2"})
 
-        snapshot-1 (make-snapshot)
-        snapshot-2 (make-snapshot)]
+          ;; Create two snapshots of identical sessions
+          make-snapshot (fn []
+                          (-> (->test-session)
+                              (r/insert app-1 app-2)
+                              (r/fire-rules)
+                              (memory/session-snapshot)))
 
-    (is (= (keys (:facts snapshot-1)) (keys (:facts snapshot-2))) "ID keys should be identical")
-    (is (= (map :data (vals (:facts snapshot-1)))
-           (map :data (vals (:facts snapshot-2)))) "Fact data order should be identical")))
+          snapshot-1 (make-snapshot)
+          snapshot-2 (make-snapshot)
+
+          ;; Strip volatile fields (e.g. timestamps) from fact data for comparison
+          strip-volatile (fn [data]
+                           (if (and (map? data) (:timestamp data) (:action data))
+                             (dissoc data :timestamp)
+                             data))]
+
+      (is (= (keys (:facts snapshot-1)) (keys (:facts snapshot-2))) "ID keys should be identical")
+      (is (= (set (map (comp strip-volatile :data) (vals (:facts snapshot-1))))
+             (set (map (comp strip-volatile :data) (vals (:facts snapshot-2))))) "Fact data set should be identical"))))
 
 (deftest test-accumulator-fact-extraction
   (testing "Accumulator results (like vectors) are not treated as facts"

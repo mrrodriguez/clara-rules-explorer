@@ -305,6 +305,8 @@
     (testing "Fact type summary maintains insertion order (rules first, then queries)"
       (is (= ["clara.server.tools.graph.rules.loan_app_facts.Application"
               "clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
+              "extract-doc-meta"
+              "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta"
               "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"
               "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument"
               "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"
@@ -319,7 +321,8 @@
 
     (testing "Fact type summary entry structure"
       (is (= {:name "clara.server.tools.graph.rules.loan_app_facts.Application"
-              :used-by-rules ["clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs"
+              :used-by-rules ["clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta"
+                              "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs"
                               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
                               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
                               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
