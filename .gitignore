@@ -4,6 +4,7 @@ node_modules
 .cpcache
 .lsp
 **/.clj-kondo/.cache/
+.cache
 .nrepl-port
 target
 /server/demo-data/

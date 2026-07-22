@@ -19,32 +19,56 @@
             LocalDummyRecord]))
 
 ;; ---------------------------------------------------------------------------
-;; Shared analysis data (computed once, reused across deftest)
+;; Shared session fixtures (computed once, reused across deftests)
+;;
+;; The session is the source of truth: analyze-session-rules synthesizes
+;; per-namespace sources (real source + one snippet def per rule RHS) and
+;; prunes hook-emitted defrule/defquery constructs. generate-annotations-from-analysis
+;; defaults its rules filter to the session's rules (productions with an :rhs).
 ;; ---------------------------------------------------------------------------
 
 (def ^:private rules-prefix "clara.server.tools.graph.rules")
 
+(def ^:private loan-doc-session
+  (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules))
+
+(def ^:private loan-doc-analysis
+  (analyze/analyze-session-rules
+   {:session-or-rulebase loan-doc-session
+    :include-ns-prefixes [rules-prefix]}))
+
 (def ^:private loan-doc-annotations
   "Annotations for the loan-doc rule suite (separate rule set from edge cases)."
-  (analyze/generate-annotations-from-paths
-   {:paths ["test/clara/server/tools/graph/rules/loan_doc_rules.clj"]}))
+  (analyze/generate-annotations-from-analysis
+   {:analysis loan-doc-analysis
+    :session-or-rulebase loan-doc-session}))
+
+(def ^:private edge-case-session
+  (r/mk-session 'clara.server.tools.graph.rules.analyze-test-rules))
+
+(def ^:private edge-case-analysis
+  (analyze/analyze-session-rules
+   {:session-or-rulebase edge-case-session
+    :include-ns-prefixes [rules-prefix]}))
 
 (def ^:private edge-case-annotations
   "Annotations for the analyze-test-rules suite (all edge-case rules)."
-  (analyze/generate-annotations-from-paths
-   {:paths ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]}))
+  (analyze/generate-annotations-from-analysis
+   {:analysis edge-case-analysis
+    :session-or-rulebase edge-case-session}))
 
 (def ^:private edge-case-annotations-filtered
   "Annotations for same rules but with a rules-filter that only keeps side-effect-only."
-  (analyze/generate-annotations-from-paths
-   {:paths ["test/clara/server/tools/graph/rules/analyze_test_rules.clj"]
+  (analyze/generate-annotations-from-analysis
+   {:analysis edge-case-analysis
+    :session-or-rulebase edge-case-session
     :rules-filter [`atr/rule-side-effect-only]}))
 
 ;; ---------------------------------------------------------------------------
-;; generate-annotations-from-paths
+;; Static insert types (record constructors traced through RHS and helpers)
 ;; ---------------------------------------------------------------------------
 
-(deftest test-generate-annotations-from-paths--static-insert-types
+(deftest test-static-insert-types
   (testing "Loan-doc rules: Clojure record insert types resolved statically"
     (let [ann loan-doc-annotations]
       (is (some? (get ann `ldr/collect-app-id-card-given-docs)))
@@ -65,10 +89,7 @@
 
       (is (some? (get ann `ldr/app-has-all-required-docs)))
       (is (= [`DocumentCheck]
-             (:clara-rules/insert-types (get ann `ldr/app-has-all-required-docs))))
-
-      (is (nil? (get ann `ldr/collect-all-missing-required-docs))
-          "Should not list rules that do not insert/retract facts")))
+             (:clara-rules/insert-types (get ann `ldr/app-has-all-required-docs))))))
 
   (testing "Edge cases: Clojure record constructors and helper tracing"
     (let [ann edge-case-annotations]
@@ -84,10 +105,6 @@
       (is (= [`DocumentCheck]
              (:clara-rules/insert-types (get ann `atr/rule-nested-helper-call))))
 
-      ;; Rule H1: insert-all! with collection of constructed records
-      (is (= [`LocalDummyRecord]
-             (:clara-rules/insert-types (get ann `atr/rule-insert-all-collection))))
-
       ;; Rule H2: insert! with varargs
       (is (= [`LocalDummyRecord]
              (:clara-rules/insert-types (get ann `atr/rule-insert-varargs))))
@@ -95,6 +112,10 @@
       ;; Rule H4: complex nested doseq loop
       (is (= [`LocalDummyRecord]
              (:clara-rules/insert-types (get ann `atr/rule-complex-rhs-nested))))
+
+      ;; Rule H5: insert-all! with collection literal
+      (is (= [`LocalDummyRecord]
+             (:clara-rules/insert-types (get ann `atr/rule-insert-all-collection))))
 
       ;; Rule H7: insert-all! with collection built by helper
       (is (= [`LocalDummyRecord]
@@ -112,10 +133,14 @@
       (is (= [`LocalDummyRecord]
              (:clara-rules/insert-types (get ann `atr/rule-insert-all-unconditional)))))))
 
-(deftest test-generate-annotations-from-paths--dynamic-insert-types-detected
+;; ---------------------------------------------------------------------------
+;; Dynamic insert callsites (arg forms captured at the boundary)
+;; ---------------------------------------------------------------------------
+
+(deftest test-dynamic-insert-types-detected
   (let [ann edge-case-annotations
         ns-sym 'clara.server.tools.graph.rules.analyze-test-rules
-        filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"]
+        filename "clara/server/tools/graph/rules/analyze_test_rules.clj"]
 
     (testing "Java constructor syntax variants → dynamic callsites"
       ;; Rule B: short Class. constructor
@@ -154,38 +179,41 @@
              (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-java-constructor-fq-modern))))
       (is (nil? (:clara-rules/insert-types (get ann `atr/rule-java-constructor-fq-modern)))))
 
-    (testing "Java constructor through helper functions → dynamic callsites"
-      ;; Rule G: nested helper calling Java constructor
-      (is (= {:callsites [{:source-str "(make-java-document-check-nested ?app-id)"
-                           :ns-name-sym ns-sym :filename filename}]}
-             (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-nested-java-helper-call))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-nested-java-helper-call))))
-
-      ;; Rule H5: helper that does Java constructor + insert
+    (testing "Java constructor via helper fn → dynamic callsite at helper"
       (is (= {:callsites [{:source-str "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new app-id :pass \"helper-insert\" nil nil)"
                            :ns-name-sym ns-sym :filename filename}]}
              (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-helper-does-insert))))
       (is (nil? (:clara-rules/insert-types (get ann `atr/rule-helper-does-insert)))))
 
-    (testing "Metadata map facts and custom fact builders → dynamic callsites"
-      ;; Rule E: with-meta map fact
+    (testing "Nested helper that calls a Java-constructor helper → dynamic callsite at outer helper"
+      (is (= {:callsites [{:source-str "(make-java-document-check-nested ?app-id)"
+                           :ns-name-sym ns-sym :filename filename}]}
+             (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-nested-java-helper-call))))
+      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-nested-java-helper-call)))))
+
+    (testing "with-meta map fact → dynamic callsite"
       (is (= {:callsites [{:source-str "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-map-type})"
                            :ns-name-sym ns-sym :filename filename}]}
              (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-metadata-map-fact))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-metadata-map-fact))))
+      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-metadata-map-fact)))))
 
-      ;; Rule E2: custom ->fact builder (not a real record constructor)
+    (testing "record-built-via-helper-fn (fact-builder) → dynamic callsite"
       (is (= {:callsites [{:source-str "(->fact :custom-fact-type {:app-id ?app-id, :status :pass})"
                            :ns-name-sym ns-sym :filename filename}]}
              (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-fact-builder-call))))
       (is (nil? (:clara-rules/insert-types (get ann `atr/rule-fact-builder-call)))))))
 
-(deftest test-generate-annotations-from-paths--retract-types
+;; ---------------------------------------------------------------------------
+;; Retract types
+;; ---------------------------------------------------------------------------
+
+(deftest test-retract-types
   (let [ann edge-case-annotations
         ns-sym 'clara.server.tools.graph.rules.analyze-test-rules
-        filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"]
+        filename "clara/server/tools/graph/rules/analyze_test_rules.clj"]
 
-    (testing "Static retract types — Clojure record varargs"
+    (testing "Static retract types — record constructors"
+      ;; Rule H3: retract! with varargs
       (let [h3 (get ann `atr/rule-retract-varargs)]
         (is (some? h3))
         (is (= [`LocalDummyRecord] (:clara-rules/retract-types h3)))
@@ -224,6 +252,61 @@
              (:clara-rules/dynamic-retract-types-detected (get ann `atr/rule-retract-helper-call))))
       (is (nil? (:clara-rules/retract-types (get ann `atr/rule-retract-helper-call)))))))
 
+;; ---------------------------------------------------------------------------
+;; Macro-emitted rules: the session sees rules kondo hooks never could
+;; ---------------------------------------------------------------------------
+
+(deftest test-extract-doc-meta-rule-captured
+  (testing "def-fact-fn-emitted rule appears as a captured dynamic callsite"
+    (let [dyn (:clara-rules/dynamic-insert-types-detected
+               (get loan-doc-annotations `ldr/extract-doc-meta-rule))]
+      (is (some? dyn)
+          "macro-emitted rule must be visible via the session (kondo hooks never see it)")
+      (is (= 1 (count (:callsites dyn))))
+      (let [{:keys [source-str ns-name-sym filename]} (first (:callsites dyn))]
+        (is (re-matches #"resolved__\d+__auto__" source-str)
+            "arg is the macro's gensym'd local; assert the shape, never the exact gensym")
+        (is (= 'clara.server.tools.graph.rules.loan-doc-rules ns-name-sym))
+        (is (= "clara/server/tools/graph/rules/loan_doc_rules.clj" filename)))))
+
+  (testing "loan-doc dynamic rules keep their captured callsites"
+    (let [ann loan-doc-annotations
+          ns-sym 'clara.server.tools.graph.rules.loan-doc-rules
+          filename "clara/server/tools/graph/rules/loan_doc_rules.clj"]
+      (is (= {:callsites [{:source-str "(build-compliance-review ?app-id)"
+                           :ns-name-sym ns-sym :filename filename}]}
+             (:clara-rules/dynamic-insert-types-detected (get ann `ldr/dynamic-insert-compliance-review))))
+      (is (= {:callsites [{:source-str "(build-compliance-via-metadata ?app-id)"
+                           :ns-name-sym ns-sym :filename filename}]}
+             (:clara-rules/dynamic-insert-types-detected (get ann `ldr/dynamic-insert-compliance-metadata))))
+      (is (= {:callsites [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
+                           :ns-name-sym ns-sym :filename filename}]}
+             (:clara-rules/dynamic-insert-types-detected (get ann `ldr/dynamic-insert-audit-trail))))
+      (is (= {:callsites [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
+                           :ns-name-sym ns-sym :filename filename}]}
+             (:clara-rules/dynamic-retract-types-detected (get ann `ldr/dynamic-retract-stale-notice)))))))
+
+;; ---------------------------------------------------------------------------
+;; Queries, no-output rules, and machinery exclusion
+;; ---------------------------------------------------------------------------
+
+(deftest test-queries-produce-no-annotations
+  (testing "queries are not rules — the default session rules-filter excludes them"
+    (is (nil? (get loan-doc-annotations `ldr/find-document-check))
+        "find-document-check is a defquery; it must not appear in rule annotations")))
+
+(deftest test-no-output-types-and-filter
+  (let [ann edge-case-annotations
+        ann-f edge-case-annotations-filtered]
+
+    (testing "Rule with no insert/retract → marked :no-output-types under the session filter"
+      (is (true? (:clara-rules/no-output-types (get ann `atr/rule-side-effect-only))))
+      (is (true? (:clara-rules/no-output-types (get loan-doc-annotations `ldr/collect-all-missing-required-docs)))))
+
+    (testing "Explicit rules-filter narrows the annotated set"
+      (is (= [`atr/rule-side-effect-only] (keys ann-f)))
+      (is (true? (:clara-rules/no-output-types (get ann-f `atr/rule-side-effect-only)))))))
+
 (deftest test-generate-annotations--excludes-insert-retract-machinery
   (testing "clara.rules insert!/retract! fns (and their non-! wrappers) never leak
             in as their own empty annotation entries"
@@ -241,25 +324,110 @@
           "insert/retract machinery fns must not appear as annotation keys")
       (is (empty? (filter (fn [[_ v]] (and (map? v) (empty? v))) ann))
           "no entry should be an empty {} annotation")
-      ;; Guard the general invariant: unfiltered output is real rules only.
-      (is (every? #(str/starts-with? (namespace %) "clara.server.tools.graph.rules")
+      (is (every? #(= "clara.server.tools.graph.rules.analyze-test-rules" (namespace %))
                   (keys ann))
-          "unfiltered annotations should contain only project rule vars"))))
+          "session-filtered annotations contain only the session's rule vars"))))
 
-(deftest test-generate-annotations-from-paths--no-output-types-and-filter
-  (let [ann edge-case-annotations
-        ann-f edge-case-annotations-filtered]
+;; ---------------------------------------------------------------------------
+;; Prune-and-replace evidence
+;; ---------------------------------------------------------------------------
 
-    (testing "Rule with no insert/retract → nil in annotations"
-      (is (nil? (get ann `atr/rule-side-effect-only))
-          "Should not produce an entry when unfiltered"))
+(deftest test-prune-and-replace--no-duplicates
+  (testing "each rule has exactly one var-definition, named after the production"
+    (doseq [[ns-sym analysis rule-names]
+            [['clara.server.tools.graph.rules.loan-doc-rules
+              loan-doc-analysis
+              '#{collect-doc-meta collect-app-id-card-given-docs collect-app-given-docs
+                 collect-app-req-docs collect-app-doc-check-input app-has-all-required-docs
+                 collect-all-missing-required-docs dynamic-insert-compliance-review
+                 dynamic-insert-compliance-metadata dynamic-retract-stale-notice
+                 dynamic-insert-audit-trail extract-doc-meta-rule}]
+             ['clara.server.tools.graph.rules.analyze-test-rules
+              edge-case-analysis
+              '#{rule-record-constructor rule-side-effect-only rule-retract-varargs}]]
+            :let [defs (filter #(= ns-sym (:ns %)) (:var-definitions analysis))
+                  def-counts (frequencies (map :name defs))]]
+      (is (every? (fn [[_ n]] (= 1 n)) def-counts)
+          (str "no duplicate var-definitions in " ns-sym))
+      (is (every? #(= 1 (get def-counts %)) rule-names)
+          "every production has exactly one def (snippet region is authoritative)")
+      (is (not-any? #(str/starts-with? (str %) "__clara_explorer_rule_")
+                    (map :name defs))
+          "snippet tags are renamed to production names, never leaked")))
 
-    (testing "Filter keeps non-inserting rule, marks it with :no-output-types"
-      (let [h6 (get ann-f `atr/rule-side-effect-only)]
-        (is (some? h6)
-            "Should produce an entry when listed in rules-filter")
-        (is (true? (:clara-rules/no-output-types h6))
-            "Should mark rules with no outputs as :no-output-types true")))))
+  (testing "query constructs produced by the bundled clara-rules hooks are pruned"
+    (let [defs (filter #(= 'clara.server.tools.graph.rules.loan-doc-rules (:ns %))
+                       (:var-definitions loan-doc-analysis))
+          def-names (set (map :name defs))]
+      (is (not (contains? def-names 'find-document-check))
+          "defquery hook output is pruned from the source region; queries get no snippet"))))
+
+;; ---------------------------------------------------------------------------
+;; Config robustness
+;; ---------------------------------------------------------------------------
+
+(deftest test-config-parity--empty-config
+  (testing "explicitly empty :config-dir yields identical annotations
+            (prune is a no-op; the snippets carry everything)"
+    (let [analysis-no-config
+          (analyze/analyze-session-rules
+           {:session-or-rulebase loan-doc-session
+            :include-ns-prefixes [rules-prefix]
+            :config-dir "test-resources/clara/server/tools/graph/empty-kondo-config"})
+          annotations-no-config
+          (analyze/generate-annotations-from-analysis
+           {:analysis analysis-no-config
+            :session-or-rulebase loan-doc-session})]
+      (is (= loan-doc-annotations annotations-no-config)))))
+
+;; ---------------------------------------------------------------------------
+;; Session-scoped cache
+;; ---------------------------------------------------------------------------
+
+(deftest test-analyze-session-rules--cache-scoping
+  (testing "explicit :cache-atom is populated; default runs use a fresh cache per call"
+    (let [cache (atom {})]
+      (analyze/analyze-session-rules
+       {:session-or-rulebase loan-doc-session
+        :include-ns-prefixes [rules-prefix]
+        :cache-atom cache})
+      (is (contains? @cache 'clara.server.tools.graph.rules.loan-doc-rules))
+      (is (contains? @cache 'clara.server.tools.graph.rules.loan-app-facts)
+          "dependencies transitively analyzed and cached"))
+    (is (= loan-doc-annotations
+           (analyze/generate-annotations-from-analysis
+            {:analysis (analyze/analyze-session-rules
+                        {:session-or-rulebase loan-doc-session
+                         :include-ns-prefixes [rules-prefix]})
+             :session-or-rulebase loan-doc-session}))
+        "sequential runs with the default session-scoped cache produce identical annotations")))
+
+;; ---------------------------------------------------------------------------
+;; Reconstructed ns form (no source on the classpath)
+;; ---------------------------------------------------------------------------
+
+(deftest test-analyze-session-rules--reconstructed-ns-fallback
+  (testing "eval'd namespace (no classpath source): reconstructed ns form still yields annotations"
+    (let [ns-sym 'fake.eval-rules]
+      (create-ns ns-sym)
+      (binding [*ns* (the-ns ns-sym)]
+        (eval '(clojure.core/require '[clara.rules :as r]))
+        (eval '(r/defrule fake-eval-rule
+                 [java.lang.Object]
+                 =>
+                 (r/insert! {:fake true}))))
+      (let [session (r/mk-session ns-sym)
+            annotations (analyze/generate-annotations-from-analysis
+                         {:analysis (analyze/analyze-session-rules
+                                     {:session-or-rulebase session
+                                      :include-ns-prefixes ["fake."]})
+                          :session-or-rulebase session})]
+        (is (= {:callsites [{:source-str "{:fake true}"
+                             :ns-name-sym ns-sym
+                             :filename "fake/eval_rules.clj"}]}
+               (:clara-rules/dynamic-insert-types-detected
+                (get annotations 'fake.eval-rules/fake-eval-rule)))
+            "rule from a source-less namespace is analyzed via the reconstructed ns form")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Utility fns
@@ -290,38 +458,8 @@
       (is (contains? var-defs 'make-document-check))
       (is (contains? var-defs 'rule-record-constructor)))))
 
-(deftest test-build-analysis-from-namespaces--global-cache-lifecycle
-  (analyze/clear-global-analysis-cache!)
-  (analyze/build-analysis-from-namespaces
-   {:starting-namespaces ['clara.server.tools.graph.rules.analyze-test-rules]
-    :include-ns-prefixes [rules-prefix]})
-  (is (not-empty @@#'analyze/global-analysis-cache))
-  (analyze/clear-global-analysis-cache!)
-  (is (empty? @@#'analyze/global-analysis-cache)))
-
-(deftest test-build-analysis-from-namespaces--in-memory
-  (let [source "(ns my.dynamic.rules
-                  (:require [clara.rules :as r]))
-
-                (r/defrule dynamic-rule
-                  =>
-                  (r/insert! (with-meta {:id 1} {:type :dynamic-fact-type})))"
-        analysis (analyze/build-analysis-from-namespaces
-                  {:starting-namespaces ['my.dynamic.rules]
-                   :in-memory-sources {'my.dynamic.rules source}})
-        annotations (analyze/generate-annotations-from-analysis
-                     {:analysis analysis
-                      :in-memory-sources {'my.dynamic.rules source}})]
-    (is (some? (get annotations 'my.dynamic.rules/dynamic-rule)))
-    (is (nil? (get-in annotations ['my.dynamic.rules/dynamic-rule :clara-rules/insert-types])))
-    (is (= {:callsites [{:source-str "(with-meta {:id 1} {:type :dynamic-fact-type})"
-                         :ns-name-sym 'my.dynamic.rules
-                         :filename "my/dynamic/rules.clj"}]}
-           (get-in annotations
-                   ['my.dynamic.rules/dynamic-rule :clara-rules/dynamic-insert-types-detected])))))
-
 ;; ---------------------------------------------------------------------------
-;; generate-annotations-from-analysis (production-style pipeline)
+;; generate-annotations-from-analysis (production-style pipeline, no session)
 ;; ---------------------------------------------------------------------------
 
 (deftest test-generate-annotations-from-analysis--from-merged-analysis
@@ -335,31 +473,12 @@
            (get-in annotations [`atr/rule-record-constructor :clara-rules/insert-types])))))
 
 ;; ---------------------------------------------------------------------------
-;; analyze-session-rules (high-level API)
-;; ---------------------------------------------------------------------------
-
-(deftest test-analyze-session-rules
-  (let [session (r/mk-session 'clara.server.tools.graph.rules.analyze-test-rules)
-        analysis (analyze/analyze-session-rules
-                  {:session-or-rulebase session
-                   :include-ns-prefixes [rules-prefix]})
-        rule-names (analyze/extract-session-rule-names session)
-        annotations (analyze/generate-annotations-from-analysis
-                     {:analysis analysis :rules-filter rule-names})]
-    (is (some? (get annotations `atr/rule-record-constructor)))
-    (is (= [`LocalDummyRecord]
-           (get-in annotations [`atr/rule-record-constructor :clara-rules/insert-types])))
-    (is (some? (get annotations `atr/rule-insert-varargs)))
-    (is (= [`LocalDummyRecord]
-           (get-in annotations [`atr/rule-insert-varargs :clara-rules/insert-types])))))
-
-;; ---------------------------------------------------------------------------
 ;; add-auto-detected-annotations
 ;; ---------------------------------------------------------------------------
 
 (deftest test-add-auto-detected-annotations--base-case
   (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
-                                   'clara.server.tools.graph.rules.loan-app-rules)
+                                  'clara.server.tools.graph.rules.loan-app-rules)
                     (r/insert (laf/map->Application {:app-id "app-1"})
                               (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
                               (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
@@ -375,24 +494,24 @@
                (:clara-rules/dynamic-insert-types-detected crd))))
       ;; No insert-types added (that is enrich-annotations-from-session's job)
       (is (nil? (:clara-rules/insert-types
-                  (get enriched "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"))))
+                 (get enriched "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")))))
 
-  (testing "Does not add dynamic detection when annotation already covers the type"
-    (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
-                                     'clara.server.tools.graph.rules.loan-app-rules)
-                      (r/insert (laf/map->Application {:app-id "app-1"})
-                                (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
-                                (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
-                      (r/fire-rules))
-          snapshot (memory/session-snapshot session)
-          existing-annos
-          {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
-           {:clara-rules/insert-types
-            ['clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments]}}
-          enriched (analyze/add-auto-detected-annotations snapshot existing-annos)]
-      (let [crd (get enriched "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
+    (testing "Does not add dynamic detection when annotation already covers the type"
+      (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                                      'clara.server.tools.graph.rules.loan-app-rules)
+                        (r/insert (laf/map->Application {:app-id "app-1"})
+                                  (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                                  (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
+                        (r/fire-rules))
+            snapshot (memory/session-snapshot session)
+            existing-annos
+            {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
+             {:clara-rules/insert-types
+              ['clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments]}}
+            enriched (analyze/add-auto-detected-annotations snapshot existing-annos)
+            crd (get enriched "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
         (is (nil? (:clara-rules/dynamic-insert-types-detected crd))
-            "Should NOT add dynamic detection when annotation already has the type"))))))
+            "Should NOT add dynamic detection when annotation already has the type")))))
 
 ;; ---------------------------------------------------------------------------
 ;; enrich-annotations-from-session
@@ -400,7 +519,7 @@
 
 (deftest test-enrich-annotations-from-session--base-case
   (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
-                                   'clara.server.tools.graph.rules.loan-app-rules)
+                                  'clara.server.tools.graph.rules.loan-app-rules)
                     (r/insert (laf/map->Application {:app-id "app-1"})
                               (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
                               (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
@@ -423,11 +542,11 @@
             "app-outcome-pending has ApplicationOutcome in its :props")
         ;; insert-types should NOT include the session-derived type (props covers it)
         (is (nil? (:clara-rules/insert-types aop))
-            "Should not add insert-types when :props already covers it"))))))
+            "Should not add insert-types when :props already covers it")))))
 
 (deftest test-enrich-annotations-from-session--preserves-callsites
   (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
-                                   'clara.server.tools.graph.rules.loan-app-rules)
+                                  'clara.server.tools.graph.rules.loan-app-rules)
                     (r/insert (laf/map->Application {:app-id "app-1"})
                               (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
                               (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
@@ -456,7 +575,7 @@
 (deftest test-enrich-annotations-from-session--dedup-against-props
   (testing "Session-derived types already in :props are not flagged as dynamic"
     (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
-                                     'clara.server.tools.graph.rules.loan-app-rules)
+                                    'clara.server.tools.graph.rules.loan-app-rules)
                       (r/insert (laf/map->Application {:app-id "app-1"})
                                 (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
                                 (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))

@@ -577,16 +577,25 @@ checkable state (`make test` + named REPL probes).
 
 ### M1 — Synthesis + prune-and-replace + session-based `analyze-session-rules`
 
+**Status: DONE (awaiting review).**
+
 - Bundled config swap: strip-lhs override out; verbatim clara-rules imports as
-  the default (sync tooling kept).
+  the default (sync tooling kept). ✓
 - Source synthesis (real source; reconstructed fallback with deviation
   detection). Snippet append with sanitized tags + tag→production mapping +
-  offset tracking. `:locals true` config.
-- Prune-and-replace; `analyze-session-rules` reworked; session-scoped cache.
-- `analyze_test.clj` migrated to session fixtures.
-- **Check:** `extract-doc-meta-rule` appears as a captured dynamic callsite; no
-  duplicate rule defs under the default config; static/helper cases unchanged;
-  `make test` green.
+  offset tracking. `:locals true` config. ✓
+- Prune-and-replace; `analyze-session-rules` reworked; session-scoped cache. ✓
+- `analyze_test.clj` migrated to session fixtures. ✓
+- **Check:** `extract-doc-meta-rule` appears as a captured dynamic callsite ✓;
+  no duplicate rule defs under the default config ✓; static/helper cases
+  unchanged ✓; `make test` green ✓ (except the failure set verified
+  pre-existing at clean HEAD: `memory_test:198`, `api-test`/`session-api-test`/
+  `smoke-test` muuntaja var-encode errors, `core_test` fact-type-summary drift;
+  `make lint` is *cleaner* than HEAD — its 2 warnings were the accidentally
+  nested deftests in the old analyze_test, now properly structured).
+- Note: kondo's `:locals`/`:local-usages` `:id` counters vary per run, so
+  run-to-run determinism is asserted on annotations (the consumer contract),
+  not on raw analysis maps.
 
 ### M2 — `analyze.rhs` ctor resolution chain + `:callsite-resolver-fn`
 

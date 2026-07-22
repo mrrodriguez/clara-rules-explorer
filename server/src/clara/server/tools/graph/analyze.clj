@@ -2,31 +2,28 @@
   "Static analysis tools for Clara rules using clj-kondo.
    Traces rule RHS call graphs to auto-detect insert/retract fact types.
 
+   ## Session-based analysis
+
+   The Clara session is the source of truth for rules: rule names, LHS, RHS,
+   and props come from the rulebase productions.
+   clj-kondo performs all Clojure syntax analysis on the RHS structures.
+
    ## Custom kondo config
 
-   Callers can supply their own clj-kondo config via the `:config-dir` option
-   on `generate-annotations-from-paths` or `analyze-session-rules`. This
-   completely replaces the bundled config — useful for adding project-specific
-   hooks or overriding rule parsing.
-
-   The bundled config (used when no `:config-dir` is given) contains:
-     - config.edn          — registers our defrule hook (LHS-stripping)
-     - hooks/strip_lhs.clj_kondo — minimal defrule hook, only analyzes RHS
-     - imports/clara/rules/ — synced clara-rules hooks (defquery, defhierarchy, etc.)
-
-   To provide a custom config while keeping clara-rules support, copy the
-   bundled config as a base, modify as needed, and pass the directory as
-   `:config-dir`. At minimum, ensure your config registers a hook for
-   `clara.rules/defrule` that emits a `def` form whose function body
-   contains the rule's RHS (clj-kondo analyzes this for var-usages).
+   The bundled config (default) is the verbatim clara-rules clj-kondo import
+   (defrule/defquery/defhierarchy hooks, synced from the clara-rules dep) —
+   the common case callers would supply themselves. Callers can supply their
+   own clj-kondo config via the `:config-dir` option, which completely
+   replaces the bundled config: typically the clara-rules import plus hooks
+   for their own var-emitting macros.
 
    Example:
      ;; Copy bundled config as a starting point
      cp -r resources/clara/server/tools/graph/kondo-config my-kondo-config
      ;; Edit my-kondo-config/config.edn to register your own hooks
      ;; Pass it to the analysis:
-     (generate-annotations-from-paths
-       {:paths [\"src/rules\"]
+     (analyze-session-rules
+       {:session-or-rulebase session
         :config-dir \"my-kondo-config\"})"
   (:require [clj-kondo.core :as kondo]
             [clojure.string :as str]
@@ -44,8 +41,6 @@
 ;;
 ;; Private Helpers
 ;;
-
-(defonce ^:private global-analysis-cache (atom {}))
 
 (def ^:private insert-fns
   #{'clara.rules/insert!
@@ -67,6 +62,16 @@
 
 (defn- fq-name-sym [ns name]
   (symbol (str ns) (str name)))
+
+(defn- var-ns-name
+  "Returns the namespace name of a var's metadata :ns."
+  [v]
+  (ns-name (:ns (meta v))))
+
+(defn- var-name
+  "Returns the name symbol from a var's metadata."
+  [v]
+  (:name (meta v)))
 
 (defn- var-usage-caller
   "Returns the fully-qualified caller symbol from a kondo var-usage map."
@@ -90,8 +95,10 @@
     k))
 
 (defn- build-graph [analysis]
+  ;; :from-var is a symbol for usages inside a def, or nil/absent for
+  ;; top-level forms (clj-kondo never produces the *symbol* `nil`).
   (reduce (fn [acc {:keys [from from-var to name]}]
-            (if (and from-var (not= from-var 'nil))
+            (if from-var
               (let [caller (fq-name-sym from from-var)
                     callee (fq-name-sym to name)]
                 (update acc caller (fnil conj #{}) callee))
@@ -117,22 +124,15 @@
         (:namespace-usages analysis)))
 
 ;;
-;; Bundled clj-kondo config (clara-rules hooks)
+;; Bundled clj-kondo config (verbatim clara-rules import)
 ;;
-;; clj-kondo only produces var-definitions for def-macros it has a hook or
-;; :lint-as mapping for. Without the clara-rules hooks, `defrule`/`defquery`
-;; etc. are opaque calls, no rule gets a :from-var, and the call graph is empty.
-;; Resources that override or extend the synced clara-rules imports.
-;; These are maintained by us, not synced from clara-rules.
-(def ^:private bundled-override-files
-  ["config.edn"
-   "hooks/strip_lhs.clj_kondo"])
-;; by walking up from the linted file's directory (see clj-kondo impl/core
-;; `config-dir`). That is cwd-dependent and unusable for a standalone tool run
-;; from a foreign working directory (CLI `-g`) or injected into a host JVM
-;; (`add-libs`). Instead we ship the clj-kondo import as classpath resources
-;; (mirrored by `clara.server.tools.graph.kondo-config-sync`), materialize it
-;; into a temp dir once per process, and pass it explicitly as `:config-dir`.
+;; clj-kondo resolves a linted file's config by walking up from the file's
+;; directory (see clj-kondo impl/core `config-dir`). That is cwd-dependent and
+;; unusable for a standalone tool run from a foreign working directory or
+;; injected into a host JVM (`add-libs`). Instead we ship the clj-kondo import
+;; as classpath resources (mirrored by
+;; `clara.server.tools.graph.kondo-config-sync`), materialize it into a temp
+;; dir once per process, and pass it explicitly as `:config-dir`.
 
 (def ^:private bundled-kondo-config-resource
   "Classpath resource base for the bundled clj-kondo config. Kept in sync with
@@ -158,13 +158,6 @@
             (io/make-parents dest)
             (with-open [in (io/input-stream res)]
               (io/copy in dest)))))
-      ;; Copy override files (our hooks, config — not in the sync manifest)
-      (doseq [rel bundled-override-files]
-        (when-let [res (io/resource (str bundled-kondo-config-resource "/" rel))]
-          (let [dest (io/file tmp-dir rel)]
-            (io/make-parents dest)
-            (with-open [in (io/input-stream res)]
-              (io/copy in dest)))))
       (.getAbsolutePath tmp-dir))))
 
 (defonce ^:private bundled-kondo-config-dir
@@ -178,7 +171,9 @@
               :filename resource-path
               :config {:analysis {:var-definitions true
                                   :var-usages true
-                                  :java-class-usages true}}}
+                                  :java-class-usages true
+                                  :locals true
+                                  :local-usages true}}}
        config-dir (assoc :config-dir config-dir)))))
 
 (defn- analyze-ns-source [ns-sym resource-url config-dir]
@@ -282,14 +277,7 @@
    from unrelated RHS branches (e.g. a helper that builds both a fact and
    an unrelated record value for a side computation). Consumers should use
    manual annotations (:clara-rules/no-output-types) to suppress false
-   positives.
-
-   The LHS is expected to already be stripped by clj-kondo macro parsing
-   config — this function only sees RHS var-usages. By default this is
-   done via the strip_lhs hook at
-   resources/clara/server/tools/graph/kondo-config/hooks/strip_lhs.clj_kondo,
-   but callers can override it by passing a custom :config-dir (see the
-   namespace docstring)."
+   positives."
   [direct-callers graph {:keys [var-usages]}]
   (let [reachable-cache (precompute-reachability graph direct-callers)]
     (into {}
@@ -388,31 +376,28 @@
 
   `ctx` must contain :graph, :insert-fns, :retract-fns, :direct-inserters, :direct-retractors,
   :analysis, :inserter-type-map, :retractor-type-map, and :get-source."
-  [var-name ctx]
+  [var-name {:keys [insert-fns retract-fns retractor-type-map] :as ctx}]
   (let [{:keys [is-inserter? is-retractor? reachable]} (var-reachability var-name ctx)]
     (when (or is-inserter? is-retractor?)
-      (let [retract-ctx (assoc ctx :inserter-type-map (:retractor-type-map ctx))
-            inserts (when is-inserter? (extract-insert-types reachable (:insert-fns ctx) ctx))
-            retracts (when is-retractor? (extract-insert-types reachable (:retract-fns ctx) retract-ctx))]
+      (let [retract-ctx (assoc ctx :inserter-type-map retractor-type-map)
+            inserts  (when is-inserter? (extract-insert-types reachable insert-fns ctx))
+            retracts (when is-retractor? (extract-insert-types reachable retract-fns retract-ctx))]
         (cond-> {}
           (seq (:static-types inserts))
-          (assoc :clara-rules/insert-types (vec (sort (map symbol (:static-types inserts)))))
+          (assoc :clara-rules/insert-types
+                 (->> (:static-types inserts) (map symbol) sort vec))
           (:dynamic-forms inserts)
           (assoc :clara-rules/dynamic-insert-types-detected (:dynamic-forms inserts))
 
           (seq (:static-types retracts))
-          (assoc :clara-rules/retract-types (vec (sort (map symbol (:static-types retracts)))))
+          (assoc :clara-rules/retract-types
+                 (->> (:static-types retracts) (map symbol) sort vec))
           (:dynamic-forms retracts)
           (assoc :clara-rules/dynamic-retract-types-detected (:dynamic-forms retracts)))))))
 
 ;;
 ;; API
 ;;
-
-(defn clear-global-analysis-cache!
-  "Clears the global analysis cache to prevent memory leaks or stale state."
-  []
-  (reset! global-analysis-cache {}))
 
 (defn ns->resource-base
   "Maps a namespace symbol to a classpath resource path by converting
@@ -437,6 +422,199 @@
       (when cache-atom
         (swap! cache-atom assoc ns-sym res))
       res)))
+
+;;
+;; Source synthesis + prune-and-replace (session-based analysis)
+;;
+
+(defn- session-rules-by-ns
+  "Groups rulebase productions that carry an :rhs (rules, not queries) by
+   their :ns-name. Returns {ns-sym [production ...]} with productions sorted
+   by name for deterministic snippet tag assignment."
+  [{:keys [productions] :as _rulebase}]
+  (->> productions
+       (filter #(and (:rhs %) (:ns-name %)))
+       (group-by :ns-name)
+       (into {}
+             (map (fn [[ns-sym rules]]
+                    [ns-sym (vec (sort-by (comp str :name) rules))])))))
+
+(defn- session-rule-fq-names
+  "Returns the fq symbols of the session's rules — productions that carry an
+   :rhs (queries excluded)."
+  [session-or-rulebase]
+  (let [{:keys [productions]} (get-rulebase session-or-rulebase)]
+    (into []
+          (comp (filter :rhs)
+                (map :name)
+                (map normalize-key)
+                (distinct))
+          productions)))
+
+;;; reconstruct-ns-source helpers ;;;
+
+(defn- core-deviations
+  "Returns {:excluded [...] :renamed {...}} describing how the given namespace
+   deviates from the default clojure.core mappings. Excluded are clojure.core
+   publics not present in the ns; renamed are entries whose local symbol
+   differs from the var's own name."
+  [nsobj]
+  (let [core-publics      (->> 'clojure.core ns-publics keys set)
+        core-entries      (into {}
+                                (filter (fn [[_ v]]
+                                          (and (var? v)
+                                               (= 'clojure.core (var-ns-name v)))))
+                                (ns-map nsobj))
+        present-core-names (into #{} (map (comp var-name val)) core-entries)]
+    {:excluded (->> core-publics (remove present-core-names) sort vec)
+     :renamed  (into {}
+                     (filter (fn [[sym v]] (not= sym (var-name v))))
+                     core-entries)}))
+
+(defn- build-require-clauses
+  "Builds a sorted vector of :require clause vectors from the namespace's
+   aliases and refers, excluding clojure.core refers."
+  [nsobj]
+  (let [alias-clauses (->> (ns-aliases nsobj)
+                           (mapv (fn [[a target]] [(ns-name target) :as a])))
+        refers        (into []
+                            (comp (remove #(= 'clojure.core
+                                              (var-ns-name (val %)))))
+                            (ns-refers nsobj))
+        refer-groups  (group-by (fn [[_ v]] (var-ns-name v)) refers)
+        refer-clauses (mapv (fn [[target kvs]]
+                              (->> kvs
+                                   (map first)
+                                   sort
+                                   (into [target :refer])))
+                            refer-groups)]
+    (->> (concat alias-clauses refer-clauses)
+         (sort-by (comp str first))
+         vec)))
+
+(defn- build-import-clauses
+  "Builds a sorted vector of :import clause vectors from the namespace's
+   imports, excluding java.lang.* (which are automatic in any new ns)."
+  [nsobj]
+  (let [imports       (into []
+                            (comp (remove #(.startsWith (.getName ^Class (val %))
+                                                        "java.lang.")))
+                            (ns-imports nsobj))
+        import-groups (group-by (fn [[_ ^Class c]] (.getPackageName c)) imports)]
+    (->> import-groups
+         (map (fn [[pkg kvs]]
+                (->> kvs
+                     (map first)
+                     sort
+                     (into [(symbol pkg)]))))
+         (sort-by (comp str first))
+         vec)))
+
+(defn- unmapped-default-imports
+  "Returns the sorted vector of default java.lang.* import symbols missing
+   from the given namespace (possible only via dynamic ns-unmap)."
+  [nsobj]
+  (let [imported (-> nsobj ns-imports keys set)]
+    (->> clojure.lang.RT/DEFAULT_IMPORTS
+         keys
+         (remove imported)
+         sort
+         vec)))
+
+(defn- reconstruct-ns-source
+  "Builds a synthetic source string containing only an (ns ...) form
+   reconstructed from the live Namespace object — used for namespaces whose
+   source is not on the classpath (jars without sources, eval'd code).
+
+   clojure.core refers and java.lang.* imports are automatic in any new ns,
+   so only deviations are emitted: a :refer-clojure clause with :exclude /
+   :rename when the live ns deviates from clojure.core defaults, and trailing
+   (ns-unmap ...) forms in the rare case a default java.lang import is
+   missing (only possible via dynamic ns-unmap in the original ns)."
+  [ns-sym]
+  (let [nsobj            (the-ns ns-sym)
+        {:keys [excluded renamed]} (core-deviations nsobj)
+        require-clauses   (build-require-clauses nsobj)
+        import-clauses    (build-import-clauses nsobj)
+        unmapped-defaults (unmapped-default-imports nsobj)
+        refer-clojure-clause (when (or (seq excluded) (seq renamed))
+                               (into [:refer-clojure]
+                                     cat
+                                     [(when (seq excluded) [:exclude excluded])
+                                      (when (seq renamed) [:rename renamed])]))
+        require-clause (when (seq require-clauses)
+                         (cons :require require-clauses))
+        import-clause (when (seq import-clauses)
+                        (cons :import import-clauses))
+        ns-form (concat (list 'ns ns-sym)
+                        (remove nil? [refer-clojure-clause require-clause import-clause]))]
+    (str (pr-str ns-form) "\n"
+         (str/join (map #(format "(ns-unmap (the-ns '%s) '%s)\n" ns-sym %)
+                        unmapped-defaults)))))
+
+(defn- synthesize-ns-source
+  "Builds the combined source for a rule-owning namespace: the real source
+   (or a reconstructed ns form when none is on the classpath) plus one
+   synthetic snippet per rule, `(def <tag> (fn [] <pr-str-of-rhs>))`, each on
+   its own line. Snippet tags are deterministic ordinals — never raw
+   production names (which may not be legal def symbols) — with an explicit
+   tag → production-name mapping for attribution.
+
+   Returns {:source combined-str
+            :offset base-source-line-count
+            :tag->production {tag-sym production-local-name-sym}}"
+  [ns-sym productions]
+  (let [base-source (or (some-> (find-ns-resource ns-sym) slurp)
+                        (reconstruct-ns-source ns-sym))
+        offset (count (str/split-lines base-source))
+        snippets (map-indexed
+                  (fn [idx production]
+                    (let [tag (symbol (str "__clara_explorer_rule_" idx "__"))
+                          local-name (-> production :name normalize-key name symbol)
+                          rhs-str (binding [*print-length* nil
+                                            *print-level* nil]
+                                    (pr-str (:rhs production)))]
+                      {:tag tag
+                       :local-name local-name
+                       :form (format "(def %s (fn [] %s))" tag rhs-str)}))
+                  productions)]
+    {:source (str base-source "\n" (str/join "\n" (map :form snippets)) "\n")
+     :offset offset
+     :tag->production (into {} (map (juxt :tag :local-name)) snippets)}))
+
+(defn- prune-and-rename-analysis
+  "Prune-and-replace for one rule-owning namespace's analysis:
+
+   1. Drops source-region (row <= offset) :var-definitions and :var-usages
+      attributed to known production vars (session rules *and* queries) —
+      whatever defrule/defquery constructs the active kondo config produced.
+   2. Renames snippet tags to the production names they stand for, so
+      downstream graph keys are the true production fq symbols.
+
+   After pruning, the snippet region (row > offset) is the authoritative
+   analysis of each rule. Robust to any caller config because it keys on
+   production names, not macro identity."
+  [analysis {:keys [offset tag->production]} prune-vars]
+  (let [source-region? (fn [row] (and row (<= row offset)))
+        rename (fn [n] (get tag->production n n))]
+    (-> analysis
+        (update :var-definitions
+                (fn [defs]
+                  (into []
+                        (comp (remove (fn [d]
+                                        (and (prune-vars (fq-name-sym (:ns d) (:name d)))
+                                             (source-region? (:row d)))))
+                              (map (fn [d] (update d :name rename))))
+                        defs)))
+        (update :var-usages
+                (fn [usages]
+                  (into []
+                        (comp (remove (fn [u]
+                                        (and (:from-var u)
+                                             (prune-vars (fq-name-sym (:from u) (:from-var u)))
+                                             (source-region? (:row u)))))
+                              (map (fn [u] (update u :from-var rename))))
+                        usages))))))
 
 (def ^:private default-exclude-ns-prefixes
   #{"clojure."
@@ -467,19 +645,24 @@
                               all transitive dependencies are followed (no filtering).
      :exclude-ns-prefixes   - optional coll of ns prefix strings; defaults to
                               default-exclude-ns-prefixes.
-     :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache.
-     :in-memory-sources     - optional map of {ns-symbol source-string} for dynamically
-                              defined in-memory namespaces.
+     :cache-atom            - optional atom to use as cache; defaults to a fresh
+                              atom per call (one analysis run).
+     :ns-source-map         - optional internal map of {ns-symbol synthesis-result}
+                              (see synthesize-ns-source); those namespaces are
+                              analyzed from their combined source instead of the
+                              classpath, then pruned-and-renamed.
+     :prune-vars            - optional set of fq production symbols to prune from
+                              synthesized namespaces (see prune-and-rename-analysis).
      :config-dir            - optional clj-kondo config dir; defaults to the bundled
-                              clara-rules hooks. Pass nil to disable (falls back to
-                              cwd-based `.clj-kondo` discovery).
+                              verbatim clara-rules config. Pass nil to disable
+                              (falls back to cwd-based `.clj-kondo` discovery).
      :initial-analysis      - optional map of analysis data to seed the merge with;
                               defaults to nil.
      :processed-namespaces  - optional coll of namespace symbols already processed;
                               defaults to nil."
-  [{:keys [starting-namespaces include-ns-prefixes exclude-ns-prefixes cache-atom in-memory-sources config-dir
+  [{:keys [starting-namespaces include-ns-prefixes exclude-ns-prefixes cache-atom ns-source-map prune-vars config-dir
            initial-analysis processed-namespaces]
-    :or {cache-atom global-analysis-cache
+    :or {cache-atom (atom {})
          config-dir @bundled-kondo-config-dir
          exclude-ns-prefixes default-exclude-ns-prefixes}}]
   (let [ns-matches-prefix? (fn [ns-sym]
@@ -501,30 +684,35 @@
               remaining (disj queue ns-sym)]
           (if (contains? processed ns-sym)
             (recur remaining processed merged-analysis)
-            (let [in-mem-source (get in-memory-sources ns-sym)
-                  resource-url (when-not in-mem-source (find-ns-resource ns-sym))]
-              (if (or in-mem-source resource-url)
-                (let [analyze-fn (if in-mem-source
-                                   #(analyze-ns-string ns-sym in-mem-source config-dir)
+            (let [synth (get ns-source-map ns-sym)
+                  resource-url (when-not synth (find-ns-resource ns-sym))]
+              (if (or synth resource-url)
+                (let [analyze-fn (if synth
+                                   #(update (analyze-ns-string ns-sym (:source synth) config-dir)
+                                            :analysis prune-and-rename-analysis synth prune-vars)
                                    #(analyze-ns-source ns-sym resource-url config-dir))
                       analysis (get-or-analyze-ns-analysis ns-sym analyze-fn cache-atom)
                       dependencies (extract-required-namespaces analysis)]
                   (recur (into remaining (filter ns-matches-prefix?) dependencies)
                          (conj processed ns-sym)
                          (merge-with into merged-analysis analysis)))
-                ;; Resource not found on classpath or in-memory, skip
+                ;; Resource not found on classpath, skip
                 (recur remaining (conj processed ns-sym) merged-analysis)))))))))
 
 (defn- build-source-loader
-  "Returns a (fn [ns-sym filename] -> source-str) that caches source lookups."
-  [in-memory-sources]
+  "Returns a (fn [ns-sym filename] -> source-str) that caches source lookups.
+   `combined-sources` maps ns-sym -> synthesized source (real source + rule
+   snippets, see synthesize-ns-source) and takes precedence over classpath
+   resources, so callsite positions in synthesized analyses resolve against
+   the exact text clj-kondo analyzed."
+  [combined-sources]
   (let [cache (atom {})]
     (fn [ns-sym filename]
       (let [k (or ns-sym filename)]
         (if-let [cached (get @cache k)]
           cached
           (let [source (try
-                         (or (and ns-sym (get in-memory-sources ns-sym))
+                         (or (and ns-sym (get combined-sources ns-sym))
                              (if-let [res (and ns-sym (find-ns-resource ns-sym))]
                                (slurp res)
                                (when filename
@@ -536,7 +724,7 @@
             source))))))
 
 (defn- build-infer-ctx
-  "Builds the context map passed to infer-annotation-for-var."
+  "Builds the context map passed to `infer-annotation-for-var`."
   [graph analysis inserter-type-map retractor-type-map get-source]
   {:graph graph
    :insert-fns insert-fns
@@ -553,20 +741,33 @@
    clj-kondo analysis map.
 
    Options:
-     :analysis           - the clj-kondo analysis map (required)
-     :rules-filter       - optional coll of rule symbols to filter by; when nil,
-                           all project vars are analyzed.
-     :in-memory-sources  - optional map of {ns-symbol source-string} for dynamically
-                           defined in-memory namespaces."
-  [{:keys [analysis rules-filter in-memory-sources]}]
-  (let [_ (doseq [ns-sym (distinct (keep :ns (:var-definitions analysis)))]
-            (try (require ns-sym) (catch Exception _ nil)))
-        get-source (build-source-loader in-memory-sources)
+     :analysis            - the clj-kondo analysis map (required). When produced
+                            by `analyze-session-rules` it carries synthesized
+                            sources under ::combined-sources, which take
+                            precedence for callsite source extraction.
+     :session-or-rulebase - optional Clara session or rulebase; when given and
+                            :rules-filter is not, the filter defaults to the
+                            session's rules (productions with an :rhs — queries
+                            are excluded).
+     :rules-filter        - optional coll of rule symbols to filter by; when nil
+                            and no session is given, all project vars are
+                            analyzed."
+  [{:keys [analysis rules-filter session-or-rulebase]}]
+
+  (doseq [ns-sym (->> analysis
+                      :var-definitions
+                      (into []
+                            (comp (keep :ns) (distinct))))]
+    (try (require ns-sym) (catch Exception _ nil)))
+
+  (let [get-source (build-source-loader (::combined-sources analysis))
         graph (build-graph analysis)
         project-vars (keys graph)
-        var-seq (if (seq rules-filter)
-                  (map normalize-key rules-filter)
-                  project-vars)
+        effective-filter (if (seq rules-filter)
+                           (mapv normalize-key rules-filter)
+                           (when session-or-rulebase
+                             (session-rule-fq-names session-or-rulebase)))
+        var-seq (or effective-filter project-vars)
         inserter-type-map (build-inserter-type-map
                            (direct-callers graph project-vars insert-fns)
                            graph analysis)
@@ -580,17 +781,9 @@
                       (let [annotation (infer-annotation-for-var v infer-ctx)]
                         (cond
                           ;; Real annotation with inferred insert/retract data.
-                          (seq annotation)   [v annotation]
+                          (seq annotation)       [v annotation]
                           ;; Explicitly-requested rule that produces nothing: mark it.
-                          (seq rules-filter) [v {:clara-rules/no-output-types true}]
-                          ;; Otherwise drop it. `infer-annotation-for-var` returns an
-                          ;; empty map (truthy) for vars that classify as inserters/
-                          ;; retractors but carry no fact types or callsites -- i.e. the
-                          ;; clara.rules insert!/retract! machinery fns and their non-!
-                          ;; wrappers (insert/retract), which land in the call graph but
-                          ;; are not rules. A real rule always yields a type or a dynamic
-                          ;; callsite, so dropping empty {} annotations loses nothing.
-                          :else              nil))))
+                          (seq effective-filter) [v {:clara-rules/no-output-types true}]))))
               var-seq)]
     annotations))
 
@@ -616,34 +809,52 @@
 
 (defn analyze-session-rules
   "Builds a unified clj-kondo analysis map for the rules in a Clara session
-   or rulebase by:
-   1. Extracting the namespaces and rule names from the session.
-   2. Building a merged analysis map from the classpath (using the cache).
+   or rulebase:
 
-   Returns the merged clj-kondo analysis map.
-   Consumers can feed this to `generate-annotations-from-analysis` with
-   `extract-session-rule-names` to generate annotations.
+   1. Rule names, namespaces, and RHS forms come from the rulebase
+      productions — the session is the source of truth, so macro-emitted
+      rules are included.
+   2. For each rule-owning namespace a combined source is synthesized: the
+      real source (or a reconstructed ns form when none is on the classpath)
+      plus one synthetic snippet def per rule (see synthesize-ns-source).
+   3. clj-kondo analyzes each combined source; defrule/defquery constructs
+      produced by the active config in the source region are pruned and the
+      snippet region is renamed to the production names (prune-and-replace).
+   4. Transitive dependencies are analyzed from the classpath and merged.
+
+   Returns the merged clj-kondo analysis map, with the combined sources under
+   ::combined-sources for `generate-annotations-from-analysis`.
 
    Options:
      :session-or-rulebase   - Clara session or rulebase (required)
      :include-ns-prefixes   - optional coll of ns prefix strings; passed to build-analysis-from-namespaces
      :exclude-ns-prefixes   - optional coll of ns prefix strings; passed to build-analysis-from-namespaces
-     :cache-atom            - optional atom to use as cache; defaults to global-analysis-cache.
-     :in-memory-sources     - optional map of {ns-symbol source-string} for dynamically
-                              defined in-memory namespaces.
+     :cache-atom            - optional atom to use as cache; defaults to a fresh
+                              atom per call (one session analysis run).
      :config-dir            - optional clj-kondo config dir; defaults to the bundled
-                              clara-rules hooks (see build-analysis-from-namespaces)."
-  [{:keys [session-or-rulebase include-ns-prefixes exclude-ns-prefixes cache-atom in-memory-sources config-dir]
-    :or {cache-atom global-analysis-cache
-         config-dir @bundled-kondo-config-dir}}]
-  (let [namespaces (extract-session-namespaces session-or-rulebase)]
-    (build-analysis-from-namespaces
-     (cond-> {:starting-namespaces namespaces
-              :cache-atom cache-atom
-              :in-memory-sources in-memory-sources
-              :config-dir config-dir}
-       include-ns-prefixes (assoc :include-ns-prefixes include-ns-prefixes)
-       exclude-ns-prefixes (assoc :exclude-ns-prefixes exclude-ns-prefixes)))))
+                              verbatim clara-rules config; replaces it entirely."
+  [{:keys [session-or-rulebase include-ns-prefixes exclude-ns-prefixes cache-atom config-dir]
+    :or {config-dir @bundled-kondo-config-dir
+         cache-atom (atom {})}}]
+  (let [rulebase (get-rulebase session-or-rulebase)
+        rules-by-ns (session-rules-by-ns rulebase)
+        prune-vars (set (map (comp normalize-key :name) (:productions rulebase)))
+        ns-source-map (into {}
+                            (map (fn [[ns-sym productions]]
+                                   [ns-sym (synthesize-ns-source ns-sym productions)]))
+                            rules-by-ns)]
+    (-> (build-analysis-from-namespaces
+         (cond-> {:starting-namespaces (keys rules-by-ns)
+                  :ns-source-map ns-source-map
+                  :prune-vars prune-vars
+                  :cache-atom cache-atom
+                  :config-dir config-dir}
+           include-ns-prefixes (assoc :include-ns-prefixes include-ns-prefixes)
+           exclude-ns-prefixes (assoc :exclude-ns-prefixes exclude-ns-prefixes)))
+        (assoc ::combined-sources
+               (into {}
+                     (map (fn [[ns-sym synth]] [ns-sym (:source synth)]))
+                     ns-source-map)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers for add-auto-detected-annotations / enrich-annotations-from-session
@@ -699,8 +910,8 @@
                                derived-entry    {:fact-instance-derived-types (vec new-types)
                                                  :resolution :partial}
                                updated-dynamic  (if existing-dynamic
-                                                   (merge existing-dynamic derived-entry)
-                                                   derived-entry)]
+                                                  (merge existing-dynamic derived-entry)
+                                                  derived-entry)]
                            (assoc acc rule-fq-str
                                   (assoc (or rule-ann {})
                                          :clara-rules/dynamic-insert-types-detected
