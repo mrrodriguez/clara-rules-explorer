@@ -636,7 +636,7 @@ checkable state (`make test` + named REPL probes).
 
 ### M3 — API surface + docs + demo artifacts
 
-**Status: DONE (awaiting review).**
+**Status: DONE (reviewed).**
 
 - Removed `generate-annotations-from-paths`, the `-g` flag
   (`main.clj` + `main_test.clj` routing test replaced with a
@@ -649,7 +649,7 @@ checkable state (`make test` + named REPL probes).
   a test); `main.clj --generate-analysis` passes the loaded session through. ✓
 - Docs rewritten to final shape (§8): `rule-annotations.md` (dynamic-capture
   section now documents the resolution chain, `:status`/`:resolved-types`/`
-  :resolution`, promotion, and `:callsite-resolver-fn`; workflows are
+:resolution`, promotion, and `:callsite-resolver-fn`; workflows are
   session-only — no `-g`, no `:in-memory-sources`),
   `analyze-clj-kondo-notes.md` (prune-and-replace, synthesis,
   `::combined-sources`, locals tracing, id non-determinism), `README.md`
@@ -676,7 +676,7 @@ checkable state (`make test` + named REPL probes).
 
 ### M4 — `:fact-type-spec-fn` var-alias chains
 
-**Status: DONE (awaiting review).**
+**Status: DONE (reviewed).**
 
 - Implemented the `:fact-type-spec-fn` mechanism of §5.5:
   `rhs/lhs-var-bindings` (LHS scan: `:fact-binding` on fact conditions,
@@ -712,13 +712,13 @@ checkable state (`make test` + named REPL probes).
   promotes `[:widget-output]`, `:resolution :full`) ✓; without a spec fn the
   consumer shows `:no-output-types` (nothing alias-derived appears) ✓;
   a throwing spec fn degrades to the no-spec-fn annotations ✓.
-- Implementation notes: the spec-fn ran against a kondo-*visible* plain
+- Implementation notes: the spec-fn ran against a kondo-_visible_ plain
   `defn`, which surfaced a pre-existing reachability semantic — a plain
   `(var the-fn)` reference in a rule RHS already explores the var's chain via
   kondo's var-usage of the var special form (the producer rule's detection
-  includes the var body's callsites in the *baseline* too, without alias
+  includes the var body's callsites in the _baseline_ too, without alias
   context keys). This is consistent with how any fn reference in an RHS pulls
-  in the callee's chain; only alias-*derived* discovery carries the context.
+  in the callee's chain; only alias-_derived_ discovery carries the context.
   `lhs-var-bindings` unit-tested directly for the accumulator
   `:result-binding` shape (no accumulator fixture needed).
 - **Gates:** `make test` = 70 tests / 454 assertions, 0 failures;
