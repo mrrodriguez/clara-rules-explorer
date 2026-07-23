@@ -299,6 +299,24 @@
      :is-inserter? is-inserter?
      :is-retractor? is-retractor?}))
 
+(defn- alias-context-for-fn
+  "Builds the (fn [usage] -> alias-context-or-nil) for one rule's var-alias
+  contexts (:fact-type-spec-fn): a boundary usage whose caller is reachable
+  from an aliased var was discovered through the alias chain — it bypasses
+  the ctor chain and carries :fact-type/:fact-type-spec. Contexts are tried
+  in deterministic ((str :fact-type)) order when several alias chains reach
+  the same caller. Returns nil when the rule has no alias contexts."
+  [graph contexts]
+  (when (seq contexts)
+    (let [sorted (sort-by (comp str :fact-type) contexts)
+          reach (memoize (fn [root] (transitive-reachability graph [root])))]
+      (fn [usage]
+        (let [caller (var-usage-caller usage)]
+          (some (fn [{:keys [root] :as ctx}]
+                  (when (contains? (reach root) caller)
+                    (select-keys ctx [:fact-type :fact-type-spec])))
+                sorted))))))
+
 (defn- infer-annotation-for-var
   "Returns an annotation map for the var referred to by the given `var-name` when it inserts or
   retracts fact types. Returns nil when the var has no output side-effects.
@@ -310,11 +328,14 @@
 
   `ctx` must contain :graph, :insert-fns, :retract-fns, :direct-inserters, :direct-retractors,
   :analysis, :inserter-type-map, :retractor-type-map, :get-source, :productions-by-name,
-  and :callsite-resolver-fn."
-  [var-name {:keys [insert-fns retract-fns retractor-type-map productions-by-name] :as ctx}]
+  :callsite-resolver-fn, and :alias-by-rule (nil when no :fact-type-spec-fn)."
+  [var-name {:keys [insert-fns retract-fns retractor-type-map productions-by-name alias-by-rule] :as ctx}]
   (let [{:keys [is-inserter? is-retractor? reachable]} (var-reachability var-name ctx)]
     (when (or is-inserter? is-retractor?)
-      (let [ctx (assoc ctx :rule (get productions-by-name var-name))
+      (let [ctx (cond-> (assoc ctx :rule (get productions-by-name var-name))
+                  alias-by-rule (assoc :alias-context-for
+                                       (alias-context-for-fn (:graph ctx)
+                                                             (:contexts (get alias-by-rule var-name)))))
             insert-ctx (assoc ctx :direction :insert)
             retract-ctx (assoc ctx
                                :inserter-type-map retractor-type-map
@@ -667,7 +688,7 @@
 (defn- build-infer-ctx
   "Builds the context map passed to `infer-annotation-for-var`."
   [graph analysis inserter-type-map retractor-type-map get-source
-   productions-by-name callsite-resolver-fn]
+   productions-by-name callsite-resolver-fn alias-by-rule]
   {:graph graph
    :insert-fns insert-fns
    :retract-fns retract-fns
@@ -678,42 +699,63 @@
    :retractor-type-map retractor-type-map
    :get-source get-source
    :productions-by-name productions-by-name
-   :callsite-resolver-fn callsite-resolver-fn})
+   :callsite-resolver-fn callsite-resolver-fn
+   :alias-by-rule alias-by-rule})
 
 (defn generate-annotations-from-analysis
-  "Generates rule annotations (insert/retract types etc.) from a pre-computed
-   clj-kondo analysis map.
+  "Generates rule annotations (insert/retract types etc.) from a pre-computed clj-kondo analysis
+  map.
 
    Options:
-     :analysis            - the clj-kondo analysis map (required). When produced
-                            by `analyze-session-rules` it carries synthesized
-                            sources under ::combined-sources, which take
-                            precedence for callsite source extraction.
-     :session-or-rulebase - Clara session or rulebase (required). Supplies the
-                            full productions handed to :callsite-resolver-fn
-                            and, when :rules-filter is not given, the default
-                            filter: the session's rules (productions with an
-                            :rhs — queries are excluded).
-     :rules-filter        - optional coll of rule symbols to filter by.
-     :callsite-resolver-fn - optional fn invoked once per callsite argument
-                            form the automatic constructor-resolution chain
-                            cannot resolve (see analyze.rhs). Receives a map:
-                              :rule        - the full production (:name :ns-name
-                                             :lhs :rhs :props :env …), when a
-                                             session was supplied
-                              :ns-name-sym - ns where the callsite was found
-                                             (may be a helper ns)
-                              :direction   - :insert | :retract
-                              :boundary-fn - e.g. clara.rules/insert!
-                              :arg-form    - the unresolved argument form
-                                             (locals already traced to their
-                                             init forms)
-                              :source-str  - pr-str of :arg-form
-                              :filename    - file containing the callsite
-                            Returns nil (still unresolved) or a map with
-                            :resolved-types [tokens…]. Exceptions are
-                            contained: logged and treated as unresolved."
-  [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn]}]
+
+     :analysis - the clj-kondo analysis map (required). When produced by `analyze-session-rules` it
+  carries synthesized sources under ::combined-sources, which take precedence for callsite source
+  extraction.
+
+     :session-or-rulebase - Clara session or rulebase (required). Supplies the full productions
+  handed to :callsite-resolver-fn and, when :rules-filter is not given, the default filter: the
+  session's rules (productions with an :rhs — queries are excluded).
+
+     :rules-filter - optional coll of rule symbols to filter by.
+
+     :callsite-resolver-fn - optional fn invoked once per callsite argument form the automatic
+  constructor-resolution chain cannot resolve (see analyze.rhs). Receives a map:
+
+   :rule - the full production (:name :ns-name :lhs :rhs :props :env …),
+  when a session was supplied
+
+   :ns-name-sym - ns where the callsite was found (may be a helper ns)
+
+   :direction - :insert | :retract
+
+   :boundary-fn - e.g. clara.rules/insert!
+
+   :arg-form - the unresolved argument form (locals already traced to
+  their init forms)
+
+   :source-str - pr-str of :arg-form
+
+   :filename - file containing the callsite
+
+                            Plus, only for callsites discovered through a var-alias chain (see
+  :fact-type-spec-fn):
+
+   :fact-type - the LHS-bound fact type that linked the aliased var
+
+   :fact-type-spec - the spec map returned for that fact type
+
+                            Returns nil (still unresolved) or a map with :resolved-types [tokens…].
+  Exceptions are contained: logged and treated as unresolved.
+
+     :fact-type-spec-fn - optional fn declaring caller-specific fact patterns. Receives a fact type
+  (from a rule's LHS bindings) and returns a spec map or nil; currently one key: {:aliases-var
+  fully.qualified/var-name} (the var-as-fact pattern — a fact IS a function var, bound on the LHS
+  and invoked in the RHS). When a rule binds an alias-mapped fact type and uses the binding in its
+  RHS, a synthetic var-usage links the rule to the aliased var so the var's call chain is explored
+  for boundary calls (see `rhs/alias-usage-map`). Callsites discovered through that chain bypass the
+  ctor chain: recorded :unresolved with :fact-type/:fact-type-spec attached, and handed to
+  :callsite-resolver-fn with the same context."
+  [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn fact-type-spec-fn]}]
   (when-not session-or-rulebase
     (throw (ex-info "generate-annotations-from-analysis requires :session-or-rulebase"
                     {:missing :session-or-rulebase})))
@@ -724,8 +766,6 @@
     (try (require ns-sym) (catch Exception _ nil)))
 
   (let [get-source (build-source-loader (::combined-sources analysis))
-        graph (build-graph analysis)
-        project-vars (keys graph)
         rulebase (get-rulebase session-or-rulebase)
         productions-by-name (into {}
                                   (map (fn [p] [(normalize-key (:name p)) p]))
@@ -733,6 +773,17 @@
         effective-filter (if (seq rules-filter)
                            (mapv normalize-key rules-filter)
                            (session-rule-fq-names session-or-rulebase))
+        ;; Var-alias chains (:fact-type-spec-fn): synthetic rule → aliased-var
+        ;; usages are injected before graph building so the existing
+        ;; reachability explores each aliased var's call chain.
+        alias-by-rule (when fact-type-spec-fn
+                        (rhs/alias-usage-map productions-by-name effective-filter
+                                             analysis fact-type-spec-fn))
+        analysis (cond-> analysis
+                   (seq alias-by-rule)
+                   (update :var-usages into (mapcat :usages) (vals alias-by-rule)))
+        graph (build-graph analysis)
+        project-vars (keys graph)
         var-seq (or effective-filter project-vars)
         inserter-type-map (build-inserter-type-map
                            (direct-callers graph project-vars insert-fns)
@@ -742,7 +793,7 @@
                             graph analysis)
         infer-ctx (build-infer-ctx graph analysis inserter-type-map retractor-type-map
                                    get-source productions-by-name
-                                   callsite-resolver-fn)
+                                   callsite-resolver-fn alias-by-rule)
         annotations
         (into (sorted-map)
               (keep (fn [v]
@@ -784,7 +835,7 @@
       rules are included.
    2. For each rule-owning namespace a combined source is synthesized: the
       real source (or a reconstructed ns form when none is on the classpath)
-      plus one synthetic snippet def per rule (see synthesize-ns-source).
+      plus one synthetic snippet def per rule (see `synthesize-ns-source`).
    3. clj-kondo analyzes each combined source; defrule/defquery constructs
       produced by the active config in the source region are pruned and the
       snippet region is renamed to the production names (prune-and-replace).

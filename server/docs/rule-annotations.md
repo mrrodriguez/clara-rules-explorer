@@ -145,6 +145,50 @@ Example — resolving the var-as-fact pattern (`(insert! (var my-fact-fn))`):
   :callsite-resolver-fn var-fact-resolver})
 ```
 
+### `:fact-type-spec-fn` — var-alias chains
+
+The **function-as-fact** (var-as-fact) pattern: a fact *is* a function var
+(e.g. a macro emitting `(insert! (var the-fn))` with the fact type on the
+var's `:type` meta), matched downstream by `[?f <- :the-type]` and invoked as
+a fn in the RHS. Nothing about this is hardcoded; the caller declares the
+mapping via `:fact-type-spec-fn`:
+
+```clojure
+:fact-type-spec-fn
+(fn [fact-type]
+  ;; => spec map, or nil when the fact type follows no special pattern.
+  ;; Currently one key (the spec is open for extension):
+  {:aliases-var fully.qualified/var-name})
+```
+
+**Mechanism** (per rule, when a spec fn is supplied):
+
+1. The rule's `:lhs` is scanned for bound fact variables — `:fact-binding` on fact conditions and
+   `:result-binding` on accumulator conditions.
+2. When `(fact-type-spec-fn t)` returns `{:aliases-var v}` for a bound type *and* the binding is
+   used in the RHS (detected via the rule's snippet var-usages), a synthetic var-usage links the
+   rule to `v`, so the existing reachability explores `v`'s whole call chain for boundary fns. (If
+   `v` is invisible to clj-kondo — macro-emitted, unhooked — its chain is empty; that is the caller
+   `:config-dir` situation.)
+3. Callsites discovered *through* an alias chain **bypass the constructor chain**: they are recorded
+   `:status :unresolved` with the alias context attached — `:fact-type` (the LHS-bound type) and
+   `:fact-type-spec` (the spec map) on both the callsite entry and the `:callsite-resolver-fn`
+   context — and are never automatically resolved. The resolver decides.
+
+```clojure
+(analyze/generate-annotations-from-analysis
+ {:analysis analysis
+  :session-or-rulebase my-session
+  :fact-type-spec-fn (fn [t]
+                       (when (= t :extract-doc-meta)
+                         {:aliases-var 'my.rules/extract-doc-meta}))
+  :callsite-resolver-fn my-resolver})
+```
+
+The *producing* side (the rule inserting the var itself) is unaffected by the
+spec fn — its `(var the-fn)` callsite is a plain resolver-fn concern and
+carries no alias context.
+
 ---
 
 ## Usage Workflows

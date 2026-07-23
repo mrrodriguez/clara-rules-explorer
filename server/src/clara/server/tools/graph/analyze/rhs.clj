@@ -26,8 +26,17 @@
 
    All Clojure syntax understanding comes from clj-kondo; this namespace only
    reads single forms at kondo-provided positions and resolves symbols via the
-   live namespace."
-  (:require [clojure.string :as str]))
+   live namespace.
+
+   Var-alias chains (:fact-type-spec-fn): the caller may declare that a fact
+   type aliases a var (the var-as-fact pattern — a fact IS a function var,
+   bound on the LHS and invoked in the RHS). alias-usage-map emits synthetic
+   var-usages linking consuming rules to their aliased vars so the existing
+   reachability explores the var's call chain; callsites discovered through
+   that chain bypass the ctor chain above and are recorded :unresolved with
+   :fact-type/:fact-type-spec context attached (then handed to the resolver)."
+  (:require [clara.rules.schema :as schema]
+            [clojure.string :as str]))
 
 (def ^:private max-resolution-depth 8)
 
@@ -233,15 +242,18 @@
 
 (defn- resolver-context
   "Builds the context map handed to :callsite-resolver-fn (see
-   analyze/generate-annotations-from-analysis)."
-  [{:keys [rule direction usage]} arg-form]
-  {:rule rule
-   :ns-name-sym (:from usage)
-   :direction direction
-   :boundary-fn (symbol (str (:to usage)) (str (:name usage)))
-   :arg-form arg-form
-   :source-str (pr-str arg-form)
-   :filename (:filename usage)})
+   analyze/generate-annotations-from-analysis). Alias context keys
+   (:fact-type/:fact-type-spec) are present only for callsites discovered
+   through a var-alias chain (:fact-type-spec-fn)."
+  [{:keys [rule direction usage alias-context]} arg-form]
+  (cond-> {:rule rule
+           :ns-name-sym (:from usage)
+           :direction direction
+           :boundary-fn (symbol (str (:to usage)) (str (:name usage)))
+           :arg-form arg-form
+           :source-str (pr-str arg-form)
+           :filename (:filename usage)}
+    alias-context (merge (select-keys alias-context [:fact-type :fact-type-spec]))))
 
 (defn- apply-resolver
   "Invokes the caller's :callsite-resolver-fn; exceptions are contained
@@ -263,13 +275,15 @@
 
 (defn- resolve-arg
   "Runs the full resolution chain for one boundary-call argument form.
-   Returns a set of resolved fact-type tokens (empty when unresolved)."
-  [arg-form {:keys [callsite-resolver-fn] :as ctx} live-ns-sym]
+   Returns a set of resolved fact-type tokens (empty when unresolved).
+   Alias-discovered callsites (:alias-context in ctx) bypass the ctor chain —
+   they are never automatically resolved — and go straight to the resolver."
+  [arg-form {:keys [callsite-resolver-fn alias-context] :as ctx} live-ns-sym]
   (let [traced (trace-arg-form arg-form ctx 0)
         resolved
         (or
-         ;; constructors (on the traced form).
-         (when (seq? traced)
+         ;; constructors (on the traced form); not for alias-discovered callsites.
+         (when (and (not alias-context) (seq? traced))
            (resolve-ctor-form live-ns-sym traced))
          ;; everything else defers to the caller's escape hatch (receives the
          ;; traced form): helper calls, with-meta, var-as-fact, literals.
@@ -289,18 +303,27 @@
      :direction             - :insert | :retract
      :rule                  - the full production map of the consuming rule (may be nil)
      :callsite-resolver-fn  - optional caller escape hatch
+     :alias-context-for     - optional (fn [usage] -> alias context or nil);
+                              when it returns a context for a boundary usage,
+                              the callsite bypasses the ctor chain and carries
+                              :fact-type/:fact-type-spec (see alias-usage-map)
 
-   Returns {:callsites [{:source-str :ns-name-sym :filename :status :resolved-types?}]
+   Returns {:callsites [{:source-str :ns-name-sym :filename :status :resolved-types?
+                         :fact-type? :fact-type-spec?}]
             :resolved-types #{token …}
             :resolution :full | :partial | :none (nil when no callsites)}"
-  [usages {:keys [get-source] :as ctx}]
+  [usages {:keys [get-source alias-context-for] :as ctx}]
   (let [entries
         (into []
               (comp (mapcat (fn [usage]
                               (map (fn [arg] [usage arg])
                                    (or (read-boundary-args usage get-source) '()))))
                     (map (fn [[usage arg]]
-                           (let [tokens (resolve-arg arg (assoc ctx :usage usage) (:from usage))]
+                           (let [alias-ctx (when alias-context-for
+                                             (alias-context-for usage))
+                                 tokens (resolve-arg arg
+                                                     (assoc ctx :usage usage :alias-context alias-ctx)
+                                                     (:from usage))]
                              (cond-> {:source-str (pr-str arg)
                                       :ns-name-sym (:from usage)
                                       :filename (:filename usage)
@@ -308,7 +331,9 @@
                                                     (= 1 (count tokens)) :resolved
                                                     :else :resolved-multi)}
                                (seq tokens)
-                               (assoc :resolved-types (vec (sort-by str tokens)))))))
+                               (assoc :resolved-types (vec (sort-by str tokens)))
+                               alias-ctx
+                               (merge (select-keys alias-ctx [:fact-type :fact-type-spec]))))))
                     (distinct))
               usages)
         resolved-types (into #{} (mapcat :resolved-types) entries)]
@@ -319,3 +344,129 @@
                    (every? #(= :unresolved (:status %)) entries) :none
                    (some #(= :unresolved (:status %)) entries) :partial
                    :else :full)}))
+
+;; ---------------------------------------------------------------------------
+;; :fact-type-spec-fn — var-alias chains (caller-guided var-as-fact discovery)
+;; ---------------------------------------------------------------------------
+
+(defn- subtree-fact-types
+  "All fact types in a condition subtree (fact conditions, accumulators, and
+   and/or/not/exists compounds; test conditions contribute none)."
+  [condition]
+  (case (schema/condition-type condition)
+    :fact [(:type condition)]
+    :accumulator (subtree-fact-types (:from condition))
+    (:and :or :not :exists) (mapcat subtree-fact-types (rest condition))
+    :test []
+    []))
+
+(defn lhs-var-bindings
+  "Scans a production's :lhs (constrained DSL data) for bound fact variables:
+   :fact-binding on fact conditions and :result-binding on accumulator
+   conditions (whose :from subtree supplies the fact types — a result binding
+   binds a collection, but the spec lookup keys on the accumulated fact type
+   the same way). Returns [{:binding ?sym :fact-type t} …] with :binding as a
+   symbol (production bindings are keywords like :?t)."
+  [lhs]
+  (letfn [(walk [condition]
+            (case (schema/condition-type condition)
+              :fact (if-let [b (:fact-binding condition)]
+                      [{:binding (symbol (name b)) :fact-type (:type condition)}]
+                      [])
+              :accumulator (if-let [b (:result-binding condition)]
+                             (into []
+                                   (map (fn [t] {:binding (symbol (name b)) :fact-type t}))
+                                   (distinct (subtree-fact-types (:from condition))))
+                             [])
+              (:and :or :not :exists) (mapcat walk (rest condition))
+              :test []
+              []))]
+    (into [] (mapcat walk) lhs)))
+
+(defn- rhs-uses-binding?
+  "True when ?sym occurs as a free symbol in the rule's RHS. Kondo records
+   free ?syms as var-usages (:to :clj-kondo/unknown-namespace) attributed to
+   the rule's snippet var; snippets contain only the RHS form, so any such
+   usage is an RHS usage."
+  [analysis rule-ns rule-local-name binding-sym]
+  (boolean
+   (some (fn [u]
+           (and (= binding-sym (:name u))
+                (= rule-ns (:from u))
+                (= rule-local-name (:from-var u))))
+         (:var-usages analysis))))
+
+(defn- apply-spec-fn
+  "Invokes the caller's :fact-type-spec-fn on a fact type; exceptions are
+   contained (logged, treated as no spec)."
+  [fact-type-spec-fn fact-type]
+  (try
+    (fact-type-spec-fn fact-type)
+    (catch Throwable t
+      (binding [*out* *err*]
+        (println (str "clara.server.tools.graph.analyze: :fact-type-spec-fn threw: "
+                      (ex-message t))))
+      nil)))
+
+(defn alias-usage-map
+  "Builds the var-alias linkage for the :fact-type-spec-fn mechanism.
+
+   For each rule production in `rule-vars`: scan the :lhs for bound fact
+   variables (lhs-var-bindings), and when (fact-type-spec-fn fact-type)
+   returns a spec with :aliases-var pointing at a fully-qualified var AND the
+   binding is used in the rule's RHS, emit a synthetic var-usage
+   {:from rule-ns :from-var rule-name :to (namespace v) :name (name v)}
+   tagged :via-var-alias. Merged into the analysis before graph building,
+   this lets the existing reachability explore the aliased var's whole call
+   chain for boundary fns. (If the var is invisible to kondo — macro-emitted,
+   unhooked — its chain is empty and nothing is found; that is the caller
+   :config-dir situation.)
+
+   `productions-by-name` maps fq rule symbol -> full production.
+
+   Returns {rule-fq-sym {:usages [synthetic var-usages …]
+                         :contexts [{:fact-type t :fact-type-spec spec
+                                     :var v :root fq-var-sym} …]}}.
+   The :contexts entries carry the alias context attached to callsites
+   discovered through each chain (:fact-type/:fact-type-spec keys; :root is
+   the aliased var's fq symbol, the reachability seed)."
+  [productions-by-name rule-vars analysis fact-type-spec-fn]
+  (into {}
+        (keep (fn [rule-fq-sym]
+                (when-let [production (get productions-by-name rule-fq-sym)]
+                  (let [rule-ns (symbol (namespace rule-fq-sym))
+                        rule-local (symbol (name rule-fq-sym))
+                        pairs
+                        (into []
+                              (comp (mapcat lhs-var-bindings)
+                                    (keep (fn [{:keys [binding fact-type]}]
+                                            (when-let [spec (apply-spec-fn fact-type-spec-fn fact-type)]
+                                              (when-let [v (:aliases-var spec)]
+                                                (when (and (symbol? v)
+                                                           (namespace v)
+                                                           (rhs-uses-binding? analysis rule-ns rule-local binding))
+                                                  {:fact-type fact-type
+                                                   :fact-type-spec spec
+                                                   :var v}))))))
+                              [(:lhs production)])
+                        pairs (distinct pairs)]
+                    (when (seq pairs)
+                      [rule-fq-sym
+                       {:usages (into []
+                                      (map (fn [{:keys [fact-type fact-type-spec] aliased-var :var}]
+                                             {:from rule-ns
+                                              :from-var rule-local
+                                              :to (symbol (namespace aliased-var))
+                                              :name (symbol (name aliased-var))
+                                              :via-var-alias {:fact-type fact-type
+                                                              :fact-type-spec fact-type-spec
+                                                              :var aliased-var}}))
+                                      pairs)
+                        :contexts (into []
+                                        (map (fn [{:keys [fact-type fact-type-spec] aliased-var :var}]
+                                               {:fact-type fact-type
+                                                :fact-type-spec fact-type-spec
+                                                :var aliased-var
+                                                :root (symbol (namespace aliased-var) (name aliased-var))}))
+                                        pairs)}])))))
+        rule-vars))

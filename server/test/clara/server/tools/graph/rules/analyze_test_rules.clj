@@ -245,3 +245,31 @@
   (r/insert! (DocumentCheck. ?app-id :pass "mixed" nil nil)
              (make-java-document-check-nested ?app-id)))
 
+;; ---------------------------------------------------------------------------
+;; Var-as-fact pattern fixtures (:fact-type-spec-fn var-alias chains)
+
+(defn widget-transform
+  "A var-as-fact fixture: inserted as a fact (the var itself) by
+   rule-insert-widget-transform, then bound and invoked by
+   rule-consume-widget-transform. Its body performs a dynamic insert whose
+   type static analysis cannot resolve (a helper call), mimicking the
+   def-fact-fn pattern from loan-doc-rules."
+  {:type :widget-transform}
+  [app-id]
+  (r/insert! (->fact :widget-output {:app-id app-id})))
+
+(r/defrule rule-insert-widget-transform
+  "Rule K1: inserts the widget-transform var itself as a fact
+   (the producing side of the var-as-fact pattern)"
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (var widget-transform)))
+
+(r/defrule rule-consume-widget-transform
+  "Rule K2: binds the widget-transform var-fact and invokes it in the RHS
+   (the consuming side of the var-as-fact pattern)"
+  [?t <- :widget-transform]
+  [Application (= ?app-id app-id)]
+  =>
+  (mapv ?t [?app-id]))
+

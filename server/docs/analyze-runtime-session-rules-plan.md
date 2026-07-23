@@ -674,19 +674,55 @@ checkable state (`make test` + named REPL probes).
   green ✓ (`make test` = 68 tests / 436 assertions, 0 failures;
   format-check / lint / reflection-check clean).
 
-### M4 (later) — `:fact-type-spec-fn` var-alias chains
+### M4 — `:fact-type-spec-fn` var-alias chains
 
-- Implement the `:fact-type-spec-fn` mechanism of §5.5: LHS binding scan,
-  RHS usage detection via snippet var-usages, synthetic alias-tagged var-usage
-  injection, alias-discovered callsites recorded unresolved with
-  `:fact-type`/`:fact-type-spec` context, resolver-fn handoff.
-- Test fixture: a var-fact fn whose body performs a dynamic insert, consumed
-  by a rule that binds it (`[?f <- :the-type]`) and calls it in the RHS.
-- **Check:** with a spec fn mapping `:extract-doc-meta ⇒ {:aliases-var
-…/extract-doc-meta}`, a dynamic callsite inside the aliased var's chain is
-  attached to the consuming rule as `:status :unresolved` with the fact-type
-  and spec attached; the resolver-fn receives those keys; without a spec fn,
-  nothing alias-derived appears.
+**Status: DONE (awaiting review).**
+
+- Implemented the `:fact-type-spec-fn` mechanism of §5.5:
+  `rhs/lhs-var-bindings` (LHS scan: `:fact-binding` on fact conditions,
+  `:result-binding` on accumulators — fact types taken from the `:from`
+  subtree — with nested and/or/not/exists walking; production bindings are
+  keywords like `:?t`, converted to symbols), RHS usage detection via the
+  rule's snippet var-usages (kondo records free `?syms` as
+  `:to :clj-kondo/unknown-namespace` usages attributed to the renamed snippet
+  var — verified by probe), `rhs/alias-usage-map` (synthetic `:via-var-alias`
+  -tagged var-usage emission, spec-fn exceptions contained),
+  `generate-annotations-from-analysis` gains `:fact-type-spec-fn` and injects
+  the synthetic usages into the analysis before `build-graph`, and
+  `analyze/alias-context-for-fn` marks boundary usages whose caller is
+  reachable from an aliased var. ✓
+- Alias-discovered callsites bypass the ctor chain (recorded `:unresolved`
+  with `:fact-type`/`:fact-type-spec` on the entry) and are handed to
+  `:callsite-resolver-fn` with the same context keys; resolver-resolved
+  alias callsites promote normally. Non-alias callsites (incl. the producing
+  side's `(var the-fn)`) carry no alias keys. ✓
+- `serialize-dynamic-callsite` passes the two new keys through to JSON
+  (`:fact-type` via `resolve-type`, spec values stringified);
+  `../docs/explorer-graph-api.md` callsite-entry table updated; the
+  `:fact-type-spec-fn` section added to `rule-annotations.md`. ✓
+- Test fixtures (`analyze_test_rules.clj`): `widget-transform` — a var-fact
+  fn (`defn` with `:type` meta) whose body performs an unresolvable dynamic
+  insert — plus `rule-insert-widget-transform` (producing side) and
+  `rule-consume-widget-transform` (binds `[?t <- :widget-transform]`, invokes
+  `(mapv ?t [?app-id])` in the RHS). ✓
+- **Check:** with a spec fn mapping `:widget-transform ⇒ {:aliases-var
+…/widget-transform}`, the dynamic callsite inside the aliased var's chain
+  attaches to the consuming rule as `:status :unresolved` with the fact-type
+  and spec attached ✓; the resolver-fn receives those keys (and resolving
+  promotes `[:widget-output]`, `:resolution :full`) ✓; without a spec fn the
+  consumer shows `:no-output-types` (nothing alias-derived appears) ✓;
+  a throwing spec fn degrades to the no-spec-fn annotations ✓.
+- Implementation notes: the spec-fn ran against a kondo-*visible* plain
+  `defn`, which surfaced a pre-existing reachability semantic — a plain
+  `(var the-fn)` reference in a rule RHS already explores the var's chain via
+  kondo's var-usage of the var special form (the producer rule's detection
+  includes the var body's callsites in the *baseline* too, without alias
+  context keys). This is consistent with how any fn reference in an RHS pulls
+  in the callee's chain; only alias-*derived* discovery carries the context.
+  `lhs-var-bindings` unit-tested directly for the accumulator
+  `:result-binding` shape (no accumulator fixture needed).
+- **Gates:** `make test` = 70 tests / 454 assertions, 0 failures;
+  format-check / lint / reflection-check clean.
 
 ## 10. Edge Cases & Open Questions (resolved per feedback round 2)
 

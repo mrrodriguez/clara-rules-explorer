@@ -136,17 +136,30 @@
   "Serializes a dynamic callsite entry for JSON output.
    - :ns-name-sym → :ns (string).
    - select-keys allowlist restricts to API-relevant keys.
+   - :fact-type (var-alias context) serializes like resolved-types tokens;
+     :fact-type-spec map values are stringified (e.g. {:aliases-var my.ns/f}
+     encodes as {\"aliases-var\": \"my.ns/f\"}).
    ns-name is the production's namespace, used to resolve types."
   [callsite ns-name]
-  (-> callsite
+  (cond-> callsite
       ;; rename :ns-name-sym → :ns, convert symbol → string
-      (set/rename-keys {:ns-name-sym :ns})
-      (update :ns #(if (symbol? %) (str %) %))
-      (select-keys #{:source-str :ns :filename :status :resolved-types :resolution-method})
-      ;; resolve :resolved-types
-      (cond-> (seq (:resolved-types callsite))
-        (update :resolved-types #(mapv (partial resolve-type ns-name) %)))
-      remove-nil-vals))
+    true (set/rename-keys {:ns-name-sym :ns})
+    true (update :ns #(if (symbol? %) (str %) %))
+    true (select-keys #{:source-str :ns :filename :status :resolved-types :resolution-method
+                        :fact-type :fact-type-spec})
+
+      ;; resolve :resolved-types / :fact-type tokens
+    (seq (:resolved-types callsite))
+    (update :resolved-types #(mapv (partial resolve-type ns-name) %))
+
+    (:fact-type callsite)
+    (assoc :fact-type (resolve-type ns-name (:fact-type callsite)))
+
+    (:fact-type-spec callsite)
+    (update :fact-type-spec #(into {}
+                                   (map (fn [[k v]] [k (if (symbol? v) (str v) v)]))
+                                   %))
+    true remove-nil-vals))
 
 (defn serialize-dynamic-detection
   "Serializes a dynamic detection info map (:dynamic-insert-types-detected or

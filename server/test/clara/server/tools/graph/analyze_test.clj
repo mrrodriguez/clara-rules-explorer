@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [clara.rules :as r]
             [clara.server.tools.graph.analyze :as analyze]
+            [clara.server.tools.graph.analyze.rhs :as rhs]
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
             [clara.server.tools.graph.rules.loan-app-rules]
@@ -363,6 +364,104 @@
                 :callsite-resolver-fn (fn [_] (throw (ex-info "boom" {})))})]
       (is (= loan-doc-annotations ann)
           "a resolver that always throws yields the same annotations as no resolver"))))
+
+;; ---------------------------------------------------------------------------
+;; :fact-type-spec-fn — var-alias chains (caller-guided var-as-fact discovery)
+;; ---------------------------------------------------------------------------
+
+(deftest test-lhs-var-bindings
+  (testing "fact conditions: :fact-binding pairs with the condition's type"
+    (is (= [{:binding '?t :fact-type :widget-transform}]
+           (rhs/lhs-var-bindings [{:type :widget-transform :constraints [] :fact-binding :?t}]))))
+  (testing "accumulator conditions: :result-binding pairs with the :from subtree's types"
+    (is (= [{:binding '?ts :fact-type :widget-transform}]
+           (rhs/lhs-var-bindings [{:accumulator 'some-acc
+                                   :from {:type :widget-transform}
+                                   :result-binding :?ts}]))))
+  (testing "nested and/or compounds are walked"
+    (is (= [{:binding '?x :fact-type :a} {:binding '?y :fact-type :c}]
+           (rhs/lhs-var-bindings ['(:and {:type :a :fact-binding :?x}
+                                         (:or {:type :b} {:type :c :fact-binding :?y}))]))))
+  (testing "unbound and test conditions contribute nothing"
+    (is (= [] (rhs/lhs-var-bindings [{:type :a} {:constraints []}])))))
+
+(deftest test-fact-type-spec-fn
+  (let [spec-fn (fn [t]
+                  (when (= t :widget-transform)
+                    {:aliases-var `atr/widget-transform}))
+        aliased-callsite {:source-str "(->fact :widget-output {:app-id app-id})"
+                          :ns-name-sym 'clara.server.tools.graph.rules.analyze-test-rules
+                          :filename "clara/server/tools/graph/rules/analyze_test_rules.clj"}]
+
+    (testing "without a spec fn, nothing alias-derived appears"
+      (is (true? (:clara-rules/no-output-types
+                  (get edge-case-annotations `atr/rule-consume-widget-transform)))
+          "the consumer's own RHS has no boundary calls; the var-fact's chain stays invisible")
+      (is (nil? (:clara-rules/dynamic-insert-types-detected
+                 (get edge-case-annotations `atr/rule-consume-widget-transform)))))
+
+    (testing "with a spec fn, the aliased var's chain attaches to the consuming rule"
+      (let [ann (analyze/generate-annotations-from-analysis
+                 {:analysis edge-case-analysis
+                  :session-or-rulebase edge-case-session
+                  :fact-type-spec-fn spec-fn})
+            dyn (:clara-rules/dynamic-insert-types-detected
+                 (get ann `atr/rule-consume-widget-transform))]
+        (is (= :none (:resolution dyn))
+            "alias-discovered callsites bypass the ctor chain — never automatically resolved")
+        (is (= [(assoc aliased-callsite
+                       :status :unresolved
+                       :fact-type :widget-transform
+                       :fact-type-spec {:aliases-var `atr/widget-transform})]
+               (:callsites dyn)))
+        (is (nil? (:clara-rules/insert-types (get ann `atr/rule-consume-widget-transform))))
+
+        (testing "the producing side gains no alias context"
+          (let [callsites (:callsites (:clara-rules/dynamic-insert-types-detected
+                                       (get ann `atr/rule-insert-widget-transform)))]
+            (is (some #(= "(var widget-transform)" (:source-str %)) callsites))
+            (is (every? #(and (not (contains? % :fact-type))
+                              (not (contains? % :fact-type-spec)))
+                        callsites)
+                "plain var references in the RHS explore the var's chain (pre-existing
+                 reachability), but only alias-derived callsites carry the context")))))
+
+    (testing "the resolver receives the alias context; resolved types promote"
+      (let [resolver-calls (atom [])
+            resolver (fn [call-ctx]
+                       (swap! resolver-calls conj call-ctx)
+                       (when (= :widget-transform (:fact-type call-ctx))
+                         {:resolved-types [:widget-output]}))
+            ann (analyze/generate-annotations-from-analysis
+                 {:analysis edge-case-analysis
+                  :session-or-rulebase edge-case-session
+                  :fact-type-spec-fn spec-fn
+                  :callsite-resolver-fn resolver})
+            dyn (:clara-rules/dynamic-insert-types-detected
+                 (get ann `atr/rule-consume-widget-transform))]
+        (is (= :full (:resolution dyn)))
+        (is (= [(assoc aliased-callsite
+                       :status :resolved
+                       :resolved-types [:widget-output]
+                       :fact-type :widget-transform
+                       :fact-type-spec {:aliases-var `atr/widget-transform})]
+               (:callsites dyn)))
+        (is (= [:widget-output]
+               (:clara-rules/insert-types (get ann `atr/rule-consume-widget-transform)))
+            "resolver-resolved alias callsites are promoted")
+        (testing "non-alias callsites carry no alias context keys"
+          (let [producer-call (first (filter #(= "(var widget-transform)" (:source-str %))
+                                             @resolver-calls))]
+            (is (some? producer-call) "the resolver still sees the producing side's callsite")
+            (is (not (contains? producer-call :fact-type)))
+            (is (not (contains? producer-call :fact-type-spec)))))))
+
+    (testing "a throwing spec fn degrades to no alias derivation"
+      (is (= edge-case-annotations
+             (analyze/generate-annotations-from-analysis
+              {:analysis edge-case-analysis
+               :session-or-rulebase edge-case-session
+               :fact-type-spec-fn (fn [_] (throw (ex-info "boom" {})))}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Queries, no-output rules, and machinery exclusion
