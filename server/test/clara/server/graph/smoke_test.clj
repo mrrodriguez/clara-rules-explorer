@@ -31,15 +31,21 @@
   (some-> (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn")
           .getPath))
 
-(defn run-rules []
-  (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
-                    'clara.server.tools.graph.rules.loan-app-rules)
-      run-app-outcome-approved))
+(defn run-rules
+  ([]
+   (run-rules {:with-facts? true}))
+  ([{:keys [with-facts?]}]
+   (cond-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                         'clara.server.tools.graph.rules.loan-app-rules)
+     with-facts? run-app-outcome-approved)))
 
-(defn run-smoke-test []
-  (let [session (run-rules)
-        server (server/start! {:port port :session session :annotations-file loan-doc-annotations-path})]
-    server))
+(defn run-smoke-test
+  ([]
+   (run-smoke-test {:session-opts {:with-facts? true}}))
+  ([{:keys [session-opts]}]
+   (let [session (run-rules session-opts)
+         server (server/start! {:port port :session session :annotations-file loan-doc-annotations-path})]
+     server)))
 
 (defn get-rules []
   (-> (client/get (->url "/rules") {:accept :json})
@@ -188,6 +194,8 @@
 (comment
   ;; Start the server with a pre-populated session
   (def s (run-smoke-test))
+
+  (def s (run-smoke-test {:session-opts {:with-facts? false}}))
 
   ;; --- Rulebase analysis (static, no session required) ---
 
