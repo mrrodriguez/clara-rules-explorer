@@ -7,8 +7,7 @@
             [clojure.pprint :as pp]))
 
 (defn load-sidecar
-  "Loads annotations from an EDN file path. Keyed by rule/query FQ-name strings
-   or symbols."
+  "Loads annotations from an EDN file path. Keyed by rule/query FQ-name strings."
   [path]
   (if (and path (.exists (io/file path)))
     (with-open [r (io/reader path)]
@@ -134,8 +133,8 @@
        has-props-notes :props)}))
 
 (defn- normalize-key [k]
-  (if (string? k)
-    (symbol k)
+  (if (symbol? k)
+    (str k)
     k))
 
 (defn- unqualify-keyword
@@ -146,7 +145,7 @@
 
 (defn normalize-annotations
   "Normalizes an annotations map to canonical form.
-   String keys are converted to symbols."
+   Symbol keys are converted to strings."
   [annotations]
   (into (empty annotations)
         (map (fn [[k v]] [(normalize-key k) v]))
@@ -165,10 +164,10 @@
   [annos1 annos2]
   (let [a1 (normalize-annotations annos1)
         a2 (normalize-annotations annos2)]
-    (reduce-kv (fn [acc rule-sym val2]
-                 (if-let [val1 (get acc rule-sym)]
-                   (assoc acc rule-sym (merge-rule-fields val1 val2))
-                   (assoc acc rule-sym val2)))
+    (reduce-kv (fn [acc rule-name val2]
+                 (if-let [val1 (get acc rule-name)]
+                   (assoc acc rule-name (merge-rule-fields val1 val2))
+                   (assoc acc rule-name val2)))
                a1
                a2)))
 
@@ -195,8 +194,7 @@
   (let [sidecar-map (ensure-unsorted-map sidecar-annotations)
         fq-name (:name production)
         props (:props production)
-        sidecar (or (get sidecar-map fq-name)
-                    (get sidecar-map (symbol fq-name)))
+        sidecar (get sidecar-map fq-name)
         production-ns (get-production-ns production)
 
         props-inserts   (resolve-types production-ns

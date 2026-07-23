@@ -484,7 +484,8 @@
       (is (true? (:clara-rules/no-output-types (get loan-doc-annotations `ldr/collect-all-missing-required-docs)))))
 
     (testing "Explicit rules-filter narrows the annotated set"
-      (is (= [`atr/rule-side-effect-only] (keys ann-f)))
+      (is (= ["clara.server.tools.graph.rules.analyze-test-rules/rule-side-effect-only"]
+             (keys ann-f)))
       (is (true? (:clara-rules/no-output-types (get ann-f `atr/rule-side-effect-only)))))))
 
 (deftest test-generate-annotations--excludes-insert-retract-machinery
@@ -500,11 +501,11 @@
                        clara.rules/retract clara.rules/retract!
                        clara.rules.engine/insert-facts!
                        clara.rules.engine/rhs-retract-facts!}]
-      (is (empty? (filter machinery (keys ann)))
+      (is (empty? (filter #(contains? machinery (symbol %)) (keys ann)))
           "insert/retract machinery fns must not appear as annotation keys")
       (is (empty? (filter (fn [[_ v]] (and (map? v) (empty? v))) ann))
           "no entry should be an empty {} annotation")
-      (is (every? #(= "clara.server.tools.graph.rules.analyze-test-rules" (namespace %))
+      (is (every? #(str/starts-with? % "clara.server.tools.graph.rules.analyze-test-rules/")
                   (keys ann))
           "session-filtered annotations contain only the session's rule vars"))))
 
@@ -761,6 +762,44 @@
             "Should NOT add :fact-instance-derived-types (types already known)")
         (is (= :full (:resolution dyn))
             "Should keep original :resolution")))))
+
+(deftest test-enrich-annotations-from-session--preserves-callsites-with-new-types
+  "When session-derived fact types are found for a rule that already has
+   :callsites from static analysis, both :callsites and :fact-instance-derived-types
+   should be present in the enriched annotation."
+  (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                                  'clara.server.tools.graph.rules.loan-app-rules)
+                    ;; Insert a DocumentCheck with :status :pass to trigger
+                    ;; dynamic-insert-compliance-review which inserts ComplianceReview
+                    (r/insert (laf/map->Application {:app-id "app-1"})
+                              (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                              (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card})
+                              (laf/map->DocumentCheck {:app-id "app-1" :status :pass}))
+                    (r/fire-rules))
+        ;; String keys — matching the EDN sidecar format used by load-sidecar
+        existing-annos
+        {"clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
+         {:clara-rules/dynamic-insert-types-detected
+          {:callsites [{:source-str "(build-compliance-review ?app-id)"
+                        :ns-name-sym 'clara.server.tools.graph.rules.loan-doc-rules
+                        :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+                        :status :unresolved}]
+           :resolution :none}
+          :clara-rules/notes "Compliance review inserted via helper call"}}
+        fe  (analyze/enrich-annotations-from-session session existing-annos)
+        crd (get fe "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review")]
+    (testing "Merges session-derived types with pre-existing :callsites"
+      (let [dyn (:clara-rules/dynamic-insert-types-detected crd)]
+        (is (some? dyn))
+        (is (contains? dyn :callsites)
+            "Should preserve :callsites from original annotations")
+        (is (contains? dyn :fact-instance-derived-types)
+            "Should add :fact-instance-derived-types from session")
+        (is (= :partial (:resolution dyn))
+            "Resolution should be :partial since session helped but callsites remain unresolved")
+        (is (contains? (set (:fact-instance-derived-types dyn))
+                       "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview")
+            "Should detect the ComplianceReview type")))))
 
 (deftest test-enrich-annotations-from-session--dedup-against-props
   (testing "Session-derived types already in :props are not flagged as dynamic"

@@ -71,9 +71,9 @@
       (is (= [String] (:insert-types resolved))))))
 
 (deftest test-merge-annotations
-  (let [rule-a 'my.ns/rule-a
-        rule-b 'my.ns/rule-b
-        rule-c 'my.ns/rule-c]
+  (let [rule-a "my.ns/rule-a"
+        rule-b "my.ns/rule-b"
+        rule-c "my.ns/rule-c"]
 
     (testing "rules only in annos1 are kept unchanged"
       (let [annos1 {rule-a {:clara-rules/insert-types [:TypeA]
@@ -92,14 +92,14 @@
     (testing "both maps empty"
       (is (= {} (ann/merge-annotations {} {}))))
 
-    (testing "string keys are normalized to symbols"
-      (let [annos1-str {"my.ns/rule-a" {:clara-rules/insert-types [:TypeA]}}
-            annos2     {rule-a         {:clara-rules/notes "from-annos2"}}
-            merged (ann/merge-annotations annos1-str annos2)]
+    (testing "symbol keys are normalized to strings"
+      (let [annos1-sym {'my.ns/rule-a {:clara-rules/insert-types [:TypeA]}}
+            annos2     {rule-a        {:clara-rules/notes "from-annos2"}}
+            merged (ann/merge-annotations annos1-sym annos2)]
         (is (= {:clara-rules/insert-types [:TypeA]
                 :clara-rules/notes "from-annos2"}
                (get merged rule-a))
-            "string key in annos1 matches symbol key in annos2 after normalization")))
+            "symbol key in annos1 matches string key in annos2 after normalization")))
 
     (testing "types are concatenated with default :merge strategy"
       (let [annos1 {rule-a {:clara-rules/insert-types [:TypeA]}}

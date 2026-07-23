@@ -658,14 +658,14 @@
                                    get-source productions-by-name
                                    callsite-resolver-fn alias-by-rule)
         annotations
-        (into (sorted-map)
+        (into (sorted-map-by #(compare (str %1) (str %2)))
               (keep (fn [v]
                       (let [annotation (infer-annotation-for-var v infer-ctx)]
                         (cond
                           ;; Real annotation with inferred insert/retract data.
-                          (seq annotation)       [v annotation]
+                          (seq annotation)       [(str v) annotation]
                           ;; Explicitly-requested rule that produces nothing: mark it.
-                          (seq effective-filter) [v {:clara-rules/no-output-types true}]))))
+                          (seq effective-filter) [(str v) {:clara-rules/no-output-types true}]))))
               var-seq)]
     annotations))
 

@@ -1,19 +1,19 @@
-{clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs
+{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
  {:clara-rules/insert-types [AllGivenDocuments]}
 
- clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
  {:clara-rules/insert-types [AllRequiredDocuments]}
 
- clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta"
  {:clara-rules/insert-types [clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta]}
 
- clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
  {:clara-rules/insert-types [DocumentCheckInput]}
 
- clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs
+ "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
  {:clara-rules/insert-types [DocumentCheck]}
 
- clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs"
  {:clara-rules/no-output-types true}
 
  ;; ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@
 
  ;; Unresolved: helper-call insert (automatic chain reports unresolved; resolve
  ;; via :callsite-resolver-fn or declare insert-types manually)
- clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review
+ "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
  {:clara-rules/dynamic-insert-types-detected
   {:callsites
    [{:source-str "(build-compliance-review ?app-id)"
@@ -35,7 +35,7 @@
   :clara-rules/notes "Compliance review inserted via helper call — unresolved by automatic analysis"}
 
  ;; Unresolved: helper-call insert (metadata variant)
- clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata
+ "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata"
  {:clara-rules/dynamic-insert-types-detected
   {:callsites
    [{:source-str "(build-compliance-via-metadata ?app-id)"
@@ -46,7 +46,7 @@
   :clara-rules/notes "Compliance review inserted via metadata helper — unresolved by automatic analysis"}
 
  ;; Resolved: direct Java-constructor retract (the automatic chain resolves this)
- clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice
+ "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
  {:clara-rules/retract-types [StaleDocumentNotice]
   :clara-rules/dynamic-retract-types-detected
   {:callsites
@@ -59,7 +59,7 @@
   :clara-rules/notes "Stale document notice retracted via Java constructor — fully resolved"}
 
  ;; Unresolved: opaque builder insert
- clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail
+ "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
  {:clara-rules/dynamic-insert-types-detected
   {:callsites
    [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
