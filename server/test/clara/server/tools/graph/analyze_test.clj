@@ -1,5 +1,5 @@
 (ns clara.server.tools.graph.analyze-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [clara.rules :as r]
             [clara.server.tools.graph.analyze :as analyze]
@@ -8,7 +8,8 @@
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
-            [clara.server.tools.graph.rules.analyze-test-rules :as atr])
+            [clara.server.tools.graph.rules.analyze-test-rules :as atr]
+            [schema.test :as st])
   (:import [clara.server.tools.graph.rules.loan_app_facts
             AllGivenDocuments
             AllRequiredDocuments
@@ -28,6 +29,8 @@
 ;; prunes hook-emitted defrule/defquery constructs. generate-annotations-from-analysis
 ;; defaults its rules filter to the session's rules (productions with an :rhs).
 ;; ---------------------------------------------------------------------------
+
+(use-fixtures :once st/validate-schemas)
 
 (def ^:private rules-prefix "clara.server.tools.graph.rules")
 

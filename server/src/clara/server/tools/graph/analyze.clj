@@ -30,13 +30,17 @@
             [clojure.set :as set]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [schema.core :as s]
             [clara.server.tools.graph.analyze.rhs :as rhs]
+            [clara.server.tools.graph.analyze.synth :as synth]
             [clara.server.tools.graph.serialize :as serialize]
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.annotations :as ann]
             [clara.rules.engine :as eng])
   (:import [clara.rules.engine LocalSession]))
 
+;; `ns->resource-base` is defined below but used in private helper fns above
+;; it, hence the forward declaration.
 (declare ns->resource-base)
 
 ;;
@@ -64,23 +68,13 @@
 (defn- fq-name-sym [ns name]
   (symbol (str ns) (str name)))
 
-(defn- var-ns-name
-  "Returns the namespace name of a var's metadata :ns."
-  [v]
-  (ns-name (:ns (meta v))))
-
-(defn- var-name
-  "Returns the name symbol from a var's metadata."
-  [v]
-  (:name (meta v)))
-
 (defn- var-usage-caller
-  "Returns the fully-qualified caller symbol from a kondo var-usage map."
+  "Returns the fully-qualified caller symbol from a kondo `:var-usage` map."
   [usage]
   (fq-name-sym (:from usage) (:from-var usage)))
 
 (defn- var-usage-callee
-  "Returns the fully-qualified callee symbol from a kondo var-usage map."
+  "Returns the fully-qualified callee symbol from a kondo `:var-usage` map."
   [usage]
   (fq-name-sym (:to usage) (:name usage)))
 
@@ -204,16 +198,16 @@
 
 (defn- build-inserter-type-map
   "Bottom-up: for every var that is a direct caller of a target fn,
-   find record constructors (map->X, ->X) in its reachable subtree.
+   find record constructors (`map->X`, `->X`) in its reachable subtree.
 
-   Returns {inserter-var -> #{type-symbols}}.
+   Returns `{inserter-var -> #{type-symbols}}`.
 
-   Note: because clj-kondo's flat var-usages analysis cannot distinguish
+   Note: because `clj-kondo`'s flat `:var-usages` analysis cannot distinguish
    argument expressions within a callsite from independent calls in the
    same function body, a var's reachable subtree may include constructors
    from unrelated RHS branches (e.g. a helper that builds both a fact and
-   an unrelated record value for a side computation). Consumers should use
-   manual annotations (:clara-rules/no-output-types) to suppress false
+   an unrelated record value for a side computation).  Consumers should use
+   manual annotations (`:clara-rules/no-output-types`) to suppress false
    positives."
   [direct-callers graph {:keys [var-usages]}]
   (let [reachable-cache (precompute-reachability graph direct-callers)]
@@ -242,12 +236,12 @@
         reachable))
 
 (defn- extract-insert-types
-  "Determines the fact types a rule inserts or retracts via target-fns:
+  "Determines the fact types a rule inserts or retracts via `target-fns`:
    statically-traceable record constructors win when present; otherwise every
    boundary-call argument form goes through the runtime resolution chain
-   (analyze.rhs) and the optional :callsite-resolver-fn, producing dynamic
-   detection entries annotated with :status/:resolved-types plus the
-   aggregate :resolution."
+   (`analyze.rhs`) and the optional `:callsite-resolver-fn`, producing dynamic
+   detection entries annotated with `:status`/`:resolved-types` plus the
+   aggregate `:resolution`."
   [reachable target-fns {:keys [analysis inserter-type-map] :as ctx}]
   (let [usages (:var-usages analysis)
         direct-caller? (fn [caller]
@@ -413,136 +407,7 @@
                 (distinct))
           productions)))
 
-;;; reconstruct-ns-source helpers ;;;
-
-(defn- core-deviations
-  "Returns {:excluded [...] :renamed {...}} describing how the given namespace
-   deviates from the default clojure.core mappings. Excluded are clojure.core
-   publics not present in the ns; renamed are entries whose local symbol
-   differs from the var's own name."
-  [nsobj]
-  (let [core-publics      (->> 'clojure.core ns-publics keys set)
-        core-entries      (into {}
-                                (filter (fn [[_ v]]
-                                          (and (var? v)
-                                               (= 'clojure.core (var-ns-name v)))))
-                                (ns-map nsobj))
-        present-core-names (into #{} (map (comp var-name val)) core-entries)]
-    {:excluded (->> core-publics (remove present-core-names) sort vec)
-     :renamed  (into {}
-                     (filter (fn [[sym v]] (not= sym (var-name v))))
-                     core-entries)}))
-
-(defn- build-require-clauses
-  "Builds a sorted vector of :require clause vectors from the namespace's
-   aliases and refers, excluding clojure.core refers."
-  [nsobj]
-  (let [alias-clauses (->> (ns-aliases nsobj)
-                           (mapv (fn [[a target]] [(ns-name target) :as a])))
-        refers        (into []
-                            (comp (remove #(= 'clojure.core
-                                              (var-ns-name (val %)))))
-                            (ns-refers nsobj))
-        refer-groups  (group-by (fn [[_ v]] (var-ns-name v)) refers)
-        refer-clauses (mapv (fn [[target kvs]]
-                              (->> kvs
-                                   (map first)
-                                   sort
-                                   (into [target :refer])))
-                            refer-groups)]
-    (->> (concat alias-clauses refer-clauses)
-         (sort-by (comp str first))
-         vec)))
-
-(defn- build-import-clauses
-  "Builds a sorted vector of :import clause vectors from the namespace's
-   imports, excluding java.lang.* (which are automatic in any new ns)."
-  [nsobj]
-  (let [imports       (into []
-                            (comp (remove #(.startsWith (.getName ^Class (val %))
-                                                        "java.lang.")))
-                            (ns-imports nsobj))
-        import-groups (group-by (fn [[_ ^Class c]] (.getPackageName c)) imports)]
-    (->> import-groups
-         (map (fn [[pkg kvs]]
-                (->> kvs
-                     (map first)
-                     sort
-                     (into [(symbol pkg)]))))
-         (sort-by (comp str first))
-         vec)))
-
-(defn- unmapped-default-imports
-  "Returns the sorted vector of default java.lang.* import symbols missing
-   from the given namespace (possible only via dynamic ns-unmap)."
-  [nsobj]
-  (let [imported (-> nsobj ns-imports keys set)]
-    (->> clojure.lang.RT/DEFAULT_IMPORTS
-         keys
-         (remove imported)
-         sort
-         vec)))
-
-(defn- reconstruct-ns-source
-  "Builds a synthetic source string containing only an (ns ...) form
-   reconstructed from the live Namespace object — used for namespaces whose
-   source is not on the classpath (jars without sources, eval'd code).
-
-   clojure.core refers and java.lang.* imports are automatic in any new ns,
-   so only deviations are emitted: a :refer-clojure clause with :exclude /
-   :rename when the live ns deviates from clojure.core defaults, and trailing
-   (ns-unmap ...) forms in the rare case a default java.lang import is
-   missing (only possible via dynamic ns-unmap in the original ns)."
-  [ns-sym]
-  (let [nsobj            (the-ns ns-sym)
-        {:keys [excluded renamed]} (core-deviations nsobj)
-        require-clauses   (build-require-clauses nsobj)
-        import-clauses    (build-import-clauses nsobj)
-        unmapped-defaults (unmapped-default-imports nsobj)
-        refer-clojure-clause (when (or (seq excluded) (seq renamed))
-                               (into [:refer-clojure]
-                                     cat
-                                     [(when (seq excluded) [:exclude excluded])
-                                      (when (seq renamed) [:rename renamed])]))
-        require-clause (when (seq require-clauses)
-                         (cons :require require-clauses))
-        import-clause (when (seq import-clauses)
-                        (cons :import import-clauses))
-        ns-form (concat (list 'ns ns-sym)
-                        (remove nil? [refer-clojure-clause require-clause import-clause]))]
-    (str (pr-str ns-form) "\n"
-         (str/join (map #(format "(ns-unmap (the-ns '%s) '%s)\n" ns-sym %)
-                        unmapped-defaults)))))
-
-(defn- synthesize-ns-source
-  "Builds the combined source for a rule-owning namespace: the real source
-   (or a reconstructed ns form when none is on the classpath) plus one
-   synthetic snippet per rule, `(def <tag> (fn [] <pr-str-of-rhs>))`, each on
-   its own line. Snippet tags are deterministic ordinals — never raw
-   production names (which may not be legal def symbols) — with an explicit
-   tag → production-name mapping for attribution.
-
-   Returns {:source combined-str
-            :offset base-source-line-count
-            :tag->production {tag-sym production-local-name-sym}}"
-  [ns-sym productions]
-  (let [base-source (or (some-> (find-ns-resource ns-sym) slurp)
-                        (reconstruct-ns-source ns-sym))
-        offset (count (str/split-lines base-source))
-        snippets (map-indexed
-                  (fn [idx production]
-                    (let [tag (symbol (str "__clara_explorer_rule_" idx "__"))
-                          local-name (-> production :name normalize-key name symbol)
-                          rhs-str (binding [*print-length* nil
-                                            *print-level* nil]
-                                    (pr-str (:rhs production)))]
-                      {:tag tag
-                       :local-name local-name
-                       :form (format "(def %s (fn [] %s))" tag rhs-str)}))
-                  productions)]
-    {:source (str base-source "\n" (str/join "\n" (map :form snippets)) "\n")
-     :offset offset
-     :tag->production (into {} (map (juxt :tag :local-name)) snippets)}))
+;; Source synthesis — see `clara.server.tools.graph.analyze.synth`
 
 (defn- prune-and-rename-analysis
   "Prune-and-replace for one rule-owning namespace's analysis:
@@ -610,9 +475,9 @@
      :cache-atom            - optional atom to use as cache; defaults to a fresh
                               atom per call (one analysis run).
      :ns-source-map         - optional internal map of {ns-symbol synthesis-result}
-                              (see synthesize-ns-source); those namespaces are
-                              analyzed from their combined source instead of the
-                              classpath, then pruned-and-renamed.
+                              (see `synth/synthesize-ns-source`); those namespaces
+                              are analyzed from their combined source instead of
+                              the classpath, then pruned-and-renamed.
      :prune-vars            - optional set of fq production symbols to prune from
                               synthesized namespaces (see prune-and-rename-analysis).
      :config-dir            - optional clj-kondo config dir; defaults to the bundled
@@ -662,11 +527,11 @@
                 (recur remaining (conj processed ns-sym) merged-analysis)))))))))
 
 (defn- build-source-loader
-  "Returns a (fn [ns-sym filename] -> source-str) that caches source lookups.
-   `combined-sources` maps ns-sym -> synthesized source (real source + rule
-   snippets, see synthesize-ns-source) and takes precedence over classpath
-   resources, so callsite positions in synthesized analyses resolve against
-   the exact text clj-kondo analyzed."
+  "Returns a `(fn [ns-sym filename] -> source-str)` that caches source lookups.
+   `combined-sources` maps `ns-sym` -> synthesized source (real source + rule
+   snippets, see `synth/synthesize-ns-source`) and takes precedence over
+   classpath resources, so callsite positions in synthesized analyses resolve
+   against the exact text `clj-kondo` analyzed."
   [combined-sources]
   (let [cache (atom {})]
     (fn [ns-sym filename]
@@ -702,59 +567,57 @@
    :callsite-resolver-fn callsite-resolver-fn
    :alias-by-rule alias-by-rule})
 
+(s/defschema CallsiteResolverContext
+  "Context map passed to `:callsite-resolver-fn` by
+   `generate-annotations-from-analysis`."
+  {:rule s/Any                               ; full production (:name, :ns-name, :lhs, :rhs, …)
+   :ns-name-sym s/Symbol                     ; ns where the callsite was found
+   :direction (s/enum :insert :retract)
+   :boundary-fn s/Symbol                     ; e.g. `clara.rules/insert!`
+   :arg-form s/Any                           ; the unresolved argument form
+   :source-str s/Str                         ; `pr-str` of `:arg-form`
+   :filename s/Str
+   (s/optional-key :fact-type) s/Keyword     ; present only for alias-discovered callsites
+   (s/optional-key :fact-type-spec)          ; present only for alias-discovered callsites
+   {s/Keyword s/Any}})
+
+(s/defschema GenerateAnnotationsOptions
+  "Options for `generate-annotations-from-analysis`."
+  {:analysis s/Any                            ; merged clj-kondo analysis (required)
+   :session-or-rulebase s/Any                 ; Clara session or rulebase (required)
+   (s/optional-key :rules-filter) [s/Symbol]
+   (s/optional-key :callsite-resolver-fn)     ; (fn [CallsiteResolverContext] -> nil or
+                                               ;   {:resolved-types [token …]})
+   (s/=> s/Any CallsiteResolverContext)
+   (s/optional-key :fact-type-spec-fn)        ; (fn [fact-type] -> nil or {:aliases-var v})
+   (s/=> s/Any s/Keyword)})
+
 (defn generate-annotations-from-analysis
-  "Generates rule annotations (insert/retract types etc.) from a pre-computed clj-kondo analysis
-  map.
+  "Generates rule annotations (insert/retract types etc.) from a pre-computed
+   `clj-kondo` analysis map.
 
-   Options:
+   Key options (see `GenerateAnnotationsOptions` for the full schema):
 
-     :analysis - the clj-kondo analysis map (required). When produced by `analyze-session-rules` it
-  carries synthesized sources under ::combined-sources, which take precedence for callsite source
-  extraction.
-
-     :session-or-rulebase - Clara session or rulebase (required). Supplies the full productions
-  handed to :callsite-resolver-fn and, when :rules-filter is not given, the default filter: the
-  session's rules (productions with an :rhs — queries are excluded).
-
-     :rules-filter - optional coll of rule symbols to filter by.
-
-     :callsite-resolver-fn - optional fn invoked once per callsite argument form the automatic
-  constructor-resolution chain cannot resolve (see analyze.rhs). Receives a map:
-
-   :rule - the full production (:name :ns-name :lhs :rhs :props :env …),
-  when a session was supplied
-
-   :ns-name-sym - ns where the callsite was found (may be a helper ns)
-
-   :direction - :insert | :retract
-
-   :boundary-fn - e.g. clara.rules/insert!
-
-   :arg-form - the unresolved argument form (locals already traced to
-  their init forms)
-
-   :source-str - pr-str of :arg-form
-
-   :filename - file containing the callsite
-
-                            Plus, only for callsites discovered through a var-alias chain (see
-  :fact-type-spec-fn):
-
-   :fact-type - the LHS-bound fact type that linked the aliased var
-
-   :fact-type-spec - the spec map returned for that fact type
-
-                            Returns nil (still unresolved) or a map with :resolved-types [tokens…].
-  Exceptions are contained: logged and treated as unresolved.
-
-     :fact-type-spec-fn - optional fn declaring caller-specific fact patterns. Receives a fact type
-  (from a rule's LHS bindings) and returns a spec map or nil; currently one key: {:aliases-var
-  fully.qualified/var-name} (the var-as-fact pattern — a fact IS a function var, bound on the LHS
-  and invoked in the RHS). When a rule binds an alias-mapped fact type and uses the binding in its
-  RHS, a synthetic var-usage links the rule to the aliased var so the var's call chain is explored
-  for boundary calls (see `rhs/alias-usage-map`). Callsites discovered through that chain bypass the
-  ctor chain: recorded :unresolved with :fact-type/:fact-type-spec attached, and handed to
-  :callsite-resolver-fn with the same context."
+   * `:analysis` — the clj-kondo analysis map (required). When produced by
+     `analyze-session-rules` it carries synthesized sources under
+     `::combined-sources`, which take precedence for callsite source extraction.
+   * `:session-or-rulebase` — Clara session or rulebase (required).
+   * `:rules-filter` — optional coll of rule symbols to filter by.
+   * `:callsite-resolver-fn` — optional fn invoked once per callsite argument
+     form the automatic constructor-resolution chain cannot resolve (see
+     `analyze.rhs`). Receives a `CallsiteResolverContext`. Returns nil (still
+     unresolved) or `{:resolved-types [tokens …]}`. Exceptions are contained:
+     logged and treated as unresolved.
+   * `:fact-type-spec-fn` — optional fn declaring caller-specific fact patterns.
+     Receives a fact type (from a rule's LHS bindings) and returns a spec map
+     or nil; currently one key: `{:aliases-var fully.qualified/var-name}` (the
+     var-as-fact pattern — a fact IS a function var, bound on the LHS and
+     invoked in the RHS). When a rule binds an alias-mapped fact type and uses
+     the binding in its RHS, a synthetic var-usage links the rule to the aliased
+     var so the var's call chain is explored for boundary calls (see
+     `rhs/alias-usage-map`). Callsites discovered through that chain bypass the
+     ctor chain: recorded `:unresolved` with `:fact-type`/`:fact-type-spec`
+     attached, and handed to `:callsite-resolver-fn` with the same context."
   [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn fact-type-spec-fn]}]
   (when-not session-or-rulebase
     (throw (ex-info "generate-annotations-from-analysis requires :session-or-rulebase"
@@ -835,10 +698,10 @@
       rules are included.
    2. For each rule-owning namespace a combined source is synthesized: the
       real source (or a reconstructed ns form when none is on the classpath)
-      plus one synthetic snippet def per rule (see `synthesize-ns-source`).
-   3. clj-kondo analyzes each combined source; defrule/defquery constructs
+      plus one synthetic snippet def per rule (see `synth/synthesize-ns-source`).
+   3. clj-kondo analyzes each combined source; `defrule`/`defquery` constructs
       produced by the active config in the source region are pruned and the
-      snippet region is renamed to the production names (prune-and-replace).
+      snippet region is renamed to the production names (see `prune-and-rename-analysis`).
    4. Transitive dependencies are analyzed from the classpath and merged.
 
    Returns the merged clj-kondo analysis map, with the combined sources under
@@ -846,8 +709,10 @@
 
    Options:
      :session-or-rulebase   - Clara session or rulebase (required)
-     :include-ns-prefixes   - optional coll of ns prefix strings; passed to build-analysis-from-namespaces
-     :exclude-ns-prefixes   - optional coll of ns prefix strings; passed to build-analysis-from-namespaces
+     :include-ns-prefixes   - optional coll of ns prefix strings; passed to
+                              `build-analysis-from-namespaces`
+     :exclude-ns-prefixes   - optional coll of ns prefix strings; passed to
+                              `build-analysis-from-namespaces`
      :cache-atom            - optional atom to use as cache; defaults to a fresh
                               atom per call (one session analysis run).
      :config-dir            - optional clj-kondo config dir; defaults to the bundled
@@ -860,7 +725,10 @@
         prune-vars (set (map (comp normalize-key :name) (:productions rulebase)))
         ns-source-map (into {}
                             (map (fn [[ns-sym productions]]
-                                   [ns-sym (synthesize-ns-source ns-sym productions)]))
+                                   [ns-sym (synth/synthesize-ns-source
+                                            ns-sym productions
+                                            #(some-> (find-ns-resource %) slurp)
+                                            normalize-key)]))
                             rules-by-ns)]
     (-> (build-analysis-from-namespaces
          (cond-> {:starting-namespaces (keys rules-by-ns)
