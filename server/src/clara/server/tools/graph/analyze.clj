@@ -689,14 +689,12 @@
                             by `analyze-session-rules` it carries synthesized
                             sources under ::combined-sources, which take
                             precedence for callsite source extraction.
-     :session-or-rulebase - optional Clara session or rulebase; when given and
-                            :rules-filter is not, the filter defaults to the
-                            session's rules (productions with an :rhs — queries
-                            are excluded). The session also supplies the
-                            full productions handed to :callsite-resolver-fn.
-     :rules-filter        - optional coll of rule symbols to filter by; when nil
-                            and no session is given, all project vars are
-                            analyzed.
+     :session-or-rulebase - Clara session or rulebase (required). Supplies the
+                            full productions handed to :callsite-resolver-fn
+                            and, when :rules-filter is not given, the default
+                            filter: the session's rules (productions with an
+                            :rhs — queries are excluded).
+     :rules-filter        - optional coll of rule symbols to filter by.
      :callsite-resolver-fn - optional fn invoked once per callsite argument
                             form the automatic constructor-resolution chain
                             cannot resolve (see analyze.rhs). Receives a map:
@@ -716,7 +714,9 @@
                             :resolved-types [tokens…]. Exceptions are
                             contained: logged and treated as unresolved."
   [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn]}]
-
+  (when-not session-or-rulebase
+    (throw (ex-info "generate-annotations-from-analysis requires :session-or-rulebase"
+                    {:missing :session-or-rulebase})))
   (doseq [ns-sym (->> analysis
                       :var-definitions
                       (into []
@@ -732,7 +732,7 @@
                                   (:productions rulebase))
         effective-filter (if (seq rules-filter)
                            (mapv normalize-key rules-filter)
-                           (some-> session-or-rulebase session-rule-fq-names))
+                           (session-rule-fq-names session-or-rulebase))
         var-seq (or effective-filter project-vars)
         inserter-type-map (build-inserter-type-map
                            (direct-callers graph project-vars insert-fns)
@@ -948,35 +948,3 @@
                    pam)]
     result))
 
-(defn generate-annotations-from-paths
-  "Runs clj-kondo on the specified paths to generate an analysis map,
-   then generates rule annotations from that analysis.
-
-   Options:
-     :paths        - paths to analyze (required)
-     :rules-filter - optional coll of rule symbols to filter by; when nil,
-                     all project vars are analyzed.
-     :config-dir   - optional clj-kondo config dir; defaults to the bundled
-                     clara-rules hooks. Pass nil to disable (falls back to
-                     cwd-based `.clj-kondo` discovery).
-     :include-ns-prefixes - optional coll of ns prefix strings; passed to build-analysis-from-namespaces
-     :exclude-ns-prefixes - optional coll of ns prefix strings; passed to build-analysis-from-namespaces"
-  [{:keys [paths rules-filter config-dir include-ns-prefixes exclude-ns-prefixes]
-    :or {config-dir @bundled-kondo-config-dir}}]
-  (let [initial-res (kondo/run! (cond-> {:lint paths
-                                         :config {:analysis {:namespace-definitions true
-                                                             :var-definitions true
-                                                             :var-usages true
-                                                             :java-class-usages true}}}
-                                  config-dir (assoc :config-dir config-dir)))
-        starting-namespaces (map :name (get-in initial-res [:analysis :namespace-definitions]))
-        merged-analysis (if (seq starting-namespaces)
-                          (build-analysis-from-namespaces
-                           (cond-> {:starting-namespaces starting-namespaces
-                                    :config-dir config-dir
-                                    :initial-analysis (:analysis initial-res)
-                                    :processed-namespaces (set starting-namespaces)}
-                             include-ns-prefixes (assoc :include-ns-prefixes include-ns-prefixes)
-                             exclude-ns-prefixes (assoc :exclude-ns-prefixes exclude-ns-prefixes)))
-                          (:analysis initial-res))]
-    (generate-annotations-from-analysis {:analysis merged-analysis :rules-filter rules-filter})))

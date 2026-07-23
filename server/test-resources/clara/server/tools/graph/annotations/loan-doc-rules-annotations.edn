@@ -17,45 +17,42 @@
  {:clara-rules/no-output-types true}
 
  ;; ---------------------------------------------------------------------------
- ;; Dynamic rule annotations — enriched with callsite resolution info
+ ;; Dynamic rule annotations — consistent with the automatic session-based
+ ;; pipeline (see clara.server.tools.graph.analyze / analyze.rhs): direct
+ ;; constructor callsites resolve; helper calls defer to the caller.
  ;; ---------------------------------------------------------------------------
 
- ;; Resolved: Java-constructor insert
+ ;; Unresolved: helper-call insert (automatic chain reports unresolved; resolve
+ ;; via :callsite-resolver-fn or declare insert-types manually)
  clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review
- {:clara-rules/insert-types [ComplianceReview]
-  :clara-rules/dynamic-insert-types-detected
+ {:clara-rules/dynamic-insert-types-detected
   {:callsites
    [{:source-str "(build-compliance-review ?app-id)"
      :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
-     :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
-     :constructor ComplianceReview
-     :status :resolved
-     :resolved-types [ComplianceReview]}]
-   :resolution :full}
-  :clara-rules/notes "Compliance review inserted via Java constructor — fully resolved"}
+     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :status :unresolved}]
+   :resolution :none}
+  :clara-rules/notes "Compliance review inserted via helper call — unresolved by automatic analysis"}
 
- ;; Resolved: metadata-map insert
+ ;; Unresolved: helper-call insert (metadata variant)
  clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata
- {:clara-rules/insert-types [ComplianceReview]
-  :clara-rules/dynamic-insert-types-detected
+ {:clara-rules/dynamic-insert-types-detected
   {:callsites
    [{:source-str "(build-compliance-via-metadata ?app-id)"
      :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
-     :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
-     :status :resolved
-     :resolved-types [ComplianceReview]}]
-   :resolution :full}
-  :clara-rules/notes "Compliance review inserted via metadata-map — fully resolved"}
+     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :status :unresolved}]
+   :resolution :none}
+  :clara-rules/notes "Compliance review inserted via metadata helper — unresolved by automatic analysis"}
 
- ;; Resolved: Java-constructor retract
+ ;; Resolved: direct Java-constructor retract (the automatic chain resolves this)
  clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice
  {:clara-rules/retract-types [StaleDocumentNotice]
   :clara-rules/dynamic-retract-types-detected
   {:callsites
    [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
      :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
-     :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
-     :constructor StaleDocumentNotice
+     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
      :status :resolved
      :resolved-types [StaleDocumentNotice]}]
    :resolution :full}
@@ -67,9 +64,7 @@
   {:callsites
    [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
      :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
-     :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
-     :constructor "clara.server.tools.graph.rules.loan-doc-rules/build-audit-trail-entry"
-     :status :unresolved
-     :reason :non-fact-constructor}]
+     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :status :unresolved}]
    :resolution :none}
   :clara-rules/notes "Audit trail insert via opaque builder — unresolved, type unknown"}}

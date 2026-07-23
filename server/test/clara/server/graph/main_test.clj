@@ -85,19 +85,22 @@
       ;; Port non-numeric
       (is (some? (:errors (parse-fn "-s" "s.bin" "-p" "abc")))))))
 
-(deftest test-main-generate-annotations
-  (testing "-main with --generate-annotations routes and exits successfully"
-    (let [exit-code (atom nil)
-          gen-called? (atom false)
-          gen-paths (atom nil)]
-      (with-redefs [clara.server.graph.main/exit (fn [code] (reset! exit-code code))
-                    main/run-generate-annotations (fn [paths]
-                                                    (reset! gen-called? true)
-                                                    (reset! gen-paths paths))]
-        (main/-main "-g" "src/my_rules.clj,src/other_rules.clj")
+(deftest test-main-generate-analysis
+  (testing "-main with --generate-analysis routes to run-generate-analysis"
+    (let [gen-called? (atom false)
+          gen-opts (atom nil)]
+      (with-redefs [clara.server.graph.main/run-generate-analysis (fn [options]
+                                                                    (reset! gen-called? true)
+                                                                    (reset! gen-opts options))]
+        (main/-main "--generate-analysis" "out" "-s" "session.bin")
         (is @gen-called?)
-        (is (= ["src/my_rules.clj" "src/other_rules.clj"] @gen-paths))
-        (is (= 0 @exit-code))))))
+        (is (= "out" (:generate-analysis-dir @gen-opts)))
+        (is (= "session.bin" (:session @gen-opts)))))))
+
+(deftest test-main-generate-annotations-flag-removed
+  (testing "the removed -g/--generate-annotations flag is rejected as unknown"
+    (let [{:keys [errors]} (cli/parse-opts ["-g" "src/my_rules.clj"] main/cli-options)]
+      (is (seq errors)))))
 
 (deftest test-main-custom-loader-missing
   (testing "-main with unresolvable custom loader exits with 1"

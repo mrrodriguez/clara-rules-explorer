@@ -312,7 +312,6 @@
               "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"
               "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput"
               "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"
-              "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"
               "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"
               "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"
               "clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
@@ -381,34 +380,30 @@
         rule-list (core/rules-list analysis)
         rule-by-name #(first (filter (fn [r] (= (:name r) %)) rule-list))]
 
-    (testing "Resolved dynamic-insert rule via Java constructor"
+    (testing "Unresolved dynamic-insert rule via helper call"
       (let [rule (rule-by-name "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review")]
-        (is (= ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"]
-               (:insert-types rule)))
+        (is (contains? rule :unlinked-rule))
+        (is (empty? (:insert-types rule)))
         (let [dyn (:dynamic-insert-types-detected rule)]
-          (is (= :full (:resolution dyn)))
+          (is (= :none (:resolution dyn)))
           (is (= 1 (count (:callsites dyn))))
           (is (= [{:source-str "(build-compliance-review ?app-id)"
                    :ns "clara.server.tools.graph.rules.loan-doc-rules"
-                   :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
-                   :status :resolved
-                   :resolved-types
-                   ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"]}]
+                   :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+                   :status :unresolved}]
                  (:callsites dyn))))))
 
-    (testing "Resolved dynamic-insert rule via metadata-map"
+    (testing "Unresolved dynamic-insert rule via metadata helper"
       (let [rule (rule-by-name "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata")]
-        (is (= ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"]
-               (:insert-types rule)))
+        (is (contains? rule :unlinked-rule))
+        (is (empty? (:insert-types rule)))
         (let [dyn (:dynamic-insert-types-detected rule)]
-          (is (= :full (:resolution dyn)))
+          (is (= :none (:resolution dyn)))
           (is (= 1 (count (:callsites dyn))))
           (is (= [{:source-str "(build-compliance-via-metadata ?app-id)"
                    :ns "clara.server.tools.graph.rules.loan-doc-rules"
-                   :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
-                   :status :resolved
-                   :resolved-types
-                   ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"]}]
+                   :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+                   :status :unresolved}]
                  (:callsites dyn))))))
 
     (testing "Resolved dynamic-retract rule"
@@ -420,7 +415,7 @@
           (is (= 1 (count (:callsites dyn))))
           (is (= [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
                    :ns "clara.server.tools.graph.rules.loan-doc-rules"
-                   :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
+                   :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
                    :status :resolved
                    :resolved-types
                    ["clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"]}]
@@ -435,6 +430,6 @@
           (is (= 1 (count (:callsites dyn))))
           (is (= [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
                    :ns "clara.server.tools.graph.rules.loan-doc-rules"
-                   :filename "test/clara/server/tools/graph/rules/loan_doc_rules.clj"
+                   :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
                    :status :unresolved}]
                  (:callsites dyn))))))))

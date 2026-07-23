@@ -44,12 +44,11 @@ The explorer tools were originally part of the main `clara-rules` repository. Th
 
 ### CLI Entry Point
 
-The server provides a `-main` entry point with three modes:
+The server provides a `-main` entry point with two modes:
 
 | Mode | Flag | Needs session? |
 |------|------|---------------|
 | Start HTTP server | (default, or `-s`) | Yes |
-| Generate annotations to stdout | `-g` / `--generate-annotations` | No |
 | Static analysis dump to disk | `--generate-analysis` | Yes |
 
 **Flags reference:**
@@ -60,7 +59,6 @@ The server provides a `-main` entry point with three modes:
 | `-f`, `--facts PATH` | Serialized facts file. Defaults to `<session-path>.facts`. |
 | `-a`, `--annotations PATH` | EDN sidecar annotations file ([format](docs/rule-annotations.md#path-b--sidecar-edn-file)). |
 | `-p`, `--port PORT` | Server port (default: `9999`). |
-| `-g`, `--generate-annotations PATHS` | Comma-separated Clojure source paths for annotation generation. |
 | `--generate-analysis DIR` | Output directory for `annotations.edn` + `analysis.edn` dump. |
 | `--load-session-state-fn SYMBOL` | Fully qualified symbol for a custom session deserializer (see below). |
 
@@ -70,11 +68,8 @@ The server provides a `-main` entry point with three modes:
 # Start the explorer server
 clojure -M -m clara.server.graph.main -s session.bin -a annotations.edn
 
-# Print annotations to stdout (no session needed)
-clojure -M -m clara.server.graph.main -g src/my_rules.clj,src/other_rules.clj
-
 # Static dump: annotations + full analysis to disk
-clojure -M -m clara.server.graph.main --generate-analysis out -s session.bin -g src/my_rules.clj
+clojure -M -m clara.server.graph.main --generate-analysis out -s session.bin
 ```
 
 For detailed CLI workflows and the programmatic REPL API, see [Rule Annotations → Usage Workflows](docs/rule-annotations.md#usage-workflows).

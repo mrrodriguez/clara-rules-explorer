@@ -77,33 +77,79 @@ The sidecar file can control the merging strategy per category by specifying a `
 
 ---
 
-## Dynamic Call-Site Capture
+## Dynamic Call-Site Capture and Resolution
 
-When the rule base analyzer detects call sites to `insert!`, `retract!`, or their variants (like `insert-all!`), but cannot statically determine the fact type (e.g. `(insert! (with-meta {:app-id 1} {:type :custom}))`), it populates the dynamic detection keys.
+When the rule base analyzer detects call sites to `insert!`, `retract!`, or their variants (like `insert-all!`) whose fact type cannot be determined by static constructor tracing, it captures each callsite and attempts **runtime-guided resolution**. The session rulebase is the source of truth: RHS forms come from the compiled productions, so macro-emitted rules are captured too.
 
-Rather than a simple boolean flag, these keys contain structured coordinates mapping back to the Clojure source code forms:
+### The resolution chain
+
+For each callsite argument form (see `clara.server.tools.graph.analyze.rhs`):
+
+1. **Record constructors** — `->MyRecord` / `map->MyRecord` heads are resolved in the live namespace of the consuming rule.
+2. **Java constructors** — `(MyFact. …)`, `(new MyFact …)`, and `(MyFact/new …)` resolve to the class.
+3. **Locals tracing** — a local symbol argument (e.g. a macro gensym) is traced through clj-kondo's `:locals` analysis to its binding's init form, and the chain restarts there.
+4. **Everything else defers** — helper calls, `with-meta`, literals/templates, and the var-as-fact pattern are *deliberately not* resolved automatically; they go to the caller-supplied `:callsite-resolver-fn`, then fall back to unresolved capture.
+
+Resolved types are **promoted**: a fully-resolved dynamic insert also appears in `:clara-rules/insert-types` (likewise retracts), so downstream graph linking uses it directly.
+
+### Detection map structure
 
 ```edn
 {:clara-rules/dynamic-insert-types-detected
  {:callsites
-  [{:source-str "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-map-type})"
-    :ns-name-sym clara.server.tools.graph.rules.analyze-test-rules
-    :filename "test/clara/server/tools/graph/rules/analyze_test_rules.clj"}]}}
+  [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
+    :ns-name-sym my.rules
+    :filename "my/rules.clj"
+    :status :resolved
+    :resolved-types [my.rules.StaleDocumentNotice]}]
+  :resolution :full}}
 ```
 
-### Callsite Map Structure
+* **`:source-str`** — the exact source text of the argument form at the boundary callsite (locals are *not* inlined here; the resolver receives the traced form separately).
+* **`:ns-name-sym`** / **`:filename`** — where the callsite was found (may be a helper namespace).
+* **`:status`** — `:resolved`, `:resolved-multi` (several types), or `:unresolved`.
+* **`:resolved-types`** — present when resolved; the fact-type tokens.
+* **`:resolution`** (aggregate) — `:full` when every callsite resolved, `:partial` when some did, `:none` otherwise.
 
-Each entry in the `:callsites` vector is a map containing:
+### `:callsite-resolver-fn`
 
-* **`:source-str`**: The exact string of the extracted Clojure argument form passed to the insertion or retraction callsite.
-* **`:ns-name-sym`**: The symbol of the namespace where the callsite was located.
-* **`:filename`**: The path to the file containing the callsite.
+`generate-annotations-from-analysis` accepts `:callsite-resolver-fn` — an escape hatch invoked once per argument form the automatic chain cannot resolve. It receives:
+
+| Key | Description |
+|-----|-------------|
+| `:rule` | the full production map of the consuming rule (`:name :ns-name :lhs :rhs :props` …) |
+| `:ns-name-sym` | namespace where the callsite was found (may be a helper ns) |
+| `:direction` | `:insert` or `:retract` |
+| `:boundary-fn` | e.g. `clara.rules/insert!` |
+| `:arg-form` | the argument form, with locals already traced to their init forms |
+| `:source-str` | `pr-str` of `:arg-form` |
+| `:filename` | file containing the callsite |
+
+Return `nil` (still unresolved) or `{:resolved-types [tokens…]}`. Tokens may be Classes, symbols, keywords, or any fact-type shape your session uses; they pass through to the annotation. Exceptions are contained — logged and treated as unresolved.
+
+Example — resolving the var-as-fact pattern (`(insert! (var my-fact-fn))`):
+
+```clojure
+(defn var-fact-resolver
+  [{:keys [arg-form ns-name-sym]}]
+  (when (and (seq? arg-form)
+             (= 'var (first arg-form))
+             (symbol? (second arg-form)))
+    (when-let [v (ns-resolve (the-ns ns-name-sym) (second arg-form))]
+      (when-let [t (:type (meta v))]
+        {:resolved-types [t]}))))
+
+(analyze/generate-annotations-from-analysis
+ {:analysis analysis
+  :session-or-rulebase my-session
+  :callsite-resolver-fn var-fact-resolver})
+```
 
 ---
 
 ## Usage Workflows
 
-There are two paths to generate annotations and analysis, depending on whether you already have a REPL running with a live Clara session.
+There are two paths to generate annotations and analysis, depending on whether you already have a REPL running with a live Clara session. **A session (or rulebase) is always required** — it is the source of truth for which rules exist, including macro-emitted ones.
 
 ### Path A — REPL with a live session (preferred when a REPL is already up)
 
@@ -135,9 +181,13 @@ Auto-discover namespaces from the session and generate annotations:
 (let [analysis    (analyze/analyze-session-rules
                    {:session-or-rulebase my-session
                     :include-ns-prefixes ["my.project.rules"]})
-      annotations (analyze/generate-annotations-from-analysis {:analysis analysis})]
+      annotations (analyze/generate-annotations-from-analysis
+                   {:analysis analysis
+                    :session-or-rulebase my-session})]
   (clojure.pprint/pprint annotations))
 ```
+
+Rules defined by `eval` in namespaces with no classpath source are handled automatically: `analyze-session-rules` reconstructs an `ns` form from the live namespace and synthesizes source from the session's productions.
 
 #### 3. Generate full static analysis from a live session
 
@@ -150,7 +200,9 @@ To get the same output as `--generate-analysis` (annotations + full rulebase ana
 
 (let [analysis    (analyze/analyze-session-rules
                    {:session-or-rulebase my-session})
-      annotations (analyze/generate-annotations-from-analysis {:analysis analysis})
+      annotations (analyze/generate-annotations-from-analysis
+                   {:analysis analysis
+                    :session-or-rulebase my-session})
       full        (core/rulebase-analysis my-session annotations)]
   ;; Inspect interactively:
   (keys full)
@@ -169,81 +221,17 @@ To get the same output as `--generate-analysis` (annotations + full rulebase ana
 (server/start! {:session my-session :port 9999})
 ```
 
-#### 5. Analyze by namespace (no session needed)
-
-You can also run the analysis against specific namespaces without a session, using classpath discovery:
-
-```clojure
-(require '[clara.server.tools.graph.analyze :as analyze])
-
-(let [cache-atom (atom {})
-      analysis   (analyze/build-analysis-from-namespaces
-                  {:starting-namespaces '[my.project.rules.income]
-                   :include-ns-prefixes []   ; nil or [] = follow all transitive deps
-                   :cache-atom cache-atom})
-      annotations (analyze/generate-annotations-from-analysis {:analysis analysis})]
-  annotations)
-```
-
-#### 6. In-memory namespaces (no source files)
-
-If you have namespaces defined entirely in memory with no matching source files on disk or classpath, supply them via `:in-memory-sources`:
-
-```clojure
-(let [in-mem-source "(ns my.dynamic.rules
-                       (:require [clara.rules :as r]))
-                     (r/defrule dynamic-rule
-                       =>
-                       (r/insert! (with-meta {:id 1} {:type :dynamic-fact-type})))"
-
-      analysis    (analyze/build-analysis-from-namespaces
-                   {:starting-namespaces '[my.dynamic.rules]
-                    :in-memory-sources {'my.dynamic.rules in-mem-source}})
-
-      annotations (analyze/generate-annotations-from-analysis
-                   {:analysis analysis
-                    :in-memory-sources {'my.dynamic.rules in-mem-source}})]
-  (clojure.pprint/pprint annotations))
-```
-
 ---
 
 ### Path B — CLI via `-main` (standalone, no REPL needed)
 
 When a REPL isn't available, use the `-main` entry point. **Note:** if your session uses custom rule constructs, custom fact types, or non-Fressian serialization, those dependencies must be on the classpath when invoking `clojure -M`. The REPL path (Path A) avoids this because everything is already loaded in your running process. For a full flags reference, see the [server README](../README.md#cli-entry-point).
 
-#### 1. Generate annotations to stdout
+#### Generate static analysis dump to disk
 
-No session required — runs clj-kondo directly on source files:
-
-```bash
-clojure -M -m clara.server.graph.main -g path/to/my_rules.clj
-clojure -M -m clara.server.graph.main -g path/to/rules.clj,path/to/other.clj
-```
-
-Example output:
-```edn
-{my.ns/cold-rule
- #:clara-rules{:insert-types [my.ns.Cold]}
-
- my.ns/orphan-rule
- #:clara-rules{:insert-types [],
-               :dynamic-insert-types-detected
-               {:callsites
-                [{:source-str "(with-meta {:app-id ?app-id} {:type :custom-type})"
-                  :ns-name-sym my.ns
-                  :filename "path/to/my_rules.clj"}]}}}
-```
-
-#### 2. Generate static analysis dump to disk
-
-Requires a serialized session. Produces `annotations.edn` + `analysis.edn` in the given output directory. Annotations are either generated from explicit `-g` source paths or auto-discovered from the session's compiled namespaces via clj-kondo:
+Requires a serialized session. Produces `annotations.edn` + `analysis.edn` in the given output directory. Annotations are auto-discovered from the session's rule namespaces via clj-kondo, with the session rulebase as the source of truth for rules:
 
 ```bash
-# With explicit source paths
-clojure -M -m clara.server.graph.main --generate-analysis out \
-  -s session.bin -g path/to/my_rules.clj
-
 # Auto-discover from session (sources must be on classpath)
 clojure -M -m clara.server.graph.main --generate-analysis out \
   -s session.bin

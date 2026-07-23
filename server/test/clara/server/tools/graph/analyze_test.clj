@@ -541,18 +541,24 @@
       (is (contains? var-defs 'rule-record-constructor)))))
 
 ;; ---------------------------------------------------------------------------
-;; generate-annotations-from-analysis (production-style pipeline, no session)
+;; generate-annotations-from-analysis (caller-built analysis + required session)
 ;; ---------------------------------------------------------------------------
 
 (deftest test-generate-annotations-from-analysis--from-merged-analysis
-  (let [merged-analysis (analyze/build-analysis-from-namespaces
-                         {:starting-namespaces ['clara.server.tools.graph.rules.analyze-test-rules]
-                          :include-ns-prefixes [rules-prefix]})
-        annotations (analyze/generate-annotations-from-analysis
-                     {:analysis merged-analysis})]
-    (is (some? (get annotations `atr/rule-record-constructor)))
-    (is (= [`LocalDummyRecord]
-           (get-in annotations [`atr/rule-record-constructor :clara-rules/insert-types])))))
+  (testing "works on a caller-built analysis (no analyze-session-rules synthesis)"
+    (let [merged-analysis (analyze/build-analysis-from-namespaces
+                           {:starting-namespaces ['clara.server.tools.graph.rules.analyze-test-rules]
+                            :include-ns-prefixes [rules-prefix]})
+          annotations (analyze/generate-annotations-from-analysis
+                       {:analysis merged-analysis
+                        :session-or-rulebase edge-case-session})]
+      (is (some? (get annotations `atr/rule-record-constructor)))
+      (is (= [`LocalDummyRecord]
+             (get-in annotations [`atr/rule-record-constructor :clara-rules/insert-types])))))
+  (testing ":session-or-rulebase is required"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (analyze/generate-annotations-from-analysis
+                  {:analysis {}})))))
 
 ;; ---------------------------------------------------------------------------
 ;; add-auto-detected-annotations

@@ -116,7 +116,7 @@ List of all rules with lightweight summaries (load order).
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `dynamic-insert-types-detected` | object? | Present when the analyzer detected dynamic `insert!` callsites whose fact types cannot be statically resolved (Java constructors, metadata-map facts, custom builder fns). Contains structured callsite coordinates for manual resolution. |
+| `dynamic-insert-types-detected` | object? | Present when the analyzer detected dynamic `insert!` callsites. Each callsite carries a resolution status: constructor callsites resolve automatically (see `analyze.rhs`); everything else defers to the caller-supplied `:callsite-resolver-fn` or remains captured as unresolved. |
 | `dynamic-retract-types-detected` | object? | Same as above, for `retract!` callsites. |
 
 **Dynamic detection object** (`dynamic-insert-types-detected` / `dynamic-retract-types-detected`):

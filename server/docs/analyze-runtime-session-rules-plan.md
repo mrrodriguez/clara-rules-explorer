@@ -636,15 +636,43 @@ checkable state (`make test` + named REPL probes).
 
 ### M3 — API surface + docs + demo artifacts
 
-- Remove `generate-annotations-from-paths`, `-g` flag, public
-  `:in-memory-sources`, global cache; `main.clj` cleanup.
-- Docs rewritten to final shape (§8); demo EDN re-scoped; core/source-sink
-  re-baselines.
-- Delete exploration artifacts (`server/dev/scratch.clj`,
-  `server/dev/tmp-kondo-config/`, `server/dev/tmp-empty-config/`,
-  `server/dev/tmp-clara-config/`).
-- **Check:** no references to removed entry points; full quality gates green
-  (`make test format-check lint reflection-check`).
+**Status: DONE (awaiting review).**
+
+- Removed `generate-annotations-from-paths`, the `-g` flag
+  (`main.clj` + `main_test.clj` routing test replaced with a
+  `--generate-analysis` routing test + a "flag rejected" test), and any global
+  cache remnants (the public `:in-memory-sources` option had already been
+  dropped in M1 — synthesized sources are internal via `::combined-sources`).
+  ✓
+- `:session-or-rulebase` is now **required** in
+  `generate-annotations-from-analysis` (throws `ex-info` otherwise; covered by
+  a test); `main.clj --generate-analysis` passes the loaded session through. ✓
+- Docs rewritten to final shape (§8): `rule-annotations.md` (dynamic-capture
+  section now documents the resolution chain, `:status`/`:resolved-types`/`
+  :resolution`, promotion, and `:callsite-resolver-fn`; workflows are
+  session-only — no `-g`, no `:in-memory-sources`),
+  `analyze-clj-kondo-notes.md` (prune-and-replace, synthesis,
+  `::combined-sources`, locals tracing, id non-determinism), `README.md`
+  (two CLI modes), and a small accuracy fix in
+  `../docs/explorer-graph-api.md`. ✓
+- Demo EDN re-scoped to what the automatic pipeline actually produces:
+  helper-call entries (`dynamic-insert-compliance-review`/`-metadata`) flipped
+  to `:unresolved`/`:none` (per the deliberately shrunk chain — resolution of
+  helpers is the resolver-fn's job), stale `:constructor`/`:reason` keys
+  dropped, filenames updated to the classpath-relative form
+  (`clara/server/...` — synthesized-source analysis) from the old path-mode
+  form (`test/clara/...`). The direct-ctor retract entry stays resolved. ✓
+- Re-baselines: `core_test.clj` (`test-dynamic-detection-in-rules-list` — two
+  testings rewritten to the unresolved shape + filename updates;
+  `test-fact-type-summary-order` — `ComplianceReview` dropped from the fact
+  types); `source_sink_test.clj` verified unaffected (no dynamic-rule
+  references); `api_test`/`smoke_test` verified unaffected. ✓
+- Deleted exploration artifacts (`dev/scratch.clj`, `dev/m1_probe.clj`,
+  `dev/m3_probe.clj`, `dev/tmp-kondo-config/`, `dev/tmp-empty-config/`,
+  `dev/tmp-clara-config/`). ✓
+- **Check:** no references to removed entry points ✓; full quality gates
+  green ✓ (`make test` = 68 tests / 436 assertions, 0 failures;
+  format-check / lint / reflection-check clean).
 
 ### M4 (later) — `:fact-type-spec-fn` var-alias chains
 

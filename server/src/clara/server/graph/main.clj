@@ -6,7 +6,6 @@
             [clara.rules.durability.fressian :as df]
             [clojure.data.fressian :as fres]
             [clojure.java.io :as io]
-            [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
             [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.annotations :as annotations]
@@ -50,8 +49,6 @@
     :default 9999
     :parse-fn #(Integer/parseInt %)
     :validate [#(< 0 % 65536) "Port must be between 1 and 65535"]]
-   ["-g" "--generate-annotations PATHS" "Generate annotations EDN for Clojure source paths (comma-separated)."
-    :parse-fn #(str/split % #",")]
    [nil "--generate-analysis DIR" "Generate annotations and analysis EDN files to the specified output directory."
     :id :generate-analysis-dir]
    [nil "--load-session-state-fn SYMBOL" "Symbol naming a function to load the session state."
@@ -65,8 +62,7 @@
   (println summary)
   (println "\nExamples:")
   (println "  clojure -M -m clara.server.graph.main -s session.bin -a annotations.edn")
-  (println "  clojure -M -m clara.server.graph.main -g src/my_rules.clj,src/other_rules.clj")
-  (println "  clojure -M -m clara.server.graph.main --generate-analysis out -s session.bin -g src/my_rules.clj")
+  (println "  clojure -M -m clara.server.graph.main --generate-analysis out -s session.bin")
   (println))
 (defn- exit [code]
   (System/exit code))
@@ -87,15 +83,11 @@
   [path]
   (.exists (io/file path)))
 
-(defn- run-generate-annotations [generate-annotations]
-  (let [res (analyze/generate-annotations-from-paths {:paths generate-annotations})]
-    (pprint/pprint res)))
-
 (defn- validate-server-options [options]
   (let [{:keys [session facts load-session-state-fn]} options]
     (cond
       (not session)
-      {:error "Error: Either --session or --generate-annotations is required."
+      {:error "Error: --session is required."
        :show-usage? true}
 
       (not (file-exists? session))
@@ -139,9 +131,9 @@
   "Generates annotations and static analysis artifacts, writing them to the
    specified output directory.
 
-   Annotations are either generated from explicit -g source paths or
-   auto-discovered from session namespaces via clj-kondo."
-  [{:keys [session facts load-session-state-fn generate-annotations generate-analysis-dir]}]
+   Annotations are auto-discovered from the session's rule namespaces via
+   clj-kondo, with the session rulebase as the source of truth for rules."
+  [{:keys [session facts load-session-state-fn generate-analysis-dir]}]
   (when-not session
     (println "Error: --session is required with --generate-analysis")
     (exit 1))
@@ -161,16 +153,13 @@
       (println "Session loaded.")
 
       (let [annotations
-            (if generate-annotations
-              (do
-                (println (format "Generating annotations from source paths: %s"
-                                 (str/join ", " generate-annotations)))
-                (analyze/generate-annotations-from-paths {:paths generate-annotations}))
-              (do
-                (println "Auto-discovering annotations from session namespaces...")
-                (let [analysis (analyze/analyze-session-rules
-                                {:session-or-rulebase loaded-session})]
-                  (analyze/generate-annotations-from-analysis {:analysis analysis}))))
+            (do
+              (println "Auto-discovering annotations from session namespaces...")
+              (let [analysis (analyze/analyze-session-rules
+                              {:session-or-rulebase loaded-session})]
+                (analyze/generate-annotations-from-analysis
+                 {:analysis analysis
+                  :session-or-rulebase loaded-session})))
 
             _ (println "Running rulebase analysis...")
             analysis (core/rulebase-analysis loaded-session annotations)
@@ -215,13 +204,11 @@
 ;; ---------------------------------------------------------------------------
 
 (defn -main
-  "Loads a serialized Clara session and starts the explorer server, generates
-   rule annotations directly from source files, or generates a static analysis
-   dump with annotations.
+  "Loads a serialized Clara session and starts the explorer server, or
+   generates a static analysis dump with annotations.
 
    Required (at least one):
      -s, --session PATH              Serialized session file (Fressian) to run server.
-     -g, --generate-annotations PATHS Clojure source paths (comma-separated) to print annotations.
      --generate-analysis DIR         Output directory for annotations and analysis EDN files.
 
    Optional:
@@ -241,15 +228,10 @@
       (println)
       (exit 1))
 
-    (let [{:keys [generate-annotations generate-analysis-dir]} options]
+    (let [{:keys [generate-analysis-dir]} options]
       (cond
         generate-analysis-dir
         (run-generate-analysis options)
-
-        generate-annotations
-        (do
-          (run-generate-annotations generate-annotations)
-          (exit 0))
 
         :else
         (let [validation (validate-server-options options)]
