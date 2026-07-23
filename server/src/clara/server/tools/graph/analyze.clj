@@ -658,15 +658,17 @@
                                    get-source productions-by-name
                                    callsite-resolver-fn alias-by-rule)
         annotations
-        (into (sorted-map-by #(compare (str %1) (str %2)))
+        (into {}
               (keep (fn [v]
                       (let [annotation (infer-annotation-for-var v infer-ctx)]
                         (cond
                           ;; Real annotation with inferred insert/retract data.
-                          (seq annotation)       [(str v) annotation]
+                          (seq annotation)       [v annotation]
                           ;; Explicitly-requested rule that produces nothing: mark it.
-                          (seq effective-filter) [(str v) {:clara-rules/no-output-types true}]))))
-              var-seq)]
+                          (seq effective-filter) [v {:clara-rules/no-output-types true}]))))
+              var-seq)
+        ;; Normalize to string keys for external consumers (EDN, API, session enrichment).
+        annotations (ann/normalize-annotations annotations)]
     annotations))
 
 (defn extract-session-rule-names
@@ -774,7 +776,8 @@
    check rule :props.  Use `enrich-annotations-from-session` for the full
    pipeline that also deduplicates against :props."
   [session-analysis annotations]
-  (let [rule->session-types
+  (let [annotations (ann/normalize-annotations annotations)
+        rule->session-types
         (reduce-kv (fn [acc _id {:keys [type inserted-from]}]
                      (reduce (fn [acc' {:keys [name]}]
                                (update acc' name (fnil conj #{}) type))
@@ -826,9 +829,9 @@
    Returns the enriched annotations map suitable for passing to
    `rulebase-analysis`."
   [session annotations]
-  (let [original     annotations
+  (let [original     (ann/normalize-annotations annotations)
         snapshot     (memory/session-snapshot session)
-        enriched     (add-auto-detected-annotations snapshot annotations)
+        enriched     (add-auto-detected-annotations snapshot original)
         rulebase     (-> session eng/components :rulebase)
         productions  (:productions rulebase)
 

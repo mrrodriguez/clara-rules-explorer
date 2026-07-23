@@ -36,6 +36,27 @@ make clean            # remove target and .cpcache
 - The server API is defined in `server/src/clara/server/graph/api.clj`.
 - Demo rules live under `server/test/clara/server/tools/graph/rules/`.
 
+### Annotation Key Normalization
+
+Annotation maps (loaded from EDN sidecar files, generated from kondo analysis,
+or enriched from session data) use **string keys** for rule names — never symbols.
+The normalization layer lives in `server/src/clara/server/tools/graph/annotations.clj`:
+
+| Function | Purpose |
+|---|---|
+| `normalize-rule-name` | Normalize a single key to its canonical string form |
+| `normalize-annotations` | Normalize all top-level keys to strings; returns a `sorted-map` |
+| `get-annotation` | Canonical accessor — normalizes the lookup key, then `get`s |
+
+**Rules:**
+1. Every boundary that reads, writes, or receives annotations from outside must
+   normalize: `load-sidecar`, `write-annotations!`, `generate-annotations-from-analysis`,
+   `add-auto-detected-annotations`, `enrich-annotations-from-session`, `merge-annotations`.
+2. Use `get-annotation` (never raw `get`) when the lookup key may be a symbol
+   (e.g., from kondo analysis, backtick-quoted vars in tests, or EDN input).
+3. The internal kondo analysis pipeline (`build-graph`, `transitive-reachability`,
+   `productions-by-name`) uses symbols — conversion happens at the boundaries only.
+
 ---
 
 ## UI (`ui/`)

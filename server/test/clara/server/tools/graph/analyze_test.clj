@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [clara.rules :as r]
+            [clara.server.tools.graph.annotations :as ann]
             [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.analyze.rhs :as rhs]
             [clara.server.tools.graph.memory :as memory]
@@ -76,31 +77,31 @@
 (deftest test-static-insert-types
   (testing "Loan-doc rules: Clojure record insert types resolved statically"
     (let [ann loan-doc-annotations]
-      (is (some? (get ann `ldr/collect-app-id-card-given-docs)))
+      (is (some? (ann/get-annotation ann `ldr/collect-app-id-card-given-docs)))
       (is (= [`AllIdCardGivenDocuments]
-             (:clara-rules/insert-types (get ann `ldr/collect-app-id-card-given-docs))))
+             (:clara-rules/insert-types (ann/get-annotation ann `ldr/collect-app-id-card-given-docs))))
 
-      (is (some? (get ann `ldr/collect-app-given-docs)))
+      (is (some? (ann/get-annotation ann `ldr/collect-app-given-docs)))
       (is (= [`AllGivenDocuments]
-             (:clara-rules/insert-types (get ann `ldr/collect-app-given-docs))))
+             (:clara-rules/insert-types (ann/get-annotation ann `ldr/collect-app-given-docs))))
 
-      (is (some? (get ann `ldr/collect-app-req-docs)))
+      (is (some? (ann/get-annotation ann `ldr/collect-app-req-docs)))
       (is (= [`AllRequiredDocuments]
-             (:clara-rules/insert-types (get ann `ldr/collect-app-req-docs))))
+             (:clara-rules/insert-types (ann/get-annotation ann `ldr/collect-app-req-docs))))
 
-      (is (some? (get ann `ldr/collect-app-doc-check-input)))
+      (is (some? (ann/get-annotation ann `ldr/collect-app-doc-check-input)))
       (is (= [`DocumentCheckInput]
-             (:clara-rules/insert-types (get ann `ldr/collect-app-doc-check-input))))
+             (:clara-rules/insert-types (ann/get-annotation ann `ldr/collect-app-doc-check-input))))
 
-      (is (some? (get ann `ldr/app-has-all-required-docs)))
+      (is (some? (ann/get-annotation ann `ldr/app-has-all-required-docs)))
       (is (= [`DocumentCheck]
-             (:clara-rules/insert-types (get ann `ldr/app-has-all-required-docs))))))
+             (:clara-rules/insert-types (ann/get-annotation ann `ldr/app-has-all-required-docs))))))
 
   (testing "Edge cases: Clojure record constructors and helper tracing"
     (let [ann edge-case-annotations]
 
       ;; Rule A: standard Clojure record constructor
-      (let [a (get ann `atr/rule-record-constructor)]
+      (let [a (ann/get-annotation ann `atr/rule-record-constructor)]
         (is (some? a))
         (is (= [`LocalDummyRecord] (:clara-rules/insert-types a)))
         (is (nil? (:clara-rules/dynamic-insert-types-detected a))
@@ -108,35 +109,35 @@
 
       ;; Rule D: tracing through helper → record constructor
       (is (= [`DocumentCheck]
-             (:clara-rules/insert-types (get ann `atr/rule-nested-helper-call))))
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-nested-helper-call))))
 
       ;; Rule H2: insert! with varargs
       (is (= [`LocalDummyRecord]
-             (:clara-rules/insert-types (get ann `atr/rule-insert-varargs))))
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-varargs))))
 
       ;; Rule H4: complex nested doseq loop
       (is (= [`LocalDummyRecord]
-             (:clara-rules/insert-types (get ann `atr/rule-complex-rhs-nested))))
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-complex-rhs-nested))))
 
       ;; Rule H5: insert-all! with collection literal
       (is (= [`LocalDummyRecord]
-             (:clara-rules/insert-types (get ann `atr/rule-insert-all-collection))))
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-collection))))
 
       ;; Rule H7: insert-all! with collection built by helper
       (is (= [`LocalDummyRecord]
-             (:clara-rules/insert-types (get ann `atr/rule-insert-all-helper))))
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-helper))))
 
       ;; Rule H8: insert-all! heterogeneous — only LocalDummyRecord static, Java ctor deferred
       (is (= [`LocalDummyRecord]
-             (:clara-rules/insert-types (get ann `atr/rule-insert-all-heterogeneous))))
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-heterogeneous))))
 
       ;; Rule H9: insert-unconditional!
       (is (= [`LocalDummyRecord]
-             (:clara-rules/insert-types (get ann `atr/rule-insert-unconditional))))
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-unconditional))))
 
       ;; Rule H10: insert-all-unconditional!
       (is (= [`LocalDummyRecord]
-             (:clara-rules/insert-types (get ann `atr/rule-insert-all-unconditional)))))))
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-unconditional)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Dynamic insert callsites — runtime resolution chain (analyze.rhs)
@@ -175,20 +176,20 @@
                [`atr/rule-java-constructor-short-modern "(DocumentCheck/new ?app-id :pass \"short-modern\" nil nil)"]
                [`atr/rule-java-constructor-fq-modern "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new ?app-id :pass \"fq-modern\" nil nil)"]]]
         (is (= (resolved-detection ns-sym filename source-str `DocumentCheck)
-               (:clara-rules/dynamic-insert-types-detected (get ann rule-sym)))
+               (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann rule-sym)))
             (str rule-sym " callsite resolves via the ctor chain"))
-        (is (= [`DocumentCheck] (:clara-rules/insert-types (get ann rule-sym)))
+        (is (= [`DocumentCheck] (:clara-rules/insert-types (ann/get-annotation ann rule-sym)))
             (str rule-sym " resolved type is promoted to :insert-types"))))
 
     (testing "Java constructor inside a helper fn → callsite at the helper, resolved"
       (is (= (resolved-detection ns-sym filename
                                  "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new app-id :pass \"helper-insert\" nil nil)"
                                  `DocumentCheck)
-             (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-helper-does-insert))))
-      (is (= [`DocumentCheck] (:clara-rules/insert-types (get ann `atr/rule-helper-does-insert)))))
+             (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `atr/rule-helper-does-insert))))
+      (is (= [`DocumentCheck] (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-helper-does-insert)))))
 
     (testing "Let-bound constructor local → traced to its init form and resolved"
-      (let [a (get ann `atr/rule-let-bound-ctor)]
+      (let [a (ann/get-annotation ann `atr/rule-let-bound-ctor)]
         (is (= (resolved-detection ns-sym filename "dc" `DocumentCheck)
                (:clara-rules/dynamic-insert-types-detected a))
             "the callsite arg is the local symbol; resolution traces the binding's init form")
@@ -196,23 +197,23 @@
 
     (testing "Helper call args are NOT automatically resolved (caller's business)"
       (is (= (unresolved-detection ns-sym filename "(make-java-document-check-nested ?app-id)")
-             (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-nested-java-helper-call))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-nested-java-helper-call)))))
+             (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `atr/rule-nested-java-helper-call))))
+      (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-nested-java-helper-call)))))
 
     (testing "with-meta map fact → unresolved (fact-type-fn honoring is the caller's business)"
       (is (= (unresolved-detection ns-sym filename
                                    "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-map-type})")
-             (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-metadata-map-fact))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-metadata-map-fact)))))
+             (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `atr/rule-metadata-map-fact))))
+      (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-metadata-map-fact)))))
 
     (testing "constructor-NAMED helper (->fact) → unresolved (derived class does not load)"
       (is (= (unresolved-detection ns-sym filename
                                    "(->fact :custom-fact-type {:app-id ?app-id, :status :pass})")
-             (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-fact-builder-call))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-fact-builder-call)))))
+             (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `atr/rule-fact-builder-call))))
+      (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-fact-builder-call)))))
 
     (testing "mixed varargs → :partial aggregate; resolved args still promoted"
-      (let [a (get ann `atr/rule-insert-mixed-varargs)
+      (let [a (ann/get-annotation ann `atr/rule-insert-mixed-varargs)
             dyn (:clara-rules/dynamic-insert-types-detected a)]
         (is (= :partial (:resolution dyn)))
         (is (= 2 (count (:callsites dyn))))
@@ -231,7 +232,7 @@
 
     (testing "Static retract types — record constructors"
       ;; Rule H3: retract! with varargs
-      (let [h3 (get ann `atr/rule-retract-varargs)]
+      (let [h3 (ann/get-annotation ann `atr/rule-retract-varargs)]
         (is (some? h3))
         (is (= [`LocalDummyRecord] (:clara-rules/retract-types h3)))
         (is (nil? (:clara-rules/dynamic-retract-types-detected h3))
@@ -242,36 +243,36 @@
       (is (= (resolved-detection ns-sym filename
                                  "(DocumentCheck. ?app-id :pass \"dot-retract\" nil nil)"
                                  `DocumentCheck)
-             (:clara-rules/dynamic-retract-types-detected (get ann `atr/rule-retract-java-dot))))
-      (is (= [`DocumentCheck] (:clara-rules/retract-types (get ann `atr/rule-retract-java-dot))))
+             (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-java-dot))))
+      (is (= [`DocumentCheck] (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-java-dot))))
 
       ;; Rule I2: new Class constructor
       (is (= (resolved-detection ns-sym filename
                                  "(new clara.server.tools.graph.rules.loan_app_facts.DocumentCheck ?app-id :pass \"new-retract\" nil nil)"
                                  `DocumentCheck)
-             (:clara-rules/dynamic-retract-types-detected (get ann `atr/rule-retract-java-new))))
-      (is (= [`DocumentCheck] (:clara-rules/retract-types (get ann `atr/rule-retract-java-new))))
+             (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-java-new))))
+      (is (= [`DocumentCheck] (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-java-new))))
 
       ;; Rule I3: modern Class/new constructor
       (is (= (resolved-detection ns-sym filename
                                  "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new ?app-id :pass \"modern-retract\" nil nil)"
                                  `DocumentCheck)
-             (:clara-rules/dynamic-retract-types-detected (get ann `atr/rule-retract-java-modern))))
-      (is (= [`DocumentCheck] (:clara-rules/retract-types (get ann `atr/rule-retract-java-modern)))))
+             (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-java-modern))))
+      (is (= [`DocumentCheck] (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-java-modern)))))
 
     (testing "Dynamic retract types — metadata map facts and helpers"
       ;; Rule I4: with-meta map fact (retract) — unresolved
       (is (= (unresolved-detection ns-sym filename
                                    "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-retract-type})")
-             (:clara-rules/dynamic-retract-types-detected (get ann `atr/rule-retract-metadata-map))))
-      (is (nil? (:clara-rules/retract-types (get ann `atr/rule-retract-metadata-map))))
+             (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-metadata-map))))
+      (is (nil? (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-metadata-map))))
 
       ;; Rule I5: helper that does Java constructor + retract — resolved at the helper
       (is (= (resolved-detection ns-sym filename
                                  "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new app-id :pass \"helper-retract\" nil nil)"
                                  `DocumentCheck)
-             (:clara-rules/dynamic-retract-types-detected (get ann `atr/rule-retract-helper-call))))
-      (is (= [`DocumentCheck] (:clara-rules/retract-types (get ann `atr/rule-retract-helper-call)))))))
+             (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-helper-call))))
+      (is (= [`DocumentCheck] (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-helper-call)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Macro-emitted rules: the session sees rules kondo hooks never could
@@ -280,13 +281,13 @@
 (deftest test-extract-doc-meta-rule-captured
   (testing "def-fact-fn-emitted rule appears as a captured dynamic callsite"
     (let [dyn (:clara-rules/dynamic-insert-types-detected
-               (get loan-doc-annotations `ldr/extract-doc-meta-rule))]
+               (ann/get-annotation loan-doc-annotations `ldr/extract-doc-meta-rule))]
       (is (some? dyn)
           "macro-emitted rule must be visible via the session (kondo hooks never see it)")
       (is (= :none (:resolution dyn))
           "the var-as-fact pattern is never automatically resolved (caller-guided)")
       (is (= 1 (count (:callsites dyn))))
-      (is (nil? (:clara-rules/insert-types (get loan-doc-annotations `ldr/extract-doc-meta-rule))))
+      (is (nil? (:clara-rules/insert-types (ann/get-annotation loan-doc-annotations `ldr/extract-doc-meta-rule))))
       (let [{:keys [source-str ns-name-sym filename status]}
             (first (:callsites dyn))]
         (is (re-matches #"resolved__\d+__auto__" source-str)
@@ -300,17 +301,17 @@
           ns-sym 'clara.server.tools.graph.rules.loan-doc-rules
           filename "clara/server/tools/graph/rules/loan_doc_rules.clj"]
       (is (= (unresolved-detection ns-sym filename "(build-compliance-review ?app-id)")
-             (:clara-rules/dynamic-insert-types-detected (get ann `ldr/dynamic-insert-compliance-review))))
+             (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `ldr/dynamic-insert-compliance-review))))
       (is (= (unresolved-detection ns-sym filename "(build-compliance-via-metadata ?app-id)")
-             (:clara-rules/dynamic-insert-types-detected (get ann `ldr/dynamic-insert-compliance-metadata))))
+             (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `ldr/dynamic-insert-compliance-metadata))))
       (is (= (unresolved-detection ns-sym filename "(build-audit-trail-entry ?app-id :doc-check-passed)")
-             (:clara-rules/dynamic-insert-types-detected (get ann `ldr/dynamic-insert-audit-trail))))
+             (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `ldr/dynamic-insert-audit-trail))))
       (is (= (resolved-detection ns-sym filename
                                  "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
                                  `StaleDocumentNotice)
-             (:clara-rules/dynamic-retract-types-detected (get ann `ldr/dynamic-retract-stale-notice))))
+             (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `ldr/dynamic-retract-stale-notice))))
       (is (= [`StaleDocumentNotice]
-             (:clara-rules/retract-types (get ann `ldr/dynamic-retract-stale-notice)))))))
+             (:clara-rules/retract-types (ann/get-annotation ann `ldr/dynamic-retract-stale-notice)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; :callsite-resolver-fn — the caller escape hatch
@@ -332,7 +333,7 @@
                {:analysis loan-doc-analysis
                 :session-or-rulebase loan-doc-session
                 :callsite-resolver-fn resolver})
-          a (get ann `ldr/extract-doc-meta-rule)
+          a (ann/get-annotation ann `ldr/extract-doc-meta-rule)
           dyn (:clara-rules/dynamic-insert-types-detected a)]
       (is (= :full (:resolution dyn)))
       (is (= [:extract-doc-meta] (:clara-rules/insert-types a))
@@ -398,10 +399,10 @@
 
     (testing "without a spec fn, nothing alias-derived appears"
       (is (true? (:clara-rules/no-output-types
-                  (get edge-case-annotations `atr/rule-consume-widget-transform)))
+                  (ann/get-annotation edge-case-annotations `atr/rule-consume-widget-transform)))
           "the consumer's own RHS has no boundary calls; the var-fact's chain stays invisible")
       (is (nil? (:clara-rules/dynamic-insert-types-detected
-                 (get edge-case-annotations `atr/rule-consume-widget-transform)))))
+                 (ann/get-annotation edge-case-annotations `atr/rule-consume-widget-transform)))))
 
     (testing "with a spec fn, the aliased var's chain attaches to the consuming rule"
       (let [ann (analyze/generate-annotations-from-analysis
@@ -409,7 +410,7 @@
                   :session-or-rulebase edge-case-session
                   :fact-type-spec-fn spec-fn})
             dyn (:clara-rules/dynamic-insert-types-detected
-                 (get ann `atr/rule-consume-widget-transform))]
+                 (ann/get-annotation ann `atr/rule-consume-widget-transform))]
         (is (= :none (:resolution dyn))
             "alias-discovered callsites bypass the ctor chain — never automatically resolved")
         (is (= [(assoc aliased-callsite
@@ -417,11 +418,11 @@
                        :fact-type :widget-transform
                        :fact-type-spec {:aliases-var `atr/widget-transform})]
                (:callsites dyn)))
-        (is (nil? (:clara-rules/insert-types (get ann `atr/rule-consume-widget-transform))))
+        (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-consume-widget-transform))))
 
         (testing "the producing side gains no alias context"
           (let [callsites (:callsites (:clara-rules/dynamic-insert-types-detected
-                                       (get ann `atr/rule-insert-widget-transform)))]
+                                       (ann/get-annotation ann `atr/rule-insert-widget-transform)))]
             (is (some #(= "(var widget-transform)" (:source-str %)) callsites))
             (is (every? #(and (not (contains? % :fact-type))
                               (not (contains? % :fact-type-spec)))
@@ -441,7 +442,7 @@
                   :fact-type-spec-fn spec-fn
                   :callsite-resolver-fn resolver})
             dyn (:clara-rules/dynamic-insert-types-detected
-                 (get ann `atr/rule-consume-widget-transform))]
+                 (ann/get-annotation ann `atr/rule-consume-widget-transform))]
         (is (= :full (:resolution dyn)))
         (is (= [(assoc aliased-callsite
                        :status :resolved
@@ -450,7 +451,7 @@
                        :fact-type-spec {:aliases-var `atr/widget-transform})]
                (:callsites dyn)))
         (is (= [:widget-output]
-               (:clara-rules/insert-types (get ann `atr/rule-consume-widget-transform)))
+               (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-consume-widget-transform)))
             "resolver-resolved alias callsites are promoted")
         (testing "non-alias callsites carry no alias context keys"
           (let [producer-call (first (filter #(= "(var widget-transform)" (:source-str %))
@@ -472,7 +473,7 @@
 
 (deftest test-queries-produce-no-annotations
   (testing "queries are not rules — the default session rules-filter excludes them"
-    (is (nil? (get loan-doc-annotations `ldr/find-document-check))
+    (is (nil? (ann/get-annotation loan-doc-annotations `ldr/find-document-check))
         "find-document-check is a defquery; it must not appear in rule annotations")))
 
 (deftest test-no-output-types-and-filter
@@ -480,13 +481,13 @@
         ann-f edge-case-annotations-filtered]
 
     (testing "Rule with no insert/retract → marked :no-output-types under the session filter"
-      (is (true? (:clara-rules/no-output-types (get ann `atr/rule-side-effect-only))))
-      (is (true? (:clara-rules/no-output-types (get loan-doc-annotations `ldr/collect-all-missing-required-docs)))))
+      (is (true? (:clara-rules/no-output-types (ann/get-annotation ann `atr/rule-side-effect-only))))
+      (is (true? (:clara-rules/no-output-types (ann/get-annotation loan-doc-annotations `ldr/collect-all-missing-required-docs)))))
 
     (testing "Explicit rules-filter narrows the annotated set"
       (is (= ["clara.server.tools.graph.rules.analyze-test-rules/rule-side-effect-only"]
              (keys ann-f)))
-      (is (true? (:clara-rules/no-output-types (get ann-f `atr/rule-side-effect-only)))))))
+      (is (true? (:clara-rules/no-output-types (ann/get-annotation ann-f `atr/rule-side-effect-only)))))))
 
 (deftest test-generate-annotations--excludes-insert-retract-machinery
   (testing "clara.rules insert!/retract! fns (and their non-! wrappers) never leak
@@ -609,9 +610,9 @@
                              :status :unresolved}]
                 :resolution :none}
                (:clara-rules/dynamic-insert-types-detected
-                (get annotations 'fake.eval-rules/fake-eval-rule)))
+                (ann/get-annotation annotations 'fake.eval-rules/fake-eval-rule)))
             "literal args are captured, not classified — classification defers to the caller")
-        (is (nil? (:clara-rules/insert-types (get annotations 'fake.eval-rules/fake-eval-rule)))
+        (is (nil? (:clara-rules/insert-types (ann/get-annotation annotations 'fake.eval-rules/fake-eval-rule)))
             "rule from a source-less namespace is analyzed via the reconstructed ns form")))))
 
 ;; ---------------------------------------------------------------------------
@@ -655,9 +656,9 @@
           annotations (analyze/generate-annotations-from-analysis
                        {:analysis merged-analysis
                         :session-or-rulebase edge-case-session})]
-      (is (some? (get annotations `atr/rule-record-constructor)))
+      (is (some? (ann/get-annotation annotations `atr/rule-record-constructor)))
       (is (= [`LocalDummyRecord]
-             (get-in annotations [`atr/rule-record-constructor :clara-rules/insert-types])))))
+             (:clara-rules/insert-types (ann/get-annotation annotations `atr/rule-record-constructor))))))
   (testing ":session-or-rulebase is required"
     (is (thrown? clojure.lang.ExceptionInfo
                  (analyze/generate-annotations-from-analysis

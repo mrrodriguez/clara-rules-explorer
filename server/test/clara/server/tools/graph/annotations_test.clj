@@ -2,6 +2,25 @@
   (:require [clara.server.tools.graph.annotations :as ann]
             [clojure.test :refer [deftest is testing]]))
 
+(deftest test-normalize-rule-name
+  (testing "symbol → string"
+    (is (= "my.ns/rule-a" (ann/normalize-rule-name 'my.ns/rule-a))))
+  (testing "string is identity"
+    (is (= "my.ns/rule-a" (ann/normalize-rule-name "my.ns/rule-a"))))
+  (testing "keyword passes through"
+    (is (= :my.ns/rule-a (ann/normalize-rule-name :my.ns/rule-a)))))
+
+(deftest test-get-annotation
+  (let [annotations {"my.ns/rule-a" {:clara-rules/insert-types [:TypeA]}}]
+    (testing "string key lookup"
+      (is (= {:clara-rules/insert-types [:TypeA]}
+             (ann/get-annotation annotations "my.ns/rule-a"))))
+    (testing "symbol key lookup is normalized"
+      (is (= {:clara-rules/insert-types [:TypeA]}
+             (ann/get-annotation annotations 'my.ns/rule-a))))
+    (testing "missing key returns nil"
+      (is (nil? (ann/get-annotation annotations "nonexistent"))))))
+
 (deftest test-resolve-annotations--no-sidecar
   (let [production {:ns-name 'user
                     :name "user/my-rule"

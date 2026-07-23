@@ -1,17 +1,28 @@
 (ns clara.server.tools.graph.annotations
   "Logic for loading and merging rule metadata from internal props and sidecar files.
    Handles arbitrary fact types (classes, keywords, symbols) as supported by Clara's
-   pluggable fact-type-fn."
+   pluggable fact-type-fn.
+
+   Rule-name normalization:
+     Clara rules use strings for `:name` (schema: `s/Str` or `s/Keyword`),
+     but annotations may arrive with symbol keys from EDN or kondo analysis.
+     All public functions that touch annotation maps normalize top-level
+     rule-name keys to strings: `normalize-rule-name` converts a single key,
+     `normalize-annotations` transforms an entire map, and `get-annotation`
+     normalizes the lookup key before access."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.pprint :as pp]))
 
+(declare normalize-annotations)
+
 (defn load-sidecar
-  "Loads annotations from an EDN file path. Keyed by rule/query FQ-name strings."
+  "Loads annotations from an EDN file path.  Returns a map with
+   rule-name keys normalized to strings."
   [path]
   (if (and path (.exists (io/file path)))
     (with-open [r (io/reader path)]
-      (edn/read (java.io.PushbackReader. r)))
+      (normalize-annotations (edn/read (java.io.PushbackReader. r))))
     {}))
 
 (defn- merge-types
@@ -132,7 +143,10 @@
        has-sidecar-notes :sidecar
        has-props-notes :props)}))
 
-(defn- normalize-key [k]
+(defn normalize-rule-name
+  "Normalizes a rule-name key to its canonical string form.
+   Symbols are converted to strings; strings and keywords pass through."
+  [k]
   (if (symbol? k)
     (str k)
     k))
@@ -144,12 +158,19 @@
     kw))
 
 (defn normalize-annotations
-  "Normalizes an annotations map to canonical form.
-   Symbol keys are converted to strings."
+  "Normalizes an annotations map to canonical form: all top-level rule-name
+   keys are converted to strings via `normalize-rule-name`, and the result
+   is a deterministically sorted map."
   [annotations]
-  (into (empty annotations)
-        (map (fn [[k v]] [(normalize-key k) v]))
+  (into (sorted-map)
+        (map (fn [[k v]] [(normalize-rule-name k) v]))
         annotations))
+
+(defn get-annotation
+  "Looks up a rule entry in the annotations map, normalizing the lookup key
+   via `normalize-rule-name` before access."
+  [annotations rule-name]
+  (get annotations (normalize-rule-name rule-name)))
 
 (defn merge-annotations
   "Merges two annotations maps. annos2 is layered on top of annos1.
@@ -172,11 +193,12 @@
                a2)))
 
 (defn write-annotations!
-  "Writes the annotations map to the specified file path as pretty-printed EDN."
+  "Normalizes annotations and writes them to the specified file path
+   as pretty-printed EDN."
   [path annotations]
   (with-open [w (io/writer path)]
     (binding [*print-meta* true]
-      (pp/pprint annotations w))))
+      (pp/pprint (normalize-annotations annotations) w))))
 
 (defn- ensure-unsorted-map
   [m]
