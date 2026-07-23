@@ -8,7 +8,7 @@
 ## 1. Problem Statement
 
 `clara.server.tools.graph.analyze` performs **pure static analysis**: clj-kondo over
-namespace *source files*, with a custom `analyze-call` hook (`strip_lhs.clj_kondo`)
+namespace _source files_, with a custom `analyze-call` hook (`strip_lhs.clj_kondo`)
 making `clara.rules/defrule` comprehensible by analyzing only the RHS.
 
 This fails for rules **emitted by custom macros** — demonstrated by
@@ -17,18 +17,18 @@ This fails for rules **emitted by custom macros** — demonstrated by
 (verified: missing from generated annotations).
 
 The intended entry point is a **live Clara session**: the rulebase already contains
-every rule as *data* (`:lhs`, `:rhs`, `:props`, `:ns-name`), macro-expanded by the
+every rule as _data_ (`:lhs`, `:rhs`, `:props`, `:ns-name`), macro-expanded by the
 real Clojure compiler. The analyzer is built on that runtime truth.
 
 ## 2. Design Principles
 
 1. **The session is the source of truth for rules.** Rule names, LHS, RHS, and props
    come from rulebase productions — never from clj-kondo macro interpretation.
-2. **clj-kondo does *all* Clojure syntax analysis.** We never hand-walk arbitrary
+2. **clj-kondo does _all_ Clojure syntax analysis.** We never hand-walk arbitrary
    CLJ forms (no ad-hoc `tree-seq` over RHS, no hand-tracked let bindings — syntax
    walking is notoriously full of caveats and kondo is battle-tested). Our code only
-   (a) reads *individual forms at kondo-provided positions* and (b) resolves
-   *symbols against the live runtime namespace*.
+   (a) reads _individual forms at kondo-provided positions_ and (b) resolves
+   _symbols against the live runtime namespace_.
 3. **The runtime classpath answers what static text cannot.** Vars, classes,
    imports, aliases are resolved via the live namespace the rule was defined in
    (`ns-resolve` handles aliased, fully-qualified, same-ns, and imported symbols
@@ -36,11 +36,11 @@ real Clojure compiler. The analyzer is built on that runtime truth.
 4. **Session configuration is honored.** `fact-type-fn` and `ancestors-fn` are
    pluggable; the analyzer uses the ones the session was actually built with
    (available at `(:get-alphas-fn rulebase)` meta — verified), never assumed
-   defaults. Fact-type *shapes* are arbitrary (a LHS type may be a class symbol, a
+   defaults. Fact-type _shapes_ are arbitrary (a LHS type may be a class symbol, a
    keyword, or even a vector like `[:vector :type :thing]` — `my-rule-test1` in the
    test rules proves this flows through as a normal production).
 5. **Automatic resolution stays in its lane.** The automatic chain resolves only
-   what we *know* the instance type of: deftype/defrecord constructors and Java
+   what we _know_ the instance type of: deftype/defrecord constructors and Java
    constructors (including through let-bound locals, traced via kondo's `:locals`).
    Everything else — including the function-as-fact/var-as-fact pattern and
    metadata-typed facts — belongs to caller-supplied resolution: two pluggable
@@ -70,16 +70,16 @@ real Clojure compiler. The analyzer is built on that runtime truth.
 ### 3.2 clj-kondo
 
 - **Snippet synthesis works** (verified): `real-source + "\n" +
-  "(def extract-doc-meta-rule (fn [] <pr-str-of-rhs-data>))"` yields a
+"(def extract-doc-meta-rule (fn [] <pr-str-of-rhs-data>))"` yields a
   `:var-definitions` entry for the rule and `:var-usages` with
   `:from-var extract-doc-meta-rule :to clara.rules :name insert!`.
 - **Prune-and-replace with the verbatim clara-rules hooks** (verified end-to-end):
   combined source analyzed with the synced `imports/clara/rules` config active;
   pruning source-region entries attributed to known production vars reduces
   var-definitions 41→30 and var-usages 238→149; afterwards every rule's defs and
-  `insert!` usages come *only* from snippet rows (181–192), and hook-emitted
+  `insert!` usages come _only_ from snippet rows (181–192), and hook-emitted
   source-side noise (including LHS `acc/all` accumulator usages — the original
-  strip-lhs motivation) is gone. `extract-doc-meta-rule` exists *only* via its
+  strip-lhs motivation) is gone. `extract-doc-meta-rule` exists _only_ via its
   snippet. ⇒ The verbatim clara-rules kondo config is safe as our default.
 - **Per-ns passes compose cross-ns** (verified): each var-usage records fq
   `:to`/`:from`; merging per-ns analyses yields a complete cross-ns call graph;
@@ -161,14 +161,14 @@ resolution (`map->X` tracing through helpers) is unchanged.
         └─────────────────────────────────────────────────────┘
 ```
 
-| Concern | Owner |
-|---|---|
-| Rule set, names, LHS, RHS, props | **Session rulebase** |
-| Call graph, locals/binding tracking, macro forms, positions | **clj-kondo** on synthesized sources |
-| Caller macros that expand to *vars* | **Caller's `:config-dir`** (optional) |
-| `defrule`/`defquery` constructs produced by kondo hooks | **Pruned** (§5.3) — session is authoritative |
-| Constructor → fact-type tokens | **Automatic chain** (§5.4) |
-| Var-as-fact, metadata-typed facts, exotic shapes | **Caller-supplied resolution** (§5.5: `:fact-type-spec-fn` + `:callsite-resolver-fn`) |
+| Concern                                                     | Owner                                                                                 |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Rule set, names, LHS, RHS, props                            | **Session rulebase**                                                                  |
+| Call graph, locals/binding tracking, macro forms, positions | **clj-kondo** on synthesized sources                                                  |
+| Caller macros that expand to _vars_                         | **Caller's `:config-dir`** (optional)                                                 |
+| `defrule`/`defquery` constructs produced by kondo hooks     | **Pruned** (§5.3) — session is authoritative                                          |
+| Constructor → fact-type tokens                              | **Automatic chain** (§5.4)                                                            |
+| Var-as-fact, metadata-typed facts, exotic shapes            | **Caller-supplied resolution** (§5.5: `:fact-type-spec-fn` + `:callsite-resolver-fn`) |
 
 ## 5. Component Design
 
@@ -180,22 +180,22 @@ Per namespace owning session rules (productions with `:rhs`, grouped by
 1. **Base source**, first match wins:
    a. real source via existing `find-ns-resource`;
    b. **reconstructed ns form** (no source on classpath — jars, eval'd code).
-      Built from the live `Namespace` object. **Do not enumerate defaults** —
-      `clojure.core` refers and `java.lang.*` imports are automatic in any new
-      ns; we only avoid excluding them, and handle deviations:
-      - `(:refer-clojure …)` clause **only when a deviation is detected**:
-        compare `(ns-publics 'clojure.core)` against `ns-map` entries that map
-        to `clojure.core` vars. Missing canonical names ⇒ `:exclude […]`;
-        canonical names mapped under a different symbol ⇒ `:rename {…}`
-        (`:only` needs no special case — it is `:exclude` of everything else).
-      - `(:require …)` clauses for every alias (`ns-aliases`) and every
-        non-core referred var (grouped by source ns).
-      - `(:import …)` clauses for every non-`java.lang` import, grouped by
-        package.
-      - Immediately after the ns form, in the rare case a default import is
-        missing (`clojure.lang.RT/DEFAULT_IMPORTS` vs `ns-imports` — only
-        possible via dynamic `ns-unmap` in the original ns), emit literal
-        `(ns-unmap (the-ns '<ns-sym>) '<Class>)` forms.
+   Built from the live `Namespace` object. **Do not enumerate defaults** —
+   `clojure.core` refers and `java.lang.*` imports are automatic in any new
+   ns; we only avoid excluding them, and handle deviations:
+   - `(:refer-clojure …)` clause **only when a deviation is detected**:
+     compare `(ns-publics 'clojure.core)` against `ns-map` entries that map
+     to `clojure.core` vars. Missing canonical names ⇒ `:exclude […]`;
+     canonical names mapped under a different symbol ⇒ `:rename {…}`
+     (`:only` needs no special case — it is `:exclude` of everything else).
+   - `(:require …)` clauses for every alias (`ns-aliases`) and every
+     non-core referred var (grouped by source ns).
+   - `(:import …)` clauses for every non-`java.lang` import, grouped by
+     package.
+   - Immediately after the ns form, in the rare case a default import is
+     missing (`clojure.lang.RT/DEFAULT_IMPORTS` vs `ns-imports` — only
+     possible via dynamic `ns-unmap` in the original ns), emit literal
+     `(ns-unmap (the-ns '<ns-sym>) '<Class>)` forms.
 2. **Append one snippet per rule**, each on its own line:
    ```clojure
    (def <snippet-tag> (fn [] <pr-str-of-rhs-data>))
@@ -245,12 +245,12 @@ attribution.
   will typically include the clara-rules imports plus hooks for their own
   var-emitting macros. Contract: their config may produce vars and
   defrule/defquery constructs — the former are kept, the latter are pruned.
-  Hooks for rule structure are never *needed*.
+  Hooks for rule structure are never _needed_.
 
 ### 5.3 Prune-and-replace
 
 Known vars = fq symbols of **all** session production names (`extract-session-rule-names`
-— rules *and* queries).
+— rules _and_ queries).
 
 After each per-ns kondo run (before merge), drop from that ns's analysis:
 
@@ -273,7 +273,7 @@ macro a consumer may write):
 - **Caller macro emitting a defrule, hooked to produce rule analysis:**
   attributed to a production var in the source region — pruned; the snippet is
   authoritative.
-- **Caller macro emitting helper *vars*:** different names, not in the
+- **Caller macro emitting helper _vars_:** different names, not in the
   known-vars set — kept. (Unhooked, those vars are invisible to kondo —
   acceptable: the rule still comes from the session; only helper-body tracing
   for that var is unavailable, which the caller's `:config-dir` exists to fix.)
@@ -297,13 +297,13 @@ constructors — everything else defers to §5.5:
 1. **Record ctor form** — head symbol resolves via `(ns-resolve live-ns head)`
    to a `->X`/`map->X` ctor var ⇒ class-name token. (When kondo's `:to` is
    `:clj-kondo/unknown-namespace` — possible in the no-source fallback — resolve
-   against the live *caller* ns from `:from`; the form was written there.)
+   against the live _caller_ ns from `:from`; the form was written there.)
 2. **Java ctor form** — `(X. …)`, `(new X)`, `(X/new …)`: strip the ctor
    marker, `ns-resolve` the class name ⇒ imported/loaded Class ⇒ fq class-name
    token.
 3. **Local symbol arg** (e.g. gensym'd `resolved__…__`) — find its
    `:local-usages` entry at the arg's position → shared `:id` → `:locals`
-   binding → read the *init form* immediately following the binding symbol →
+   binding → read the _init form_ immediately following the binding symbol →
    recurse (depth-capped). Terminates at 1/2, otherwise defers.
 4. Otherwise ⇒ **`:callsite-resolver-fn`** (§5.5) ⇒ unresolved capture.
 
@@ -321,7 +321,7 @@ constructors — everything else defers to §5.5:
   fact-type-fn. (Removed in M2 review; originally step 4 applied the session's
   fact-type-fn to literals.)
 - `clojure.core/var` / the **function-as-fact (var-as-fact) pattern** — no
-  hardcoding. This pattern *is* a first-class requirement (it is how
+  hardcoding. This pattern _is_ a first-class requirement (it is how
   `def-fact-fn`'s `extract-doc-meta-rule` inserts), but it is resolved by
   **caller-supplied guidance** (§5.5), not by built-in special cases.
 
@@ -333,7 +333,7 @@ rule-level (`:from-var` = rule) and helper-level (`:from-var` = helper).
 into the ns's combined source (the synthesized source string is what the
 internal source loader returns for that ns), `read-string` the single form.
 
-**Type tokens:** ctor resolutions publish class-name symbols — we *know* the
+**Type tokens:** ctor resolutions publish class-name symbols — we _know_ the
 instance type being inserted; connection to LHS conditions is determined during
 graph analysis (`core/build-dep-graph`) using the session's `ancestors-fn`
 (existing behavior, from the same `get-alphas-fn` meta). Arbitrary fact-type
@@ -354,18 +354,18 @@ in `serialize.clj` / `docs/explorer-graph-api.md` and the demo EDN):
   :resolution :full | :partial | :none}}
 ```
 
-`:callsites`/`:source-str` exist to show a consumer *precisely which form* at the
+`:callsites`/`:source-str` exist to show a consumer _precisely which form_ at the
 `insert!`/`retract!` boundary had an undetermined type — for manual follow-up or
 for their resolver. `pr-str` normalization (commas, single-line) is acceptable.
 
 ### 5.5 Caller-supplied resolution
 
-Two pluggable points. The first teaches the analyzer about the *shape* of
+Two pluggable points. The first teaches the analyzer about the _shape_ of
 caller-specific fact patterns; the second resolves individual callsites.
 
 #### `:fact-type-spec-fn` — structured guidance for the var-as-fact pattern
 
-The function-as-fact (var-as-fact) pattern: a fact *is* a function var (e.g.
+The function-as-fact (var-as-fact) pattern: a fact _is_ a function var (e.g.
 `def-fact-fn` emitting `(insert! (var the-fn))` with the fact type on the var's
 `:type` meta), matched downstream by `[?f <- :the-type]` and invoked as a fn in
 the RHS (e.g. `collect-doc-meta` binds `?extract-doc-meta <- :extract-doc-meta`
@@ -388,7 +388,7 @@ the caller declares the mapping:
    accumulator conditions (`:from {:type t}`). (`:result-binding` binds a
    collection; both shapes are supported.)
 2. When `(fact-type-spec-fn t) ⇒ {:aliases-var v}`, determine whether `?sym` is
-   *used in the RHS*. Only RHS usage can influence inserts/retracts, so this is
+   _used in the RHS_. Only RHS usage can influence inserts/retracts, so this is
    the usage that matters. Detection needs no form-walking: in the rule's
    snippet, kondo records free `?sym` occurrences as var-usages
    (`:name ?sym`, `:to :clj-kondo/unknown-namespace` — verified shape, incl.
@@ -401,7 +401,7 @@ the caller declares the mapping:
    fns. (If `v` is invisible to kondo — macro-emitted, unhooked — its chain is
    empty and nothing is found; that is the caller `:config-dir` situation from
    §5.3.)
-4. Dynamic callsites reached *through* an alias-tagged usage are **added to the
+4. Dynamic callsites reached _through_ an alias-tagged usage are **added to the
    consuming rule's detection but never automatically resolved** — they bypass
    the ctor chain of §5.4 and are recorded `:status :unresolved` with the
    alias context attached (`:fact-type`, `:fact-type-spec`, plus the callsite's
@@ -441,12 +441,12 @@ treated as unresolved).
 
 The full production gives resolvers complete context — including `:env` for
 macro-captured closures and `:lhs` for matching conventions. `:fact-type` /
-`:fact-type-spec` tell the resolver *why* the aliased var is in the chain, so
+`:fact-type-spec` tell the resolver _why_ the aliased var is in the chain, so
 it can decide whether the callsite is resolvable in that context. These two
 keys are part of the contract from the start; they are simply absent until a
 `:fact-type-spec-fn` is supplied.
 
-The *producing* side of the var-as-fact pattern (a rule inserting the var
+The _producing_ side of the var-as-fact pattern (a rule inserting the var
 itself, e.g. `extract-doc-meta-rule`'s `(insert! (var the-fn))`) is also a
 resolver-fn concern: the callsite arg form `(var the-fn)` is passed through and
 the caller's resolver can resolve the var and return its fact type. No alias
@@ -492,15 +492,15 @@ Removed from the namespace: `generate-annotations-from-paths`,
 
 ## 6. Namespace-by-Namespace Changes
 
-| File | Change |
-|---|---|
-| `src/clara/server/tools/graph/analyze.clj` | Rework `analyze-session-rules` (synthesis + prune/merge). `generate-annotations-from-analysis` gains required `:session-or-rulebase` + optional `:callsite-resolver-fn`. Session-scoped cache. Default config = verbatim clara-rules imports; strip-lhs override removed. Remove `generate-annotations-from-paths`, `:in-memory-sources`, global cache. |
-| **NEW** `src/clara/server/tools/graph/analyze/rhs.clj` | §5.4 + §5.5: callsite extraction helpers, ctor resolution chain, locals tracing, resolver-fn integration, detection-map assembly. |
-| `resources/clara/server/tools/graph/kondo-config/` | Delete `hooks/strip_lhs.clj_kondo`; root `config.edn` → `{}`; **keep** synced `imports/` and `manifest.edn`. |
-| `dev/clara/server/tools/graph/kondo_config_sync.clj` | **Kept** — still mirrors the clara-rules import; docstring updated (no more override files). |
-| `src/clara/server/graph/main.clj` | Remove `-g` flag + `run-generate-annotations`; `--generate-analysis` session-derived only. |
-| `src/clara/server/graph/api.clj` | Untouched (in-flux `enriched-annotations`). |
-| `core.clj`, `annotations.clj`, `serialize.clj`, `memory.clj`, `nodes.clj` | Untouched — annotation shape only gains keys they already handle. |
+| File                                                                      | Change                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/clara/server/tools/graph/analyze.clj`                                | Rework `analyze-session-rules` (synthesis + prune/merge). `generate-annotations-from-analysis` gains required `:session-or-rulebase` + optional `:callsite-resolver-fn`. Session-scoped cache. Default config = verbatim clara-rules imports; strip-lhs override removed. Remove `generate-annotations-from-paths`, `:in-memory-sources`, global cache. |
+| **NEW** `src/clara/server/tools/graph/analyze/rhs.clj`                    | §5.4 + §5.5: callsite extraction helpers, ctor resolution chain, locals tracing, resolver-fn integration, detection-map assembly.                                                                                                                                                                                                                       |
+| `resources/clara/server/tools/graph/kondo-config/`                        | Delete `hooks/strip_lhs.clj_kondo`; root `config.edn` → `{}`; **keep** synced `imports/` and `manifest.edn`.                                                                                                                                                                                                                                            |
+| `dev/clara/server/tools/graph/kondo_config_sync.clj`                      | **Kept** — still mirrors the clara-rules import; docstring updated (no more override files).                                                                                                                                                                                                                                                            |
+| `src/clara/server/graph/main.clj`                                         | Remove `-g` flag + `run-generate-annotations`; `--generate-analysis` session-derived only.                                                                                                                                                                                                                                                              |
+| `src/clara/server/graph/api.clj`                                          | Untouched (in-flux `enriched-annotations`).                                                                                                                                                                                                                                                                                                             |
+| `core.clj`, `annotations.clj`, `serialize.clj`, `memory.clj`, `nodes.clj` | Untouched — annotation shape only gains keys they already handle.                                                                                                                                                                                                                                                                                       |
 
 ## 7. Test Plan
 
@@ -547,12 +547,12 @@ Removed from the namespace: `generate-annotations-from-paths`,
 ### Other test files
 
 - `main_test.clj` — drop `-g` coverage; `--generate-analysis` session-only.
-- `core_test.clj` / `source_sink_test.clj` — re-baseline against *generated*
+- `core_test.clj` / `source_sink_test.clj` — re-baseline against _generated_
   annotations.
 - `smoke_test.clj` — API shape unchanged; adjust only if the shipped demo
   annotations file changes.
 - `test-resources/.../loan-doc-rules-annotations.edn` — re-scoped as sidecar
-  *input* carrying notes / `:no-output-types` / merge control; the
+  _input_ carrying notes / `:no-output-types` / merge control; the
   hand-written "Resolved" dynamic entries become generated output instead.
 - Enrichment tests (`add-auto-detected-annotations`, `enrich-annotations-from-session`)
   — **untouched** (parallel in-flux work).
@@ -569,12 +569,12 @@ make reflection-check
 
 ## 8. Documentation Plan (docs shaped to the final design)
 
-| Doc | Change |
-|---|---|
-| `server/docs/rule-annotations.md` | Rewrite Usage Workflows around the two supported session paths ("2. Generate annotations from a live session", "3. Generate full static analysis from a live session") with the §5.7 API. Remove the namespace-analysis workflow, the in-memory workflow, and the CLI `-g` workflow. Document the dynamic-detection schema (`:status`, `:resolved-types`, `:resolution`, `:resolution-method`), the automatic ctor resolution chain, and the `:callsite-resolver-fn` contract (full production context) with an example. Document the `:config-dir` contract: defaults to the verbatim clara-rules config; caller configs may add hooks for their own var-emitting macros; rule constructs from any config are pruned — the session is the source of truth. Note the var-as-fact pattern as caller-guided (later milestone). |
-| `server/docs/analyze-clj-kondo-notes.md` | Keep the `with-in-str` / `:lint ["-"]` / `:filename` mechanics. Replace the strip-lhs rationale with: combined-source synthesis, verbatim-clara default config + prune-and-replace, `:locals` analysis for binding tracing, reconstructed-ns fallback with `:refer-clojure`/`ns-unmap` deviation handling. |
-| `server/README.md` | Flags table without `-g`; `--generate-analysis` session-only; examples updated. |
-| `docs/explorer-graph-api.md` | Verify the dynamic-detection JSON section matches generated output (it already documents `:status`/`:resolved-types`/`:resolution`); adjust only on drift. |
+| Doc                                      | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server/docs/rule-annotations.md`        | Rewrite Usage Workflows around the two supported session paths ("2. Generate annotations from a live session", "3. Generate full static analysis from a live session") with the §5.7 API. Remove the namespace-analysis workflow, the in-memory workflow, and the CLI `-g` workflow. Document the dynamic-detection schema (`:status`, `:resolved-types`, `:resolution`, `:resolution-method`), the automatic ctor resolution chain, and the `:callsite-resolver-fn` contract (full production context) with an example. Document the `:config-dir` contract: defaults to the verbatim clara-rules config; caller configs may add hooks for their own var-emitting macros; rule constructs from any config are pruned — the session is the source of truth. Note the var-as-fact pattern as caller-guided (later milestone). |
+| `server/docs/analyze-clj-kondo-notes.md` | Keep the `with-in-str` / `:lint ["-"]` / `:filename` mechanics. Replace the strip-lhs rationale with: combined-source synthesis, verbatim-clara default config + prune-and-replace, `:locals` analysis for binding tracing, reconstructed-ns fallback with `:refer-clojure`/`ns-unmap` deviation handling.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `server/README.md`                       | Flags table without `-g`; `--generate-analysis` session-only; examples updated.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `docs/explorer-graph-api.md`             | Verify the dynamic-detection JSON section matches generated output (it already documents `:status`/`:resolved-types`/`:resolution`); adjust only on drift.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ## 9. Implementation Milestones
 
@@ -583,7 +583,7 @@ checkable state (`make test` + named REPL probes).
 
 ### M1 — Synthesis + prune-and-replace + session-based `analyze-session-rules`
 
-**Status: DONE (awaiting review).**
+**Status: DONE (reviewed).**
 
 - Bundled config swap: strip-lhs override out; verbatim clara-rules imports as
   the default (sync tooling kept). ✓
@@ -597,7 +597,7 @@ checkable state (`make test` + named REPL probes).
   unchanged ✓; `make test` green ✓ (except the failure set verified
   pre-existing at clean HEAD: `memory_test:198`, `api-test`/`session-api-test`/
   `smoke-test` muuntaja var-encode errors, `core_test` fact-type-summary drift;
-  `make lint` is *cleaner* than HEAD — its 2 warnings were the accidentally
+  `make lint` is _cleaner_ than HEAD — its 2 warnings were the accidentally
   nested deftests in the old analyze_test, now properly structured).
 - Note: kondo's `:locals`/`:local-usages` `:id` counters vary per run, so
   run-to-run determinism is asserted on annotations (the consumer contract),
@@ -605,7 +605,7 @@ checkable state (`make test` + named REPL probes).
 
 ### M2 — `analyze.rhs` ctor resolution chain + `:callsite-resolver-fn`
 
-**Status: DONE (awaiting review).**
+**Status: DONE (reviewed).**
 
 - Resolution chain (record ctors, Java ctors, locals tracing, literal objects);
   caller-ns fallback for `:clj-kondo/unknown-namespace`. ✓
@@ -613,7 +613,7 @@ checkable state (`make test` + named REPL probes).
 - Type promotion + provenance (`:status`/`:resolved-types`/`:resolution`). ✓
 - **Check:** Java-ctor dynamic cases resolve ✓ (all six syntax variants, plus
   helper-level ctors); direct-ctor entries from the demo EDN reproduce
-  automatically (`StaleDocumentNotice.`) — the demo's *helper-call* entries
+  automatically (`StaleDocumentNotice.`) — the demo's _helper-call_ entries
   (`build-compliance-review`) do **not** auto-resolve, per the deliberately
   shrunk chain (§5.4: helper calls defer to the caller); the demo EDN is
   re-scoped in M3 accordingly. `extract-doc-meta-rule` resolves via a
@@ -655,14 +655,14 @@ checkable state (`make test` + named REPL probes).
 - Test fixture: a var-fact fn whose body performs a dynamic insert, consumed
   by a rule that binds it (`[?f <- :the-type]`) and calls it in the RHS.
 - **Check:** with a spec fn mapping `:extract-doc-meta ⇒ {:aliases-var
-  …/extract-doc-meta}`, a dynamic callsite inside the aliased var's chain is
+…/extract-doc-meta}`, a dynamic callsite inside the aliased var's chain is
   attached to the consuming rule as `:status :unresolved` with the fact-type
   and spec attached; the resolver-fn receives those keys; without a spec fn,
   nothing alias-derived appears.
 
 ## 10. Edge Cases & Open Questions (resolved per feedback round 2)
 
-1. **Rule names illegal as `def` symbols** — *explored*: kondo does not
+1. **Rule names illegal as `def` symbols** — _explored_: kondo does not
    hard-fail; `(def my rule …)` silently defines `my`. So raw production names
    are never emitted; snippet tags are sanitized deterministically and mapped
    back to productions via generation order (§5.1.2).
@@ -684,9 +684,9 @@ checkable state (`make test` + named REPL probes).
    there by nature; rule-level resolution still works; same-ns ctor
    attribution uses the live caller ns when kondo reports
    `:clj-kondo/unknown-namespace`.
-6. **Intern stubs** — *dropped from the design*. Their only use was restoring
+6. **Intern stubs** — _dropped from the design_. Their only use was restoring
    same-ns var attribution in the no-source fallback; superseded by resolving
-   ctor symbols against the live *caller* ns (`:from`) at resolution time.
+   ctor symbols against the live _caller_ ns (`:from`) at resolution time.
 7. **Deeply nested local chains** (`(let [a (->X) b a] …)`): recursion through
    kondo locals, depth-capped; overflow ⇒ resolver-fn / capture.
 
@@ -723,41 +723,41 @@ Key evidence:
 
 ### Round 1 (`plan-feedback.md`)
 
-| # | Feedback | Design response |
-|---|---|---|
-| 1, 14 | `build-rule-action` not an edge case | Removed entirely |
-| 2 | `fact-type-fn`/`ancestors-fn` configurable | Session's fns from `(:get-alphas-fn rulebase)` meta; graph matching already uses session `ancestors-fn` |
-| 3 | Ignore-hook unsustainable; prune by known session vars | §5.3 prune-and-replace; verified against verbatim clara hooks |
-| 4, 10 | RHS symbols always resolvable via live ns; drop `resolve-aliased-sym` | §3.3: single `ns-resolve` path; locals handled by kondo `:locals` |
-| 5 | Vet `:in-memory-sources` | Removed as public option; source map is internal |
-| 6 | Reconstructed ns must honor full ns structure | §5.1b (refined further in round 2) |
-| 7 | `:clj` only | Always `:lang :clj`, `.clj` synthetic filenames |
-| 8 | Cache scope = one session | §5.6: fresh atom per run; global cache removed |
-| 9 | Name under `analyze` | `clara.server.tools.graph.analyze.rhs` |
-| 11 | No hand-rolled RHS walking | §5.4: kondo syntax analysis only; position-guided reads + `ns-resolve` |
-| 12 | `:callsites` = literal boundary forms | §5.4 aggregation |
-| 13 | No breaking-change phasing | §5.7 final-shape API; §9 reframed milestones |
+| #     | Feedback                                                              | Design response                                                                                         |
+| ----- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 1, 14 | `build-rule-action` not an edge case                                  | Removed entirely                                                                                        |
+| 2     | `fact-type-fn`/`ancestors-fn` configurable                            | Session's fns from `(:get-alphas-fn rulebase)` meta; graph matching already uses session `ancestors-fn` |
+| 3     | Ignore-hook unsustainable; prune by known session vars                | §5.3 prune-and-replace; verified against verbatim clara hooks                                           |
+| 4, 10 | RHS symbols always resolvable via live ns; drop `resolve-aliased-sym` | §3.3: single `ns-resolve` path; locals handled by kondo `:locals`                                       |
+| 5     | Vet `:in-memory-sources`                                              | Removed as public option; source map is internal                                                        |
+| 6     | Reconstructed ns must honor full ns structure                         | §5.1b (refined further in round 2)                                                                      |
+| 7     | `:clj` only                                                           | Always `:lang :clj`, `.clj` synthetic filenames                                                         |
+| 8     | Cache scope = one session                                             | §5.6: fresh atom per run; global cache removed                                                          |
+| 9     | Name under `analyze`                                                  | `clara.server.tools.graph.analyze.rhs`                                                                  |
+| 11    | No hand-rolled RHS walking                                            | §5.4: kondo syntax analysis only; position-guided reads + `ns-resolve`                                  |
+| 12    | `:callsites` = literal boundary forms                                 | §5.4 aggregation                                                                                        |
+| 13    | No breaking-change phasing                                            | §5.7 final-shape API; §9 reframed milestones                                                            |
 
 ### Round 2 (`plan-feedback-2.md`)
 
-| # | Feedback | Design response |
-|---|---|---|
-| 1 | Default to verbatim clara-rules config; verify hooks don't break us | §5.2 rewritten (imports kept, sync tooling kept); verified: prune yields snippet-only attribution with hooks active (41→30 defs, 238→149 usages) |
-| 2 | Don't enumerate core/java.lang; detect `:refer-clojure` deviations; `ns-unmap` for missing default imports | §5.1b rewritten: deviation detection via `ns-publics`/`ns-map` and `RT/DEFAULT_IMPORTS`; verified detection mechanism |
-| 3 | Cross-ns traversal with per-ns passes? | §5.1.5 + §3.2: reconciliation at merge time via fq `:to`/`:from`; transitive deps via `:namespace-usages` |
-| 4 | Automatic chain over-specified; no `with-meta`/`var` special cases; var-as-fact is caller-guided, later milestone | §5.4 chain shrunk to ctors + locals-to-ctor; §5.5 var-as-fact noted as M4 caller-supplied guidance |
-| 5 | Resolver gets the entire rule structure | §5.5: `:rule` = full production (incl. `:env`, `:lhs`, `:props`) |
-| 6a | Weird def symbols — explored? | §10.1: explored; silent misreads; sanitize + map |
-| 6b | Record literals — how encountered? support them | §10.3: hypothetical, now verified supported by construction |
-| 6c | Arbitrary fact-type shapes (e.g. `[:vector :type :thing]`) | §2.4 + §10.4: publish ctor instance types only; session `ancestors-fn` decides LHS connectivity; `my-rule-test1` fixture |
-| 6d | Intern stubs — elaborate | §10.6: dropped; superseded by live caller-ns resolution |
+| #   | Feedback                                                                                                          | Design response                                                                                                                                  |
+| --- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Default to verbatim clara-rules config; verify hooks don't break us                                               | §5.2 rewritten (imports kept, sync tooling kept); verified: prune yields snippet-only attribution with hooks active (41→30 defs, 238→149 usages) |
+| 2   | Don't enumerate core/java.lang; detect `:refer-clojure` deviations; `ns-unmap` for missing default imports        | §5.1b rewritten: deviation detection via `ns-publics`/`ns-map` and `RT/DEFAULT_IMPORTS`; verified detection mechanism                            |
+| 3   | Cross-ns traversal with per-ns passes?                                                                            | §5.1.5 + §3.2: reconciliation at merge time via fq `:to`/`:from`; transitive deps via `:namespace-usages`                                        |
+| 4   | Automatic chain over-specified; no `with-meta`/`var` special cases; var-as-fact is caller-guided, later milestone | §5.4 chain shrunk to ctors + locals-to-ctor; §5.5 var-as-fact noted as M4 caller-supplied guidance                                               |
+| 5   | Resolver gets the entire rule structure                                                                           | §5.5: `:rule` = full production (incl. `:env`, `:lhs`, `:props`)                                                                                 |
+| 6a  | Weird def symbols — explored?                                                                                     | §10.1: explored; silent misreads; sanitize + map                                                                                                 |
+| 6b  | Record literals — how encountered? support them                                                                   | §10.3: hypothetical, now verified supported by construction                                                                                      |
+| 6c  | Arbitrary fact-type shapes (e.g. `[:vector :type :thing]`)                                                        | §2.4 + §10.4: publish ctor instance types only; session `ancestors-fn` decides LHS connectivity; `my-rule-test1` fixture                         |
+| 6d  | Intern stubs — elaborate                                                                                          | §10.6: dropped; superseded by live caller-ns resolution                                                                                          |
 
 ### Round 3 (var-as-fact design refinement)
 
-| # | Feedback | Design response |
-|---|---|---|
-| 1 | `:callsite-resolver-fn` is not the only pluggable point for locals bound to facts and called as fns | §5.5 split into two pluggable points: `:fact-type-spec-fn` + `:callsite-resolver-fn` |
-| 2 | Caller maps fact-types → spec `{:aliases-var fq/var}` | §5.5 `:fact-type-spec-fn` contract; spec map open for extension |
-| 3 | Fact types bound as result bindings & used as locals ⇒ treat as var usages; explore the var's call chain for dynamic callsites | §5.5 mechanism: LHS binding scan (`:fact-binding`/`:result-binding`), RHS usage via snippet var-usages, synthetic alias-tagged usage injection into the existing reachability |
-| 4 | Alias-discovered callsites are added but NOT automatically resolved | §5.5 step 4: bypass ctor chain, recorded `:status :unresolved` with alias context |
-| 5 | Resolver-fn must receive the fact-type and the spec returned for it | §5.5 contract: optional `:fact-type` / `:fact-type-spec` keys, in the contract from the start (absent until a spec fn is supplied) |
+| #   | Feedback                                                                                                                       | Design response                                                                                                                                                               |
+| --- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `:callsite-resolver-fn` is not the only pluggable point for locals bound to facts and called as fns                            | §5.5 split into two pluggable points: `:fact-type-spec-fn` + `:callsite-resolver-fn`                                                                                          |
+| 2   | Caller maps fact-types → spec `{:aliases-var fq/var}`                                                                          | §5.5 `:fact-type-spec-fn` contract; spec map open for extension                                                                                                               |
+| 3   | Fact types bound as result bindings & used as locals ⇒ treat as var usages; explore the var's call chain for dynamic callsites | §5.5 mechanism: LHS binding scan (`:fact-binding`/`:result-binding`), RHS usage via snippet var-usages, synthetic alias-tagged usage injection into the existing reachability |
+| 4   | Alias-discovered callsites are added but NOT automatically resolved                                                            | §5.5 step 4: bypass ctor chain, recorded `:status :unresolved` with alias context                                                                                             |
+| 5   | Resolver-fn must receive the fact-type and the spec returned for it                                                            | §5.5 contract: optional `:fact-type` / `:fact-type-spec` keys, in the contract from the start (absent until a spec fn is supplied)                                            |
