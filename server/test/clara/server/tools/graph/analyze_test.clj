@@ -14,7 +14,8 @@
             DocumentCheckInput
             DocumentCheck]
            [clara.server.tools.graph.rules.loan_doc_rules
-            AllIdCardGivenDocuments]
+            AllIdCardGivenDocuments
+            StaleDocumentNotice]
            [clara.server.tools.graph.rules.analyze_test_rules
             LocalDummyRecord]))
 
@@ -134,74 +135,86 @@
              (:clara-rules/insert-types (get ann `atr/rule-insert-all-unconditional)))))))
 
 ;; ---------------------------------------------------------------------------
-;; Dynamic insert callsites (arg forms captured at the boundary)
+;; Dynamic insert callsites — runtime resolution chain (analyze.rhs)
 ;; ---------------------------------------------------------------------------
+
+(defn- resolved-detection
+  "Expected dynamic-detection map for a single resolved callsite."
+  [ns-sym filename source-str token]
+  {:callsites [{:source-str source-str
+                :ns-name-sym ns-sym
+                :filename filename
+                :status :resolved
+                :resolved-types [token]}]
+   :resolution :full})
+
+(defn- unresolved-detection
+  "Expected dynamic-detection map for a single unresolved callsite."
+  [ns-sym filename source-str]
+  {:callsites [{:source-str source-str
+                :ns-name-sym ns-sym
+                :filename filename
+                :status :unresolved}]
+   :resolution :none})
 
 (deftest test-dynamic-insert-types-detected
   (let [ann edge-case-annotations
         ns-sym 'clara.server.tools.graph.rules.analyze-test-rules
         filename "clara/server/tools/graph/rules/analyze_test_rules.clj"]
 
-    (testing "Java constructor syntax variants → dynamic callsites"
-      ;; Rule B: short Class. constructor
-      (is (= {:callsites [{:source-str "(DocumentCheck. ?app-id :pass \"dot-style\" nil nil)"
-                           :ns-name-sym ns-sym :filename filename}]}
-             (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-java-constructor-dot))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-java-constructor-dot))))
+    (testing "Java constructor syntax variants → resolved and promoted to insert-types"
+      (doseq [[rule-sym source-str]
+              [[`atr/rule-java-constructor-dot "(DocumentCheck. ?app-id :pass \"dot-style\" nil nil)"]
+               [`atr/rule-java-constructor-new "(new clara.server.tools.graph.rules.loan_app_facts.DocumentCheck ?app-id :pass \"new-style\" nil nil)"]
+               [`atr/rule-java-constructor-fq-dot "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck. ?app-id :pass \"fq-dot-style\" nil nil)"]
+               [`atr/rule-java-constructor-short-new "(new DocumentCheck ?app-id :pass \"short-new-style\" nil nil)"]
+               [`atr/rule-java-constructor-short-modern "(DocumentCheck/new ?app-id :pass \"short-modern\" nil nil)"]
+               [`atr/rule-java-constructor-fq-modern "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new ?app-id :pass \"fq-modern\" nil nil)"]]]
+        (is (= (resolved-detection ns-sym filename source-str `DocumentCheck)
+               (:clara-rules/dynamic-insert-types-detected (get ann rule-sym)))
+            (str rule-sym " callsite resolves via the ctor chain"))
+        (is (= [`DocumentCheck] (:clara-rules/insert-types (get ann rule-sym)))
+            (str rule-sym " resolved type is promoted to :insert-types"))))
 
-      ;; Rule C: new Class constructor
-      (is (= {:callsites [{:source-str "(new clara.server.tools.graph.rules.loan_app_facts.DocumentCheck ?app-id :pass \"new-style\" nil nil)"
-                           :ns-name-sym ns-sym :filename filename}]}
-             (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-java-constructor-new))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-java-constructor-new))))
-
-      ;; Rule B2: fully-qualified Class. constructor
-      (is (= {:callsites [{:source-str "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck. ?app-id :pass \"fq-dot-style\" nil nil)"
-                           :ns-name-sym ns-sym :filename filename}]}
-             (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-java-constructor-fq-dot))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-java-constructor-fq-dot))))
-
-      ;; Rule C2: short-name new Class constructor
-      (is (= {:callsites [{:source-str "(new DocumentCheck ?app-id :pass \"short-new-style\" nil nil)"
-                           :ns-name-sym ns-sym :filename filename}]}
-             (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-java-constructor-short-new))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-java-constructor-short-new))))
-
-      ;; Rule F1: modern Class/new via short name
-      (is (= {:callsites [{:source-str "(DocumentCheck/new ?app-id :pass \"short-modern\" nil nil)"
-                           :ns-name-sym ns-sym :filename filename}]}
-             (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-java-constructor-short-modern))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-java-constructor-short-modern))))
-
-      ;; Rule F2: modern Class/new via fully-qualified name
-      (is (= {:callsites [{:source-str "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new ?app-id :pass \"fq-modern\" nil nil)"
-                           :ns-name-sym ns-sym :filename filename}]}
-             (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-java-constructor-fq-modern))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-java-constructor-fq-modern)))))
-
-    (testing "Java constructor via helper fn → dynamic callsite at helper"
-      (is (= {:callsites [{:source-str "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new app-id :pass \"helper-insert\" nil nil)"
-                           :ns-name-sym ns-sym :filename filename}]}
+    (testing "Java constructor inside a helper fn → callsite at the helper, resolved"
+      (is (= (resolved-detection ns-sym filename
+                                 "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new app-id :pass \"helper-insert\" nil nil)"
+                                 `DocumentCheck)
              (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-helper-does-insert))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-helper-does-insert)))))
+      (is (= [`DocumentCheck] (:clara-rules/insert-types (get ann `atr/rule-helper-does-insert)))))
 
-    (testing "Nested helper that calls a Java-constructor helper → dynamic callsite at outer helper"
-      (is (= {:callsites [{:source-str "(make-java-document-check-nested ?app-id)"
-                           :ns-name-sym ns-sym :filename filename}]}
+    (testing "Let-bound constructor local → traced to its init form and resolved"
+      (let [a (get ann `atr/rule-let-bound-ctor)]
+        (is (= (resolved-detection ns-sym filename "dc" `DocumentCheck)
+               (:clara-rules/dynamic-insert-types-detected a))
+            "the callsite arg is the local symbol; resolution traces the binding's init form")
+        (is (= [`DocumentCheck] (:clara-rules/insert-types a)))))
+
+    (testing "Helper call args are NOT automatically resolved (caller's business)"
+      (is (= (unresolved-detection ns-sym filename "(make-java-document-check-nested ?app-id)")
              (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-nested-java-helper-call))))
       (is (nil? (:clara-rules/insert-types (get ann `atr/rule-nested-java-helper-call)))))
 
-    (testing "with-meta map fact → dynamic callsite"
-      (is (= {:callsites [{:source-str "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-map-type})"
-                           :ns-name-sym ns-sym :filename filename}]}
+    (testing "with-meta map fact → unresolved (fact-type-fn honoring is the caller's business)"
+      (is (= (unresolved-detection ns-sym filename
+                                   "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-map-type})")
              (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-metadata-map-fact))))
       (is (nil? (:clara-rules/insert-types (get ann `atr/rule-metadata-map-fact)))))
 
-    (testing "record-built-via-helper-fn (fact-builder) → dynamic callsite"
-      (is (= {:callsites [{:source-str "(->fact :custom-fact-type {:app-id ?app-id, :status :pass})"
-                           :ns-name-sym ns-sym :filename filename}]}
+    (testing "constructor-NAMED helper (->fact) → unresolved (derived class does not load)"
+      (is (= (unresolved-detection ns-sym filename
+                                   "(->fact :custom-fact-type {:app-id ?app-id, :status :pass})")
              (:clara-rules/dynamic-insert-types-detected (get ann `atr/rule-fact-builder-call))))
-      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-fact-builder-call)))))))
+      (is (nil? (:clara-rules/insert-types (get ann `atr/rule-fact-builder-call)))))
+
+    (testing "mixed varargs → :partial aggregate; resolved args still promoted"
+      (let [a (get ann `atr/rule-insert-mixed-varargs)
+            dyn (:clara-rules/dynamic-insert-types-detected a)]
+        (is (= :partial (:resolution dyn)))
+        (is (= 2 (count (:callsites dyn))))
+        (is (= #{:resolved :unresolved} (set (map :status (:callsites dyn)))))
+        (is (= [`DocumentCheck] (:clara-rules/insert-types a))
+            "only the ctor arg's type is promoted")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Retract types
@@ -220,37 +233,41 @@
         (is (nil? (:clara-rules/dynamic-retract-types-detected h3))
             "No dynamic-retract-types when statically resolved")))
 
-    (testing "Dynamic retract types — Java constructors"
+    (testing "Dynamic retract types — Java constructors resolve and promote"
       ;; Rule I1: short Class. constructor
-      (is (= {:callsites [{:source-str "(DocumentCheck. ?app-id :pass \"dot-retract\" nil nil)"
-                           :ns-name-sym ns-sym :filename filename}]}
+      (is (= (resolved-detection ns-sym filename
+                                 "(DocumentCheck. ?app-id :pass \"dot-retract\" nil nil)"
+                                 `DocumentCheck)
              (:clara-rules/dynamic-retract-types-detected (get ann `atr/rule-retract-java-dot))))
-      (is (nil? (:clara-rules/retract-types (get ann `atr/rule-retract-java-dot))))
+      (is (= [`DocumentCheck] (:clara-rules/retract-types (get ann `atr/rule-retract-java-dot))))
 
       ;; Rule I2: new Class constructor
-      (is (= {:callsites [{:source-str "(new clara.server.tools.graph.rules.loan_app_facts.DocumentCheck ?app-id :pass \"new-retract\" nil nil)"
-                           :ns-name-sym ns-sym :filename filename}]}
+      (is (= (resolved-detection ns-sym filename
+                                 "(new clara.server.tools.graph.rules.loan_app_facts.DocumentCheck ?app-id :pass \"new-retract\" nil nil)"
+                                 `DocumentCheck)
              (:clara-rules/dynamic-retract-types-detected (get ann `atr/rule-retract-java-new))))
-      (is (nil? (:clara-rules/retract-types (get ann `atr/rule-retract-java-new))))
+      (is (= [`DocumentCheck] (:clara-rules/retract-types (get ann `atr/rule-retract-java-new))))
 
       ;; Rule I3: modern Class/new constructor
-      (is (= {:callsites [{:source-str "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new ?app-id :pass \"modern-retract\" nil nil)"
-                           :ns-name-sym ns-sym :filename filename}]}
+      (is (= (resolved-detection ns-sym filename
+                                 "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new ?app-id :pass \"modern-retract\" nil nil)"
+                                 `DocumentCheck)
              (:clara-rules/dynamic-retract-types-detected (get ann `atr/rule-retract-java-modern))))
-      (is (nil? (:clara-rules/retract-types (get ann `atr/rule-retract-java-modern)))))
+      (is (= [`DocumentCheck] (:clara-rules/retract-types (get ann `atr/rule-retract-java-modern)))))
 
     (testing "Dynamic retract types — metadata map facts and helpers"
-      ;; Rule I4: with-meta map fact (retract)
-      (is (= {:callsites [{:source-str "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-retract-type})"
-                           :ns-name-sym ns-sym :filename filename}]}
+      ;; Rule I4: with-meta map fact (retract) — unresolved
+      (is (= (unresolved-detection ns-sym filename
+                                   "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-retract-type})")
              (:clara-rules/dynamic-retract-types-detected (get ann `atr/rule-retract-metadata-map))))
       (is (nil? (:clara-rules/retract-types (get ann `atr/rule-retract-metadata-map))))
 
-      ;; Rule I5: helper that does Java constructor + retract
-      (is (= {:callsites [{:source-str "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new app-id :pass \"helper-retract\" nil nil)"
-                           :ns-name-sym ns-sym :filename filename}]}
+      ;; Rule I5: helper that does Java constructor + retract — resolved at the helper
+      (is (= (resolved-detection ns-sym filename
+                                 "(clara.server.tools.graph.rules.loan_app_facts.DocumentCheck/new app-id :pass \"helper-retract\" nil nil)"
+                                 `DocumentCheck)
              (:clara-rules/dynamic-retract-types-detected (get ann `atr/rule-retract-helper-call))))
-      (is (nil? (:clara-rules/retract-types (get ann `atr/rule-retract-helper-call)))))))
+      (is (= [`DocumentCheck] (:clara-rules/retract-types (get ann `atr/rule-retract-helper-call)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Macro-emitted rules: the session sees rules kondo hooks never could
@@ -262,29 +279,90 @@
                (get loan-doc-annotations `ldr/extract-doc-meta-rule))]
       (is (some? dyn)
           "macro-emitted rule must be visible via the session (kondo hooks never see it)")
+      (is (= :none (:resolution dyn))
+          "the var-as-fact pattern is never automatically resolved (caller-guided)")
       (is (= 1 (count (:callsites dyn))))
-      (let [{:keys [source-str ns-name-sym filename]} (first (:callsites dyn))]
+      (is (nil? (:clara-rules/insert-types (get loan-doc-annotations `ldr/extract-doc-meta-rule))))
+      (let [{:keys [source-str ns-name-sym filename status]}
+            (first (:callsites dyn))]
         (is (re-matches #"resolved__\d+__auto__" source-str)
             "arg is the macro's gensym'd local; assert the shape, never the exact gensym")
+        (is (= :unresolved status))
         (is (= 'clara.server.tools.graph.rules.loan-doc-rules ns-name-sym))
         (is (= "clara/server/tools/graph/rules/loan_doc_rules.clj" filename)))))
 
-  (testing "loan-doc dynamic rules keep their captured callsites"
+  (testing "loan-doc dynamic rules: helpers unresolved, direct Java ctor resolved"
     (let [ann loan-doc-annotations
           ns-sym 'clara.server.tools.graph.rules.loan-doc-rules
           filename "clara/server/tools/graph/rules/loan_doc_rules.clj"]
-      (is (= {:callsites [{:source-str "(build-compliance-review ?app-id)"
-                           :ns-name-sym ns-sym :filename filename}]}
+      (is (= (unresolved-detection ns-sym filename "(build-compliance-review ?app-id)")
              (:clara-rules/dynamic-insert-types-detected (get ann `ldr/dynamic-insert-compliance-review))))
-      (is (= {:callsites [{:source-str "(build-compliance-via-metadata ?app-id)"
-                           :ns-name-sym ns-sym :filename filename}]}
+      (is (= (unresolved-detection ns-sym filename "(build-compliance-via-metadata ?app-id)")
              (:clara-rules/dynamic-insert-types-detected (get ann `ldr/dynamic-insert-compliance-metadata))))
-      (is (= {:callsites [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
-                           :ns-name-sym ns-sym :filename filename}]}
+      (is (= (unresolved-detection ns-sym filename "(build-audit-trail-entry ?app-id :doc-check-passed)")
              (:clara-rules/dynamic-insert-types-detected (get ann `ldr/dynamic-insert-audit-trail))))
-      (is (= {:callsites [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
-                           :ns-name-sym ns-sym :filename filename}]}
-             (:clara-rules/dynamic-retract-types-detected (get ann `ldr/dynamic-retract-stale-notice)))))))
+      (is (= (resolved-detection ns-sym filename
+                                 "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
+                                 `StaleDocumentNotice)
+             (:clara-rules/dynamic-retract-types-detected (get ann `ldr/dynamic-retract-stale-notice))))
+      (is (= [`StaleDocumentNotice]
+             (:clara-rules/retract-types (get ann `ldr/dynamic-retract-stale-notice)))))))
+
+;; ---------------------------------------------------------------------------
+;; :callsite-resolver-fn — the caller escape hatch
+;; ---------------------------------------------------------------------------
+
+(deftest test-callsite-resolver-fn
+  (testing "resolver resolves the var-as-fact callsite after locals tracing"
+    (let [resolver-calls (atom [])
+          resolver (fn [call-ctx]
+                     (swap! resolver-calls conj call-ctx)
+                     (let [{:keys [arg-form ns-name-sym]} call-ctx]
+                       (when (and (seq? arg-form)
+                                  (= 'var (first arg-form))
+                                  (symbol? (second arg-form)))
+                         (when-let [v (ns-resolve (the-ns ns-name-sym) (second arg-form))]
+                           (when-let [t (:type (meta v))]
+                             {:resolved-types [t]})))))
+          ann (analyze/generate-annotations-from-analysis
+               {:analysis loan-doc-analysis
+                :session-or-rulebase loan-doc-session
+                :callsite-resolver-fn resolver})
+          a (get ann `ldr/extract-doc-meta-rule)
+          dyn (:clara-rules/dynamic-insert-types-detected a)]
+      (is (= :full (:resolution dyn)))
+      (is (= [:extract-doc-meta] (:clara-rules/insert-types a))
+          "resolver-provided fact type is promoted (arbitrary token shapes pass through)")
+      (let [{:keys [source-str status resolved-types]} (first (:callsites dyn))]
+        (is (= :resolved status))
+        (is (= [:extract-doc-meta] resolved-types))
+        (is (re-matches #"resolved__\d+__auto__" source-str)
+            "the callsite still shows the literal boundary arg (the gensym local)"))
+
+      (testing "resolver receives the full context, with locals traced"
+        (let [extract-call (first (filter #(= 'clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule
+                                              (some-> % :rule :name symbol))
+                                          @resolver-calls))]
+          (is (some? extract-call) "resolver saw the extract-doc-meta-rule callsite")
+          (is (= '(var extract-doc-meta) (:arg-form extract-call))
+              "arg-form is the traced init form, not the gensym local")
+          (is (= :insert (:direction extract-call)))
+          (is (= 'clara.rules/insert! (:boundary-fn extract-call)))
+          (is (= 'clara.server.tools.graph.rules.loan-doc-rules (:ns-name-sym extract-call)))
+          (is (= "clara/server/tools/graph/rules/loan_doc_rules.clj" (:filename extract-call)))
+          (is (= "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule"
+                 (:name (:rule extract-call)))
+              "the full production is handed over")
+          (is (some? (:rhs (:rule extract-call))))
+          (is (some? (:lhs (:rule extract-call))))))))
+
+  (testing "throwing resolver degrades to unresolved capture"
+    (let [ann (analyze/generate-annotations-from-analysis
+               {:analysis loan-doc-analysis
+                :session-or-rulebase loan-doc-session
+                :callsite-resolver-fn (fn [_] (throw (ex-info "boom" {})))})]
+      (is (= loan-doc-annotations ann)
+          "a resolver that always throws yields the same annotations as no resolver"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Queries, no-output rules, and machinery exclusion
@@ -424,9 +502,13 @@
                           :session-or-rulebase session})]
         (is (= {:callsites [{:source-str "{:fake true}"
                              :ns-name-sym ns-sym
-                             :filename "fake/eval_rules.clj"}]}
+                             :filename "fake/eval_rules.clj"
+                             :status :unresolved}]
+                :resolution :none}
                (:clara-rules/dynamic-insert-types-detected
                 (get annotations 'fake.eval-rules/fake-eval-rule)))
+            "literal args are captured, not classified — classification defers to the caller")
+        (is (nil? (:clara-rules/insert-types (get annotations 'fake.eval-rules/fake-eval-rule)))
             "rule from a source-less namespace is analyzed via the reconstructed ns form")))))
 
 ;; ---------------------------------------------------------------------------

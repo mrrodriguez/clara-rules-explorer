@@ -226,3 +226,22 @@
   =>
   (retract-document-check-helper ?app-id))
 
+;; ---------------------------------------------------------------------------
+;; Constructor resolution chain rules
+
+(r/defrule rule-let-bound-ctor
+  "Rule J1: RHS let-binds a Java constructor result, then inserts the local —
+   resolved by tracing the local to its init form"
+  [Application (= ?app-id app-id)]
+  =>
+  (let [dc (DocumentCheck. ?app-id :pass "let-bound" nil nil)]
+    (r/insert! dc)))
+
+(r/defrule rule-insert-mixed-varargs
+  "Rule J2: varargs insert where only some args are automatically resolvable —
+   yields a :partial aggregate resolution"
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (DocumentCheck. ?app-id :pass "mixed" nil nil)
+             (make-java-document-check-nested ?app-id)))
+

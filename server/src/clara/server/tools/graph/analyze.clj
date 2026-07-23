@@ -30,6 +30,7 @@
             [clojure.set :as set]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clara.server.tools.graph.analyze.rhs :as rhs]
             [clara.server.tools.graph.serialize :as serialize]
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.annotations :as ann]
@@ -82,12 +83,6 @@
   "Returns the fully-qualified callee symbol from a kondo var-usage map."
   [usage]
   (fq-name-sym (:to usage) (:name usage)))
-
-(defn- constructor-fn-name?
-  "True if the given fn-name string looks like a record constructor (->X or map->X)."
-  [fn-name]
-  (or (str/starts-with? fn-name "map->")
-      (str/starts-with? fn-name "->")))
 
 (defn- normalize-key [k]
   (if (string? k)
@@ -199,64 +194,6 @@
         (filter (fn [var-name] (some target-fns (get graph var-name))))
         var-names))
 
-(defn- source-text-at
-  "Extracts source text from a position range. Returns nil on any error."
-  [source-str row col end-row end-col]
-  (try
-    (let [lines (str/split-lines source-str)]
-      (when (and row col end-row end-col
-                 (<= 1 row (count lines))
-                 (<= 1 end-row (count lines))
-                 (<= row end-row))
-        (let [relevant-lines (subvec (vec lines) (dec row) end-row)]
-          (if (= (count relevant-lines) 1)
-            (let [line (first relevant-lines)]
-              (when (and (<= 0 (dec col) (count line))
-                         (<= 0 (dec end-col) (count line))
-                         (<= col end-col))
-                (subs line (dec col) (dec end-col))))
-            (let [first-line (first relevant-lines)
-                  last-line (last relevant-lines)
-                  middle-lines (subvec relevant-lines 1 (dec (count relevant-lines)))
-                  trimmed-first (if (<= 0 (dec col) (count first-line))
-                                  (subs first-line (dec col))
-                                  first-line)
-                  trimmed-last (if (<= 0 (dec end-col) (count last-line))
-                                 (subs last-line 0 (dec end-col))
-                                 last-line)]
-              (str/join "\n" (concat [trimmed-first] middle-lines [trimmed-last])))))))
-    (catch Exception _
-      nil)))
-
-(defn- resolvable-fact-class [sym]
-  (try
-    (when (class? (resolve sym))
-      sym)
-    (catch Throwable _ nil)))
-
-(defn- resolve-record-type [ns-sym class-sym]
-  (try
-    (if-let [resolved (ns-resolve (find-ns ns-sym) class-sym)]
-      (cond
-        (class? resolved)
-        (symbol (.getName ^Class resolved))
-
-        (var? resolved)
-        (let [v-meta (meta resolved)
-              ns-str (name (ns-name (:ns v-meta)))
-              fn-name (name (:name v-meta))
-              class-name (cond
-                           (str/starts-with? fn-name "->") (subs fn-name 2)
-                           (str/starts-with? fn-name "map->") (subs fn-name 5)
-                           :else nil)]
-          (when class-name
-            (let [fq-sym (symbol (str (str/replace ns-str "-" "_") "." class-name))]
-              (resolvable-fact-class fq-sym))))
-
-        :else nil)
-      nil)
-    (catch Exception _ nil)))
-
 (defn- precompute-reachability
   "Returns a map of {var-sym -> reachable-set} for every var in `graph`.
    reachable-set is the transitive closure of callees, stopping at boundary-fns."
@@ -289,9 +226,9 @@
                              (comp
                               (filter (fn [vu]
                                         (and (contains? subtree (var-usage-caller vu))
-                                             (constructor-fn-name? (name (:name vu))))))
+                                             (-> vu :name name rhs/constructor-fn-name?))))
                               (keep (fn [vu]
-                                      (resolve-record-type (:to vu) (:name vu)))))
+                                      (rhs/resolve-record-type (:to vu) (:name vu)))))
                              var-usages)]
                    [v types])))
           direct-callers)))
@@ -304,25 +241,14 @@
         (mapcat (fn [v] (get inserter-type-map v #{})))
         reachable))
 
-(defn- callsite->dynamic-entries
-  "Extracts dynamic annotation entries from a single kondo var-usage.
-   Returns a vector of {:source-str :ns-name-sym :filename} maps, one per arg."
-  [usage get-source]
-  (let [source (get-source (:from usage) (:filename usage))
-        call-str (source-text-at source (:row usage) (:col usage) (:end-row usage) (:end-col usage))]
-    (if call-str
-      (try
-        (let [form (read-string call-str)
-              args (rest form)]
-          (mapv (fn [arg]
-                  {:source-str (pr-str arg)
-                   :ns-name-sym (:from usage)
-                   :filename (:filename usage)})
-                args))
-        (catch Exception _ []))
-      [])))
-
-(defn- extract-insert-types [reachable target-fns {:keys [analysis inserter-type-map get-source]}]
+(defn- extract-insert-types
+  "Determines the fact types a rule inserts or retracts via target-fns:
+   statically-traceable record constructors win when present; otherwise every
+   boundary-call argument form goes through the runtime resolution chain
+   (analyze.rhs) and the optional :callsite-resolver-fn, producing dynamic
+   detection entries annotated with :status/:resolved-types plus the
+   aggregate :resolution."
+  [reachable target-fns {:keys [analysis inserter-type-map] :as ctx}]
   (let [usages (:var-usages analysis)
         direct-caller? (fn [caller]
                          (and (contains? reachable caller)
@@ -334,19 +260,22 @@
         has-direct-callers? (boolean (some direct-target-call? usages))]
     (if-not has-direct-callers?
       {:static-types #{}
+       :resolved-types #{}
        :dynamic-forms nil}
       (let [static-types (extract-constructor-types-from-reachable
                           reachable inserter-type-map)]
         (if (seq static-types)
           {:static-types static-types
+           :resolved-types #{}
            :dynamic-forms nil}
-          (let [callsites (into []
-                                (comp (filter direct-target-call?)
-                                      (mapcat #(callsite->dynamic-entries % get-source))
-                                      (distinct))
-                                usages)]
+          (let [boundary-usages (into [] (filter direct-target-call?) usages)
+                {:keys [callsites resolved-types resolution]}
+                (rhs/resolve-boundary-callsites boundary-usages ctx)]
             {:static-types #{}
-             :dynamic-forms (when (seq callsites) {:callsites callsites})}))))))
+             :resolved-types resolved-types
+             :dynamic-forms (when (seq callsites)
+                              (cond-> {:callsites callsites}
+                                resolution (assoc :resolution resolution)))}))))))
 
 (defn- var-reachability
   "For a given `var-name`, returns a map of:
@@ -374,24 +303,36 @@
   "Returns an annotation map for the var referred to by the given `var-name` when it inserts or
   retracts fact types. Returns nil when the var has no output side-effects.
 
+  Statically-traceable constructor types and types resolved by the dynamic
+  callsite chain (analyze.rhs) are promoted into :clara-rules/insert-types
+  and :clara-rules/retract-types; unresolved or partially-resolved callsites
+  remain visible under the dynamic-detection keys.
+
   `ctx` must contain :graph, :insert-fns, :retract-fns, :direct-inserters, :direct-retractors,
-  :analysis, :inserter-type-map, :retractor-type-map, and :get-source."
-  [var-name {:keys [insert-fns retract-fns retractor-type-map] :as ctx}]
+  :analysis, :inserter-type-map, :retractor-type-map, :get-source, :productions-by-name,
+  and :callsite-resolver-fn."
+  [var-name {:keys [insert-fns retract-fns retractor-type-map productions-by-name] :as ctx}]
   (let [{:keys [is-inserter? is-retractor? reachable]} (var-reachability var-name ctx)]
     (when (or is-inserter? is-retractor?)
-      (let [retract-ctx (assoc ctx :inserter-type-map retractor-type-map)
-            inserts  (when is-inserter? (extract-insert-types reachable insert-fns ctx))
-            retracts (when is-retractor? (extract-insert-types reachable retract-fns retract-ctx))]
+      (let [ctx (assoc ctx :rule (get productions-by-name var-name))
+            insert-ctx (assoc ctx :direction :insert)
+            retract-ctx (assoc ctx
+                               :inserter-type-map retractor-type-map
+                               :direction :retract)
+            inserts  (when is-inserter? (extract-insert-types reachable insert-fns insert-ctx))
+            retracts (when is-retractor? (extract-insert-types reachable retract-fns retract-ctx))
+            insert-types (into (:static-types inserts) (:resolved-types inserts))
+            retract-types (into (:static-types retracts) (:resolved-types retracts))]
         (cond-> {}
-          (seq (:static-types inserts))
+          (seq insert-types)
           (assoc :clara-rules/insert-types
-                 (->> (:static-types inserts) (map symbol) sort vec))
+                 (->> insert-types (sort-by str) vec))
           (:dynamic-forms inserts)
           (assoc :clara-rules/dynamic-insert-types-detected (:dynamic-forms inserts))
 
-          (seq (:static-types retracts))
+          (seq retract-types)
           (assoc :clara-rules/retract-types
-                 (->> (:static-types retracts) (map symbol) sort vec))
+                 (->> retract-types (sort-by str) vec))
           (:dynamic-forms retracts)
           (assoc :clara-rules/dynamic-retract-types-detected (:dynamic-forms retracts)))))))
 
@@ -725,7 +666,8 @@
 
 (defn- build-infer-ctx
   "Builds the context map passed to `infer-annotation-for-var`."
-  [graph analysis inserter-type-map retractor-type-map get-source]
+  [graph analysis inserter-type-map retractor-type-map get-source
+   productions-by-name callsite-resolver-fn]
   {:graph graph
    :insert-fns insert-fns
    :retract-fns retract-fns
@@ -734,7 +676,9 @@
    :analysis analysis
    :inserter-type-map inserter-type-map
    :retractor-type-map retractor-type-map
-   :get-source get-source})
+   :get-source get-source
+   :productions-by-name productions-by-name
+   :callsite-resolver-fn callsite-resolver-fn})
 
 (defn generate-annotations-from-analysis
   "Generates rule annotations (insert/retract types etc.) from a pre-computed
@@ -748,11 +692,30 @@
      :session-or-rulebase - optional Clara session or rulebase; when given and
                             :rules-filter is not, the filter defaults to the
                             session's rules (productions with an :rhs — queries
-                            are excluded).
+                            are excluded). The session also supplies the
+                            full productions handed to :callsite-resolver-fn.
      :rules-filter        - optional coll of rule symbols to filter by; when nil
                             and no session is given, all project vars are
-                            analyzed."
-  [{:keys [analysis rules-filter session-or-rulebase]}]
+                            analyzed.
+     :callsite-resolver-fn - optional fn invoked once per callsite argument
+                            form the automatic constructor-resolution chain
+                            cannot resolve (see analyze.rhs). Receives a map:
+                              :rule        - the full production (:name :ns-name
+                                             :lhs :rhs :props :env …), when a
+                                             session was supplied
+                              :ns-name-sym - ns where the callsite was found
+                                             (may be a helper ns)
+                              :direction   - :insert | :retract
+                              :boundary-fn - e.g. clara.rules/insert!
+                              :arg-form    - the unresolved argument form
+                                             (locals already traced to their
+                                             init forms)
+                              :source-str  - pr-str of :arg-form
+                              :filename    - file containing the callsite
+                            Returns nil (still unresolved) or a map with
+                            :resolved-types [tokens…]. Exceptions are
+                            contained: logged and treated as unresolved."
+  [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn]}]
 
   (doseq [ns-sym (->> analysis
                       :var-definitions
@@ -763,10 +726,13 @@
   (let [get-source (build-source-loader (::combined-sources analysis))
         graph (build-graph analysis)
         project-vars (keys graph)
+        rulebase (get-rulebase session-or-rulebase)
+        productions-by-name (into {}
+                                  (map (fn [p] [(normalize-key (:name p)) p]))
+                                  (:productions rulebase))
         effective-filter (if (seq rules-filter)
                            (mapv normalize-key rules-filter)
-                           (when session-or-rulebase
-                             (session-rule-fq-names session-or-rulebase)))
+                           (some-> session-or-rulebase session-rule-fq-names))
         var-seq (or effective-filter project-vars)
         inserter-type-map (build-inserter-type-map
                            (direct-callers graph project-vars insert-fns)
@@ -774,7 +740,9 @@
         retractor-type-map (build-inserter-type-map
                             (direct-callers graph project-vars retract-fns)
                             graph analysis)
-        infer-ctx (build-infer-ctx graph analysis inserter-type-map retractor-type-map get-source)
+        infer-ctx (build-infer-ctx graph analysis inserter-type-map retractor-type-map
+                                   get-source productions-by-name
+                                   callsite-resolver-fn)
         annotations
         (into (sorted-map)
               (keep (fn [v]

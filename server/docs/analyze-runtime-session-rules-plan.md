@@ -305,15 +305,21 @@ constructors — everything else defers to §5.5:
    `:local-usages` entry at the arg's position → shared `:id` → `:locals`
    binding → read the *init form* immediately following the binding symbol →
    recurse (depth-capped). Terminates at 1/2, otherwise defers.
-4. **Non-symbol, non-seq arg form** (e.g. a record literal emitted by a macro —
-   reads back as an instance, verified) ⇒ apply the session's `fact-type-fn` to
-   the object.
-5. Otherwise ⇒ **`:callsite-resolver-fn`** (§5.5) ⇒ unresolved capture.
+4. Otherwise ⇒ **`:callsite-resolver-fn`** (§5.5) ⇒ unresolved capture.
 
 **Deliberately NOT in the automatic chain** (over-assumptions, per feedback):
 
 - `with-meta` + literal `:type` — only meaningful when the session's
   `fact-type-fn` honors `:type`; that is the caller's business → resolver-fn.
+- **Literal arg forms** (maps, keywords, record literals, …) — a literal is
+  source text read as data; when it contains rule bindings it is an
+  unevaluated template, not a runtime fact. Classifying it would mean running
+  the session's caller-configured `fact-type-fn` (arbitrary semantics,
+  potentially value-dependent) on fabricated data. The resolver receives the
+  read object as `:arg-form` — macro-emitted record literals read back as
+  genuine instances — and may classify it with full knowledge of its own
+  fact-type-fn. (Removed in M2 review; originally step 4 applied the session's
+  fact-type-fn to literals.)
 - `clojure.core/var` / the **function-as-fact (var-as-fact) pattern** — no
   hardcoding. This pattern *is* a first-class requirement (it is how
   `def-fact-fn`'s `extract-doc-meta-rule` inserts), but it is resolved by
@@ -599,14 +605,34 @@ checkable state (`make test` + named REPL probes).
 
 ### M2 — `analyze.rhs` ctor resolution chain + `:callsite-resolver-fn`
 
+**Status: DONE (awaiting review).**
+
 - Resolution chain (record ctors, Java ctors, locals tracing, literal objects);
-  caller-ns fallback for `:clj-kondo/unknown-namespace`.
-- `:callsite-resolver-fn` with full-production context.
-- Type promotion + provenance (`:status`/`:resolved-types`/`:resolution`).
-- **Check:** Java-ctor and record-ctor dynamic cases resolve (the demo EDN's
-  hand-written "Resolved" entries reproduce automatically);
-  `extract-doc-meta-rule` resolves via a test-supplied resolver-fn; contract
-  tests pass; `make test` green.
+  caller-ns fallback for `:clj-kondo/unknown-namespace`. ✓
+- `:callsite-resolver-fn` with full-production context. ✓
+- Type promotion + provenance (`:status`/`:resolved-types`/`:resolution`). ✓
+- **Check:** Java-ctor dynamic cases resolve ✓ (all six syntax variants, plus
+  helper-level ctors); direct-ctor entries from the demo EDN reproduce
+  automatically (`StaleDocumentNotice.`) — the demo's *helper-call* entries
+  (`build-compliance-review`) do **not** auto-resolve, per the deliberately
+  shrunk chain (§5.4: helper calls defer to the caller); the demo EDN is
+  re-scoped in M3 accordingly. `extract-doc-meta-rule` resolves via a
+  test-supplied resolver-fn ✓ (locals traced to `(var extract-doc-meta)`;
+  keyword fact-type token passes through); contract tests pass ✓; `make test`
+  green ✓ (full suite 67 tests / 432 assertions — including the previously
+  "pre-existing" failure set, which no longer reproduces: it was environment
+  flakiness in the worktree baseline, not a real regression set).
+- Implementation notes: kondo `:locals` `:id`s restart per analyzed namespace,
+  so binding lookups are constrained by `:filename`; resolver receives the
+  locals-**traced** arg form (e.g. `(var extract-doc-meta)`) while the callsite
+  `:source-str` keeps the literal boundary arg (the gensym); `distinct` on a
+  raw set throws (`nth`) — token sets are already distinct by construction.
+- **Post-review change (§5.4):** the literal-classification step (apply the
+  session's `fact-type-fn` to non-symbol/non-seq args) was removed — a literal
+  arg is source text read as data, not a runtime fact instance, and running
+  caller-configured `fact-type-fn` semantics on it is an over-assumption.
+  Literals (incl. record literals, which read back as genuine instances) now
+  defer to `:callsite-resolver-fn` like everything else non-ctor.
 
 ### M3 — API surface + docs + demo artifacts
 
@@ -645,8 +671,9 @@ checkable state (`make test` + named REPL probes).
    included — is passed to `:callsite-resolver-fn`, which may incorporate it.
 3. **Record literals in RHS data** (`#my.ns.Record{:x 1}`): supported by
    construction — kondo parses tagged literals syntactically; extraction reads
-   them back as instances; the chain classifies them via the session's
-   `fact-type-fn` (verified).
+   them back as instances; the instance is passed to `:callsite-resolver-fn`
+   as `:arg-form` (post-M2-review: no automatic `fact-type-fn` classification
+   of literals — see §5.4).
 4. **Arbitrary fact-type shapes** (e.g. `[:vector :type :thing]`): supported.
    Automatic resolution publishes only ctor instance types (class tokens we are
    certain of); how those connect to LHS conditions is decided in graph
