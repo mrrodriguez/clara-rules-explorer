@@ -21,9 +21,15 @@
 
 	let searchTerm = $state('');
 	// Namespaces the user has hidden from view. Empty = show all.
-	// SvelteSet is natively reactive — no $state() wrapper needed.
-	let hiddenNamespaces = new SvelteSet<string>();
-	let expandedGroups = new SvelteSet<string>();
+	// SvelteSet is internally reactive, but $state() on the variable binding
+	// is still needed so that mutations from $effect blocks (auto-expand) and
+	// event handlers (toggleGroup, toggleNamespaceVisibility) reliably
+	// propagate through the derived view model and template. Without it,
+	// updates may not trigger re-renders in production builds.
+	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
+	let hiddenNamespaces = $state(new SvelteSet<string>());
+	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
+	let expandedGroups = $state(new SvelteSet<string>());
 	let filterDropdownOpen = $state(false);
 
 	// ── clickOutside action ──────────────────────────────────────────────────

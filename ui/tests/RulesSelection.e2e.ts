@@ -13,7 +13,10 @@ test.describe('Rules Navigation and Selection', () => {
 		// 2. Verify we are on the rules page
 		await expect(page).toHaveURL(/\/rules/);
 
-		// 3. Select the first rule from the EntityList
+		// 3. Groups start collapsed — expand all to see items
+		await ui.groupedNav.expandAllButton(page).click();
+
+		// 4. Select the first rule from the EntityList
 		const firstRule = ui.list.firstItem(page);
 		const ruleName = await firstRule.textContent();
 		

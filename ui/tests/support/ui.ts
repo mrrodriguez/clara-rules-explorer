@@ -45,5 +45,47 @@ export const ui = {
 		noOutputIcon(page: Page) {
 			return page.locator('.list-group-item i.bi-sign-stop.text-secondary');
 		}
+	},
+	groupedNav: {
+		/** The search/filter input */
+		searchInput(page: Page, placeholder: string) {
+			return page.locator(`input[placeholder="${placeholder}"]`);
+		},
+		/** The namespace multi-select filter dropdown toggle button */
+		namespaceFilterButton(page: Page) {
+			return page.locator('button.btn-outline-secondary').filter({ has: page.locator('i.bi-funnel') });
+		},
+		/** The namespace filter dropdown menu (when open) */
+		namespaceFilterDropdown(page: Page) {
+			return page.locator('.dropdown-menu.show');
+		},
+		/** A checkbox label inside the namespace filter dropdown */
+		namespaceCheckbox(page: Page, nsLabel: string) {
+			return page.locator('.dropdown-menu.show label').filter({ hasText: nsLabel });
+		},
+		/** The "Show all namespaces" button in the dropdown */
+		showAllNamespacesButton(page: Page) {
+			return page.locator('.dropdown-menu.show button.dropdown-item').filter({ hasText: 'Show all namespaces' });
+		},
+		/** A namespace group toggle button (button, not anchor) */
+		groupToggle(page: Page, ns: string) {
+			return page.locator('button.list-group-item').filter({ hasText: ns });
+		},
+		/** All namespace group toggle buttons */
+		allGroupToggles(page: Page) {
+			return page.locator('button.list-group-item');
+		},
+		/** The "Expand all" button */
+		expandAllButton(page: Page) {
+			return page.locator('button.btn-link').filter({ hasText: 'Expand all' });
+		},
+		/** The "Collapse all" button */
+		collapseAllButton(page: Page) {
+			return page.locator('button.btn-link').filter({ hasText: 'Collapse all' });
+		},
+		/** The empty state message (when no items match) */
+		emptyState(page: Page) {
+			return page.locator('.text-muted.fst-italic');
+		}
 	}
 };

@@ -8,6 +8,8 @@ test.describe('Rule Indicators — Unlinked vs No-Output', () => {
 		await page.goto('/');
 		await ui.sidebar.navigateTo(page, 'Rules');
 		await expect(page).toHaveURL(/\/rules/);
+		// Groups start collapsed — expand all to make items visible
+		await ui.groupedNav.expandAllButton(page).click();
 	});
 
 	test('should show "No Output" muted badge on rule summary for no-output-type rules', async ({ page }) => {
