@@ -22,6 +22,8 @@
 		pageSize?: number;
 		/** Whether to show a border on the container (default: true) */
 		border?: boolean;
+		/** Label used to qualify counts (e.g. "rules", "queries", "fact types") */
+		itemLabel?: string;
 	}
 
 	let {
@@ -34,23 +36,41 @@
 		itemRight,
 		paramName = 'id',
 		pageSize = 100,
-		border = true
+		border = true,
+		itemLabel = 'items'
 	}: Props = $props();
 
 	// ── State ────────────────────────────────────────────────────────────────
 
 	let searchTerm = $state('');
-	let selectedNamespace = $state('');
-	// SvelteSet mutation is reactive but the template reference requires
-	// $state for re-render on reassignment.
+	// Namespaces the user has hidden from view. Empty = show all.
+	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
+	let hiddenNamespaces = $state(new SvelteSet<string>());
 	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
 	let expandedGroups = $state(new SvelteSet<string>());
+	let filterDropdownOpen = $state(false);
 	const DEFAULT_PAGE_SIZE = 100;
 
 	let groupVisibleCounts = $state<Record<string, number>>({});
 	// pageSize is captured once as a reactive prop — the $effect below
 	// syncs flatVisibleCount to the actual pageSize on mount / item changes.
 	let flatVisibleCount = $state(DEFAULT_PAGE_SIZE);
+
+	// ── clickOutside action ──────────────────────────────────────────────────
+
+	function clickOutside(node: HTMLElement, callback: () => void) {
+		function handleClick(e: MouseEvent) {
+			if (!node.contains(e.target as Node)) {
+				callback();
+			}
+		}
+		document.addEventListener('click', handleClick, true);
+		return {
+			destroy() {
+				document.removeEventListener('click', handleClick, true);
+			}
+		};
+	}
 
 	// ── Derived view model ───────────────────────────────────────────────────
 
@@ -66,28 +86,45 @@
 			}
 		}
 
-		// Filter by namespace
-		const nsFiltered =
-			selectedNamespace !== ''
-				? items.filter((item) => {
-						const ns = groupKey(item) || '(no namespace)';
-						return ns === selectedNamespace;
-					})
-				: items;
-
-		// Filter by search term
+		// Search filter (independent of namespace visibility)
 		const searchActive = searchTerm.length > 0;
 		const searchFiltered = searchActive
-			? nsFiltered.filter((item) =>
+			? items.filter((item) =>
 					searchFields(item).some((field) => field.toLowerCase().includes(searchTerm.toLowerCase()))
 				)
-			: nsFiltered;
+			: items;
+
+		// Total matching items across ALL namespaces (for dropdown counter)
+		const totalSearchResults = searchFiltered.length;
+
+		// Per-namespace item counts from searchFiltered (for checkbox labels)
+		const nsItemCounts: Record<string, number> = {};
+		for (const item of searchFiltered) {
+			const ns = groupKey(item) || '(no namespace)';
+			nsItemCounts[ns] = (nsItemCounts[ns] ?? 0) + 1;
+		}
+
+		// Namespace visibility filter
+		const activeNsFilter = hiddenNamespaces.size > 0;
+		const nsFiltered = activeNsFilter
+			? searchFiltered.filter((item) => {
+					const ns = groupKey(item) || '(no namespace)';
+					return !hiddenNamespaces.has(ns);
+				})
+			: searchFiltered;
+
+		// Count of visible namespaces (those with matching items after search)
+		let visibleNsCount = 0;
+		for (const ns of nsOrder) {
+			const count = nsItemCounts[ns] ?? 0;
+			if (count > 0 && !hiddenNamespaces.has(ns)) visibleNsCount++;
+		}
 
 		// Group items by namespace (only when not searching)
 		const groupedItems: { ns: string; items: T[]; totalCount: number }[] = [];
 		if (!searchActive) {
 			const groupMap: Record<string, T[]> = {};
-			for (const item of searchFiltered) {
+			for (const item of nsFiltered) {
 				const ns = groupKey(item) || '(no namespace)';
 				if (!groupMap[ns]) groupMap[ns] = [];
 				groupMap[ns].push(item);
@@ -104,15 +141,19 @@
 
 		return {
 			nsOrder,
-			nsFiltered,
 			searchFiltered,
+			nsFiltered,
 			groupedItems,
 			searchActive,
-			totalMatching: searchFiltered.length
+			totalSearchResults,
+			activeNsFilter,
+			visibleNsCount,
+			nsItemCounts,
+			totalMatching: nsFiltered.length
 		};
 	});
 
-	// ── Auto-expand groups based on namespace count ──────────────────────────
+	// ── Auto-expand / collapse based on namespace count ──────────────────────
 
 	let prevNsLength = 0;
 	$effect(() => {
@@ -120,10 +161,9 @@
 		if (currentLength !== prevNsLength) {
 			prevNsLength = currentLength;
 			expandedGroups.clear();
-			if (currentLength <= 5) {
-				for (const ns of view.nsOrder) {
-					expandedGroups.add(ns);
-				}
+			// Auto-expand only when there is exactly 1 namespace
+			if (currentLength === 1) {
+				expandedGroups.add(view.nsOrder[0]);
 			}
 			// Reset pagination counts
 			groupVisibleCounts = {};
@@ -131,13 +171,22 @@
 		}
 	});
 
-	// ── Helpers ──────────────────────────────────────────────────────────────
+	// ── Namespace filter helpers ─────────────────────────────────────────────
 
-	function isActive(name: string) {
-		const targetId = toUrlId(name);
-		const params = page.params as Record<string, string | undefined>;
-		return params[paramName] === targetId;
+	function toggleNamespaceVisibility(ns: string) {
+		if (hiddenNamespaces.has(ns)) {
+			hiddenNamespaces.delete(ns);
+		} else {
+			hiddenNamespaces.add(ns);
+		}
 	}
+
+	function showAllNamespaces() {
+		hiddenNamespaces.clear();
+		filterDropdownOpen = false;
+	}
+
+	// ── Group helpers ────────────────────────────────────────────────────────
 
 	function toggleGroup(ns: string) {
 		if (expandedGroups.has(ns)) {
@@ -145,6 +194,16 @@
 		} else {
 			expandedGroups.add(ns);
 		}
+	}
+
+	function expandAll() {
+		for (const ns of view.nsOrder) {
+			expandedGroups.add(ns);
+		}
+	}
+
+	function collapseAll() {
+		expandedGroups.clear();
 	}
 
 	function visibleCount(ns: string, total: number) {
@@ -162,6 +221,14 @@
 
 	function showMoreFlat() {
 		flatVisibleCount = Math.min(flatVisibleCount + pageSize, view.totalMatching);
+	}
+
+	// ── Route helpers ────────────────────────────────────────────────────────
+
+	function isActive(name: string) {
+		const targetId = toUrlId(name);
+		const params = page.params as Record<string, string | undefined>;
+		return params[paramName] === targetId;
 	}
 </script>
 
@@ -186,18 +253,67 @@
 		</div>
 	{/if}
 
-	<!-- Namespace filter dropdown (only when not searching and > 1 namespace) -->
+	<!-- Namespace multi-select filter (only when > 1 namespace, not searching) -->
 	{#if !view.searchActive && view.nsOrder.length > 1}
 		<div class="p-2 border-bottom bg-light">
-			<select class="form-select form-select-sm" bind:value={selectedNamespace}>
-				<option value="">All namespaces ({view.totalMatching})</option>
-				{#each view.nsOrder as ns (ns)}
-					{@const nsCount = view.groupedItems.find((g) => g.ns === ns)?.totalCount ?? 0}
-					{#if nsCount > 0}
-						<option value={ns}>{ns} ({nsCount})</option>
+			<div class="position-relative" use:clickOutside={() => (filterDropdownOpen = false)}>
+				<button
+					class="btn btn-sm btn-outline-secondary w-100 text-truncate text-start"
+					onclick={() => (filterDropdownOpen = !filterDropdownOpen)}
+				>
+					<i class="bi bi-funnel me-1 opacity-75"></i>
+					{#if view.activeNsFilter}
+						{view.visibleNsCount} of {view.nsOrder.length} namespaces
+					{:else}
+						All namespaces
 					{/if}
-				{/each}
-			</select>
+					<span class="ms-1 text-muted">· {view.totalSearchResults} {itemLabel}</span>
+				</button>
+
+				{#if filterDropdownOpen}
+					<div class="dropdown-menu show w-100 p-1" style="max-height: 240px; overflow-y: auto;">
+						<button class="dropdown-item small py-1" onclick={showAllNamespaces}>
+							<i class="bi bi-check-all me-1 opacity-50"></i> Show all namespaces
+						</button>
+						<div class="dropdown-divider my-1"></div>
+						{#each view.nsOrder as ns (ns)}
+							{@const count = view.nsItemCounts[ns] ?? 0}
+							<label
+								class="dropdown-item small d-flex align-items-center gap-1 mb-0 py-1 {count === 0
+									? 'text-muted'
+									: ''}"
+							>
+								<input
+									type="checkbox"
+									checked={!hiddenNamespaces.has(ns)}
+									disabled={count === 0}
+									onchange={() => toggleNamespaceVisibility(ns)}
+								/>
+								<span class="text-truncate">{ns}</span>
+								<span class="ms-auto text-muted ps-1 small">{count}</span>
+							</label>
+						{/each}
+					</div>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
+	<!-- Collapse / Expand all (only in grouped mode, > 1 namespace) -->
+	{#if !view.searchActive && view.nsOrder.length > 1}
+		<div class="d-flex justify-content-end gap-2 px-2 pt-1 small">
+			<button
+				class="btn btn-link btn-sm text-muted text-decoration-none py-0 px-1"
+				onclick={expandAll}
+			>
+				Expand all
+			</button>
+			<button
+				class="btn btn-link btn-sm text-muted text-decoration-none py-0 px-1"
+				onclick={collapseAll}
+			>
+				Collapse all
+			</button>
 		</div>
 	{/if}
 
@@ -245,7 +361,9 @@
 						<i class="bi bi-{expanded ? 'chevron-down' : 'chevron-right'} me-1 opacity-50"></i>
 						{group.ns}
 					</span>
-					<span class="badge bg-secondary rounded-pill ms-2 flex-shrink-0">{group.totalCount}</span>
+					<span class="badge bg-secondary rounded-pill ms-2 flex-shrink-0"
+						>{group.totalCount} {itemLabel}</span
+					>
 				</button>
 
 				{#if expanded}

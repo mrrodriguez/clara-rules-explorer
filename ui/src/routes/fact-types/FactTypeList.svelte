@@ -18,4 +18,5 @@
 	hrefPrefix={factPath}
 	activeColor="#0dcaf0"
 	searchPlaceholder="Search fact types..."
+	itemLabel="fact types"
 />

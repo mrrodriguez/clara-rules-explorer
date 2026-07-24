@@ -18,4 +18,5 @@
 	hrefPrefix={queryPath}
 	activeColor="#198754"
 	searchPlaceholder="Search queries..."
+	itemLabel="queries"
 />

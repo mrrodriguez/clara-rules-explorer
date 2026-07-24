@@ -44,5 +44,6 @@
 	hrefPrefix={rulePath}
 	activeColor="#0d6efd"
 	searchPlaceholder="Search rules..."
+	itemLabel="rules"
 	itemRight={ruleRight}
 />
