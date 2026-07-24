@@ -67,13 +67,26 @@
               (filter dep-is-rule?)
               empty?))))
 
-(defn- rule-summary
-  [production
+(defn- get-production-ns-name-sym
+  [{p-name :name p-ns-name :ns-name}]
+  (or p-ns-name
+      (when-let [derived-ns-str (cond
+                                  (string? p-name) (-> p-name symbol namespace)
+                                  (symbol? p-name) (namespace p-name)
+                                  (keyword? p-name) (namespace p-name))]
+        (symbol derived-ns-str))))
+
+(defn- production-summary
+  "Builds a summary map for a single production (rule or query).
+  When :ns-name is nil (as with queries in the underlying clara-rules schema),
+  derives the namespace from the fully-qualified :name."
+  [{p-name :name :as production}
    sidecar-annotations
    dep-graph
    production-map]
   (let [ann (ann/resolve-annotations production sidecar-annotations)
-        {p-ns-name :ns-name p-name :name} production
+        ;; Queries in clara.rules.schema/Query have no :ns-name — derive it.
+        p-ns-name (get-production-ns-name-sym production)
         serialize-fact-type (partial serialize/serialize-fact-type p-ns-name)
 
         {:keys [upstream downstream]} (get-production-deps-summary dep-graph
@@ -211,10 +224,10 @@
     (->> productions
          (sequence
           (comp filter-xf
-                (mapcat (juxt :name #(rule-summary %
-                                                   sidecar-annotations
-                                                   dep-graph
-                                                   production-map)))))
+                (mapcat (juxt :name #(production-summary %
+                                                         sidecar-annotations
+                                                         dep-graph
+                                                         production-map)))))
          (apply array-map))))
 
 (defn- build-rule-summary-map
