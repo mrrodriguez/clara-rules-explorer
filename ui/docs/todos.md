@@ -1,4 +1,4 @@
-1. IN PROGRESS Convert primary analyze path to use objects from an in-memory clara session.
+1. DONE Convert primary analyze path to use objects from an in-memory clara session.
 
 Currently, the clara.server.tools.graph.analyze rulebase analysis functions are fundamentally based
 on pure static analysis of the namespaces connected to a rulebase. clj-kondo hooks for analyze-call
@@ -104,9 +104,12 @@ are only concerned with deriving new annotations from working memor fact instanc
 available). This is unrelated to the goals scope of the work I've presented for you to plan here.
 
 
-2. IN PROGRESS Setup an example of a special "functions as facts" to show how that can be discovered and tracked.
+2. DONE Setup an example of a special "functions as facts" to show how that can be discovered and tracked.
 
-3. IN PROGRESS Consider an extension to analyze that can take a given callsite and call a helper function to
+3. DONE Consider an extension to analyze that can take a given callsite and call a helper function to
    resolve the type. Maybe use kondo for this too.
 
-4. clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail does not show a callsite when facts are in memory - does this wipe out callsites? make a smoke test with no facts in memory to double check.
+4. DONE clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail does not show a callsite when facts are in memory - does this wipe out callsites? make a smoke test with no facts in memory to double check.
+
+5. Need to sort/grouped (can maintain load order) rules/queries/fact types by ns name and/or paginate in UI.
+
