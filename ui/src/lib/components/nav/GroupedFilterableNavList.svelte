@@ -18,8 +18,6 @@
 		itemRight?: Snippet<[T]>;
 		/** Route parameter name for active detection (default: 'id') */
 		paramName?: string;
-		/** Items to show per page (default: 100) */
-		pageSize?: number;
 		/** Whether to show a border on the container (default: true) */
 		border?: boolean;
 		/** Label used to qualify counts (e.g. "rules", "queries", "fact types") */
@@ -35,7 +33,6 @@
 		searchFields = (item: T) => [item.name],
 		itemRight,
 		paramName = 'id',
-		pageSize = 100,
 		border = true,
 		itemLabel = 'items'
 	}: Props = $props();
@@ -49,12 +46,6 @@
 	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
 	let expandedGroups = $state(new SvelteSet<string>());
 	let filterDropdownOpen = $state(false);
-	const DEFAULT_PAGE_SIZE = 100;
-
-	let groupVisibleCounts = $state<Record<string, number>>({});
-	// pageSize is captured once as a reactive prop — the $effect below
-	// syncs flatVisibleCount to the actual pageSize on mount / item changes.
-	let flatVisibleCount = $state(DEFAULT_PAGE_SIZE);
 
 	// ── clickOutside action ──────────────────────────────────────────────────
 
@@ -153,21 +144,59 @@
 		};
 	});
 
-	// ── Auto-expand / collapse based on namespace count ──────────────────────
+	// ── Namespace of the currently active item (from route params) ───────────
+
+	const activeNs = $derived.by(() => {
+		const params = page.params as Record<string, string | undefined>;
+		const activeId = params[paramName];
+		if (!activeId) return null;
+
+		for (const item of items) {
+			if (toUrlId(item.name) === activeId) {
+				return groupKey(item) || '(no namespace)';
+			}
+		}
+		return null;
+	});
+
+	// ── Auto-expand logic ────────────────────────────────────────────────────
 
 	let prevNsLength = 0;
+	let prevVisibleNsCount = 0;
 	$effect(() => {
-		const currentLength = view.nsOrder.length;
-		if (currentLength !== prevNsLength) {
-			prevNsLength = currentLength;
+		const totalNs = view.nsOrder.length;
+		const visibleNs = view.visibleNsCount;
+
+		// Full data set changed — reset
+		if (totalNs !== prevNsLength) {
+			prevNsLength = totalNs;
+			prevVisibleNsCount = visibleNs;
 			expandedGroups.clear();
-			// Auto-expand only when there is exactly 1 namespace
-			if (currentLength === 1) {
+			if (totalNs === 1) {
 				expandedGroups.add(view.nsOrder[0]);
 			}
-			// Reset pagination counts
-			groupVisibleCounts = {};
-			flatVisibleCount = pageSize;
+			return;
+		}
+
+		// Namespace filter narrowed results to exactly 1 visible namespace — auto-expand it
+		if (visibleNs === 1 && visibleNs !== prevVisibleNsCount) {
+			for (const g of view.groupedItems) {
+				expandedGroups.add(g.ns);
+			}
+		}
+
+		prevVisibleNsCount = visibleNs;
+	});
+
+	// Expand the namespace containing the currently active item
+	let prevActiveNs: string | null = null;
+	$effect(() => {
+		const ns = activeNs;
+		if (ns && ns !== prevActiveNs) {
+			prevActiveNs = ns;
+			if (!expandedGroups.has(ns)) {
+				expandedGroups.add(ns);
+			}
 		}
 	});
 
@@ -204,23 +233,6 @@
 
 	function collapseAll() {
 		expandedGroups.clear();
-	}
-
-	function visibleCount(ns: string, total: number) {
-		return groupVisibleCounts[ns] ?? Math.min(pageSize, total);
-	}
-
-	function showMore(ns: string) {
-		const total = view.groupedItems.find((g) => g.ns === ns)?.totalCount ?? 0;
-		const current = visibleCount(ns, total);
-		groupVisibleCounts = {
-			...groupVisibleCounts,
-			[ns]: Math.min(current + pageSize, total)
-		};
-	}
-
-	function showMoreFlat() {
-		flatVisibleCount = Math.min(flatVisibleCount + pageSize, view.totalMatching);
 	}
 
 	// ── Route helpers ────────────────────────────────────────────────────────
@@ -320,8 +332,8 @@
 	<!-- Content area -->
 	<div class="list-group list-group-flush flex-grow-1 overflow-auto">
 		{#if view.searchActive}
-			<!-- Flat search results with global pagination -->
-			{#each view.searchFiltered.slice(0, flatVisibleCount) as item (item.name)}
+			<!-- Flat search results -->
+			{#each view.searchFiltered as item (item.name)}
 				{#snippet badge()}
 					{#if itemRight}
 						{@render itemRight(item)}
@@ -337,21 +349,10 @@
 					{badge}
 				/>
 			{/each}
-
-			{#if flatVisibleCount < view.totalMatching}
-				<button
-					class="list-group-item list-group-item-action text-center text-muted small py-2 border-0"
-					onclick={showMoreFlat}
-				>
-					Show {Math.min(pageSize, view.totalMatching - flatVisibleCount)} more ({flatVisibleCount} of
-					{view.totalMatching})
-				</button>
-			{/if}
 		{:else}
 			<!-- Grouped view -->
 			{#each view.groupedItems as group (group.ns)}
 				{@const expanded = expandedGroups.has(group.ns)}
-				{@const shown = visibleCount(group.ns, group.totalCount)}
 
 				<button
 					class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-3 border-start-0 border-end-0 bg-light fw-medium small"
@@ -367,7 +368,7 @@
 				</button>
 
 				{#if expanded}
-					{#each group.items.slice(0, shown) as item (item.name)}
+					{#each group.items as item (item.name)}
 						{#snippet badge()}
 							{#if itemRight}
 								{@render itemRight(item)}
@@ -383,15 +384,6 @@
 							{badge}
 						/>
 					{/each}
-
-					{#if shown < group.totalCount}
-						<button
-							class="list-group-item list-group-item-action text-center text-muted small py-1 ps-4 border-0"
-							onclick={() => showMore(group.ns)}
-						>
-							Show {Math.min(pageSize, group.totalCount - shown)} more ({shown} of {group.totalCount})
-						</button>
-					{/if}
 				{/if}
 			{/each}
 		{/if}
