@@ -4,7 +4,7 @@
 	import UnlinkedRuleIndicator from '$lib/components/rulebase/UnlinkedRuleIndicator.svelte';
 	import NoOutputTypesIndicator from '$lib/components/rulebase/NoOutputTypesIndicator.svelte';
 	import DynamicDetectionIndicator from '$lib/components/rulebase/DynamicDetectionIndicator.svelte';
-	import FilterableNavList from '$lib/components/nav/FilterableNavList.svelte';
+	import GroupedFilterableNavList from '$lib/components/nav/GroupedFilterableNavList.svelte';
 	import { rulePath } from '$lib/utils';
 
 	interface Props {
@@ -12,6 +12,8 @@
 	}
 
 	let { rules }: Props = $props();
+
+	const groupKey = (rule: RuleListItem) => rule.ns;
 </script>
 
 {#snippet ruleRight(rule: RuleListItem)}
@@ -36,8 +38,9 @@
 	</div>
 {/snippet}
 
-<FilterableNavList
+<GroupedFilterableNavList
 	items={rules}
+	{groupKey}
 	hrefPrefix={rulePath}
 	activeColor="#0d6efd"
 	searchPlaceholder="Search rules..."

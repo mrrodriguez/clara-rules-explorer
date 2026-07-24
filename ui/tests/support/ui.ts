@@ -15,11 +15,11 @@ export const ui = {
 	list: {
 		/** Returns a locator for an item in an EntityList by its name (title attribute) */
 		item(page: Page, name: string) {
-			return page.locator('.list-group-item').filter({ hasText: name });
+			return page.locator('a.list-group-item').filter({ hasText: name });
 		},
 		/** Returns the first item in an EntityList */
 		firstItem(page: Page) {
-			return page.locator('.list-group-item').first();
+			return page.locator('a.list-group-item').first();
 		}
 	},
 	summary: {
