@@ -7,7 +7,7 @@
 			"type": "root",
 			"facts": [
 				{
-					"id": 10,
+					"id": 11,
 					"type": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 					"data": {
 						"app-id": "app-1",
@@ -33,7 +33,7 @@
 			"type": "rule",
 			"facts": [
 				{
-					"id": 10,
+					"id": 11,
 					"type": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 					"data": {
 						"app-id": "app-1",
@@ -54,5 +54,5 @@
 			"ns": "clara.server.tools.graph.rules.loan-app-rules"
 		}
 	],
-	"ids": [10]
+	"ids": [11]
 }

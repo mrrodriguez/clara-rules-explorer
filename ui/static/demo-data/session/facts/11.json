@@ -1,6 +1,6 @@
 {
 	"id": 11,
-	"type": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
+	"type": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 	"data": {
 		"app-id": "app-1",
 		"status": "pass",

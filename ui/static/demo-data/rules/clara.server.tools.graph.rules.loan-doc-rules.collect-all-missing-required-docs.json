@@ -23,6 +23,6 @@
 		}
 	],
 	"doc": null,
-	"sink-rule": true,
+	"sink-rule": false,
 	"props": {}
 }

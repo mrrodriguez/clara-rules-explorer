@@ -1,6 +1,10 @@
 {
 	"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
 	"used-by-rules": [
+		"clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
+		"clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
+		"clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice",
+		"clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
 		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
 		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
 		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"

@@ -1,13 +1,13 @@
 {
 	"matches": [
 		{
-			"id": 12,
+			"id": 13,
 			"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 			"data": {
 				"?outcome": {
-					"message": "Application approved",
-					"checks-incomplete": null,
+					"app-id": "app-1",
 					"status": "approved",
+					"message": "Application approved",
 					"passed-checks": [
 						{
 							"check-type": "document"
@@ -19,9 +19,9 @@
 							"check-type": "fraud"
 						}
 					],
-					"app-id": "app-1",
+					"failed-checks": null,
 					"checks-complete": null,
-					"failed-checks": null
+					"checks-incomplete": null
 				},
 				"?app-id": "app-1"
 			},

@@ -19,6 +19,11 @@
 			"inserted-from": [],
 			"used-by": [
 				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
@@ -51,7 +56,7 @@
 			]
 		},
 		{
-			"id": 5,
+			"id": 6,
 			"type": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
 			"data": {
 				"?app": {
@@ -78,7 +83,7 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 7,
+			"id": 8,
 			"type": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
 			"data": {
 				"app-id": "app-1",

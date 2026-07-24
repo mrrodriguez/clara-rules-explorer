@@ -1,0 +1,7 @@
+{
+	"name": "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail",
+	"used-by-rules": [],
+	"used-by-queries": [],
+	"inserted-by-rules": ["clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"],
+	"retracted-by-rules": []
+}

@@ -1,5 +1,5 @@
 {
-	"ns": "",
+	"ns": "clara.server.tools.graph.rules.loan-app-rules",
 	"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
 	"params": ["?app-id"],
 	"lhs-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],

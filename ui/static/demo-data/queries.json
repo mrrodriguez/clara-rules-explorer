@@ -2,7 +2,7 @@
 	"queries": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/find-document-check",
-			"ns": "",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"doc": null,
 			"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
 			"params": ["?app-id"],
@@ -16,7 +16,7 @@
 		},
 		{
 			"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
-			"ns": "",
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"doc": null,
 			"lhs-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
 			"params": ["?app-id"],
