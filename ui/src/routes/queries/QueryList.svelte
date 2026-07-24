@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { QueryListItem } from '$lib/types/api';
+	import { page } from '$app/state';
 	import GroupedFilterableNavList from '$lib/components/nav/GroupedFilterableNavList.svelte';
 	import { queryPath } from '$lib/utils';
 
@@ -10,6 +11,7 @@
 	let { queries }: Props = $props();
 
 	const groupKey = (query: QueryListItem) => query.ns;
+	const activeId = $derived(page.params.id);
 </script>
 
 <GroupedFilterableNavList
@@ -19,4 +21,5 @@
 	activeColor="#198754"
 	searchPlaceholder="Search queries..."
 	itemLabel="queries"
+	{activeId}
 />

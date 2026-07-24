@@ -19,6 +19,7 @@
 	}
 
 	const groupKey = (ft: SessionFactTypeInfo) => splitQualifiedName(ft.name).namespace;
+	const activeId = $derived(page.params.typeName);
 </script>
 
 {#snippet itemRight(type: SessionFactTypeInfo)}
@@ -39,5 +40,5 @@
 	searchPlaceholder="Search session facts..."
 	itemLabel="types"
 	{itemRight}
-	paramName="typeName"
+	{activeId}
 />

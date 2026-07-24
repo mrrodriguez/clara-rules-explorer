@@ -1,28 +1,8 @@
 <script lang="ts" generics="T extends { name: string }">
 	import { SvelteSet } from 'svelte/reactivity';
-	import type { Snippet } from 'svelte';
 	import ReferenceListItem from '$lib/components/nav/ReferenceListItem.svelte';
+	import type { GroupedFilterableNavListProps } from '$lib/components/nav/GroupedFilterableNavListProps';
 	import { toUrlId } from '$lib/utils';
-	import { page } from '$app/state';
-
-	interface Props {
-		items: T[];
-		/** Extract the namespace/group key from an item. Empty string = ungrouped. */
-		groupKey: (item: T) => string;
-		hrefPrefix: (name: string) => string;
-		activeColor?: string;
-		searchPlaceholder?: string;
-		/** Fields to search against (default: [item.name]) */
-		searchFields?: (item: T) => string[];
-		/** Optional snippet for content to the right of the name */
-		itemRight?: Snippet<[T]>;
-		/** Route parameter name for active detection (default: 'id') */
-		paramName?: string;
-		/** Whether to show a border on the container (default: true) */
-		border?: boolean;
-		/** Label used to qualify counts (e.g. "rules", "queries", "fact types") */
-		itemLabel?: string;
-	}
 
 	let {
 		items,
@@ -32,19 +12,18 @@
 		searchPlaceholder = 'Search...',
 		searchFields = (item: T) => [item.name],
 		itemRight,
-		paramName = 'id',
+		activeId,
 		border = true,
 		itemLabel = 'items'
-	}: Props = $props();
+	}: GroupedFilterableNavListProps<T> = $props();
 
 	// ── State ────────────────────────────────────────────────────────────────
 
 	let searchTerm = $state('');
 	// Namespaces the user has hidden from view. Empty = show all.
-	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
-	let hiddenNamespaces = $state(new SvelteSet<string>());
-	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
-	let expandedGroups = $state(new SvelteSet<string>());
+	// SvelteSet is natively reactive — no $state() wrapper needed.
+	let hiddenNamespaces = new SvelteSet<string>();
+	let expandedGroups = new SvelteSet<string>();
 	let filterDropdownOpen = $state(false);
 
 	// ── clickOutside action ──────────────────────────────────────────────────
@@ -147,8 +126,6 @@
 	// ── Namespace of the currently active item (from route params) ───────────
 
 	const activeNs = $derived.by(() => {
-		const params = page.params as Record<string, string | undefined>;
-		const activeId = params[paramName];
 		if (!activeId) return null;
 
 		for (const item of items) {
@@ -161,6 +138,9 @@
 
 	// ── Auto-expand logic ────────────────────────────────────────────────────
 
+	// Effect guards: track previous values for comparison inside $effect blocks.
+	// These are NOT $state — they exist solely to diff against across effect runs
+	// and should never trigger re-rendering.
 	let prevNsLength = 0;
 	let prevVisibleNsCount = 0;
 	$effect(() => {
@@ -189,6 +169,7 @@
 	});
 
 	// Expand the namespace containing the currently active item
+	// Effect guard (see note above) — NOT $state.
 	let prevActiveNs: string | null = null;
 	$effect(() => {
 		const ns = activeNs;
@@ -238,9 +219,7 @@
 	// ── Route helpers ────────────────────────────────────────────────────────
 
 	function isActive(name: string) {
-		const targetId = toUrlId(name);
-		const params = page.params as Record<string, string | undefined>;
-		return params[paramName] === targetId;
+		return activeId !== undefined && activeId === toUrlId(name);
 	}
 </script>
 

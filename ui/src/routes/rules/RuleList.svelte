@@ -4,6 +4,7 @@
 	import UnlinkedRuleIndicator from '$lib/components/rulebase/UnlinkedRuleIndicator.svelte';
 	import NoOutputTypesIndicator from '$lib/components/rulebase/NoOutputTypesIndicator.svelte';
 	import DynamicDetectionIndicator from '$lib/components/rulebase/DynamicDetectionIndicator.svelte';
+	import { page } from '$app/state';
 	import GroupedFilterableNavList from '$lib/components/nav/GroupedFilterableNavList.svelte';
 	import { rulePath } from '$lib/utils';
 
@@ -14,6 +15,7 @@
 	let { rules }: Props = $props();
 
 	const groupKey = (rule: RuleListItem) => rule.ns;
+	const activeId = $derived(page.params.id);
 </script>
 
 {#snippet ruleRight(rule: RuleListItem)}
@@ -46,4 +48,5 @@
 	searchPlaceholder="Search rules..."
 	itemLabel="rules"
 	itemRight={ruleRight}
+	{activeId}
 />
