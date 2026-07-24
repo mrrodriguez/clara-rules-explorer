@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { SessionFactTypeInfo } from '$lib/types/api';
-	import { toUrlId } from '$lib/utils';
-	import FilterableNavList from '$lib/components/nav/FilterableNavList.svelte';
+	import { toUrlId, splitQualifiedName } from '$lib/utils';
+	import GroupedFilterableNavList from '$lib/components/nav/GroupedFilterableNavList.svelte';
 	import { page } from '$app/state';
 
 	const factTypes = $derived<SessionFactTypeInfo[]>(
@@ -17,6 +17,8 @@
 	function isTypeActive(typeName: string) {
 		return page.params.typeName === toUrlId(typeName);
 	}
+
+	const groupKey = (ft: SessionFactTypeInfo) => splitQualifiedName(ft.name).namespace;
 </script>
 
 {#snippet itemRight(type: SessionFactTypeInfo)}
@@ -29,11 +31,13 @@
 	</span>
 {/snippet}
 
-<FilterableNavList
+<GroupedFilterableNavList
 	items={factTypes}
+	{groupKey}
 	hrefPrefix={sessionPath}
 	activeColor="#0d6efd"
 	searchPlaceholder="Search session facts..."
+	itemLabel="types"
 	{itemRight}
 	paramName="typeName"
 />
