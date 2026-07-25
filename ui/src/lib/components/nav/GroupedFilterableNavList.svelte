@@ -1,5 +1,4 @@
 <script lang="ts" generics="T extends { name: string }">
-	import { SvelteSet } from 'svelte/reactivity';
 	import ReferenceListItem from '$lib/components/nav/ReferenceListItem.svelte';
 	import type { GroupedFilterableNavListProps } from '$lib/components/nav/GroupedFilterableNavListProps';
 	import { toUrlId } from '$lib/utils';
@@ -20,16 +19,9 @@
 	// ── State ────────────────────────────────────────────────────────────────
 
 	let searchTerm = $state('');
-	// Namespaces the user has hidden from view. Empty = show all.
-	// SvelteSet is internally reactive, but $state() on the variable binding
-	// is still needed so that mutations from $effect blocks (auto-expand) and
-	// event handlers (toggleGroup, toggleNamespaceVisibility) reliably
-	// propagate through the derived view model and template. Without it,
-	// updates may not trigger re-renders in production builds.
-	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
-	let hiddenNamespaces = $state(new SvelteSet<string>());
-	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
-	let expandedGroups = $state(new SvelteSet<string>());
+	// Namespaces the user has hidden from view. Empty record = show all.
+	let hiddenNamespaces = $state<Record<string, boolean>>({});
+	let expandedGroups = $state<Record<string, boolean>>({});
 	let filterDropdownOpen = $state(false);
 
 	// ── clickOutside action ──────────────────────────────────────────────────
@@ -53,11 +45,11 @@
 	const view = $derived.by(() => {
 		// Determine namespaces in original order of first appearance
 		const nsOrder: string[] = [];
-		const seenNs = new SvelteSet<string>();
+		const seenNs: Record<string, boolean> = {};
 		for (const item of items) {
 			const ns = groupKey(item) || '(no namespace)';
-			if (!seenNs.has(ns)) {
-				seenNs.add(ns);
+			if (!seenNs[ns]) {
+				seenNs[ns] = true;
 				nsOrder.push(ns);
 			}
 		}
@@ -81,11 +73,11 @@
 		}
 
 		// Namespace visibility filter
-		const activeNsFilter = hiddenNamespaces.size > 0;
+		const activeNsFilter = Object.keys(hiddenNamespaces).length > 0;
 		const nsFiltered = activeNsFilter
 			? searchFiltered.filter((item) => {
 					const ns = groupKey(item) || '(no namespace)';
-					return !hiddenNamespaces.has(ns);
+					return !hiddenNamespaces[ns];
 				})
 			: searchFiltered;
 
@@ -93,7 +85,7 @@
 		let visibleNsCount = 0;
 		for (const ns of nsOrder) {
 			const count = nsItemCounts[ns] ?? 0;
-			if (count > 0 && !hiddenNamespaces.has(ns)) visibleNsCount++;
+			if (count > 0 && !hiddenNamespaces[ns]) visibleNsCount++;
 		}
 
 		// Group items by namespace (only when not searching)
@@ -157,9 +149,9 @@
 		if (totalNs !== prevNsLength) {
 			prevNsLength = totalNs;
 			prevVisibleNsCount = visibleNs;
-			expandedGroups.clear();
+			expandedGroups = {};
 			if (totalNs === 1) {
-				expandedGroups.add(view.nsOrder[0]);
+				expandedGroups[view.nsOrder[0]] = true;
 			}
 			return;
 		}
@@ -167,7 +159,7 @@
 		// Namespace filter narrowed results to exactly 1 visible namespace — auto-expand it
 		if (visibleNs === 1 && visibleNs !== prevVisibleNsCount) {
 			for (const g of view.groupedItems) {
-				expandedGroups.add(g.ns);
+				expandedGroups[g.ns] = true;
 			}
 		}
 
@@ -181,8 +173,8 @@
 		const ns = activeNs;
 		if (ns && ns !== prevActiveNs) {
 			prevActiveNs = ns;
-			if (!expandedGroups.has(ns)) {
-				expandedGroups.add(ns);
+			if (!expandedGroups[ns]) {
+				expandedGroups[ns] = true;
 			}
 		}
 	});
@@ -190,36 +182,36 @@
 	// ── Namespace filter helpers ─────────────────────────────────────────────
 
 	function toggleNamespaceVisibility(ns: string) {
-		if (hiddenNamespaces.has(ns)) {
-			hiddenNamespaces.delete(ns);
+		if (hiddenNamespaces[ns]) {
+			delete hiddenNamespaces[ns];
 		} else {
-			hiddenNamespaces.add(ns);
+			hiddenNamespaces[ns] = true;
 		}
 	}
 
 	function showAllNamespaces() {
-		hiddenNamespaces.clear();
+		hiddenNamespaces = {};
 		filterDropdownOpen = false;
 	}
 
 	// ── Group helpers ────────────────────────────────────────────────────────
 
 	function toggleGroup(ns: string) {
-		if (expandedGroups.has(ns)) {
-			expandedGroups.delete(ns);
+		if (expandedGroups[ns]) {
+			delete expandedGroups[ns];
 		} else {
-			expandedGroups.add(ns);
+			expandedGroups[ns] = true;
 		}
 	}
 
 	function expandAll() {
 		for (const ns of view.nsOrder) {
-			expandedGroups.add(ns);
+			expandedGroups[ns] = true;
 		}
 	}
 
 	function collapseAll() {
-		expandedGroups.clear();
+		expandedGroups = {};
 	}
 
 	// ── Route helpers ────────────────────────────────────────────────────────
@@ -282,7 +274,7 @@
 							>
 								<input
 									type="checkbox"
-									checked={!hiddenNamespaces.has(ns)}
+									checked={!hiddenNamespaces[ns]}
 									disabled={count === 0}
 									onchange={() => toggleNamespaceVisibility(ns)}
 								/>
@@ -337,7 +329,7 @@
 		{:else}
 			<!-- Grouped view -->
 			{#each view.groupedItems as group (group.ns)}
-				{@const expanded = expandedGroups.has(group.ns)}
+				{@const expanded = !!expandedGroups[group.ns]}
 
 				<button
 					class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-3 border-start-0 border-end-0 bg-light fw-medium small"
