@@ -1,7 +1,9 @@
 <script lang="ts" generics="T extends { name: string }">
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+	import { clickOutside } from '$lib/actions/clickOutside';
 	import ReferenceListItem from '$lib/components/nav/ReferenceListItem.svelte';
 	import type { GroupedFilterableNavListProps } from '$lib/components/nav/GroupedFilterableNavListProps';
+	import { NamespaceFilter } from '$lib/components/nav/namespaceFilter.svelte';
 	import { toRouteId } from '$lib/utils';
 
 	let {
@@ -20,27 +22,9 @@
 	// ── State ────────────────────────────────────────────────────────────────
 
 	let searchTerm = $state('');
-	// Namespaces the user has hidden from view. Empty record = show all.
-	let hiddenNamespaces = $state<Record<string, boolean>>({});
 	let expandedGroups = $state<Record<string, boolean>>({});
-	let filterDropdownOpen = $state(false);
-	let nsFilterText = $state('');
 
-	// ── clickOutside action ──────────────────────────────────────────────────
-
-	function clickOutside(node: HTMLElement, callback: () => void) {
-		function handleClick(e: MouseEvent) {
-			if (!node.contains(e.target as Node)) {
-				callback();
-			}
-		}
-		document.addEventListener('click', handleClick, true);
-		return {
-			destroy() {
-				document.removeEventListener('click', handleClick, true);
-			}
-		};
-	}
+	const nsFilter = new NamespaceFilter();
 
 	// ── Precomputed namespace index (only recomputes when items changes) ─────
 
@@ -75,7 +59,7 @@
 	const view = $derived.by(() => {
 		const { nsOrder, byNs } = nsIndex;
 		const searchActive = searchTerm.length > 0;
-		const activeNsFilter = Object.keys(hiddenNamespaces).length > 0;
+		const activeNsFilter = nsFilter.active;
 		const needle = searchTerm.toLowerCase();
 
 		// Per-namespace visible counts (for dropdown checkboxes)
@@ -99,7 +83,7 @@
 			// Visible ns count (all namespaces with matching items)
 			for (const ns of nsOrder) {
 				const count = nsItemCounts.get(ns) ?? 0;
-				if (count > 0 && !hiddenNamespaces[ns]) visibleNsCount++;
+				if (count > 0 && !nsFilter.hiddenNamespaces[ns]) visibleNsCount++;
 			}
 		} else {
 			// Non-search mode: populate counts for ALL namespaces (dropdown checkboxes
@@ -108,7 +92,7 @@
 				const bucket = byNs.get(ns);
 				const count = bucket ? bucket.length : 0;
 				nsItemCounts.set(ns, count);
-				if (count > 0 && !hiddenNamespaces[ns]) visibleNsCount++;
+				if (count > 0 && !nsFilter.hiddenNamespaces[ns]) visibleNsCount++;
 			}
 			totalSearchResults = items.length;
 		}
@@ -117,7 +101,7 @@
 		const groupedItems: { ns: string; items: T[]; totalCount: number }[] = [];
 		if (!searchActive) {
 			for (const ns of nsOrder) {
-				if (hiddenNamespaces[ns]) continue;
+				if (nsFilter.hiddenNamespaces[ns]) continue;
 				const bucket = byNs.get(ns);
 				if (bucket && bucket.length > 0) {
 					groupedItems.push({ ns, items: bucket, totalCount: bucket.length });
@@ -191,40 +175,9 @@
 		}
 	});
 
-	// ── Namespace filter helpers ─────────────────────────────────────────────
-
-	function toggleNamespaceVisibility(ns: string) {
-		const hasActiveFilter = Object.keys(hiddenNamespaces).length > 0;
-		if (!hasActiveFilter) {
-			// First click: select only this namespace (hide all others)
-			for (const otherNs of view.nsOrder) {
-				hiddenNamespaces[otherNs] = true;
-			}
-			delete hiddenNamespaces[ns];
-		} else if (hiddenNamespaces[ns]) {
-			delete hiddenNamespaces[ns];
-		} else {
-			hiddenNamespaces[ns] = true;
-			// If all namespaces would be hidden, reset to show all
-			if (Object.keys(hiddenNamespaces).length >= view.nsOrder.length) {
-				hiddenNamespaces = {};
-			}
-		}
-	}
-
-	function showAllNamespaces() {
-		hiddenNamespaces = {};
-		filterDropdownOpen = false;
-		nsFilterText = '';
-	}
-
 	// ── Filtered namespace list for dropdown search ─────────────────────────
 
-	const filteredNsOrder = $derived(
-		nsFilterText.length === 0
-			? view.nsOrder
-			: view.nsOrder.filter((ns) => ns.toLowerCase().includes(nsFilterText.toLowerCase()))
-	);
+	const filteredNsOrder = $derived(nsFilter.getFiltered(view.nsOrder));
 
 	// ── Group helpers ────────────────────────────────────────────────────────
 
@@ -280,16 +233,16 @@
 			<div
 				class="position-relative"
 				use:clickOutside={() => {
-					filterDropdownOpen = false;
-					nsFilterText = '';
+					nsFilter.filterDropdownOpen = false;
+					nsFilter.nsFilterText = '';
 				}}
 			>
 				<button
 					class="btn btn-sm btn-outline-secondary w-100 text-truncate text-start"
-					onclick={() => (filterDropdownOpen = !filterDropdownOpen)}
+					onclick={() => (nsFilter.filterDropdownOpen = !nsFilter.filterDropdownOpen)}
 				>
 					<i class="bi bi-funnel me-1 opacity-75"></i>
-					{#if view.activeNsFilter}
+					{#if nsFilter.active}
 						{view.visibleNsCount} of {view.nsOrder.length} namespaces
 					{:else}
 						All namespaces
@@ -297,9 +250,9 @@
 					<span class="ms-1 text-muted">· {view.totalSearchResults} {itemLabel}</span>
 				</button>
 
-				{#if filterDropdownOpen}
+				{#if nsFilter.filterDropdownOpen}
 					<div class="dropdown-menu show w-100 p-1" style="max-height: 320px; overflow-y: auto;">
-						<button class="dropdown-item small py-1" onclick={showAllNamespaces}>
+						<button class="dropdown-item small py-1" onclick={() => nsFilter.showAll()}>
 							<i class="bi bi-check-all me-1 opacity-50"></i> Show all namespaces
 						</button>
 						<div class="dropdown-divider my-1"></div>
@@ -308,18 +261,18 @@
 								type="text"
 								class="form-control form-control-sm"
 								placeholder="Filter namespaces..."
-								bind:value={nsFilterText}
+								bind:value={nsFilter.nsFilterText}
 							/>
 						</div>
 						{#each filteredNsOrder as ns (ns)}
 							{@const count = view.nsItemCounts.get(ns) ?? 0}
-							{@const checked = !hiddenNamespaces[ns]}
+							{@const checked = !nsFilter.hiddenNamespaces[ns]}
 							<button
 								class="dropdown-item small d-flex align-items-center gap-1 mb-0 py-1 {count === 0
 									? 'text-muted'
 									: ''}"
 								disabled={count === 0}
-								onclick={() => toggleNamespaceVisibility(ns)}
+								onclick={() => nsFilter.toggle(ns, view.nsOrder)}
 								data-ns={ns}
 							>
 								<i class="bi bi-{checked ? 'check-square' : 'square'} me-1 opacity-75"></i>
