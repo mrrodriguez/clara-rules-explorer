@@ -1,4 +1,5 @@
 <script lang="ts" generics="T extends { name: string }">
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import ReferenceListItem from '$lib/components/nav/ReferenceListItem.svelte';
 	import type { GroupedFilterableNavListProps } from '$lib/components/nav/GroupedFilterableNavListProps';
 	import { toUrlId } from '$lib/utils';
@@ -41,69 +42,85 @@
 		};
 	}
 
-	// ── Derived view model ───────────────────────────────────────────────────
+	// ── Precomputed namespace index (only recomputes when items changes) ─────
 
-	const view = $derived.by(() => {
-		// Determine namespaces in original order of first appearance
+	const nsIndex = $derived.by(() => {
 		const nsOrder: string[] = [];
-		const seenNs: Record<string, boolean> = {};
+		const seenNs = new SvelteSet<string>();
+		const byNs = new SvelteMap<string, T[]>();
+		const urlIdToNs = new SvelteMap<string, string>();
+
 		for (const item of items) {
 			const ns = groupKey(item) || '(no namespace)';
-			if (!seenNs[ns]) {
-				seenNs[ns] = true;
+			const urlId = toUrlId(item.name);
+
+			if (!seenNs.has(ns)) {
+				seenNs.add(ns);
 				nsOrder.push(ns);
 			}
+			const bucket = byNs.get(ns);
+			if (bucket) {
+				bucket.push(item);
+			} else {
+				byNs.set(ns, [item]);
+			}
+			urlIdToNs.set(urlId, ns);
 		}
 
-		// Search filter (independent of namespace visibility)
+		return { nsOrder, byNs, urlIdToNs };
+	});
+
+	// ── Derived view model (cheap filtering over precomputed index) ──────────
+
+	const view = $derived.by(() => {
+		const { nsOrder, byNs } = nsIndex;
 		const searchActive = searchTerm.length > 0;
-		const searchFiltered = searchActive
-			? items.filter((item) =>
-					searchFields(item).some((field) => field.toLowerCase().includes(searchTerm.toLowerCase()))
-				)
-			: items;
-
-		// Total matching items across ALL namespaces (for dropdown counter)
-		const totalSearchResults = searchFiltered.length;
-
-		// Per-namespace item counts from searchFiltered (for checkbox labels)
-		const nsItemCounts: Record<string, number> = {};
-		for (const item of searchFiltered) {
-			const ns = groupKey(item) || '(no namespace)';
-			nsItemCounts[ns] = (nsItemCounts[ns] ?? 0) + 1;
-		}
-
-		// Namespace visibility filter
 		const activeNsFilter = Object.keys(hiddenNamespaces).length > 0;
-		const nsFiltered = activeNsFilter
-			? searchFiltered.filter((item) => {
-					const ns = groupKey(item) || '(no namespace)';
-					return !hiddenNamespaces[ns];
-				})
-			: searchFiltered;
+		const needle = searchTerm.toLowerCase();
 
-		// Count of visible namespaces (those with matching items after search)
+		// Per-namespace visible counts (for dropdown checkboxes)
+		const nsItemCounts = new SvelteMap<string, number>();
+		let totalSearchResults: number;
 		let visibleNsCount = 0;
-		for (const ns of nsOrder) {
-			const count = nsItemCounts[ns] ?? 0;
-			if (count > 0 && !hiddenNamespaces[ns]) visibleNsCount++;
+
+		// Search results (flat list, no grouping)
+		let searchFiltered: T[] | null = null;
+		if (searchActive) {
+			searchFiltered = [];
+			for (const item of items) {
+				const matches = searchFields(item).some((f) => f.toLowerCase().includes(needle));
+				if (matches) {
+					searchFiltered.push(item);
+					const ns = groupKey(item) || '(no namespace)';
+					nsItemCounts.set(ns, (nsItemCounts.get(ns) ?? 0) + 1);
+				}
+			}
+			totalSearchResults = searchFiltered.length;
+			// Visible ns count (all namespaces with matching items)
+			for (const ns of nsOrder) {
+				const count = nsItemCounts.get(ns) ?? 0;
+				if (count > 0 && !hiddenNamespaces[ns]) visibleNsCount++;
+			}
+		} else {
+			// Non-search mode: populate counts for ALL namespaces (dropdown checkboxes
+			// need counts even for hidden namespaces so toggles remain clickable).
+			for (const ns of nsOrder) {
+				const bucket = byNs.get(ns);
+				const count = bucket ? bucket.length : 0;
+				nsItemCounts.set(ns, count);
+				if (count > 0 && !hiddenNamespaces[ns]) visibleNsCount++;
+			}
+			totalSearchResults = items.length;
 		}
 
-		// Group items by namespace (only when not searching)
+		// Build groupedItems for non-search mode (respects namespace visibility)
 		const groupedItems: { ns: string; items: T[]; totalCount: number }[] = [];
 		if (!searchActive) {
-			const groupMap: Record<string, T[]> = {};
-			for (const item of nsFiltered) {
-				const ns = groupKey(item) || '(no namespace)';
-				if (!groupMap[ns]) groupMap[ns] = [];
-				groupMap[ns].push(item);
-			}
-
-			// Preserve nsOrder but only include namespaces with matching items
 			for (const ns of nsOrder) {
-				const groupItems = groupMap[ns];
-				if (groupItems && groupItems.length > 0) {
-					groupedItems.push({ ns, items: groupItems, totalCount: groupItems.length });
+				if (hiddenNamespaces[ns]) continue;
+				const bucket = byNs.get(ns);
+				if (bucket && bucket.length > 0) {
+					groupedItems.push({ ns, items: bucket, totalCount: bucket.length });
 				}
 			}
 		}
@@ -111,29 +128,23 @@
 		return {
 			nsOrder,
 			searchFiltered,
-			nsFiltered,
 			groupedItems,
 			searchActive,
 			totalSearchResults,
 			activeNsFilter,
 			visibleNsCount,
 			nsItemCounts,
-			totalMatching: nsFiltered.length
+			totalMatching: searchActive
+				? (searchFiltered?.length ?? 0)
+				: activeNsFilter
+					? groupedItems.reduce((sum, g) => sum + g.items.length, 0)
+					: items.length
 		};
 	});
 
-	// ── Namespace of the currently active item (from route params) ───────────
+	// ── Namespace of the currently active item (O(1) Map lookup) ─────────────
 
-	const activeNs = $derived.by(() => {
-		if (!activeId) return null;
-
-		for (const item of items) {
-			if (toUrlId(item.name) === activeId) {
-				return groupKey(item) || '(no namespace)';
-			}
-		}
-		return null;
-	});
+	const activeNs = $derived(activeId ? (nsIndex.urlIdToNs.get(activeId) ?? null) : null);
 
 	// ── Auto-expand logic ────────────────────────────────────────────────────
 
@@ -301,7 +312,7 @@
 							/>
 						</div>
 						{#each filteredNsOrder as ns (ns)}
-							{@const count = view.nsItemCounts[ns] ?? 0}
+							{@const count = view.nsItemCounts.get(ns) ?? 0}
 							{@const checked = !hiddenNamespaces[ns]}
 							<button
 								class="dropdown-item small d-flex align-items-center gap-1 mb-0 py-1 {count === 0

@@ -121,5 +121,5 @@ available). This is unrelated to the goals scope of the work I've presented for 
 8. IN PROGRESS ns filter should be able to deselect all but one. First click should be the selected. Then when
    one is selected already they stack.
 
-9. Loading summaries when there is a big list - even collapsed, is very slow. Even when on queries
+9. IN PROGRESS Loading summaries when there is a big list - even collapsed, is very slow. Even when on queries
    when an order of magnitude less than rules/fact-types (300 vs 3000).

@@ -328,19 +328,22 @@
    :fact-type-count (count (:fact-types analysis))})
 
 (defn rules-list
-  "Returns a sequence of lightweight rule summaries, preserving load order."
+  "Returns a sequence of lightweight rule summaries, preserving load order.
+   Omits :upstream and :downstream — they are only needed in the detail view
+   and add significant payload weight at scale (3k+ rules)."
   [analysis]
   (mapv #(select-keys % [:name :ns :doc :lhs-types :insert-types :retract-types
                          :source-rule :sink-rule :unlinked-rule
-                         :no-output-types :upstream :downstream
+                         :no-output-types
                          :dynamic-insert-types-detected
                          :dynamic-retract-types-detected])
         (vals (:rules analysis))))
 
 (defn queries-list
-  "Returns a sequence of lightweight query summaries, preserving load order."
+  "Returns a sequence of lightweight query summaries, preserving load order.
+   Omits :upstream and :downstream — they are only needed in the detail view."
   [analysis]
-  (mapv #(select-keys % [:name :ns :doc :lhs-types :params :upstream :downstream])
+  (mapv #(select-keys % [:name :ns :doc :lhs-types :params])
         (vals (:queries analysis))))
 
 (defn fact-types-list
