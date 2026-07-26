@@ -12,7 +12,7 @@
 	"notes": null,
 	"annotation-sources": ["clara-rules/insert-types"],
 	"insert-types": ["extract-doc-meta"],
-	"rhs-form": "(do\n (clojure.core/let\n  [resolved__61439__auto__ #'extract-doc-meta]\n  (clara.rules/insert! resolved__61439__auto__)))\n",
+	"rhs-form": "(do\n (clojure.core/let\n  [resolved__61559__auto__ #'extract-doc-meta]\n  (clara.rules/insert! resolved__61559__auto__)))\n",
 	"doc": null,
 	"sink-rule": true,
 	"props": {}

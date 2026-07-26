@@ -48,143 +48,56 @@
 			"sink-rule": true
 		},
 		{
-			"downstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
-					"type": "rule"
-				}
-			],
-			"source-rule": true,
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"doc": null,
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
 			],
-			"retract-types": [],
 			"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"],
-			"doc": null,
+			"retract-types": [],
+			"source-rule": true,
 			"sink-rule": false
 		},
 		{
-			"downstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
-					"type": "rule"
-				}
-			],
-			"source-rule": true,
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"doc": null,
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_facts.RequiredDocument"
 			],
-			"retract-types": [],
 			"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"],
-			"doc": null,
+			"retract-types": [],
+			"source-rule": true,
 			"sink-rule": false
 		},
 		{
-			"downstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs",
-					"type": "rule"
-				}
-			],
-			"source-rule": false,
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"doc": null,
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
 				"clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"
 			],
-			"retract-types": [],
 			"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput"],
-			"upstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
-					"type": "rule"
-				}
-			],
-			"doc": null,
+			"retract-types": [],
+			"source-rule": false,
 			"sink-rule": false
 		},
 		{
-			"downstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/find-document-check",
-					"type": "query"
-				}
-			],
-			"source-rule": false,
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"doc": null,
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput"
 			],
-			"retract-types": [],
 			"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
-			"upstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
-					"type": "rule"
-				}
-			],
-			"doc": null,
+			"retract-types": [],
+			"source-rule": false,
 			"sink-rule": false
 		},
 		{
@@ -195,13 +108,6 @@
 			"no-output-types": true,
 			"retract-types": [],
 			"insert-types": [],
-			"upstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
-					"type": "rule"
-				}
-			],
 			"doc": null,
 			"sink-rule": false
 		},
@@ -226,13 +132,6 @@
 			"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
 			"retract-types": [],
 			"insert-types": ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"],
-			"upstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-					"type": "rule"
-				}
-			],
 			"doc": "After document checks pass, trigger a compliance review via Java constructor.\n   The analyzer sees the ComplianceReview. call but cannot statically determine\n   its return type — captured as a dynamic insert callsite.",
 			"sink-rule": true
 		},
@@ -255,13 +154,6 @@
 			"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
 			"retract-types": [],
 			"insert-types": ["compliance-review-result"],
-			"upstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-					"type": "rule"
-				}
-			],
 			"doc": "Same compliance review, but built via metadata-map style.\n   The analyzer captures the with-meta form as a dynamic callsite.",
 			"sink-rule": true
 		},
@@ -284,13 +176,6 @@
 				],
 				"resolution": "full"
 			},
-			"upstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-					"type": "rule"
-				}
-			],
 			"doc": "When doc check passes, retract any stale-document notice via Java constructor.\n   The analyzer captures the retract callsite with source coordinates.",
 			"sink-rule": true
 		},
@@ -313,71 +198,28 @@
 			"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
 			"retract-types": [],
 			"insert-types": ["clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"],
-			"upstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-					"type": "rule"
-				}
-			],
 			"doc": "After document checks pass, write an audit trail entry via opaque builder.\n   The analyzer detects an insert but cannot resolve the fact type — the\n   builder is a custom non-record function. This stays unresolved.",
 			"sink-rule": true
 		},
 		{
-			"downstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
-					"type": "query"
-				}
-			],
-			"source-rule": false,
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+			"doc": null,
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
 				"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 				"clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
 			],
-			"retract-types": [],
 			"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
-			"upstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-					"type": "rule"
-				}
-			],
-			"doc": null,
+			"retract-types": [],
+			"source-rule": false,
 			"sink-rule": false
 		},
 		{
-			"downstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
-					"type": "query"
-				}
-			],
-			"source-rule": false,
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+			"doc": null,
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
@@ -385,44 +227,15 @@
 				"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 				"clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
 			],
-			"retract-types": [],
 			"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
-			"upstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-					"type": "rule"
-				}
-			],
-			"doc": null,
+			"retract-types": [],
+			"source-rule": false,
 			"sink-rule": false
 		},
 		{
-			"downstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
-					"type": "query"
-				}
-			],
-			"source-rule": false,
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending",
+			"doc": null,
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
@@ -430,26 +243,9 @@
 				"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 				"clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
 			],
-			"retract-types": [],
 			"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
-			"upstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-					"type": "rule"
-				}
-			],
-			"doc": null,
+			"retract-types": [],
+			"source-rule": false,
 			"sink-rule": false
 		}
 	]

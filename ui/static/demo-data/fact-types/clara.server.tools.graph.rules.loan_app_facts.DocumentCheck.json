@@ -5,9 +5,9 @@
 		"clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
 		"clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice",
 		"clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
-		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
-		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
 	],
 	"used-by-queries": ["clara.server.tools.graph.rules.loan-doc-rules/find-document-check"],
 	"inserted-by-rules": ["clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"],

@@ -7,9 +7,9 @@
 		"clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
 		"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
 		"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
-		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
+		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
 	],
 	"used-by-queries": [],
 	"inserted-by-rules": [],

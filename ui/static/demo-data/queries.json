@@ -5,38 +5,14 @@
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"doc": null,
 			"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
-			"params": ["?app-id"],
-			"upstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-					"type": "rule"
-				}
-			]
+			"params": ["?app-id"]
 		},
 		{
 			"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"doc": null,
 			"lhs-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
-			"params": ["?app-id"],
-			"upstream": [
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-					"type": "rule"
-				},
-				{
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending",
-					"type": "rule"
-				}
-			]
+			"params": ["?app-id"]
 		}
 	]
 }

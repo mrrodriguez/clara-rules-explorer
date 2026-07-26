@@ -15,17 +15,17 @@
 	"upstream": [
 		{
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 			"type": "rule"
 		},
 		{
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
 			"type": "rule"
 		},
 		{
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
 			"type": "rule"
 		}
 	],

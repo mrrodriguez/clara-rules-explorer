@@ -44,7 +44,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -97,7 +97,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -148,7 +148,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -199,7 +199,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -250,7 +250,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -260,7 +260,7 @@
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 			"type": "rule",
 			"facts": [
 				{
@@ -301,7 +301,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}

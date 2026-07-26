@@ -16,9 +16,9 @@
 				"clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
 				"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
 				"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
 			],
 			"used-by-queries": [],
 			"inserted-by-rules": [],
@@ -95,9 +95,9 @@
 				"clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
 				"clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice",
 				"clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
 			],
 			"used-by-queries": ["clara.server.tools.graph.rules.loan-doc-rules/find-document-check"],
 			"inserted-by-rules": [
@@ -144,9 +144,9 @@
 		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 			"used-by-rules": [
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
 			],
 			"used-by-queries": [],
 			"inserted-by-rules": [],
@@ -155,9 +155,9 @@
 		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
 			"used-by-rules": [
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
 			],
 			"used-by-queries": [],
 			"inserted-by-rules": [],
@@ -166,14 +166,14 @@
 		{
 			"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 			"used-by-rules": [
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
 			],
 			"used-by-queries": ["clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"],
 			"inserted-by-rules": [
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
+				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
 			],
 			"retracted-by-rules": []
 		}
