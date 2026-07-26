@@ -59,9 +59,20 @@ export const ui = {
 		namespaceFilterDropdown(page: Page) {
 			return page.locator('.dropdown-menu.show');
 		},
-		/** A checkbox label inside the namespace filter dropdown */
-		namespaceCheckbox(page: Page, nsLabel: string) {
-			return page.locator('.dropdown-menu.show label').filter({ hasText: nsLabel });
+		/** A namespace toggle button inside the filter dropdown */
+		namespaceToggle(page: Page, nsLabel: string) {
+			return page.locator('.dropdown-menu.show button[data-ns]').filter({ hasText: nsLabel });
+		},
+		/** All namespace toggle buttons inside the filter dropdown */
+		allNamespaceToggles(page: Page) {
+			return page.locator('.dropdown-menu.show button[data-ns]');
+		},
+		/** Returns true if the namespace toggle for the given ns is checked (check-square icon) */
+		isNamespaceChecked(page: Page, nsLabel: string) {
+			return page
+				.locator('.dropdown-menu.show button[data-ns]')
+				.filter({ hasText: nsLabel })
+				.locator('i.bi-check-square');
 		},
 		/** The "Show all namespaces" button in the dropdown */
 		showAllNamespacesButton(page: Page) {

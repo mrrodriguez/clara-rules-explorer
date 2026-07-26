@@ -141,80 +141,164 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 
 	// ── Namespace filter dropdown ─────────────────────────────────────────
 
-	test('namespace filter dropdown opens and shows checkboxes', async ({ page }) => {
+	test('namespace filter dropdown opens and shows toggles', async ({ page }) => {
 		await ui.groupedNav.namespaceFilterButton(page).click();
 
 		const dropdown = ui.groupedNav.namespaceFilterDropdown(page);
 		await expect(dropdown).toBeVisible();
 
 		const groupCount = await ui.groupedNav.allGroupToggles(page).count();
-		await expect(dropdown.locator('input[type="checkbox"]')).toHaveCount(groupCount);
+		await expect(ui.groupedNav.allNamespaceToggles(page)).toHaveCount(groupCount);
 		await expect(ui.groupedNav.showAllNamespacesButton(page)).toBeVisible();
+
+		// All namespaces start checked (no filter active)
+		const toggleCount = await ui.groupedNav.allNamespaceToggles(page).count();
+		for (let i = 0; i < toggleCount; i++) {
+			await expect(
+				ui.groupedNav.allNamespaceToggles(page).nth(i).locator('i.bi-check-square')
+			).toBeVisible();
+		}
 	});
 
-	test('unchecking a namespace hides its group and updates filter button text', async ({ page }) => {
+	test('first click exclusively selects one namespace (deselects all others)', async ({ page }) => {
 		await ui.groupedNav.expandAllButton(page).click();
 		const initialCount = await page.locator('a.list-group-item').count();
-		const initialGroupCount = await ui.groupedNav.allGroupToggles(page).count();
 
 		await ui.groupedNav.namespaceFilterButton(page).click();
-		await ui.groupedNav.namespaceFilterDropdown(page).locator('input[type="checkbox"]').first().uncheck();
+		const toggles = ui.groupedNav.allNamespaceToggles(page);
+		const toggleCount = await toggles.count();
+		expect(toggleCount).toBeGreaterThanOrEqual(2);
 
-		// Item count decreased
+		// Click the first namespace — should exclusively select it
+		await toggles.first().click();
+
+		// Only the first toggle shows checked
+		await expect(toggles.first().locator('i.bi-check-square')).toBeVisible();
+		for (let i = 1; i < toggleCount; i++) {
+			await expect(toggles.nth(i).locator('i.bi-square')).toBeVisible();
+		}
+
+		// Fewer items and groups visible
 		const newCount = await page.locator('a.list-group-item').count();
 		expect(newCount).toBeLessThan(initialCount);
-
-		// At least one fewer group
-		const newGroupCount = await ui.groupedNav.allGroupToggles(page).count();
-		expect(newGroupCount).toBeLessThan(initialGroupCount);
 
 		// Filter button text reflects active filter
 		await expect(ui.groupedNav.namespaceFilterButton(page)).not.toContainText('All namespaces');
 	});
 
-	test('rechecking a namespace restores it', async ({ page }) => {
+	test('subsequent clicks stack (add to selection)', async ({ page }) => {
+		await ui.groupedNav.expandAllButton(page).click();
+
+		await ui.groupedNav.namespaceFilterButton(page).click();
+		const toggles = ui.groupedNav.allNamespaceToggles(page);
+		const toggleCount = await toggles.count();
+		expect(toggleCount).toBeGreaterThanOrEqual(2);
+
+		// First click: exclusive select
+		await toggles.first().click();
+		await expect(toggles.first().locator('i.bi-check-square')).toBeVisible();
+		await expect(toggles.nth(1).locator('i.bi-square')).toBeVisible();
+
+		// Second click on another namespace: stacks (both visible)
+		await toggles.nth(1).click();
+		await expect(toggles.first().locator('i.bi-check-square')).toBeVisible();
+		await expect(toggles.nth(1).locator('i.bi-check-square')).toBeVisible();
+
+		// Three groups visible
+		const groupCount = await ui.groupedNav.allGroupToggles(page).count();
+		expect(groupCount).toBe(2);
+	});
+
+	test('unchecking the last visible namespace shows all again', async ({ page }) => {
 		await ui.groupedNav.expandAllButton(page).click();
 		const initialCount = await page.locator('a.list-group-item').count();
 
-		// Hide one namespace
 		await ui.groupedNav.namespaceFilterButton(page).click();
-		const firstCheckbox = ui.groupedNav.namespaceFilterDropdown(page).locator('input[type="checkbox"]').first();
-		await firstCheckbox.uncheck();
-		const reducedCount = await page.locator('a.list-group-item').count();
-		expect(reducedCount).toBeLessThan(initialCount);
+		const toggles = ui.groupedNav.allNamespaceToggles(page);
+		const toggleCount = await toggles.count();
 
-		// Close dropdown then reopen to re-check
+		// Hide all namespaces one by one
+		for (let i = 0; i < toggleCount; i++) {
+			await toggles.nth(0).click();
+			// After each click that hides the last visible, all should reappear
+			// But if there are still visible ones, the toggle just hides this one
+			const remainingToggles = ui.groupedNav.allNamespaceToggles(page);
+			const remainingCount = await remainingToggles.count();
+			if (remainingCount > 0 && (await remainingToggles.locator('i.bi-check-square').count()) === 0) {
+				// All are hidden — should auto-reset to show all
+				await expect(ui.groupedNav.namespaceFilterButton(page)).toContainText('All namespaces');
+				break;
+			}
+		}
+
+		// Close dropdown
 		await ui.groupedNav.searchInput(page, 'Search rules...').click();
-		await ui.groupedNav.namespaceFilterButton(page).click();
-		await firstCheckbox.check();
-		await expect(page.locator('a.list-group-item')).toHaveCount(initialCount);
 
-		// Filter button back to "All namespaces"
+		// All items should be back
+		await expect(page.locator('a.list-group-item')).toHaveCount(initialCount);
+	});
+
+	test('toggling the only selected namespace hides it and shows all', async ({ page }) => {
+		await ui.groupedNav.expandAllButton(page).click();
+		const initialCount = await page.locator('a.list-group-item').count();
+
+		// First click: exclusive select the first namespace
+		await ui.groupedNav.namespaceFilterButton(page).click();
+		const toggles = ui.groupedNav.allNamespaceToggles(page);
+		await toggles.first().click();
+
+		// Now only the first is checked — click it again to hide it
+		await toggles.first().click();
+
+		// All namespaces should be visible again (auto-reset to show all)
 		await expect(ui.groupedNav.namespaceFilterButton(page)).toContainText('All namespaces');
+		await expect(toggles.first().locator('i.bi-check-square')).toBeVisible();
+
+		// Close dropdown and verify all items restored
+		await ui.groupedNav.searchInput(page, 'Search rules...').click();
+		await expect(page.locator('a.list-group-item')).toHaveCount(initialCount);
 	});
 
 	test('"Show all namespaces" button resets filters', async ({ page }) => {
 		await ui.groupedNav.expandAllButton(page).click();
 		const initialCount = await page.locator('a.list-group-item').count();
 
-		// Hide all namespaces
+		// Hide one namespace via exclusive select
 		await ui.groupedNav.namespaceFilterButton(page).click();
-		const checkboxes = ui.groupedNav.namespaceFilterDropdown(page).locator('input[type="checkbox"]');
-		const cbCount = await checkboxes.count();
-		for (let i = 0; i < cbCount; i++) {
-			await checkboxes.nth(i).uncheck();
-		}
+		await ui.groupedNav.allNamespaceToggles(page).first().click();
 
-		await expect(ui.groupedNav.allGroupToggles(page)).toHaveCount(0);
+		await expect(ui.groupedNav.allGroupToggles(page)).toHaveCount(1);
 
 		// Close dropdown, reopen, click "Show all namespaces"
 		await ui.groupedNav.searchInput(page, 'Search rules...').click();
 		await ui.groupedNav.namespaceFilterButton(page).click();
 		await ui.groupedNav.showAllNamespacesButton(page).click();
 
-		// All items restored
+		// All items restored and dropdown closed
 		await expect(page.locator('a.list-group-item')).toHaveCount(initialCount);
 		await expect(ui.groupedNav.namespaceFilterButton(page)).toContainText('All namespaces');
+		await expect(ui.groupedNav.namespaceFilterDropdown(page)).not.toBeVisible();
+	});
+
+	test('namespace filter text input filters the toggle list', async ({ page }) => {
+		await ui.groupedNav.namespaceFilterButton(page).click();
+
+		const dropdown = ui.groupedNav.namespaceFilterDropdown(page);
+		const filterInput = dropdown.locator('input[placeholder="Filter namespaces..."]');
+		await expect(filterInput).toBeVisible();
+
+		const initialToggleCount = await ui.groupedNav.allNamespaceToggles(page).count();
+		expect(initialToggleCount).toBeGreaterThanOrEqual(2);
+
+		// Type a filter that matches only one namespace
+		await filterInput.fill('loan-app');
+
+		// Only one toggle visible
+		await expect(ui.groupedNav.allNamespaceToggles(page)).toHaveCount(1);
+
+		// Clear filter — all toggles reappear
+		await filterInput.fill('');
+		await expect(ui.groupedNav.allNamespaceToggles(page)).toHaveCount(initialToggleCount);
 	});
 
 	test('filter dropdown closes on clicking outside', async ({ page }) => {

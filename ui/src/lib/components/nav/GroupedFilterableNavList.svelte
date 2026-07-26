@@ -23,6 +23,7 @@
 	let hiddenNamespaces = $state<Record<string, boolean>>({});
 	let expandedGroups = $state<Record<string, boolean>>({});
 	let filterDropdownOpen = $state(false);
+	let nsFilterText = $state('');
 
 	// ── clickOutside action ──────────────────────────────────────────────────
 
@@ -182,17 +183,37 @@
 	// ── Namespace filter helpers ─────────────────────────────────────────────
 
 	function toggleNamespaceVisibility(ns: string) {
-		if (hiddenNamespaces[ns]) {
+		const hasActiveFilter = Object.keys(hiddenNamespaces).length > 0;
+		if (!hasActiveFilter) {
+			// First click: select only this namespace (hide all others)
+			for (const otherNs of view.nsOrder) {
+				hiddenNamespaces[otherNs] = true;
+			}
+			delete hiddenNamespaces[ns];
+		} else if (hiddenNamespaces[ns]) {
 			delete hiddenNamespaces[ns];
 		} else {
 			hiddenNamespaces[ns] = true;
+			// If all namespaces would be hidden, reset to show all
+			if (Object.keys(hiddenNamespaces).length >= view.nsOrder.length) {
+				hiddenNamespaces = {};
+			}
 		}
 	}
 
 	function showAllNamespaces() {
 		hiddenNamespaces = {};
 		filterDropdownOpen = false;
+		nsFilterText = '';
 	}
+
+	// ── Filtered namespace list for dropdown search ─────────────────────────
+
+	const filteredNsOrder = $derived(
+		nsFilterText.length === 0
+			? view.nsOrder
+			: view.nsOrder.filter((ns) => ns.toLowerCase().includes(nsFilterText.toLowerCase()))
+	);
 
 	// ── Group helpers ────────────────────────────────────────────────────────
 
@@ -245,7 +266,13 @@
 	<!-- Namespace multi-select filter (only when > 1 namespace, not searching) -->
 	{#if !view.searchActive && view.nsOrder.length > 1}
 		<div class="p-2 border-bottom bg-light">
-			<div class="position-relative" use:clickOutside={() => (filterDropdownOpen = false)}>
+			<div
+				class="position-relative"
+				use:clickOutside={() => {
+					filterDropdownOpen = false;
+					nsFilterText = '';
+				}}
+			>
 				<button
 					class="btn btn-sm btn-outline-secondary w-100 text-truncate text-start"
 					onclick={() => (filterDropdownOpen = !filterDropdownOpen)}
@@ -260,27 +287,34 @@
 				</button>
 
 				{#if filterDropdownOpen}
-					<div class="dropdown-menu show w-100 p-1" style="max-height: 240px; overflow-y: auto;">
+					<div class="dropdown-menu show w-100 p-1" style="max-height: 320px; overflow-y: auto;">
 						<button class="dropdown-item small py-1" onclick={showAllNamespaces}>
 							<i class="bi bi-check-all me-1 opacity-50"></i> Show all namespaces
 						</button>
 						<div class="dropdown-divider my-1"></div>
-						{#each view.nsOrder as ns (ns)}
+						<div class="px-1 mb-1">
+							<input
+								type="text"
+								class="form-control form-control-sm"
+								placeholder="Filter namespaces..."
+								bind:value={nsFilterText}
+							/>
+						</div>
+						{#each filteredNsOrder as ns (ns)}
 							{@const count = view.nsItemCounts[ns] ?? 0}
-							<label
+							{@const checked = !hiddenNamespaces[ns]}
+							<button
 								class="dropdown-item small d-flex align-items-center gap-1 mb-0 py-1 {count === 0
 									? 'text-muted'
 									: ''}"
+								disabled={count === 0}
+								onclick={() => toggleNamespaceVisibility(ns)}
+								data-ns={ns}
 							>
-								<input
-									type="checkbox"
-									checked={!hiddenNamespaces[ns]}
-									disabled={count === 0}
-									onchange={() => toggleNamespaceVisibility(ns)}
-								/>
-								<span class="text-truncate">{ns}</span>
+								<i class="bi bi-{checked ? 'check-square' : 'square'} me-1 opacity-75"></i>
+								<span class="text-truncate" title={ns}>{ns}</span>
 								<span class="ms-auto text-muted ps-1 small">{count}</span>
-							</label>
+							</button>
 						{/each}
 					</div>
 				{/if}
