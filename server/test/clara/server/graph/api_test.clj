@@ -28,7 +28,7 @@
 (defn- ->handler
   ([] (->handler (->test-session)))
   ([session]
-   (api/app (atom session) (atom loan-doc-annotations))))
+   (:handler (api/app (atom session) (atom loan-doc-annotations)))))
 
 (deftest test-not-found
   (let [handler (->handler)]

@@ -21,7 +21,7 @@
                     (r/fire-rules))
         session-atom (atom session)
         annotations-atom (atom {})
-        handler (api/app session-atom annotations-atom)]
+        handler (:handler (api/app session-atom annotations-atom))]
 
     (testing "GET /v1/session/fact-types"
       (let [response (handler (mock/request :get "/v1/session/fact-types"))]
@@ -39,7 +39,7 @@
                     (r/fire-rules))
         session-atom (atom session)
         annotations-atom (atom {})
-        handler (api/app session-atom annotations-atom)]
+        handler (:handler (api/app session-atom annotations-atom))]
 
     (testing "GET /v1/session/facts/:id"
       ;; First get the snapshot to find an ID
@@ -68,7 +68,7 @@
                     (r/fire-rules))
         session-atom (atom session)
         annotations-atom (atom {})
-        handler (api/app session-atom annotations-atom)]
+        handler (:handler (api/app session-atom annotations-atom))]
 
     (testing "GET /v1/session/rules/:fq-name"
       (let [response (handler (mock/request :get "/v1/session/rules/clara.server.tools.graph.rules.loan-doc-rules.collect-app-req-docs"))]
