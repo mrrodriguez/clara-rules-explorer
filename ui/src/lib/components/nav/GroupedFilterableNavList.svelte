@@ -2,7 +2,7 @@
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import ReferenceListItem from '$lib/components/nav/ReferenceListItem.svelte';
 	import type { GroupedFilterableNavListProps } from '$lib/components/nav/GroupedFilterableNavListProps';
-	import { toUrlId } from '$lib/utils';
+	import { toRouteId } from '$lib/utils';
 
 	let {
 		items,
@@ -48,11 +48,11 @@
 		const nsOrder: string[] = [];
 		const seenNs = new SvelteSet<string>();
 		const byNs = new SvelteMap<string, T[]>();
-		const urlIdToNs = new SvelteMap<string, string>();
+		const routeIdToNs = new SvelteMap<string, string>();
 
 		for (const item of items) {
 			const ns = groupKey(item) || '(no namespace)';
-			const urlId = toUrlId(item.name);
+			const routeId = toRouteId(item.name);
 
 			if (!seenNs.has(ns)) {
 				seenNs.add(ns);
@@ -64,10 +64,10 @@
 			} else {
 				byNs.set(ns, [item]);
 			}
-			urlIdToNs.set(urlId, ns);
+			routeIdToNs.set(routeId, ns);
 		}
 
-		return { nsOrder, byNs, urlIdToNs };
+		return { nsOrder, byNs, routeIdToNs };
 	});
 
 	// ── Derived view model (cheap filtering over precomputed index) ──────────
@@ -144,7 +144,7 @@
 
 	// ── Namespace of the currently active item (O(1) Map lookup) ─────────────
 
-	const activeNs = $derived(activeId ? (nsIndex.urlIdToNs.get(activeId) ?? null) : null);
+	const activeNs = $derived(activeId ? (nsIndex.routeIdToNs.get(activeId) ?? null) : null);
 
 	// ── Auto-expand logic ────────────────────────────────────────────────────
 
@@ -249,7 +249,7 @@
 	// ── Route helpers ────────────────────────────────────────────────────────
 
 	function isActive(name: string) {
-		return activeId !== undefined && activeId === toUrlId(name);
+		return activeId !== undefined && activeId === toRouteId(name);
 	}
 </script>
 

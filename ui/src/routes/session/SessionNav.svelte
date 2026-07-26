@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { SessionFactTypeInfo } from '$lib/types/api';
-	import { toUrlId, splitQualifiedName } from '$lib/utils';
+	import { toRouteId, splitQualifiedName } from '$lib/utils';
 	import GroupedFilterableNavList from '$lib/components/nav/GroupedFilterableNavList.svelte';
 	import { page } from '$app/state';
 
@@ -11,11 +11,11 @@
 	);
 
 	function sessionPath(name: string) {
-		return `/session/fact-types/${toUrlId(name)}`;
+		return `/session/fact-types/${encodeURIComponent(toRouteId(name))}`;
 	}
 
 	function isTypeActive(typeName: string) {
-		return page.params.typeName === toUrlId(typeName);
+		return page.params.typeName === toRouteId(typeName);
 	}
 
 	const groupKey = (ft: SessionFactTypeInfo) => splitQualifiedName(ft.name).namespace;

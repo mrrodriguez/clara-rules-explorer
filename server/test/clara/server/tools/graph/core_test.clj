@@ -120,7 +120,7 @@
           (is (= #{"?app-id"} (:params summary)))
           (is (some #{"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"} (:lhs-types summary)))
           ;; Verify summary includes upstream info directly
-          (is (some (fn [u] (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved" (:name u)))
+          (is (some (fn [u] (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?" (:name u)))
                     (:upstream summary))))
 
         (is (contains? queries-map "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"))
@@ -191,11 +191,11 @@
       (is (= {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
               {:downstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"}},
-              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
+              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
               {:downstream
                #{"clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"},
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"},
                :upstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
               "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"
@@ -206,9 +206,9 @@
                #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"}},
               "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"
               {:upstream
-               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"}},
+               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
               {:upstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
@@ -223,30 +223,30 @@
               {:upstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"},
                :downstream
-               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
+               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
                  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
                  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata"
                  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
                  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
                  "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"}},
-              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
+              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
               {:upstream
-               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
+               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
                  "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"},
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"},
                :downstream
                #{"clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"}},
-              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
+              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
               {:upstream
-               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
+               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
                  "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"},
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"},
                :downstream
                #{"clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"}},
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"}},
               "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
               {:upstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
@@ -326,9 +326,9 @@
                               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
                               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
                               "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
-                              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
-                              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"
-                              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"]
+                              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+                              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"]
               :used-by-queries []
               :inserted-by-rules []
               :retracted-by-rules []}

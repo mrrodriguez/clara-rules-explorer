@@ -147,9 +147,9 @@
 
   (testing "Rules endpoints"
     (let [rules (get-rules)
-          rule (get-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved")]
+          rule (get-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved%3F")]
       (is (seq rules))
-      (is (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved" (get rule "name")))))
+      (is (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?" (get rule "name")))))
 
   (testing "Queries endpoints"
     (let [queries (get-queries)
@@ -179,7 +179,7 @@
           (is (= (str fact-id) (str (get fact "id"))))))))
 
   (testing "Session rules and queries"
-    (let [session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved")
+    (let [session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved%3F")
           session-query (get-session-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome")]
       (is (some? session-rule))
       (is (some? session-query)))))
@@ -205,7 +205,7 @@
   (def analysis (get-analysis))
 
   (def rules (get-rules))
-  (def rule (get-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved"))
+  (def rule (get-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved%3F"))
   (def rule (get-rule "clara.server.tools.graph.rules.loan-doc-rules.dynamic-insert-audit-trail"))
   (def rule (get-rule "clara.server.tools.graph.rules.loan-doc-rules.dynamic-insert-compliance-review"))
 
@@ -225,7 +225,7 @@
   ;; Pick a fact id from the snapshot, e.g.:
   (def fact (get-session-fact (ffirst (get ss "facts"))))
 
-  (def session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved"))
+  (def session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved%3F"))
   (def session-query (get-session-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome"))
 
   ;; --- Annotations ---

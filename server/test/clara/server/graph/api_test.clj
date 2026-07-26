@@ -69,9 +69,9 @@
           (is (contains? names "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"))
           (is (contains? names "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs"))
           (is (contains? names "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"))
-          (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"))
-          (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"))
-          (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending")))))))
+          (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"))
+          (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"))
+          (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?")))))))
 
 (deftest test-v1-rules-fq-name
   (let [handler (->handler)]

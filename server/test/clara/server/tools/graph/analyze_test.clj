@@ -729,9 +729,9 @@
             "Should add dynamic detection")))
 
     (testing "Does NOT add dynamic detection for rules whose types are already in :props"
-      (let [aop (get fe "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending")]
+      (let [aop (get fe "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?")]
         (is (nil? (:clara-rules/dynamic-insert-types-detected aop))
-            "app-outcome-pending has ApplicationOutcome in its :props")
+            "app-outcome-pending? has ApplicationOutcome in its :props")
         ;; insert-types should NOT include the session-derived type (props covers it)
         (is (nil? (:clara-rules/insert-types aop))
             "Should not add insert-types when :props already covers it")))))
@@ -811,8 +811,8 @@
                                 (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
                       (r/fire-rules))
           fe      (analyze/enrich-annotations-from-session session {})
-          aop     (get fe "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending")]
+          aop     (get fe "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?")]
       (is (nil? (:clara-rules/dynamic-insert-types-detected aop))
-          "app-outcome-pending declares ApplicationOutcome in its :props")
+          "app-outcome-pending? declares ApplicationOutcome in its :props")
       (is (nil? (:clara-rules/insert-types aop))
           "No insert-types added since :props already covers them"))))

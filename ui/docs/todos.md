@@ -113,13 +113,15 @@ available). This is unrelated to the goals scope of the work I've presented for 
 
 5. DONE Need to sort/grouped (can maintain load order) rules/queries/fact types by ns name and/or paginate in UI.
 
-6. IN PROGRESS The ns filter options get truncated where you cannot see the full name and it may be ambiguous.
+6. DONE The ns filter options get truncated where you cannot see the full name and it may be ambiguous.
    A popover on hover to fix.
 
-7. IN PROGRESS ns filter should let you filter by ns name as well since the list can be long.
+7. DONE ns filter should let you filter by ns name as well since the list can be long.
 
-8. IN PROGRESS ns filter should be able to deselect all but one. First click should be the selected. Then when
+8. DONE ns filter should be able to deselect all but one. First click should be the selected. Then when
    one is selected already they stack.
 
-9. IN PROGRESS Loading summaries when there is a big list - even collapsed, is very slow. Even when on queries
+9. DONE Loading summaries when there is a big list - even collapsed, is very slow. Even when on queries
    when an order of magnitude less than rules/fact-types (300 vs 3000).
+
+10. DONE URL encoding for some rule names fail - such as with "?" in them.

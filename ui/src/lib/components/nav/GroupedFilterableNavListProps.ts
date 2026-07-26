@@ -25,7 +25,7 @@ export interface GroupedFilterableNavListProps<T extends { name: string }> {
 	itemRight?: Snippet<[T]>;
 	/**
 	 * URL-encoded ID of the currently active item (from route params).
-	 * Compared against `toUrlId(item.name)`. When `undefined`, no item
+	 * Compared against `toRouteId(item.name)`. When `undefined`, no item
 	 * is highlighted. Callers should derive this from `page.params` on
 	 * their own route, where SvelteKit provides compile-time type safety.
 	 */

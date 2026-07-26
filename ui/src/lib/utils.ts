@@ -1,21 +1,32 @@
 /**
- * Converts a Clara fully-qualified name (namespace/name) into a URL-safe ID
- * by replacing the slash with a dot. This avoids Jetty's "Ambiguous URI path separator"
- * errors when slashes are encoded in the path.
+ * Converts a Clara fully-qualified name into the dot-separated route
+ * identifier used in SvelteKit route params and API path segments.
+ *
+ * This replaces the Clojure namespace separator ("/") with a dot so the
+ * identifier is safe to use as a single path segment (after percent-encoding
+ * by callers). The result is NOT percent-encoded — callers are responsible
+ * for wrapping with {@link encodeURIComponent} when generating actual URLs.
  *
  * @param fqName The fully-qualified name (e.g., "my.ns/my-rule")
- * @returns A URL-safe string (e.g., "my.ns.my-rule")
+ * @returns A dot-separated route identifier (e.g., "my.ns.my-rule")
  */
-export function toUrlId(fqName: string): string {
+export function toRouteId(fqName: string): string {
 	return fqName.replace('/', '.');
 }
 
 /**
- * Reverses toUrlId.
+ * Reverses {@link toRouteId} — converts a dot-separated route identifier
+ * back to the canonical fully-qualified name.
+ *
  * e.g., "my.ns.my-rule" -> "my.ns/my-rule"
- * Note: For Java classes (which already use dots), this is idempotent.
+ *
+ * This receives SvelteKit-decoded route params, so percent-encoded
+ * characters (like %3F for "?") have already been decoded by the router.
+ *
+ * Note: For Java class names (which already use dots), this is a heuristic
+ * based on the last dot.
  */
-export function fromUrlId(id: string): string {
+export function fromRouteId(id: string): string {
 	// If it was a Clojure rule/query, it had a slash that we converted to a dot.
 	// However, Java classes use dots. The convention in the backend is that
 	// the LAST dot is the separator for rules/queries.
@@ -36,7 +47,7 @@ export function fromUrlId(id: string): string {
  * Generates the application path for a specific rule's summary or full view.
  */
 export function rulePath(fqName: string, full = false): `/rules/${string}` {
-	const id = toUrlId(fqName);
+	const id = encodeURIComponent(toRouteId(fqName));
 	return (full ? `/rules/${id}/full` : `/rules/${id}`) as `/rules/${string}`;
 }
 
@@ -44,7 +55,7 @@ export function rulePath(fqName: string, full = false): `/rules/${string}` {
  * Generates the application path for a specific query's summary or full view.
  */
 export function queryPath(fqName: string, full = false): `/queries/${string}` {
-	const id = toUrlId(fqName);
+	const id = encodeURIComponent(toRouteId(fqName));
 	return (full ? `/queries/${id}/full` : `/queries/${id}`) as `/queries/${string}`;
 }
 
@@ -52,7 +63,7 @@ export function queryPath(fqName: string, full = false): `/queries/${string}` {
  * Generates the application path for a specific fact type's summary.
  */
 export function factPath(name: string): `/fact-types/${string}` {
-	const id = toUrlId(name);
+	const id = encodeURIComponent(toRouteId(name));
 	return `/fact-types/${id}` as `/fact-types/${string}`;
 }
 

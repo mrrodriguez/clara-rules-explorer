@@ -13,7 +13,7 @@
 ;; NOTE: Leaving this fact type here inline to show fact types coming from multiple places.
 (defrecord ApplicationOutcome [app-id status message passed-checks failed-checks checks-complete checks-incomplete])
 
-(r/defrule app-outcome-approved
+(r/defrule app-outcome-approved?
   {:clara-rules/insert-types [ApplicationOutcome]}
   [Application (= ?app-id app-id)]
   [DocumentCheck (= ?app-id app-id) (= status :pass)]
@@ -27,7 +27,7 @@
                                                        {:check-type :identity}
                                                        {:check-type :fraud}]})))
 
-(r/defrule app-outcome-denied
+(r/defrule app-outcome-denied?
   {:clara-rules/insert-types [ApplicationOutcome]}
   [Application (= ?app-id app-id)]
   [:not [ApplicationOutcome (= ?app-id app-id) (= status :approved)]]
@@ -52,7 +52,7 @@
                                          :passed-checks passed-checks
                                          :failed-checks failed-checks}))))
 
-(r/defrule app-outcome-pending
+(r/defrule app-outcome-pending?
   {:clara-rules/insert-types [ApplicationOutcome]}
   [Application (= ?app-id app-id)]
   [:not [ApplicationOutcome (= ?app-id app-id) (= status :approved)]]
