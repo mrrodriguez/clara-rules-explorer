@@ -195,12 +195,22 @@
               {:downstream
                #{"clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"},
                :upstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
               "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"
               {:upstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"},
+               :downstream
+               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
+                 "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"}},
               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
               {:downstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"}},
@@ -208,6 +218,7 @@
               {:upstream
                #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
               {:upstream
@@ -235,17 +246,21 @@
               {:upstream
                #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
                  "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"},
                :downstream
                #{"clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
               "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
               {:upstream
                #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
                  "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"},
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"},
                :downstream
                #{"clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"}},
               "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
               {:upstream
