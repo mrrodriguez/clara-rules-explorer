@@ -1,7 +1,8 @@
 <script lang="ts" generics="T extends { name: string }">
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import { clickOutside } from '$lib/actions/clickOutside';
-	import { tooltip } from '$lib/actions/popover';
+	import NavFilterDropdown from '$lib/components/nav/filterable-nav/NavFilterDropdown.svelte';
+	import NavFilterDropdownItem from '$lib/components/nav/filterable-nav/NavFilterDropdownItem.svelte';
+	import NavGroupHeader from '$lib/components/nav/filterable-nav/NavGroupHeader.svelte';
 	import ReferenceListItem from '$lib/components/nav/ReferenceListItem.svelte';
 	import type { GroupedFilterableNavListProps } from '$lib/components/nav/GroupedFilterableNavListProps';
 	import { NamespaceFilter } from '$lib/components/nav/namespaceFilter.svelte';
@@ -273,108 +274,80 @@
 
 	<!-- Rulebase attribute filter (only when filter options are provided) -->
 	{#if filters.length > 0}
-		<div class="p-2 border-bottom bg-light">
-			<div
-				class="position-relative"
-				use:clickOutside={() => {
-					rulebaseFilter.filterDropdownOpen = false;
-				}}
-			>
-				<button
-					class="btn btn-sm btn-outline-secondary w-100 text-truncate text-start"
-					onclick={() => (rulebaseFilter.filterDropdownOpen = !rulebaseFilter.filterDropdownOpen)}
-				>
-					<i class="bi bi-funnel-fill me-1 opacity-75"></i>
-					{#if rulebaseFilter.active}
-						{Object.keys(rulebaseFilter.activeFilters).length} filter{Object.keys(
-							rulebaseFilter.activeFilters
-						).length !== 1
-							? 's'
-							: ''}
-					{:else}
-						Filters
-					{/if}
-				</button>
-
-				{#if rulebaseFilter.filterDropdownOpen}
-					<div class="dropdown-menu show w-100 p-1" style="max-height: 320px; overflow-y: auto;">
-						<button class="dropdown-item small py-1" onclick={() => rulebaseFilter.clearAll()}>
-							<i class="bi bi-eraser me-1 opacity-50"></i> Clear all filters
-						</button>
-						<div class="dropdown-divider my-1"></div>
-						{#each filters as filter (filter.id)}
-							{@const checked = !!rulebaseFilter.activeFilters[filter.id]}
-							<button
-								class="dropdown-item small d-flex align-items-center gap-1 mb-0 py-1"
-								onclick={() => rulebaseFilter.toggle(filter.id)}
-							>
-								<i class="bi bi-{checked ? 'check-square' : 'square'} me-1 opacity-75"></i>
-								<span class="text-truncate">{filter.label}</span>
-							</button>
-						{/each}
-					</div>
+		<NavFilterDropdown
+			bind:open={rulebaseFilter.filterDropdownOpen}
+			onclose={() => (rulebaseFilter.filterDropdownOpen = false)}
+		>
+			{#snippet buttonContent()}
+				<i class="bi bi-funnel-fill me-1 opacity-75"></i>
+				{#if rulebaseFilter.active}
+					{Object.keys(rulebaseFilter.activeFilters).length} filter{Object.keys(
+						rulebaseFilter.activeFilters
+					).length !== 1
+						? 's'
+						: ''}
+				{:else}
+					Filters
 				{/if}
-			</div>
-		</div>
+			{/snippet}
+			<button class="dropdown-item small py-1" onclick={() => rulebaseFilter.clearAll()}>
+				<i class="bi bi-eraser me-1 opacity-50"></i> Clear all filters
+			</button>
+			<div class="dropdown-divider my-1"></div>
+			{#each filters as filter (filter.id)}
+				<NavFilterDropdownItem
+					checked={!!rulebaseFilter.activeFilters[filter.id]}
+					label={filter.label}
+					onclick={() => rulebaseFilter.toggle(filter.id)}
+				/>
+			{/each}
+		</NavFilterDropdown>
 	{/if}
 
 	<!-- Namespace multi-select filter (only when > 1 namespace, not searching) -->
 	{#if !view.searchActive && view.nsOrder.length > 1}
-		<div class="p-2 border-bottom bg-light">
-			<div
-				class="position-relative"
-				use:clickOutside={() => {
-					nsFilter.filterDropdownOpen = false;
-					nsFilter.nsFilterText = '';
-				}}
-			>
-				<button
-					class="btn btn-sm btn-outline-secondary w-100 text-truncate text-start"
-					onclick={() => (nsFilter.filterDropdownOpen = !nsFilter.filterDropdownOpen)}
-				>
-					<i class="bi bi-funnel me-1 opacity-75"></i>
-					{#if nsFilter.active}
-						{view.visibleNsCount} of {view.nsOrder.length} namespaces
-					{:else}
-						All namespaces
-					{/if}
-					<span class="ms-1 text-muted">· {view.totalSearchResults} {itemLabel}</span>
-				</button>
-
-				{#if nsFilter.filterDropdownOpen}
-					<div class="dropdown-menu show w-100 p-1" style="max-height: 320px; overflow-y: auto;">
-						<button class="dropdown-item small py-1" onclick={() => nsFilter.showAll()}>
-							<i class="bi bi-check-all me-1 opacity-50"></i> Show all namespaces
-						</button>
-						<div class="dropdown-divider my-1"></div>
-						<div class="px-1 mb-1">
-							<input
-								type="text"
-								class="form-control form-control-sm"
-								placeholder="Filter namespaces..."
-								bind:value={nsFilter.nsFilterText}
-							/>
-						</div>
-						{#each filteredNsOrder as ns (ns)}
-							{@const count = view.nsItemCounts.get(ns) ?? 0}
-							{@const checked = !nsFilter.hiddenNamespaces[ns]}
-							<button
-								class="dropdown-item small d-flex align-items-center gap-1 mb-0 py-1 {count === 0
-									? 'text-muted'
-									: ''}"
-								disabled={count === 0}
-								onclick={() => nsFilter.toggle(ns, view.nsOrder)}
-								data-ns={ns}
-							>
-								<i class="bi bi-{checked ? 'check-square' : 'square'} me-1 opacity-75"></i>
-								<span class="text-truncate" title={ns}>{ns}</span>
-								<span class="ms-auto text-muted ps-1 small">{count}</span>
-							</button>
-						{/each}
-					</div>
+		<NavFilterDropdown
+			bind:open={nsFilter.filterDropdownOpen}
+			onclose={() => {
+				nsFilter.filterDropdownOpen = false;
+				nsFilter.nsFilterText = '';
+			}}
+		>
+			{#snippet buttonContent()}
+				<i class="bi bi-funnel me-1 opacity-75"></i>
+				{#if nsFilter.active}
+					{view.visibleNsCount} of {view.nsOrder.length} namespaces
+				{:else}
+					All namespaces
 				{/if}
+				<span class="ms-1 text-muted">· {view.totalSearchResults} {itemLabel}</span>
+			{/snippet}
+			<button class="dropdown-item small py-1" onclick={() => nsFilter.showAll()}>
+				<i class="bi bi-check-all me-1 opacity-50"></i> Show all namespaces
+			</button>
+			<div class="dropdown-divider my-1"></div>
+			<div class="px-1 mb-1">
+				<input
+					type="text"
+					class="form-control form-control-sm"
+					placeholder="Filter namespaces..."
+					bind:value={nsFilter.nsFilterText}
+				/>
 			</div>
-		</div>
+			{#each filteredNsOrder as ns (ns)}
+				{@const count = view.nsItemCounts.get(ns) ?? 0}
+				{@const checked = !nsFilter.hiddenNamespaces[ns]}
+				<NavFilterDropdownItem
+					{checked}
+					label={ns}
+					onclick={() => nsFilter.toggle(ns, view.nsOrder)}
+					disabled={count === 0}
+					muted={count === 0}
+					{count}
+					dataNs={ns}
+				/>
+			{/each}
+		</NavFilterDropdown>
 	{/if}
 
 	<!-- Collapse / Expand all (only in grouped mode, > 1 namespace) -->
@@ -420,22 +393,13 @@
 			{#each view.groupedItems as group (group.ns)}
 				{@const expanded = !!expandedGroups[group.ns]}
 
-				<button
-					class="list-group-item list-group-item-action d-flex flex-column py-2 px-3 border-start-0 border-end-0 bg-light fw-medium small text-start"
-					onclick={() => toggleGroup(group.ns)}
-				>
-					<span class="d-flex align-items-center w-100">
-						<i
-							class="bi bi-{expanded
-								? 'chevron-down'
-								: 'chevron-right'} me-1 opacity-50 flex-shrink-0"
-						></i>
-						<span class="text-truncate" use:tooltip>
-							{group.ns}
-						</span>
-					</span>
-					<span class="badge bg-secondary rounded-pill mt-1">{group.totalCount} {itemLabel}</span>
-				</button>
+				<NavGroupHeader
+					ns={group.ns}
+					{expanded}
+					totalCount={group.totalCount}
+					{itemLabel}
+					ontoggle={() => toggleGroup(group.ns)}
+				/>
 
 				{#if expanded}
 					{#each group.items as item (item.name)}
