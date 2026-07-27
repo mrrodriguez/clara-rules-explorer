@@ -4,7 +4,6 @@
 	import RulebaseComponentSummaryDescription from '$lib/components/rulebase/RulebaseComponentSummaryDescription.svelte';
 	import DependencyRow from '$lib/components/rulebase/DependencyRow.svelte';
 	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
-	import ProductionFullViewHint from '$lib/components/rulebase/ProductionFullViewHint.svelte';
 	import LhsList from '$lib/components/rulebase/LhsList.svelte';
 	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
 	import SessionProductionActivity from '$lib/components/rulebase/SessionProductionActivity.svelte';
@@ -15,6 +14,8 @@
 	import NoOutputTypesIndicator from '$lib/components/rulebase/NoOutputTypesIndicator.svelte';
 	import DynamicDetectionIndicator from '$lib/components/rulebase/DynamicDetectionIndicator.svelte';
 	import DynamicCallsiteList from '$lib/components/rulebase/DynamicCallsiteList.svelte';
+	import { resolve } from '$app/paths';
+	import type { Pathname } from '$app/types';
 
 	interface Props {
 		rule: RuleSummary;
@@ -23,6 +24,8 @@
 	}
 
 	let { rule, activity, fullView = false }: Props = $props();
+
+	let fullViewHref = $derived(resolve(rulePath(rule.name, true) as Pathname));
 
 	$effect(() => {
 		if (fullView) {
@@ -121,11 +124,18 @@
 				</div>
 
 				<SessionProductionActivity {activity} />
+			{/if}
 
-				<DynamicCallsiteList detection={rule['dynamic-insert-types-detected']} label="Insert" />
-				<DynamicCallsiteList detection={rule['dynamic-retract-types-detected']} label="Retract" />
-			{:else}
-				<ProductionFullViewHint type="rule" />
+			<DynamicCallsiteList detection={rule['dynamic-insert-types-detected']} label="Insert" />
+			<DynamicCallsiteList detection={rule['dynamic-retract-types-detected']} label="Retract" />
+
+			{#if !fullView}
+				<div class="d-flex align-items-center gap-2 mt-3 pt-2 border-top">
+					<a href={fullViewHref} class="btn btn-outline-primary btn-sm">
+						<i class="bi bi-arrows-fullscreen me-1"></i> Full View
+					</a>
+					<span class="text-muted small"> See detailed LHS conditions and RHS code. </span>
+				</div>
 			{/if}
 		{/key}
 	</div>

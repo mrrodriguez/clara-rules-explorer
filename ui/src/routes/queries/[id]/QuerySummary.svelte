@@ -4,11 +4,12 @@
 	import RulebaseComponentSummaryDescription from '$lib/components/rulebase/RulebaseComponentSummaryDescription.svelte';
 	import DependencyRow from '$lib/components/rulebase/DependencyRow.svelte';
 	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
-	import ProductionFullViewHint from '$lib/components/rulebase/ProductionFullViewHint.svelte';
 	import LhsList from '$lib/components/rulebase/LhsList.svelte';
 	import SessionProductionActivity from '$lib/components/rulebase/SessionProductionActivity.svelte';
 	import { queryPath } from '$lib/utils';
 	import { appState } from '$lib/state/appState.svelte';
+	import { resolve } from '$app/paths';
+	import type { Pathname } from '$app/types';
 
 	interface Props {
 		query: QuerySummary;
@@ -17,6 +18,8 @@
 	}
 
 	let { query, activity, fullView = false }: Props = $props();
+
+	let fullViewHref = $derived(resolve(queryPath(query.name, true) as Pathname));
 
 	$effect(() => {
 		if (fullView) {
@@ -73,8 +76,15 @@
 				<LhsList lhs={query.lhs} />
 
 				<SessionProductionActivity {activity} />
-			{:else}
-				<ProductionFullViewHint type="query" />
+			{/if}
+
+			{#if !fullView}
+				<div class="d-flex align-items-center gap-2 mt-3 pt-2 border-top">
+					<a href={fullViewHref} class="btn btn-outline-success btn-sm">
+						<i class="bi bi-arrows-fullscreen me-1"></i> Full View
+					</a>
+					<span class="text-muted small"> See detailed LHS conditions. </span>
+				</div>
 			{/if}
 		{/key}
 	</div>

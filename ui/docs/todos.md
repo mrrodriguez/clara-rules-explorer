@@ -145,4 +145,4 @@ perhaps?
 
 17. Add filter to find rules/queries that are source/sink.
 
-18. Show dynamic callsites inline in rule/query summary view. 
+18. DONE Show dynamic callsites inline in rule/query summary view. 

@@ -9,11 +9,11 @@
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clojure.java.io :as io]))
 
-(def port 9001)
+(def ^:dynamic *port* 9001)
 
 (defn ->url
   [path]
-  (format "http://localhost:%s/v1%s" port path))
+  (format "http://localhost:%s/v1%s" *port* path))
 
 (defn run-app-outcome-approved
   [session]
@@ -44,7 +44,7 @@
    (run-smoke-test {:session-opts {:with-facts? true}}))
   ([{:keys [session-opts]}]
    (let [session (run-rules session-opts)
-         server (server/start! {:port port :session session :annotations-file loan-doc-annotations-path})]
+         server (server/start! {:port *port* :session session :annotations-file loan-doc-annotations-path})]
      server)))
 
 (defn get-rules []
@@ -129,12 +129,13 @@
 (def ^:dynamic *server* nil)
 
 (defn with-server [f]
-  (let [server (run-smoke-test)]
-    (binding [*server* server]
-      (try
-        (f)
-        (finally
-          (server/stop!))))))
+  (binding [*port* 19001]
+    (let [server (run-smoke-test)]
+      (binding [*server* server]
+        (try
+          (f)
+          (finally
+            (server/stop!)))))))
 
 (use-fixtures :once with-server)
 
