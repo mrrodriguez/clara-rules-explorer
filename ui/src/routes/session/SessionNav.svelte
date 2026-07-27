@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { SessionFactTypeInfo } from '$lib/types/api';
 	import { toRouteId, splitQualifiedName } from '$lib/utils';
-	import GroupedFilterableNavList from '$lib/components/nav/GroupedFilterableNavList.svelte';
+	import GroupedFilterableNavList from '$lib/components/rulebase/nav/GroupedFilterableNavList.svelte';
 	import { page } from '$app/state';
 
 	const factTypes = $derived<SessionFactTypeInfo[]>(

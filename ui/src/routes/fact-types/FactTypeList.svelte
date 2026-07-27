@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { FactTypeSummary } from '$lib/types/api';
 	import { page } from '$app/state';
-	import GroupedFilterableNavList from '$lib/components/nav/GroupedFilterableNavList.svelte';
+	import GroupedFilterableNavList from '$lib/components/rulebase/nav/GroupedFilterableNavList.svelte';
 	import { factPath, splitQualifiedName } from '$lib/utils';
 
 	interface Props {

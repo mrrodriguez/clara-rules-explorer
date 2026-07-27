@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { ProductionReference } from '$lib/types/api';
 	import RulebaseComponentTypeBadge from '$lib/components/rulebase/RulebaseComponentTypeBadge.svelte';
-	import ReferenceListItem from '$lib/components/nav/ReferenceListItem.svelte';
+	import ReferenceListItem from '$lib/components/rulebase/nav/ReferenceListItem.svelte';
 	import { rulePath, queryPath } from '$lib/utils';
 
 	interface Props {

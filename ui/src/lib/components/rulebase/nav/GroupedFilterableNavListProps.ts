@@ -20,7 +20,7 @@ export interface FilterOption<T> {
  *
  * ```ts
  * import type { RuleListItem } from '$lib/types/api';
- * import type { GroupedFilterableNavListProps } from '$lib/components/nav/GroupedFilterableNavListProps';
+ * import type { GroupedFilterableNavListProps } from '$lib/components/rulebase/nav/GroupedFilterableNavListProps';
  * const cfg: GroupedFilterableNavListProps<RuleListItem> = { ... };
  * ```
  */

@@ -1,12 +1,12 @@
 <script lang="ts">
-	import type { FilterOption } from '$lib/components/nav/GroupedFilterableNavListProps';
+	import type { FilterOption } from '$lib/components/rulebase/nav/GroupedFilterableNavListProps';
 	import type { RuleListItem } from '$lib/types/api';
 	import SourceSinkIndicators from '$lib/components/rulebase/SourceSinkIndicators.svelte';
 	import UnlinkedRuleIndicator from '$lib/components/rulebase/UnlinkedRuleIndicator.svelte';
 	import NoOutputTypesIndicator from '$lib/components/rulebase/NoOutputTypesIndicator.svelte';
 	import DynamicDetectionIndicator from '$lib/components/rulebase/DynamicDetectionIndicator.svelte';
 	import { page } from '$app/state';
-	import GroupedFilterableNavList from '$lib/components/nav/GroupedFilterableNavList.svelte';
+	import GroupedFilterableNavList from '$lib/components/rulebase/nav/GroupedFilterableNavList.svelte';
 	import { rulePath } from '$lib/utils';
 
 	interface Props {

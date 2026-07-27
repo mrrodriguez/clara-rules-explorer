@@ -1,12 +1,12 @@
 <script lang="ts" generics="T extends { name: string }">
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import NavFilterDropdown from '$lib/components/nav/filterable-nav/NavFilterDropdown.svelte';
-	import NavFilterDropdownItem from '$lib/components/nav/filterable-nav/NavFilterDropdownItem.svelte';
-	import NavGroupHeader from '$lib/components/nav/filterable-nav/NavGroupHeader.svelte';
-	import ReferenceListItem from '$lib/components/nav/ReferenceListItem.svelte';
-	import type { GroupedFilterableNavListProps } from '$lib/components/nav/GroupedFilterableNavListProps';
-	import { NamespaceFilter } from '$lib/components/nav/namespaceFilter.svelte';
-	import { RulebaseFilter } from '$lib/components/nav/rulebaseFilter.svelte';
+	import FilterDropdown from '$lib/components/rulebase/nav/FilterDropdown.svelte';
+	import FilterDropdownItem from '$lib/components/rulebase/nav/FilterDropdownItem.svelte';
+	import GroupHeader from '$lib/components/rulebase/nav/GroupHeader.svelte';
+	import ReferenceListItem from '$lib/components/rulebase/nav/ReferenceListItem.svelte';
+	import type { GroupedFilterableNavListProps } from '$lib/components/rulebase/nav/GroupedFilterableNavListProps';
+	import { NamespaceFilter } from '$lib/components/rulebase/nav/namespaceFilter.svelte';
+	import { RulebaseFilter } from '$lib/components/rulebase/nav/rulebaseFilter.svelte';
 	import { toRouteId } from '$lib/utils';
 
 	let {
@@ -274,7 +274,7 @@
 
 	<!-- Rulebase attribute filter (only when filter options are provided) -->
 	{#if filters.length > 0}
-		<NavFilterDropdown
+		<FilterDropdown
 			bind:open={rulebaseFilter.filterDropdownOpen}
 			onclose={() => (rulebaseFilter.filterDropdownOpen = false)}
 		>
@@ -295,18 +295,18 @@
 			</button>
 			<div class="dropdown-divider my-1"></div>
 			{#each filters as filter (filter.id)}
-				<NavFilterDropdownItem
+				<FilterDropdownItem
 					checked={!!rulebaseFilter.activeFilters[filter.id]}
 					label={filter.label}
 					onclick={() => rulebaseFilter.toggle(filter.id)}
 				/>
 			{/each}
-		</NavFilterDropdown>
+		</FilterDropdown>
 	{/if}
 
 	<!-- Namespace multi-select filter (only when > 1 namespace, not searching) -->
 	{#if !view.searchActive && view.nsOrder.length > 1}
-		<NavFilterDropdown
+		<FilterDropdown
 			bind:open={nsFilter.filterDropdownOpen}
 			onclose={() => {
 				nsFilter.filterDropdownOpen = false;
@@ -337,7 +337,7 @@
 			{#each filteredNsOrder as ns (ns)}
 				{@const count = view.nsItemCounts.get(ns) ?? 0}
 				{@const checked = !nsFilter.hiddenNamespaces[ns]}
-				<NavFilterDropdownItem
+				<FilterDropdownItem
 					{checked}
 					label={ns}
 					onclick={() => nsFilter.toggle(ns, view.nsOrder)}
@@ -347,7 +347,7 @@
 					dataNs={ns}
 				/>
 			{/each}
-		</NavFilterDropdown>
+		</FilterDropdown>
 	{/if}
 
 	<!-- Collapse / Expand all (only in grouped mode, > 1 namespace) -->
@@ -393,7 +393,7 @@
 			{#each view.groupedItems as group (group.ns)}
 				{@const expanded = !!expandedGroups[group.ns]}
 
-				<NavGroupHeader
+				<GroupHeader
 					ns={group.ns}
 					{expanded}
 					totalCount={group.totalCount}
