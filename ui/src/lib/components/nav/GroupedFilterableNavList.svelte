@@ -5,6 +5,7 @@
 	import ReferenceListItem from '$lib/components/nav/ReferenceListItem.svelte';
 	import type { GroupedFilterableNavListProps } from '$lib/components/nav/GroupedFilterableNavListProps';
 	import { NamespaceFilter } from '$lib/components/nav/namespaceFilter.svelte';
+	import { RulebaseFilter } from '$lib/components/nav/rulebaseFilter.svelte';
 	import { toRouteId } from '$lib/utils';
 
 	let {
@@ -17,7 +18,8 @@
 		itemRight,
 		activeId,
 		border = true,
-		itemLabel = 'items'
+		itemLabel = 'items',
+		filters = []
 	}: GroupedFilterableNavListProps<T> = $props();
 
 	// ── State ────────────────────────────────────────────────────────────────
@@ -26,6 +28,18 @@
 	let expandedGroups = $state<Record<string, boolean>>({});
 
 	const nsFilter = new NamespaceFilter();
+	const rulebaseFilter = new RulebaseFilter();
+
+	// ── Rulebase filter helpers ──────────────────────────────────────────────
+
+	function matchesRulebaseFilter(item: T): boolean {
+		if (!rulebaseFilter.active) return true;
+		const activeIds = Object.keys(rulebaseFilter.activeFilters);
+		return activeIds.some((id) => {
+			const opt = filters.find((f) => f.id === id);
+			return opt ? opt.predicate(item) : false;
+		});
+	}
 
 	// ── Precomputed namespace index (only recomputes when items changes) ─────
 
@@ -62,6 +76,7 @@
 		const searchActive = searchTerm.length > 0;
 		const activeNsFilter = nsFilter.active;
 		const needle = searchTerm.toLowerCase();
+		const filterActive = rulebaseFilter.active;
 
 		// Per-namespace visible counts (for dropdown checkboxes)
 		const nsItemCounts = new SvelteMap<string, number>();
@@ -99,7 +114,7 @@
 		}
 
 		// Build groupedItems for non-search mode (respects namespace visibility)
-		const groupedItems: { ns: string; items: T[]; totalCount: number }[] = [];
+		let groupedItems: { ns: string; items: T[]; totalCount: number }[] = [];
 		if (!searchActive) {
 			for (const ns of nsOrder) {
 				if (nsFilter.hiddenNamespaces[ns]) continue;
@@ -107,6 +122,23 @@
 				if (bucket && bucket.length > 0) {
 					groupedItems.push({ ns, items: bucket, totalCount: bucket.length });
 				}
+			}
+		}
+
+		// ── Rulebase attribute filter (applies in both search and grouped mode) ──
+
+		if (filterActive) {
+			if (searchActive && searchFiltered) {
+				searchFiltered = searchFiltered.filter((item) => matchesRulebaseFilter(item));
+				totalSearchResults = searchFiltered.length;
+			} else {
+				groupedItems = groupedItems
+					.map((g) => ({
+						...g,
+						items: g.items.filter((item) => matchesRulebaseFilter(item)),
+						totalCount: g.items.length
+					}))
+					.filter((g) => g.items.length > 0);
 			}
 		}
 
@@ -119,9 +151,10 @@
 			activeNsFilter,
 			visibleNsCount,
 			nsItemCounts,
+			filterActive,
 			totalMatching: searchActive
 				? (searchFiltered?.length ?? 0)
-				: activeNsFilter
+				: activeNsFilter || filterActive
 					? groupedItems.reduce((sum, g) => sum + g.items.length, 0)
 					: items.length
 		};
@@ -138,14 +171,17 @@
 	// and should never trigger re-rendering.
 	let prevNsLength = 0;
 	let prevVisibleNsCount = 0;
+	let prevGroupCount = 0;
 	$effect(() => {
 		const totalNs = view.nsOrder.length;
 		const visibleNs = view.visibleNsCount;
+		const groupCount = view.groupedItems.length;
 
 		// Full data set changed — reset
 		if (totalNs !== prevNsLength) {
 			prevNsLength = totalNs;
 			prevVisibleNsCount = visibleNs;
+			prevGroupCount = groupCount;
 			expandedGroups = {};
 			if (totalNs === 1) {
 				expandedGroups[view.nsOrder[0]] = true;
@@ -153,14 +189,22 @@
 			return;
 		}
 
-		// Namespace filter narrowed results to exactly 1 visible namespace — auto-expand it
-		if (visibleNs === 1 && visibleNs !== prevVisibleNsCount) {
+		// Auto-expand when narrowed to exactly 1 group (namespace filter or rulebase filter)
+		if (groupCount === 1 && groupCount !== prevGroupCount) {
+			for (const g of view.groupedItems) {
+				expandedGroups[g.ns] = true;
+			}
+		}
+		// Namespace filter narrowed to 1 visible NS but rulebase filter may have
+		// cleared all items from some groups — still expand the sole survivor.
+		else if (visibleNs === 1 && visibleNs !== prevVisibleNsCount) {
 			for (const g of view.groupedItems) {
 				expandedGroups[g.ns] = true;
 			}
 		}
 
 		prevVisibleNsCount = visibleNs;
+		prevGroupCount = groupCount;
 	});
 
 	// Expand the namespace containing the currently active item
@@ -224,6 +268,53 @@
 					placeholder={searchPlaceholder}
 					bind:value={searchTerm}
 				/>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Rulebase attribute filter (only when filter options are provided) -->
+	{#if filters.length > 0}
+		<div class="p-2 border-bottom bg-light">
+			<div
+				class="position-relative"
+				use:clickOutside={() => {
+					rulebaseFilter.filterDropdownOpen = false;
+				}}
+			>
+				<button
+					class="btn btn-sm btn-outline-secondary w-100 text-truncate text-start"
+					onclick={() => (rulebaseFilter.filterDropdownOpen = !rulebaseFilter.filterDropdownOpen)}
+				>
+					<i class="bi bi-funnel-fill me-1 opacity-75"></i>
+					{#if rulebaseFilter.active}
+						{Object.keys(rulebaseFilter.activeFilters).length} filter{Object.keys(
+							rulebaseFilter.activeFilters
+						).length !== 1
+							? 's'
+							: ''}
+					{:else}
+						Filters
+					{/if}
+				</button>
+
+				{#if rulebaseFilter.filterDropdownOpen}
+					<div class="dropdown-menu show w-100 p-1" style="max-height: 320px; overflow-y: auto;">
+						<button class="dropdown-item small py-1" onclick={() => rulebaseFilter.clearAll()}>
+							<i class="bi bi-eraser me-1 opacity-50"></i> Clear all filters
+						</button>
+						<div class="dropdown-divider my-1"></div>
+						{#each filters as filter (filter.id)}
+							{@const checked = !!rulebaseFilter.activeFilters[filter.id]}
+							<button
+								class="dropdown-item small d-flex align-items-center gap-1 mb-0 py-1"
+								onclick={() => rulebaseFilter.toggle(filter.id)}
+							>
+								<i class="bi bi-{checked ? 'check-square' : 'square'} me-1 opacity-75"></i>
+								<span class="text-truncate">{filter.label}</span>
+							</button>
+						{/each}
+					</div>
+				{/if}
 			</div>
 		</div>
 	{/if}

@@ -141,8 +141,8 @@ perhaps?
 15. DONE The summary upstream/downstream should have count next to them and the whole section should be
     collapsible, default expanded.
 
-16. Add filter to find rules/queries that have unresolved dynamic callsites and/or unlinked RHS.
+16. DONE Add filter to find rules/queries that have unresolved dynamic callsites and/or unlinked RHS.
 
-17. Add filter to find rules/queries that are source/sink.
+17. DONE Add filter to find rules/queries that are source/sink.
 
 18. DONE Show dynamic callsites inline in rule/query summary view. 

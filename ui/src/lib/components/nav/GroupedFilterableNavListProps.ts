@@ -1,6 +1,18 @@
 import type { Snippet } from 'svelte';
 
 /**
+ * A single filter option displayed as a checkbox in the filter menu.
+ */
+export interface FilterOption<T> {
+	/** Unique identifier for this filter (used as the toggle key). */
+	id: string;
+	/** Human-readable label shown in the dropdown. */
+	label: string;
+	/** Predicate that returns `true` when an item matches this filter. */
+	predicate: (item: T) => boolean;
+}
+
+/**
  * Props for {@link GroupedFilterableNavList}. Extracted to a standalone module
  * because Svelte's instance `<script>` does not support `export` on types that
  * depend on component-level generics. Consumers import this type for type-safe
@@ -34,4 +46,10 @@ export interface GroupedFilterableNavListProps<T extends { name: string }> {
 	border?: boolean;
 	/** Label used to qualify counts (e.g. "rules", "queries", "fact types") */
 	itemLabel?: string;
+	/**
+	 * Optional rulebase attribute filter options. When provided, a filter
+	 * menu button appears between the search box and the namespace filter.
+	 * Multiple checked filters are combined with OR logic.
+	 */
+	filters?: FilterOption<T>[];
 }

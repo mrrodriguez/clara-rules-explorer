@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { FilterOption } from '$lib/components/nav/GroupedFilterableNavListProps';
 	import type { RuleListItem } from '$lib/types/api';
 	import SourceSinkIndicators from '$lib/components/rulebase/SourceSinkIndicators.svelte';
 	import UnlinkedRuleIndicator from '$lib/components/rulebase/UnlinkedRuleIndicator.svelte';
@@ -16,6 +17,40 @@
 
 	const groupKey = (rule: RuleListItem) => rule.ns;
 	const activeId = $derived(page.params.id);
+
+	const ruleFilters: FilterOption<RuleListItem>[] = [
+		{
+			id: 'dynamic-inserts-unresolved',
+			label: 'Dynamic Inserts (unresolved)',
+			predicate: (r) => {
+				const di = r['dynamic-insert-types-detected'];
+				return di != null && di.resolution !== 'full';
+			}
+		},
+		{
+			id: 'dynamic-retracts-unresolved',
+			label: 'Dynamic Retracts (unresolved)',
+			predicate: (r) => {
+				const dr = r['dynamic-retract-types-detected'];
+				return dr != null && dr.resolution !== 'full';
+			}
+		},
+		{
+			id: 'unlinked-rhs',
+			label: 'Unlinked RHS',
+			predicate: (r) => r['unlinked-rule'] != null
+		},
+		{
+			id: 'source-rule',
+			label: 'Source Rule',
+			predicate: (r) => r['source-rule'] === true
+		},
+		{
+			id: 'sink-rule',
+			label: 'Sink Rule',
+			predicate: (r) => r['sink-rule'] === true
+		}
+	];
 </script>
 
 {#snippet ruleRight(rule: RuleListItem)}
@@ -49,4 +84,5 @@
 	itemLabel="rules"
 	itemRight={ruleRight}
 	{activeId}
+	filters={ruleFilters}
 />
