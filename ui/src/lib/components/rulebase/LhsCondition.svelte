@@ -33,6 +33,7 @@
 	const ignoredKeys = new Set([
 		'type',
 		'constraints',
+		'args',
 		'accumulator',
 		'from',
 		'result-binding',
@@ -115,6 +116,20 @@
 						{@render textProperty(key, formatValue(value))}
 					{/if}
 				{/each}
+
+				{#if leaf.args}
+					<div class="row g-0 py-1">
+						<div
+							class="col-12 text-muted fw-bold text-uppercase ps-3 pt-2"
+							style="font-size: 0.7rem;"
+						>
+							Args
+						</div>
+						<div class="col-12 p-0">
+							<CodeBlock code={leaf.args} language="clojure" />
+						</div>
+					</div>
+				{/if}
 
 				{#if leaf.constraints}
 					<div class="row g-0 py-1">

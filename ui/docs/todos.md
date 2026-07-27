@@ -125,3 +125,24 @@ available). This is unrelated to the goals scope of the work I've presented for 
    when an order of magnitude less than rules/fact-types (300 vs 3000).
 
 10. DONE URL encoding for some rule names fail - such as with "?" in them.
+
+11. annotations gen perf?
+
+12. DONE LHS "args" can be big and needs code formatting and likely collapsed by default like other exprs.
+
+13. Need popover non-truncated over the namespace expand toggles cine they are often trucated. Put
+    the badges for how many rules/queries on a new line entirely since it takes too much of the
+space of the ns name.
+
+14. when upstream/downstream get long in the summary they should scroll instead of push all content
+    too low in viewport. Show no more than 8 or better is to use a fraction of the viewport space
+perhaps?
+
+15. The summary upstream/downstream should have count next to them and the whole section should be
+    collapsible, default expanded.
+
+16. Add filter to find rules/queries that have unresolved dynamic callsites and/or unlinked RHS.
+
+17. Add filter to find rules/queries that are source/sink.
+
+18. Show dynamic callsites inline in rule/query summary view. 
