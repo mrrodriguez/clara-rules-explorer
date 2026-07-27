@@ -37,6 +37,11 @@
 			<i class="bi {icon} me-2 opacity-75"></i>
 		{/if}
 		{title}
+		{#if items.length > 0}
+			<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle ms-2"
+				>{items.length}</span
+			>
+		{/if}
 	</h6>
 
 	{#if items.length > 0}

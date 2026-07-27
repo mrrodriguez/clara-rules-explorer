@@ -138,7 +138,7 @@ space of the ns name.
     too low in viewport. Show no more than 8 or better is to use a fraction of the viewport space
 perhaps?
 
-15. The summary upstream/downstream should have count next to them and the whole section should be
+15. DONE The summary upstream/downstream should have count next to them and the whole section should be
     collapsible, default expanded.
 
 16. Add filter to find rules/queries that have unresolved dynamic callsites and/or unlinked RHS.
