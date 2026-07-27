@@ -1,6 +1,7 @@
 <script lang="ts" generics="T extends { name: string }">
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { clickOutside } from '$lib/actions/clickOutside';
+	import { tooltip } from '$lib/actions/popover';
 	import ReferenceListItem from '$lib/components/nav/ReferenceListItem.svelte';
 	import type { GroupedFilterableNavListProps } from '$lib/components/nav/GroupedFilterableNavListProps';
 	import { NamespaceFilter } from '$lib/components/nav/namespaceFilter.svelte';
@@ -330,16 +331,20 @@
 				{@const expanded = !!expandedGroups[group.ns]}
 
 				<button
-					class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-3 border-start-0 border-end-0 bg-light fw-medium small"
+					class="list-group-item list-group-item-action d-flex flex-column py-2 px-3 border-start-0 border-end-0 bg-light fw-medium small text-start"
 					onclick={() => toggleGroup(group.ns)}
 				>
-					<span class="text-truncate">
-						<i class="bi bi-{expanded ? 'chevron-down' : 'chevron-right'} me-1 opacity-50"></i>
-						{group.ns}
+					<span class="d-flex align-items-center w-100">
+						<i
+							class="bi bi-{expanded
+								? 'chevron-down'
+								: 'chevron-right'} me-1 opacity-50 flex-shrink-0"
+						></i>
+						<span class="text-truncate" use:tooltip>
+							{group.ns}
+						</span>
 					</span>
-					<span class="badge bg-secondary rounded-pill ms-2 flex-shrink-0"
-						>{group.totalCount} {itemLabel}</span
-					>
+					<span class="badge bg-secondary rounded-pill mt-1">{group.totalCount} {itemLabel}</span>
 				</button>
 
 				{#if expanded}

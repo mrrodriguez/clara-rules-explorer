@@ -126,11 +126,11 @@ available). This is unrelated to the goals scope of the work I've presented for 
 
 10. DONE URL encoding for some rule names fail - such as with "?" in them.
 
-11. annotations gen perf?
+11. MAYBE annotations gen perf?
 
 12. DONE LHS "args" can be big and needs code formatting and likely collapsed by default like other exprs.
 
-13. Need popover non-truncated over the namespace expand toggles cine they are often trucated. Put
+13. DONE Need popover non-truncated over the namespace expand toggles cine they are often trucated. Put
     the badges for how many rules/queries on a new line entirely since it takes too much of the
 space of the ns name.
 
