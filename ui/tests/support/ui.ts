@@ -97,6 +97,25 @@ export const ui = {
 		/** The empty state message (when no items match) */
 		emptyState(page: Page) {
 			return page.locator('.text-muted.fst-italic');
+		},
+
+		// ── Rulebase filter menu (the "Filters" button with checkboxes) ──
+
+		/** The rulebase filter menu toggle button */
+		filterMenuButton(page: Page) {
+			return page.locator('button.btn-outline-secondary').filter({ has: page.locator('i.bi-funnel-fill') });
+		},
+		/** The rulebase filter dropdown menu (when open) — scoped by its unique content */
+		filterMenuDropdown(page: Page) {
+			return page.locator('.dropdown-menu.show').filter({ hasText: 'Clear all filters' });
+		},
+		/** A filter checkbox inside the filter menu dropdown */
+		filterOption(page: Page, label: string) {
+			return page.locator('.dropdown-menu.show button.dropdown-item').filter({ hasText: label });
+		},
+		/** The "Clear all filters" button inside the filter menu dropdown */
+		clearAllFiltersButton(page: Page) {
+			return page.locator('.dropdown-menu.show button.dropdown-item').filter({ hasText: 'Clear all filters' });
 		}
 	}
 };

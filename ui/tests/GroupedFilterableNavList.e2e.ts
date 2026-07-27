@@ -359,6 +359,267 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 	});
 });
 
+test.describe('GroupedFilterableNavList — Rulebase filters', () => {
+	test.beforeEach(async ({ page }) => {
+		await page.goto('/');
+		await ui.sidebar.navigateTo(page, 'Rules');
+		await expect(page).toHaveURL(/\/rules/);
+	});
+
+	// ── Filter menu visibility ───────────────────────────────────────────
+
+	test('filter menu button appears on rules page but not queries page', async ({ page }) => {
+		// Visible on rules page (filter options are passed)
+		await expect(ui.groupedNav.filterMenuButton(page)).toBeVisible();
+
+		// Navigate to queries — no filter options passed, button absent
+		await ui.sidebar.navigateTo(page, 'Queries');
+		await expect(page).toHaveURL(/\/queries/);
+		await expect(ui.groupedNav.filterMenuButton(page)).not.toBeVisible();
+	});
+
+	// ── Filter menu open / close ─────────────────────────────────────────
+
+	test('filter menu opens with expected checkboxes', async ({ page }) => {
+		await ui.groupedNav.filterMenuButton(page).click();
+		const dropdown = ui.groupedNav.filterMenuDropdown(page);
+		await expect(dropdown).toBeVisible();
+
+		// All 5 filter options should be present
+		await expect(ui.groupedNav.filterOption(page, 'Dynamic Inserts (unresolved)')).toBeVisible();
+		await expect(ui.groupedNav.filterOption(page, 'Dynamic Retracts (unresolved)')).toBeVisible();
+		await expect(ui.groupedNav.filterOption(page, 'Unlinked RHS')).toBeVisible();
+		await expect(ui.groupedNav.filterOption(page, 'Source Rule')).toBeVisible();
+		await expect(ui.groupedNav.filterOption(page, 'Sink Rule')).toBeVisible();
+
+		// Clear all button present
+		await expect(ui.groupedNav.clearAllFiltersButton(page)).toBeVisible();
+
+		// All options start unchecked (square icon)
+		const dropdownItems = dropdown.locator('button.dropdown-item');
+		const count = await dropdownItems.count();
+		for (let i = 0; i < count; i++) {
+			const icon = dropdownItems.nth(i).locator('i');
+			const iconClass = await icon.getAttribute('class');
+			if (iconClass?.includes('bi-square') || iconClass?.includes('bi-check-square')) {
+				expect(iconClass).toContain('bi-square');
+				expect(iconClass).not.toContain('bi-check-square');
+			}
+		}
+	});
+
+	test('filter menu button label reflects active filter count', async ({ page }) => {
+		// Default: "Filters"
+		await expect(ui.groupedNav.filterMenuButton(page)).toContainText('Filters');
+
+		// Check one filter → "1 filter"
+		await ui.groupedNav.filterMenuButton(page).click();
+		await ui.groupedNav.filterOption(page, 'Source Rule').click();
+		await ui.groupedNav.filterMenuButton(page).click(); // close
+		await expect(ui.groupedNav.filterMenuButton(page)).toContainText('1 filter');
+
+		// Check another → "2 filters"
+		await ui.groupedNav.filterMenuButton(page).click();
+		await ui.groupedNav.filterOption(page, 'Sink Rule').click();
+		await ui.groupedNav.filterMenuButton(page).click(); // close
+		await expect(ui.groupedNav.filterMenuButton(page)).toContainText('2 filters');
+	});
+
+	test('clicking outside closes filter menu dropdown', async ({ page }) => {
+		await ui.groupedNav.filterMenuButton(page).click();
+		await expect(ui.groupedNav.filterMenuDropdown(page)).toBeVisible();
+
+		// Click the search input to close
+		await ui.groupedNav.searchInput(page, 'Search rules...').click();
+		await expect(ui.groupedNav.filterMenuDropdown(page)).not.toBeVisible();
+	});
+
+	// ── Single filter behaviour ──────────────────────────────────────────
+
+	test('checking "Source Rule" shows only source rules', async ({ page }) => {
+		await ui.groupedNav.filterMenuButton(page).click();
+		await ui.groupedNav.filterOption(page, 'Source Rule').click();
+
+		// Filter narrows to single namespace → auto-expand happens.
+		// All visible rules should have the source-rule icon.
+		const items = page.locator('a.list-group-item');
+		const count = await items.count();
+		expect(count).toBeGreaterThan(0);
+
+		// Every visible rule should show the source icon
+		for (let i = 0; i < count; i++) {
+			const icons = items.nth(i).locator('i');
+			const sourceIcon = icons.filter({ hasText: '' }).locator('.bi-box-arrow-in-right');
+			// At least one source icon should exist (may be in the badge area)
+			await expect(items.nth(i).locator('i.bi-box-arrow-in-right')).toHaveCount(1);
+		}
+	});
+
+	test('checking "Sink Rule" shows only sink rules', async ({ page }) => {
+		await ui.groupedNav.filterMenuButton(page).click();
+		await ui.groupedNav.filterOption(page, 'Sink Rule').click();
+
+		const items = page.locator('a.list-group-item');
+		const count = await items.count();
+		expect(count).toBeGreaterThan(0);
+
+		for (let i = 0; i < count; i++) {
+			await expect(items.nth(i).locator('i.bi-box-arrow-right')).toHaveCount(1);
+		}
+	});
+
+	test('checking "Dynamic Inserts (unresolved)" shows only rules with unresolved dynamic inserts', async ({
+		page
+	}) => {
+		await ui.groupedNav.filterMenuButton(page).click();
+		await ui.groupedNav.filterOption(page, 'Dynamic Inserts (unresolved)').click();
+
+		const items = page.locator('a.list-group-item');
+		const count = await items.count();
+		expect(count).toBeGreaterThan(0);
+
+		// Each visible rule should have the warning (partial) or danger (none) dynamic-insert icon
+		for (let i = 0; i < count; i++) {
+			const icon = items.nth(i).locator('i.bi-exclamation-circle-fill, i.bi-question-circle-fill');
+			await expect(icon).toHaveCount(1);
+		}
+	});
+
+	// ── OR logic: multiple filters ───────────────────────────────────────
+
+	test('multiple filters combine with OR logic', async ({ page }) => {
+		// Count source-only, sink-only, then source+sink together
+		await ui.groupedNav.filterMenuButton(page).click();
+		await ui.groupedNav.filterOption(page, 'Source Rule').click();
+		const sourceCount = await page.locator('a.list-group-item').count();
+
+		// Clear and check sink only
+		await ui.groupedNav.filterOption(page, 'Source Rule').click(); // uncheck
+		await ui.groupedNav.filterOption(page, 'Sink Rule').click(); // check
+		const sinkCount = await page.locator('a.list-group-item').count();
+
+		// Now check both
+		await ui.groupedNav.filterOption(page, 'Source Rule').click(); // re-check
+		const combinedCount = await page.locator('a.list-group-item').count();
+
+		// Combined should be >= max of individual counts (OR logic)
+		expect(combinedCount).toBeGreaterThanOrEqual(Math.max(sourceCount, sinkCount));
+		// Combined should be <= sum (could be less if some items match both)
+		expect(combinedCount).toBeLessThanOrEqual(sourceCount + sinkCount);
+	});
+
+	// ── Clear all ────────────────────────────────────────────────────────
+
+	test('"Clear all filters" resets the list', async ({ page }) => {
+		await ui.groupedNav.expandAllButton(page).click();
+		const fullCount = await page.locator('a.list-group-item').count();
+
+		// Apply a filter (dropdown stays open after toggle — close it by clicking outside)
+		await ui.groupedNav.filterMenuButton(page).click();
+		await ui.groupedNav.filterOption(page, 'Source Rule').click();
+		await ui.groupedNav.searchInput(page, 'Search rules...').click(); // dismiss dropdown
+		const filteredCount = await page.locator('a.list-group-item').count();
+		expect(filteredCount).toBeLessThan(fullCount);
+
+		// Reopen and clear all filters
+		await ui.groupedNav.filterMenuButton(page).click();
+		await ui.groupedNav.clearAllFiltersButton(page).click();
+
+		// All groups should be back
+		await ui.groupedNav.expandAllButton(page).click();
+		const restoredCount = await page.locator('a.list-group-item').count();
+		expect(restoredCount).toBe(fullCount);
+
+		// Button label reset to "Filters"
+		await expect(ui.groupedNav.filterMenuButton(page)).toContainText('Filters');
+	});
+
+	// ── Filter + search interaction ──────────────────────────────────────
+
+	test('filter and search combine (intersection)', async ({ page }) => {
+		// Apply source filter
+		await ui.groupedNav.filterMenuButton(page).click();
+		await ui.groupedNav.filterOption(page, 'Source Rule').click();
+
+		// Search within filtered results
+		const search = ui.groupedNav.searchInput(page, 'Search rules...');
+		await search.fill('collect-app-given-docs');
+
+		// Only matching items (source + name match)
+		const items = page.locator('a.list-group-item');
+		await expect(items).toHaveCount(1);
+		await expect(items.first()).toContainText('collect-app-given-docs');
+
+		// Clear search, verify filter remains active
+		await search.fill('');
+		const postSearchCount = await page.locator('a.list-group-item').count();
+		expect(postSearchCount).toBeGreaterThan(1);
+
+		// Verify filter button still shows active
+		await expect(ui.groupedNav.filterMenuButton(page)).toContainText('1 filter');
+	});
+
+	// ── Auto-expand behaviour ────────────────────────────────────────────
+
+	test('filter reduces to single namespace → group auto-expands', async ({ page }) => {
+		// Start with all groups collapsed
+		const groupToggles = ui.groupedNav.allGroupToggles(page);
+		const initialGroupCount = await groupToggles.count();
+		expect(initialGroupCount).toBeGreaterThanOrEqual(2);
+
+		// No rule items visible (all collapsed)
+		await expect(page.locator('a.list-group-item')).toHaveCount(0);
+
+		// Apply filter that eliminates all rules from one namespace.
+		// Source rules only exist in loan-doc-rules, so this leaves 1 group.
+		await ui.groupedNav.filterMenuButton(page).click();
+		await ui.groupedNav.filterOption(page, 'Source Rule').click();
+
+		// The sole remaining group should auto-expand
+		const remainingGroups = ui.groupedNav.allGroupToggles(page);
+		await expect(remainingGroups).toHaveCount(1);
+
+		// There should be visible rule items (group expanded)
+		await expect(page.locator('a.list-group-item')).not.toHaveCount(0);
+	});
+
+	test('filter eliminates all items → empty state shown', async ({ page }) => {
+		// Combine filters that match nothing: Dynamic Retracts (unresolved) — none in demo data
+		await ui.groupedNav.filterMenuButton(page).click();
+		await ui.groupedNav.filterOption(page, 'Dynamic Retracts (unresolved)').click();
+
+		// Or use a combination that can't be satisfied. In demo data there are no
+		// rules with unlinked-rhs, so combine it with something else for OR that still
+		// yields 0 when only that is checked. Actually Unlinked RHS also matches 0.
+		// But the OR of two empty sets is still empty. Let's just check one that
+		// we know matches 0.
+		await expect(page.locator('a.list-group-item')).toHaveCount(0);
+		await expect(ui.groupedNav.emptyState(page)).toBeVisible();
+	});
+
+	// ── Group badge reflects filtered count ──────────────────────────────
+
+	test('group badge counts reflect filtered results', async ({ page }) => {
+		// Expand all to see all items
+		await ui.groupedNav.expandAllButton(page).click();
+		const fullTotal = await page.locator('a.list-group-item').count();
+
+		// Apply source filter
+		await ui.groupedNav.filterMenuButton(page).click();
+		await ui.groupedNav.filterOption(page, 'Source Rule').click();
+
+		// Count visible items (group auto-expanded)
+		const visibleItems = await page.locator('a.list-group-item').count();
+		expect(visibleItems).toBeLessThan(fullTotal);
+
+		// The visible group badge should match the number of visible items
+		const badge = ui.groupedNav.allGroupToggles(page).first().locator('.badge');
+		const badgeText = (await badge.textContent()) || '0';
+		const badgeCount = parseInt(badgeText, 10);
+		expect(badgeCount).toBe(visibleItems);
+	});
+});
+
 test.describe('GroupedFilterableNavList — Queries page', () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto('/');

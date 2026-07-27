@@ -133,11 +133,10 @@
 				totalSearchResults = searchFiltered.length;
 			} else {
 				groupedItems = groupedItems
-					.map((g) => ({
-						...g,
-						items: g.items.filter((item) => matchesRulebaseFilter(item)),
-						totalCount: g.items.length
-					}))
+					.map((g) => {
+						const filtered = g.items.filter((item) => matchesRulebaseFilter(item));
+						return { ns: g.ns, items: filtered, totalCount: filtered.length };
+					})
 					.filter((g) => g.items.length > 0);
 			}
 		}
