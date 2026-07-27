@@ -20,11 +20,15 @@
 		items = [],
 		fullView = false,
 		class: className = '',
-		maxVisibleItems = 8,
+		maxVisibleItems = 6,
 		children
 	}: Props = $props();
 
-	const scrollable = $derived(items.length > maxVisibleItems);
+	const scrollable = $derived(items.length >= maxVisibleItems);
+
+	// Per-item height: py-2 (1rem vertical) + QualifiedName two-line text (~2rem) = ~3rem.
+	// Add 0.25rem buffer so the last visible item renders nearly fully.
+	const scrollMaxHeight = $derived(`${maxVisibleItems * 3 + 0.25}rem`);
 </script>
 
 <div class="mb-3 {className}">
@@ -37,9 +41,8 @@
 
 	{#if items.length > 0}
 		<div
-			class="list-group list-group-flush border rounded shadow-sm overflow-hidden{scrollable
-				? ' scrollable-list'
-				: ''}"
+			class="list-group list-group-flush border rounded shadow-sm"
+			style={scrollable ? `max-height: ${scrollMaxHeight}; overflow-y: auto;` : ''}
 		>
 			{#each items as item (typeof item === 'string' ? item : item.name)}
 				{#if typeof item === 'string'}
@@ -62,10 +65,5 @@
 	}
 	.list-group-item:hover {
 		background-color: rgba(0, 0, 0, 0.02);
-	}
-
-	.scrollable-list {
-		max-height: min(20rem, 30vh);
-		overflow-y: auto;
 	}
 </style>
