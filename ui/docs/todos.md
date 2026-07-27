@@ -134,7 +134,7 @@ available). This is unrelated to the goals scope of the work I've presented for 
     the badges for how many rules/queries on a new line entirely since it takes too much of the
 space of the ns name.
 
-14. when upstream/downstream get long in the summary they should scroll instead of push all content
+14. DONE when upstream/downstream get long in the summary they should scroll instead of push all content
     too low in viewport. Show no more than 8 or better is to use a fraction of the viewport space
 perhaps?
 

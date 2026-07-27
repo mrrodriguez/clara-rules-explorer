@@ -10,6 +10,7 @@
 		items?: (ProductionReference | string)[];
 		fullView?: boolean;
 		class?: string;
+		maxVisibleItems?: number;
 		children?: Snippet;
 	}
 
@@ -19,8 +20,11 @@
 		items = [],
 		fullView = false,
 		class: className = '',
+		maxVisibleItems = 8,
 		children
 	}: Props = $props();
+
+	const scrollable = $derived(items.length > maxVisibleItems);
 </script>
 
 <div class="mb-3 {className}">
@@ -32,7 +36,11 @@
 	</h6>
 
 	{#if items.length > 0}
-		<div class="list-group list-group-flush border rounded shadow-sm overflow-hidden">
+		<div
+			class="list-group list-group-flush border rounded shadow-sm overflow-hidden{scrollable
+				? ' scrollable-list'
+				: ''}"
+		>
 			{#each items as item (typeof item === 'string' ? item : item.name)}
 				{#if typeof item === 'string'}
 					<FactTypeReferenceLink type={item} />
@@ -54,5 +62,10 @@
 	}
 	.list-group-item:hover {
 		background-color: rgba(0, 0, 0, 0.02);
+	}
+
+	.scrollable-list {
+		max-height: min(20rem, 30vh);
+		overflow-y: auto;
 	}
 </style>
