@@ -146,3 +146,9 @@ perhaps?
 17. DONE Add filter to find rules/queries that are source/sink.
 
 18. DONE Show dynamic callsites inline in rule/query summary view. 
+
+19. DONE The rule/query summary title area can overrun the view width and the "full view" breaks out of
+    its borders and looks broken. In general, we should move the badges to a new line to avoid
+trying to put so much horizontallly. The rule/query name itself can be quite long, so needs space.
+The "rule" or "query" badge also needs to stay out of this horiztonal space. It can go on the
+separte newline badges strip as well.

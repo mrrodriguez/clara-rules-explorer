@@ -19,20 +19,23 @@
 	const resolvedHref = $derived(resolve(href as Pathname));
 </script>
 
-<div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
-	<div class="d-flex align-items-center min-width-0 flex-grow-1">
-		{#if type !== 'fact'}
-			<RulebaseComponentTypeBadge {type} />
-			<QualifiedName fullName={name} size="lg" class="ms-3 text-{color}" />
-		{:else}
+<div class="card-header bg-white py-2">
+	<!-- Row 1: Name + Full View button -->
+	<div class="d-flex justify-content-between align-items-center">
+		<div class="min-width-0 flex-grow-1">
 			<QualifiedName fullName={name} size="lg" class="text-{color}" />
+		</div>
+		{#if !fullView && type !== 'fact'}
+			<a href={resolvedHref} class="btn btn-outline-{color} btn-sm flex-shrink-0 ms-2">
+				<i class="bi bi-arrows-fullscreen me-1"></i> Full View
+			</a>
 		{/if}
-
-		{@render children?.()}
 	</div>
-	{#if !fullView && type !== 'fact'}
-		<a href={resolvedHref} class="btn btn-outline-{color} btn-sm">
-			<i class="bi bi-arrows-fullscreen me-1"></i> Full View
-		</a>
+	<!-- Row 2: Type badge + other badges -->
+	{#if type !== 'fact'}
+		<div class="d-flex align-items-center flex-wrap gap-1 mt-1">
+			<RulebaseComponentTypeBadge {type} />
+			{@render children?.()}
+		</div>
 	{/if}
 </div>
