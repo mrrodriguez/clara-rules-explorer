@@ -13,6 +13,25 @@
  "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs"
  {:clara-rules/no-output-types true}
 
+ ;; Resolved via :fact-constructor-match-fn / :fact-constructor-type-resolver-fn
+ ;; The analyzer traces through ->document-check-input → helpers/->fact to
+ ;; discover the :loan-doc-rules/document-check-input fact type.
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
+ {:clara-rules/insert-types [:loan-doc-rules/document-check-input]
+  :clara-rules/dynamic-insert-types-detected
+  {:callsites
+   [{:source-str "(h/->fact :loan-doc-rules/document-check-input data)"
+     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
+     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :status :resolved
+     :resolved-types [:loan-doc-rules/document-check-input]
+     :constructor-sym clara.server.tools.graph.rules.helpers/->fact
+     :via {:boundary-var-name-sym clara.rules/insert!
+           :callstack [{:var-name-sym clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input}
+                       {:var-name-sym clara.server.tools.graph.rules.loan-doc-rules/->document-check-input}
+                       {:var-name-sym clara.server.tools.graph.rules.helpers/->fact}]}}]
+   :resolution :full}}
+
  ;; ---------------------------------------------------------------------------
  ;; Dynamic rule annotations — consistent with the automatic session-based
  ;; pipeline (see clara.server.tools.graph.analyze / analyze.rhs): direct

@@ -146,7 +146,7 @@
     true (set/rename-keys {:ns-name-sym :ns})
     true (update :ns #(if (symbol? %) (str %) %))
     true (select-keys #{:source-str :ns :filename :status :resolved-types :resolution-method
-                        :fact-type :fact-type-spec})
+                        :fact-type :fact-type-spec :constructor-sym :via})
 
       ;; resolve :resolved-types / :fact-type tokens
     (seq (:resolved-types callsite))
@@ -159,6 +159,18 @@
     (update :fact-type-spec #(into {}
                                    (map (fn [[k v]] [k (if (symbol? v) (str v) v)]))
                                    %))
+
+    (:constructor-sym callsite)
+    (update :constructor-sym #(if (symbol? %) (str %) %))
+
+    (:via callsite)
+    (update :via (fn [via]
+                   (-> via
+                       (update :boundary-var-name-sym #(if (symbol? %) (str %) %))
+                       (update :callstack (fn [cs]
+                                            (mapv (fn [entry]
+                                                    (update entry :var-name-sym #(if (symbol? %) (str %) %)))
+                                                  cs))))))
     true remove-nil-vals))
 
 (defn serialize-dynamic-detection

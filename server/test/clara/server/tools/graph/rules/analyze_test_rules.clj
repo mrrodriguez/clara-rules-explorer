@@ -273,3 +273,21 @@
   =>
   (mapv ?t [?app-id]))
 
+;; ---------------------------------------------------------------------------
+;; Constructor-of-interest fixtures (:fact-constructor-match-fn mechanism)
+
+(defn make-tagged-facts
+  "Helper that builds facts via the ->fact constructor and returns them.
+   The constructor is reached transitively through this helper — the analyzer
+   must trace through it to find the ->fact callsite."
+  [ids]
+  (mapv (fn [id] (->fact :demo/tagged {:id id})) ids))
+
+(r/defrule rule-ctor-of-interest-via-helper
+  "Rule L: inserts via a helper that internally calls the ->fact constructor.
+   Without :fact-constructor-match-fn the ->fact callsite inside
+   make-tagged-facts is invisible; with it, the type :demo/tagged is resolved."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert-all! (make-tagged-facts [?app-id])))
+

@@ -51,6 +51,15 @@
    (s/optional-key :fact-binding) s/Any
    s/Keyword s/Any})
 
+(s/defschema ViaEntry
+  "A single entry in a constructor callstack chain."
+  {:var-name-sym s/Str})
+
+(s/defschema ViaChain
+  "Provenance chain from a boundary fn to a constructor callsite."
+  {:boundary-var-name-sym s/Str
+   :callstack [ViaEntry]})
+
 (s/defschema DynamicCallsiteEntry
   "A single dynamic-insert/retract callsite with source coordinates
    and optional resolution info."
@@ -59,7 +68,9 @@
    :filename s/Str
    (s/optional-key :status) s/Keyword
    (s/optional-key :resolved-types) [s/Str]
-   (s/optional-key :resolution-method) s/Str})
+   (s/optional-key :resolution-method) s/Str
+   (s/optional-key :constructor-sym) s/Str
+   (s/optional-key :via) ViaChain})
 
 (s/defschema DynamicDetectionInfo
   "Info about dynamic insert/retract callsites detected by the analyzer."

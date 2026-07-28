@@ -70,6 +70,49 @@
     :rules-filter [`atr/rule-side-effect-only]}))
 
 ;; ---------------------------------------------------------------------------
+;; Constructor-of-interest test helpers
+;; ---------------------------------------------------------------------------
+
+(def ^:private ->fact-sym
+  "The fully-qualified symbol for the ->fact constructor in analyze-test-rules."
+  'clara.server.tools.graph.rules.analyze-test-rules/->fact)
+
+(defn- ->fact-match-fn
+  "Matches the ->fact constructor symbol."
+  [sym]
+  (= ->fact-sym sym))
+
+(defn- ->fact-type-resolver
+  "Resolves fact types from ->fact callsites. The type is the first argument."
+  [{:keys [arg-form constructor-sym]}]
+  (when (and (= ->fact-sym constructor-sym)
+             (seq? arg-form)
+             (= 3 (count arg-form)))
+    {:resolved-types [(second arg-form)]}))
+
+(def ^:private edge-case-ctor-annotations
+  "Edge-case annotations with constructor-of-interest resolution enabled."
+  (analyze/generate-annotations-from-analysis
+   {:analysis edge-case-analysis
+    :session-or-rulebase edge-case-session
+    :fact-constructor-match-fn ->fact-match-fn
+    :fact-constructor-type-resolver-fn ->fact-type-resolver}))
+
+(def ^:private loan-doc-ctor-annotations
+  "Loan-doc annotations with constructor-of-interest resolution enabled.
+   Resolves :loan-doc-rules/document-check-input via the ->fact chain
+   (helpers/->fact → loan-doc-rules/->document-check-input → collect-app-doc-check-input)."
+  (analyze/generate-annotations-from-analysis
+   {:analysis loan-doc-analysis
+    :session-or-rulebase loan-doc-session
+    :fact-constructor-match-fn (fn [sym]
+                                (= 'clara.server.tools.graph.rules.helpers/->fact sym))
+    :fact-constructor-type-resolver-fn (fn [{:keys [arg-form]}]
+                                        (when (and (seq? arg-form)
+                                                   (= 3 (count arg-form)))
+                                          {:resolved-types [(second arg-form)]}))}))
+
+;; ---------------------------------------------------------------------------
 ;; Static insert types (record constructors traced through RHS and helpers)
 ;; ---------------------------------------------------------------------------
 
@@ -815,3 +858,105 @@
           "app-outcome-pending? declares ApplicationOutcome in its :props")
       (is (nil? (:clara-rules/insert-types aop))
           "No insert-types added since :props already covers them"))))
+
+;; ---------------------------------------------------------------------------
+;; Constructor-of-interest resolution
+;; ---------------------------------------------------------------------------
+
+(deftest test-fact-constructor-resolution
+  (let [ns-sym 'clara.server.tools.graph.rules.analyze-test-rules
+        filename "clara/server/tools/graph/rules/analyze_test_rules.clj"]
+
+    (testing "Constructor-of-interest reached transitively through helper"
+      (let [ann (ann/get-annotation edge-case-ctor-annotations
+                                    `atr/rule-ctor-of-interest-via-helper)
+            dyn (:clara-rules/dynamic-insert-types-detected ann)]
+        (is (= [:demo/tagged] (:clara-rules/insert-types ann))
+            "type is promoted from constructor callsite resolution")
+        (is (= :full (:resolution dyn)))
+        (is (= 1 (count (:callsites dyn))))
+        (let [cs (first (:callsites dyn))]
+          (is (= :resolved (:status cs)))
+          (is (= ->fact-sym (:constructor-sym cs)))
+          (is (= [:demo/tagged] (:resolved-types cs)))
+          (is (= "(->fact :demo/tagged {:id id})"
+                 (:source-str cs))
+              "source-str shows the constructor callsite form from the helper")
+          (is (= ns-sym (:ns-name-sym cs)))
+          (is (= filename (:filename cs)))
+          ;; :via chain
+          (let [{:keys [boundary-var-name-sym callstack]} (:via cs)]
+            (is (= 'clara.rules/insert-all! boundary-var-name-sym))
+            (is (= [`atr/rule-ctor-of-interest-via-helper
+                    `atr/make-tagged-facts
+                    ->fact-sym]
+                   (mapv :var-name-sym callstack))
+                "callstack: rule-var → make-tagged-facts → ->fact")))))
+
+    (testing "Direct ->fact call (no helper) still works but isn't resolved by default"
+      ;; Without match-fn, ->fact is just an unknown constructor-named function
+      (let [ann (ann/get-annotation edge-case-annotations
+                                    `atr/rule-fact-builder-call)
+            dyn (:clara-rules/dynamic-insert-types-detected ann)]
+        (is (= :none (:resolution dyn)))
+        (is (nil? (:clara-rules/insert-types ann)))))
+
+    (testing "Direct ->fact call WITH match-fn resolves correctly"
+      (let [ann (ann/get-annotation edge-case-ctor-annotations
+                                    `atr/rule-fact-builder-call)
+            dyn (:clara-rules/dynamic-insert-types-detected ann)]
+        (is (= :full (:resolution dyn)))
+        (is (= [:custom-fact-type] (:clara-rules/insert-types ann)))
+        (let [cs (first (:callsites dyn))]
+          (is (= :resolved (:status cs)))
+          (is (= ->fact-sym (:constructor-sym cs)))
+          (is (= [:custom-fact-type] (:resolved-types cs)))
+          (let [{:keys [boundary-var-name-sym callstack]} (:via cs)]
+            (is (= 'clara.rules/insert! boundary-var-name-sym))
+            ;; Direct call: the containing var IS the inserter var
+            (is (= [`atr/rule-fact-builder-call ->fact-sym]
+                   (mapv :var-name-sym callstack))
+                "callstack: boundary-caller → ->fact (direct, no helper)")))))))
+
+(deftest test-constructor-options-validation
+  (testing "Providing match-fn without type-resolver throws"
+    (is (thrown-with-msg?
+         Exception
+         #":fact-constructor-match-fn and :fact-constructor-type-resolver-fn must be provided together"
+         (analyze/generate-annotations-from-analysis
+          {:analysis edge-case-analysis
+           :session-or-rulebase edge-case-session
+           :fact-constructor-match-fn (constantly true)}))))
+
+  (testing "Providing type-resolver without match-fn throws"
+    (is (thrown-with-msg?
+         Exception
+         #":fact-constructor-match-fn and :fact-constructor-type-resolver-fn must be provided together"
+         (analyze/generate-annotations-from-analysis
+          {:analysis edge-case-analysis
+           :session-or-rulebase edge-case-session
+           :fact-constructor-type-resolver-fn (constantly nil)})))))
+
+(deftest test-loan-doc-ctor-resolution
+  (testing "collect-app-doc-check-input resolved via helpers/->fact chain"
+    (let [ann (ann/get-annotation loan-doc-ctor-annotations
+                                  `ldr/collect-app-doc-check-input)
+          dyn (:clara-rules/dynamic-insert-types-detected ann)]
+      (is (= [:loan-doc-rules/document-check-input]
+             (:clara-rules/insert-types ann))
+          "type resolved transitively through ->document-check-input → helpers/->fact")
+      (is (= :full (:resolution dyn)))
+      (is (= 1 (count (:callsites dyn))))
+      (let [cs (first (:callsites dyn))]
+        (is (= :resolved (:status cs)))
+        (is (= 'clara.server.tools.graph.rules.helpers/->fact
+               (:constructor-sym cs)))
+        (is (= [:loan-doc-rules/document-check-input]
+               (:resolved-types cs)))
+        (let [{:keys [boundary-var-name-sym callstack]} (:via cs)]
+          (is (= 'clara.rules/insert! boundary-var-name-sym))
+          (is (= [`ldr/collect-app-doc-check-input
+                  `ldr/->document-check-input
+                  'clara.server.tools.graph.rules.helpers/->fact]
+                 (mapv :var-name-sym callstack))
+              "callstack: collect-app-doc-check-input → ->document-check-input → helpers/->fact"))))))

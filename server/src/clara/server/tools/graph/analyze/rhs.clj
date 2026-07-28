@@ -517,3 +517,128 @@
                       {:usages (mapv (partial build-synthetic-usage rule-ns rule-local) pairs)
                        :contexts (mapv build-alias-context pairs)}])))))
        (into {})))
+
+;; ---------------------------------------------------------------------------
+;; Fact-constructor callsite resolution
+;; ---------------------------------------------------------------------------
+
+(defn- fq-sym
+  "Returns the fully-qualified symbol [ns name] as a single symbol."
+  [ns name]
+  (symbol (str ns) (str name)))
+
+(defn- shortest-call-path
+  "BFS from start to end in the call graph.
+   Returns [start … end] or nil when unreachable.
+   Neighbors are sorted by str for deterministic traversal."
+  [graph start end]
+  (loop [queue (conj clojure.lang.PersistentQueue/EMPTY [start])
+         visited #{start}]
+    (when-let [path (peek queue)]
+      (let [node (peek path)]
+        (if (= node end)
+          path
+          (let [neighbors (->> (get graph node)
+                               (remove visited)
+                               (sort-by str)
+                               vec)]
+            (recur (into (pop queue) (map #(conj path %) neighbors))
+                   (into visited neighbors))))))))
+
+(defn- resolve-ctor-callsite
+  "Resolves a single constructor-of-interest callsite.
+   Returns a callsite entry map."
+  [ctor-usage inserter-var boundary-fn-sym graph direction rule
+   fact-constructor-type-resolver-fn get-source]
+  (let [ctor-sym (fq-sym (:to ctor-usage) (:name ctor-usage))
+        ctor-caller (fq-sym (:from ctor-usage) (:from-var ctor-usage))
+        callstack-path
+        (if (= inserter-var ctor-caller)
+          [{:var-name-sym ctor-caller}]
+          (when-let [path (shortest-call-path graph inserter-var ctor-caller)]
+            (mapv (fn [v] {:var-name-sym v}) path)))
+        via (when callstack-path
+              {:boundary-var-name-sym boundary-fn-sym
+               :callstack (conj callstack-path {:var-name-sym ctor-sym})})
+        source (get-source (:from ctor-usage) (:filename ctor-usage))
+        call-str (source-text-at source
+                                 (:row ctor-usage) (:col ctor-usage)
+                                 (:end-row ctor-usage) (:end-col ctor-usage))
+        arg-form (when call-str
+                   (try (read-string call-str) (catch Exception _ nil)))
+        resolver-ctx (cond-> {:constructor-sym ctor-sym
+                              :arg-form arg-form
+                              :ns-name-sym (:from ctor-usage)
+                              :filename (:filename ctor-usage)
+                              :direction direction
+                              :rule rule}
+                       via (assoc :via via))
+        resolved (try
+                   (some-> (fact-constructor-type-resolver-fn resolver-ctx)
+                           :resolved-types seq)
+                   (catch Throwable t
+                     (binding [*out* *err*]
+                       (println
+                        (str "clara.server.tools.graph.analyze: :fact-constructor-type-resolver-fn threw: "
+                             (ex-message t))))
+                     nil))
+        tokens (into #{} (map normalize-token) (or resolved '()))]
+    (cond-> {:source-str (pr-str arg-form)
+             :ns-name-sym (:from ctor-usage)
+             :filename (:filename ctor-usage)
+             :constructor-sym ctor-sym
+             :status (cond (empty? tokens) :unresolved
+                           (= 1 (count tokens)) :resolved
+                           :else :resolved-multi)}
+      (seq tokens) (assoc :resolved-types (vec (sort-by str tokens)))
+      via (assoc :via via))))
+
+(defn resolve-constructor-callsites
+  "Resolves constructor-of-interest callsites discovered in a reachable subtree.
+
+   `boundary-usages` — boundary calls (insert!/retract!) for this rule var.
+   `constructor-ctr-map` — {inserter-var -> [ctor-usage …]} from
+     `build-constructor-callsite-map`, scoped to this rule var.
+   `ctx` — must contain :get-source, :graph, :direction, :rule,
+     :fact-constructor-type-resolver-fn.
+
+   Returns {:callsites […] :resolved-types #{…} :resolution :full|:partial|:none}
+   (same shape as `resolve-boundary-callsites`)."
+  [boundary-usages constructor-ctr-map {:keys [get-source graph direction rule
+                                                fact-constructor-type-resolver-fn]}]
+  (let [boundary-by-caller (into {} (map (fn [u] [(fq-sym (:from u) (:from-var u))
+                                                   (fq-sym (:to u) (:name u))]))
+                                   boundary-usages)
+        entries (into [] (mapcat (fn [[inserter-var ctor-usages]]
+                                   (let [bfn (get boundary-by-caller inserter-var)]
+                                     (map #(resolve-ctor-callsite % inserter-var bfn graph direction rule
+                                                                  fact-constructor-type-resolver-fn
+                                                                  get-source)
+                                          ctor-usages))))
+                                 constructor-ctr-map)
+        resolved-types (into #{} (mapcat :resolved-types) entries)]
+    {:callsites entries
+     :resolved-types resolved-types
+     :resolution (cond (empty? entries) nil
+                       (every? #(= :unresolved (:status %)) entries) :none
+                       (some #(= :unresolved (:status %)) entries) :partial
+                       :else :full)}))
+;; Schemas
+;; ---------------------------------------------------------------------------
+
+(s/defschema ViaEntry
+  {:var-name-sym s/Symbol})
+
+(s/defschema ViaChain
+  {:boundary-var-name-sym s/Symbol
+   :callstack [ViaEntry]})
+
+(s/defschema ConstructorTypeResolverContext
+  "Context map passed to `:fact-constructor-type-resolver-fn`."
+  {:constructor-sym s/Symbol
+   :arg-form s/Any
+   :ns-name-sym s/Symbol
+   :filename s/Str
+   :direction (s/enum :insert :retract)
+   :rule s/Any
+   (s/optional-key :via) ViaChain})

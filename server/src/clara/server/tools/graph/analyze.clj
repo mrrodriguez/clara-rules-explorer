@@ -227,6 +227,28 @@
                    [v types])))
           direct-callers)))
 
+(defn- build-constructor-callsite-map
+  "Like `build-inserter-type-map`, but for caller-supplied constructors of
+   interest matched by `fact-constructor-match-fn`.
+
+   Returns `{inserter-var -> [ctor-usage …]}` where each ctor-usage is a
+   kondo `:var-usage` whose callee matched the predicate and whose caller
+   is in the inserter-var's reachable subtree."
+  [direct-callers graph fact-constructor-match-fn {:keys [var-usages]}]
+  (let [reachable-cache (precompute-reachability graph direct-callers)]
+    (into {}
+          (keep (fn [v]
+                  (let [subtree (get reachable-cache v #{})
+                        ctor-usages (into []
+                                          (filter (fn [vu]
+                                                    (and (contains? subtree (fq-name-sym (:from vu) (:from-var vu)))
+                                                         (fact-constructor-match-fn
+                                                          (fq-name-sym (:to vu) (:name vu))))))
+                                          var-usages)]
+                    (when (seq ctor-usages)
+                      [v ctor-usages]))))
+          direct-callers)))
+
 (defn- extract-constructor-types-from-reachable
   "Top-down: given a rule var's reachable set, find which inserter vars are
    in it and union their types from the precomputed inserter-type-map."
@@ -237,12 +259,16 @@
 
 (defn- extract-insert-types
   "Determines the fact types a rule inserts or retracts via `target-fns`:
-   statically-traceable record constructors win when present; otherwise every
-   boundary-call argument form goes through the runtime resolution chain
-   (`analyze.rhs`) and the optional `:callsite-resolver-fn`, producing dynamic
-   detection entries annotated with `:status`/`:resolved-types` plus the
-   aggregate `:resolution`."
-  [reachable target-fns {:keys [analysis inserter-type-map] :as ctx}]
+   statically-traceable record constructors win when present; otherwise
+   constructor-of-interest callsites (when :fact-constructor-match-fn is
+   supplied) are resolved via :fact-constructor-type-resolver-fn; finally
+   every remaining boundary-call argument form goes through the runtime
+   resolution chain (`analyze.rhs`) and the optional `:callsite-resolver-fn`.
+
+   Returns {:static-types #{…} :resolved-types #{…} :dynamic-forms …}."
+  [reachable target-fns {:keys [analysis inserter-type-map
+                                 constructor-callsite-map
+                                 fact-constructor-type-resolver-fn] :as ctx}]
   (let [usages (:var-usages analysis)
         direct-caller? (fn [caller]
                          (and (contains? reachable caller)
@@ -263,13 +289,52 @@
            :resolved-types #{}
            :dynamic-forms nil}
           (let [boundary-usages (into [] (filter direct-target-call?) usages)
+                ;; Constructor-of-interest resolution — gather ctor usages
+                ;; for all inserter-vars in the reachable subtree.
+                ctor-inserter-vars (when constructor-callsite-map
+                                     (into []
+                                           (filter #(contains? reachable %))
+                                           (sort-by str (keys constructor-callsite-map))))
+                ctor-result (when (and fact-constructor-type-resolver-fn (seq ctor-inserter-vars))
+                              (let [scoped-map (select-keys constructor-callsite-map ctor-inserter-vars)]
+                                (rhs/resolve-constructor-callsites
+                                 boundary-usages
+                                 scoped-map
+                                 ctx)))
+                ;; Boundary-call resolution (existing)
                 {:keys [callsites resolved-types resolution]}
-                (rhs/resolve-boundary-callsites boundary-usages ctx)]
+                (rhs/resolve-boundary-callsites boundary-usages ctx)
+                ;; Merge constructor result with boundary result.
+                ;; Suppress :unresolved boundary callsites when constructor
+                ;; callsites are present (they carry richer provenance).
+                ctor-callsites (:callsites ctor-result)
+                ctor-types (:resolved-types ctor-result)
+                all-callsites (into (vec ctor-callsites)
+                                   (if (seq ctor-callsites)
+                                     (remove #(= :unresolved (:status %)) callsites)
+                                     callsites))
+                all-types (into (or ctor-types #{}) resolved-types)
+                ;; Aggregate resolution status
+                all-resolution
+                (let [ctor-resolution (:resolution ctor-result)]
+                  (cond
+                    (empty? all-callsites) nil
+                    ;; When constructor result covers everything: use its resolution
+                    (and ctor-resolution (= :full ctor-resolution)
+                         (every? #(= :resolved (:status %)) all-callsites))
+                    :full
+                    ;; When no constructor result: preserve original boundary resolution
+                    (not ctor-resolution)
+                    resolution
+                    ;; Otherwise: partial (some resolved, some not)
+                    :else
+                    :partial))]
             {:static-types #{}
-             :resolved-types resolved-types
-             :dynamic-forms (when (seq callsites)
-                              (cond-> {:callsites callsites}
-                                resolution (assoc :resolution resolution)))}))))))
+             :resolved-types all-types
+             :dynamic-forms (when (seq all-callsites)
+                              (cond-> {:callsites all-callsites}
+                                all-resolution
+                                (assoc :resolution all-resolution)))}))))))
 
 (defn- var-reachability
   "For a given `var-name`, returns a map of:
@@ -552,8 +617,9 @@
 
 (defn- build-infer-ctx
   "Builds the context map passed to `infer-annotation-for-var`."
-  [graph analysis inserter-type-map retractor-type-map get-source
-   productions-by-name callsite-resolver-fn alias-by-rule]
+  [graph analysis inserter-type-map retractor-type-map constructor-callsite-map
+   get-source productions-by-name callsite-resolver-fn
+   fact-constructor-type-resolver-fn alias-by-rule]
   {:graph graph
    :insert-fns insert-fns
    :retract-fns retract-fns
@@ -562,9 +628,11 @@
    :analysis analysis
    :inserter-type-map inserter-type-map
    :retractor-type-map retractor-type-map
+   :constructor-callsite-map constructor-callsite-map
    :get-source get-source
    :productions-by-name productions-by-name
    :callsite-resolver-fn callsite-resolver-fn
+   :fact-constructor-type-resolver-fn fact-constructor-type-resolver-fn
    :alias-by-rule alias-by-rule})
 
 (s/defschema CallsiteResolverContext
@@ -590,7 +658,11 @@
                                                ;   {:resolved-types [token …]})
    (s/=> s/Any CallsiteResolverContext)
    (s/optional-key :fact-type-spec-fn)        ; (fn [fact-type] -> nil or {:aliases-var v})
-   (s/=> s/Any s/Keyword)})
+   (s/=> s/Any s/Keyword)
+   (s/optional-key :fact-constructor-match-fn) ; (fn [var-sym] -> truthy/nil)
+   (s/=> s/Any s/Symbol)
+   (s/optional-key :fact-constructor-type-resolver-fn) ; (fn [ConstructorTypeResolverContext] -> nil or {:resolved-types [token …]})
+   (s/=> s/Any rhs/ConstructorTypeResolverContext)})
 
 (defn generate-annotations-from-analysis
   "Generates rule annotations (insert/retract types etc.) from a pre-computed `clj-kondo` analysis
@@ -619,10 +691,17 @@
   for boundary calls (see `rhs/alias-usage-map`). Callsites discovered through that chain bypass the
   ctor chain: recorded `:unresolved` with `:fact-type`/`:fact-type-spec` attached, and handed to
   `:callsite-resolver-fn` with the same context."
-  [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn fact-type-spec-fn]}]
+  [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn fact-type-spec-fn
+           fact-constructor-match-fn fact-constructor-type-resolver-fn] :as opts}]
   (when-not session-or-rulebase
     (throw (ex-info "generate-annotations-from-analysis requires :session-or-rulebase"
                     {:missing :session-or-rulebase})))
+  ;; Validate: both constructor options must be provided together or not at all.
+  (when (boolean (not= (boolean fact-constructor-match-fn)
+                       (boolean fact-constructor-type-resolver-fn)))
+    (throw (ex-info "generate-annotations-from-analysis: :fact-constructor-match-fn and :fact-constructor-type-resolver-fn must be provided together"
+                    {:fact-constructor-match-fn (boolean fact-constructor-match-fn)
+                     :fact-constructor-type-resolver-fn (boolean fact-constructor-type-resolver-fn)})))
   (doseq [ns-sym (->> analysis
                       :var-definitions
                       (into []
@@ -655,9 +734,16 @@
         retractor-type-map (build-inserter-type-map
                             (direct-callers graph project-vars retract-fns)
                             graph analysis)
+        constructor-callsite-map (when fact-constructor-match-fn
+                                   (build-constructor-callsite-map
+                                    (direct-callers graph project-vars boundary-fns)
+                                    graph fact-constructor-match-fn analysis))
         infer-ctx (build-infer-ctx graph analysis inserter-type-map retractor-type-map
+                                   constructor-callsite-map
                                    get-source productions-by-name
-                                   callsite-resolver-fn alias-by-rule)
+                                   callsite-resolver-fn
+                                   fact-constructor-type-resolver-fn
+                                   alias-by-rule)
         annotations
         (into {}
               (keep (fn [v]
