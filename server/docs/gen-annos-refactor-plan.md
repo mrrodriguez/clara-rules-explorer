@@ -1,8 +1,117 @@
-I now have a complete picture. Here's the review.
+# gen-annos refactor — action plan
+
+This doc is the action plan for the post-review refactor of the annotation
+generation pipeline. The original review findings are kept below (§ Review)
+for context; this top section tracks execution. Status is updated as chunks
+land so work can stop/resume at any checkbox.
+
+## Directives (from review discussion)
+
+1. Perform the namespace split. If duplication appears across namespaces that
+   are not closely related, create an `analyze.utils` ns to hold the shared
+   pieces — no duplication, no mutual docstring cross-references.
+2. Make the named abstractions real, with inner schemas so the structures are
+   clearly identifiable (`AnalysisIndex`, `TracedArg`, `CallsiteEntry`,
+   `CallsiteResolution`, ...).
+3. Replace `:fact-constructor-match-fn` + `:fact-constructor-type-resolver-fn`
+   with a single `:fact-constructors` vector API. **No backwards-compat shims** —
+   the only consumer is the author.
+4. Schema nits: where `s/Any` is unavoidable, comment why (open kondo maps,
+   type-agnostic fact tokens); for open maps name the keys we care about;
+   where a shape relates to `clara.server.graph.api`, replicate the relevant
+   parts locally and docstring the relation — do not share schemas across the
+   serialization boundary.
+5. `s/validate` top-level schemas at the edges only
+   (`GenerateAnnotationsOptions` in `generate-annotations-from-analysis`) —
+   never in hot paths.
+6. Address the performance concerns (see § Point 3 below).
+7. Correctness observations: fix or document. Guiding principle: **favor
+   promoting possibly-too-many insert-types over missing them entirely** and
+   over inflating `resolved` status.
+
+## Execution chunks
+
+- [x] **Chunk 1 — format fix.** `make format`; `format-check` was failing on
+  HEAD. → landed as `bfc45dd`.
+
+- [ ] **Chunk 2 — Index pass + performance + inner schemas.**
+  - New `analyze/utils.clj`: `fq-sym`, `var-usage-caller`/`callee`,
+    `KondoVarUsage` schema. Dependency-free to avoid require cycles.
+  - New `analyze/index.clj`: the Index pass. Boundary-fn sets move here;
+    `AnalysisIndex` + `CtorUsageMatch` schemas; `build-analysis-index` builds
+    once per run: call graph, `usages-by-caller` / `usages-by-callee`,
+    `local-usages-by-name` / `locals-by-id`, memoized `reachable-set`,
+    direct inserter/retractor sets, inserter/retractor type-maps (via
+    by-caller index instead of full scans), ctor-callsite map, memoized
+    `resolve-record-type`, memoized `read-ctor-form`.
+  - `analyze.clj`: delete moved helpers; `extract-insert-types` resolves
+    boundary usages via `usages-by-callee` lookup (kills the
+    rules × all-usages quadratic term); `direct-callers` computed once;
+    infer-ctx = `AnalysisIndex` + config.
+  - `analyze/rhs.clj`: `find-local-binding` uses the locals indexes;
+    `rhs-uses-binding?` uses `usages-by-caller`; `alias-usage-map` takes the
+    by-caller index; new `TracedArg` / `CallsiteEntry` / `CallsiteResolution`
+    schemas (docstring-only, not validated in hot paths).
+  - Verify: `make format test lint reflection-check`; re-run REPL benchmark
+    (expect ~linear; baseline: 800 rules × 80k usages = 3,260 ms).
+
+- [ ] **Chunk 3 — namespace split.** `analyze/rhs.clj` dissolves:
+  - `analyze/kondo.clj` — source reading at kondo positions
+    (`source-text-at`, `read-boundary-args`, `read-init-form`, `read-ctor-form`).
+  - `analyze/ctor.clj` — record/Java ctor resolution (`constructor-fn-name?`,
+    `resolve-record-type`, `resolve-ctor-form`).
+  - `analyze/callsite.clj` — boundary chain + constructor-of-interest
+    resolution, `TracedArg`/`CallsiteEntry`/`CallsiteResolution`/`ViaChain`
+    schemas.
+  - `analyze/alias.clj` — var-alias chain machinery (`alias-usage-map` et al.).
+  - Update requires in `analyze.clj`, `index.clj`, and tests.
+
+- [ ] **Chunk 4 — `:fact-constructors` vector API.**
+  `[{:match-fn (fn [fq-var-sym] -> truthy/nil)
+    :type-resolver-fn (fn [ConstructorTypeResolverContext] -> {:resolved-types [...]})}]`
+  - `build-constructor-callsite-map` pairs each matched usage with its spec
+    (first matching spec in vector order wins — document precedence).
+  - `resolve-ctor-callsite` uses the matched spec's resolver.
+  - Remove the paired-options validation + old options entirely; update
+    `GenerateAnnotationsOptions`, tests, `rule-annotations.md`,
+    `extensible-fact-constructors-plan.md`.
+
+- [ ] **Chunk 5 — schema nits + edge validation.**
+  - `s/validate GenerateAnnotationsOptions` at the top of
+    `generate-annotations-from-analysis`.
+  - `:fact-type-spec-fn` input schema `s/Keyword` → `s/Any` (fact types can be
+    class-name symbols/strings).
+  - Comment every unavoidable `s/Any` (kondo open maps, type-agnostic tokens,
+    full productions — name the keys of interest, relate to api.clj schemas
+    by docstring).
+
+- [ ] **Chunk 6 — correctness items (fix or document).**
+  - **Fix:** `arg-reaches-ctor?` rule 3 identity matching — carry the innermost
+    `:locals` binding through `trace-arg-form` (`TracedArg` gains
+    `:traced-binding`); match ctor-usage by init-form start position instead
+    of form value equality. Pinning test for the
+    `(let [f (->fact :t m)] (insert! f) (insert! (->fact :t m)))` case.
+  - **Document:** nested ctor calls `(insert! (->fact :a (->fact :b)))`
+    promote both types — accepted over-promotion per directive 7.
+  - **Document:** `:source-str`/`:ns-name-sym`/`:filename` on constructor
+    callsites describe the *constructor* form (possibly in a helper ns),
+    discriminated by the presence of `:constructor-sym`.
+  - **Remove:** dead `:resolution-method` key (no producer) from
+    `api.clj`, `serialize.clj`, `ui/src/lib/types/api.ts`.
+
+- [ ] **Chunk 7 — final gates + docs.** `make format format-check test lint
+  reflection-check`; UI `pnpm run format && pnpm run check && pnpm run lint`
+  (if UI touched); confirm docs match shipped behavior.
 
 ---
 
 # Review: Extensible fact-constructor resolution (`9240212`..HEAD, 6 commits)
+
+_(The review below is the basis for the chunks above; kept verbatim.)_
+
+I now have a complete picture. Here's the review.
+
+---
 
 ## Verification status
 
