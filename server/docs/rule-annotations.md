@@ -97,11 +97,16 @@ Resolved types are **promoted**: a fully-resolved dynamic insert also appears in
 ```edn
 {:clara-rules/dynamic-insert-types-detected
  {:callsites
-  [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
+  [{:source-str "(h/->fact :my-rules/document-check-input data)"
     :ns-name-sym my.rules
     :filename "my/rules.clj"
     :status :resolved
-    :resolved-types [my.rules.StaleDocumentNotice]}]
+    :resolved-types [:my-rules/document-check-input]
+    :constructor-sym my.helpers/->fact
+    :via {:boundary-var-name-sym clara.rules/insert!
+          :callstack [{:var-name-sym my.rules/collect-input}
+                      {:var-name-sym my.rules/->document-check-input}
+                      {:var-name-sym my.helpers/->fact}]}}]
   :resolution :full}}
 ```
 
@@ -109,6 +114,8 @@ Resolved types are **promoted**: a fully-resolved dynamic insert also appears in
 * **`:ns-name-sym`** / **`:filename`** — where the callsite was found (may be a helper namespace).
 * **`:status`** — `:resolved`, `:resolved-multi` (several types), or `:unresolved`.
 * **`:resolved-types`** — present when resolved; the fact-type tokens.
+* **`:constructor-sym`** — present when resolved via `:fact-constructor-type-resolver-fn`; the fully-qualified constructor symbol.
+* **`:via`** — present when resolved via `:fact-constructor-type-resolver-fn`; a `ViaChain` tracing how the constructor was reached from the originating `insert!`/`retract!` (see below).
 * **`:resolution`** (aggregate) — `:full` when every callsite resolved, `:partial` when some did, `:none` otherwise.
 
 ### `:callsite-resolver-fn`
@@ -188,6 +195,102 @@ mapping via `:fact-type-spec-fn`:
 The *producing* side (the rule inserting the var itself) is unaffected by the
 spec fn — its `(var the-fn)` callsite is a plain resolver-fn concern and
 carries no alias context.
+
+### `:fact-constructor-match-fn` and `:fact-constructor-type-resolver-fn` — extensible constructor tracing
+
+When a codebase builds facts through plain functions rather than record/Java
+constructors (e.g. `with-meta`-tagged maps via a shared `->fact` builder),
+those functions are invisible to the automatic constructor-resolution chain
+because the chain only recognizes `->X` / `map->X` / `Class.` patterns. The
+two extension fns let callers declare their own constructors of interest.
+
+- **`:fact-constructor-match-fn`** — `(fn [var-sym] -> truthy/nil)` — the
+  predicate that identifies a constructor of interest by its fully-qualified
+  symbol (e.g. `my.helpers/->fact`). kondo already resolves these to FQ
+  symbols, so matching is unambiguous.
+- **`:fact-constructor-type-resolver-fn`** — `(fn [ctx] -> nil or
+  {:resolved-types [token …]})` — called once per discovered constructor
+  callsite in the reachable subtree. Receives a `ConstructorTypeResolverContext`:
+
+| Key | Description |
+|---|---|
+| `:constructor-sym` | FQ symbol of the matched constructor var |
+| `:arg-form` | The full constructor callsite form read from source (e.g. `(->fact :my-type data)`) |
+| `:ns-name-sym` | Namespace where the constructor callsite was found |
+| `:filename` | Source file |
+| `:direction` | `:insert` or `:retract` |
+| `:rule` | Full rule production map |
+| `:via` | Optional `ViaChain` — provenance from the boundary fn to this constructor callsite |
+
+#### `ViaChain`
+
+The `:via` chain traces how a constructor was reached from the originating
+boundary call:
+
+```clojure
+{:boundary-var-name-sym clara.rules/insert!
+ :callstack
+ [{:var-name-sym my.rules/collect-app-doc-check-input}
+  {:var-name-sym my.rules/->document-check-input}
+  {:var-name-sym my.helpers/->fact}]}
+```
+
+- **`:boundary-var-name-sym`** — the `insert!`/`retract!` variant.
+- **`:callstack`** — BFS shortest-path through the call graph from the boundary's
+direct caller to the constructor's containing var, then the constructor itself.
+Entries are maps (`{:var-name-sym …}`) so future extensions (arity, filename,
+row/col) don't require a breaking change.
+
+#### Example
+
+Given a `->fact` constructor in `helpers.clj`:
+
+```clojure
+;; helpers.clj
+(defn ->fact [fact-type fact-data]
+  (with-meta fact-data {:type fact-type}))
+```
+
+Used transitively through a helper:
+
+```clojure
+;; my_rules.clj
+(defn ->document-check-input [data]
+  (h/->fact :loan-doc-rules/document-check-input data))
+
+(r/defrule collect-app-doc-check-input
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (->document-check-input {...})))
+```
+
+The analyzer is told about `->fact`:
+
+```clojure
+(analyze/generate-annotations-from-analysis
+ {:analysis analysis
+  :session-or-rulebase my-session
+  :fact-constructor-match-fn
+  (fn [sym] (= 'my.helpers/->fact sym))
+  :fact-constructor-type-resolver-fn
+  (fn [{:keys [arg-form]}]
+    {:resolved-types [(second arg-form)]})})
+```
+
+The analyzer traces through `->document-check-input` to find the `(h/->fact …)`
+callsite, reads `:loan-doc-rules/document-check-input` as the type, and promotes
+it into `:clara-rules/insert-types`. The callsite entry carries `:constructor-sym`
+and a `:via` chain showing the full provenance.
+
+**Validation**: both fns must be provided together (or both absent). Providing one
+without the other throws.
+
+**Interaction with existing resolution**: constructor-of-interest callsites are
+discovered and resolved *before* the existing boundary-call resolution path runs.
+When constructor callsites are found, unresolved boundary callsites (those that
+would have been handed to `:callsite-resolver-fn`) are suppressed in favor of the
+richer constructor provenance. Record/Java constructors, `with-meta` maps, and
+the `:fact-type-spec-fn` var-alias flow are unaffected.
 
 ---
 

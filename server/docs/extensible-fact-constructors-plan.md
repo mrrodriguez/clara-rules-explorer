@@ -1,6 +1,6 @@
 # Plan: extensible "constructors of interest" — transitive fact-type resolution
 
-_Status: draft — under revision._
+_Status: implemented._
 
 ## Context
 
@@ -249,17 +249,19 @@ The `loan-doc-rules-annotations.edn` entry for `collect-app-doc-check-input` has
 will be resolved by the analyzer with `:fact-constructor-match-fn` and
 `:fact-constructor-type-resolver-fn` that reads `(second arg-form)` as the type.
 
-## Files to modify
+## Files modified (complete)
 
 - Core: `src/clara/server/tools/graph/analyze.clj`,
   `src/clara/server/tools/graph/analyze/rhs.clj`,
   `src/clara/server/tools/graph/serialize.clj`.
+- Schemas: `src/clara/server/graph/api.clj` (ViaEntry, ViaChain, DynamicCallsiteEntry extensions).
 - Test resources: `test-resources/clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn`
-  (already done — entry removed).
-- Tests: `test/clara/server/tools/graph/rules/analyze_test_rules.clj` (add
-  `rule-ctor-of-interest-via-helper` fixture reusing the existing `->fact` at line 11),
-  `test/clara/server/tools/graph/analyze_test.clj` (new test driven by
-  `:fact-constructor-match-fn` and `:fact-constructor-type-resolver-fn`).
+  (entry for `collect-app-doc-check-input` now reflects `:resolved` via `helpers/->fact`).
+- Tests: `test/clara/server/tools/graph/rules/analyze_test_rules.clj` (added
+  `rule-ctor-of-interest-via-helper` and `make-tagged-facts` fixtures),
+  `test/clara/server/tools/graph/analyze_test.clj` (added
+  `test-fact-constructor-resolution`, `test-constructor-options-validation`,
+  `test-loan-doc-ctor-resolution`).
 
 ## Reuse (do not reinvent)
 
