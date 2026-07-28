@@ -51,12 +51,17 @@
 ;; Schemas
 ;; ---------------------------------------------------------------------------
 
+(s/defschema CtorUsageMatch
+  "A constructor-of-interest callsite found in an inserter's reachable subtree,
+   paired with the `:type-resolver-fn` of the `:fact-constructors` spec that
+   matched it (first matching spec in vector order wins)."
+  {:usage u/KondoVarUsage
+   :type-resolver-fn (s/=> s/Any s/Any)})
+
 (s/defschema CtorCallsiteMap
   "Constructor-of-interest callsites by inserter var:
-   {inserter-var -> [ctor-usage …]} where each ctor-usage is a kondo
-   `:var-usage` whose callee matched the caller's constructor predicate and
-   whose caller is in the inserter var's reachable subtree."
-  {s/Symbol [u/KondoVarUsage]})
+   {inserter-var -> [CtorUsageMatch …]}."
+  {s/Symbol [CtorUsageMatch]})
 
 (s/defschema AnalysisIndex
   "Everything the per-rule passes need, derived once from the merged analysis.
@@ -175,20 +180,30 @@
 
 (defn- build-constructor-callsite-map
   "Like `build-inserter-type-map`, but for caller-supplied constructors of
-   interest matched by `fact-constructor-match-fn`.  Returns a
-   `CtorCallsiteMap`."
-  [direct-callers usages-by-caller reachable-set fact-constructor-match-fn]
-  (into {}
-        (keep (fn [v]
-                (let [subtree (reachable-set v)
-                      ctor-usages (into []
-                                        (comp (mapcat #(get usages-by-caller %))
-                                              (filter #(fact-constructor-match-fn
-                                                        (u/var-usage-callee %))))
-                                        subtree)]
-                  (when (seq ctor-usages)
-                    [v ctor-usages]))))
-        direct-callers))
+   interest (`fact-constructors` — a vector of {:match-fn :type-resolver-fn}
+   specs).  Each usage whose callee matches is paired with the *first*
+   matching spec; vector order is precedence.
+
+   Returns a `CtorCallsiteMap`."
+  [direct-callers usages-by-caller reachable-set fact-constructors]
+  (let [match-spec (fn [callee]
+                     (some (fn [{:keys [match-fn] :as spec}]
+                             (when (match-fn callee)
+                               spec))
+                           fact-constructors))]
+    (into {}
+          (keep (fn [v]
+                  (let [subtree (reachable-set v)
+                        ctor-matches (into []
+                                           (comp (mapcat #(get usages-by-caller %))
+                                                 (keep (fn [vu]
+                                                         (when-let [spec (match-spec (u/var-usage-callee vu))]
+                                                           {:usage vu
+                                                            :type-resolver-fn (:type-resolver-fn spec)}))))
+                                           subtree)]
+                    (when (seq ctor-matches)
+                      [v ctor-matches]))))
+          direct-callers)))
 
 ;; ---------------------------------------------------------------------------
 ;; The index
@@ -197,9 +212,9 @@
 (defn build-analysis-index
   "Derives the `AnalysisIndex` from a merged clj-kondo `analysis` map.
 
-   `fact-constructor-match-fn` (optional, (fn [fq-var-sym] -> truthy/nil))
-   enables the constructor-of-interest callsite map."
-  [{:keys [analysis get-source productions-by-name fact-constructor-match-fn]}]
+   `fact-constructors` (optional, [{:match-fn :type-resolver-fn} …]) enables
+   the constructor-of-interest callsite map."
+  [{:keys [analysis get-source productions-by-name fact-constructors]}]
   (let [usages (:var-usages analysis)
         graph (build-graph usages)
         usages-by-caller (group-by u/var-usage-caller usages)
@@ -216,10 +231,10 @@
                            direct-inserters usages-by-caller reachable-set resolve-record-type)
         retractor-type-map (build-inserter-type-map
                             direct-retractors usages-by-caller reachable-set resolve-record-type)
-        constructor-callsite-map (when fact-constructor-match-fn
+        constructor-callsite-map (when (seq fact-constructors)
                                    (build-constructor-callsite-map
                                     (direct-callers graph boundary-fns)
-                                    usages-by-caller reachable-set fact-constructor-match-fn))]
+                                    usages-by-caller reachable-set fact-constructors))]
     {:graph graph
      :usages-by-caller usages-by-caller
      :usages-by-callee usages-by-callee

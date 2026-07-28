@@ -98,8 +98,8 @@
   (analyze/generate-annotations-from-analysis
    {:analysis edge-case-analysis
     :session-or-rulebase edge-case-session
-    :fact-constructor-match-fn (->fact-sym-match-fn ->fact-sym)
-    :fact-constructor-type-resolver-fn ->fact-type-resolver}))
+    :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                         :type-resolver-fn ->fact-type-resolver}]}))
 
 (def ^:private loan-doc-ctor-annotations
   "Loan-doc annotations with constructor-of-interest resolution enabled.
@@ -108,8 +108,8 @@
   (analyze/generate-annotations-from-analysis
    {:analysis loan-doc-analysis
     :session-or-rulebase loan-doc-session
-    :fact-constructor-match-fn (->fact-sym-match-fn helpers->fact-sym)
-    :fact-constructor-type-resolver-fn ->fact-type-resolver}))
+    :fact-constructors [{:match-fn (->fact-sym-match-fn helpers->fact-sym)
+                         :type-resolver-fn ->fact-type-resolver}]}))
 
 ;; ---------------------------------------------------------------------------
 ;; Static insert types (record constructors traced through RHS and helpers)
@@ -934,8 +934,8 @@
                {:analysis edge-case-analysis
                 :session-or-rulebase edge-case-session
                 :callsite-resolver-fn generic
-                :fact-constructor-match-fn (->fact-sym-match-fn ->fact-sym)
-                :fact-constructor-type-resolver-fn ->fact-type-resolver})
+                :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})
           a (ann/get-annotation ann `atr/rule-ctor-and-opaque-inserts)
           callsites (:callsites (:clara-rules/dynamic-insert-types-detected a))
           by-type (into {} (map (juxt #(first (:resolved-types %)) identity)) callsites)]
@@ -985,8 +985,8 @@
                  {:analysis edge-case-analysis
                   :session-or-rulebase edge-case-session
                   :callsite-resolver-fn generic
-                  :fact-constructor-match-fn (->fact-sym-match-fn ->fact-sym)
-                  :fact-constructor-type-resolver-fn ->fact-type-resolver})
+                  :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                       :type-resolver-fn ->fact-type-resolver}]})
             a (ann/get-annotation ann rule-sym)
             callsites (:callsites (:clara-rules/dynamic-insert-types-detected a))
             cs (first callsites)]
@@ -1016,8 +1016,8 @@
                {:analysis edge-case-analysis
                 :session-or-rulebase edge-case-session
                 :callsite-resolver-fn generic
-                :fact-constructor-match-fn (->fact-sym-match-fn ->fact-sym)
-                :fact-constructor-type-resolver-fn ->fact-type-resolver})
+                :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})
           a (ann/get-annotation ann `atr/rule-ctor-bound-to-local)
           callsites (:callsites (:clara-rules/dynamic-insert-types-detected a))]
       (is (= [:demo/local-bound] (:clara-rules/insert-types a)))
@@ -1032,8 +1032,8 @@
   (let [ann (analyze/generate-annotations-from-analysis
              {:analysis edge-case-analysis
               :session-or-rulebase edge-case-session
-              :fact-constructor-match-fn (->fact-sym-match-fn ->fact-sym)
-              :fact-constructor-type-resolver-fn ->fact-type-resolver})]
+              :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                   :type-resolver-fn ->fact-type-resolver}]})]
 
     (testing "several inserts, one of them a let-bound constructor"
       (let [a (ann/get-annotation ann `atr/rule-ctor-local-plus-multiple-inserts)
@@ -1064,23 +1064,46 @@
         (is (= :none (:resolution dyn)))))))
 
 (deftest test-constructor-options-validation
-  (testing "Providing match-fn without type-resolver throws"
-    (is (thrown-with-msg?
-         Exception
-         #":fact-constructor-match-fn and :fact-constructor-type-resolver-fn must be provided together"
-         (analyze/generate-annotations-from-analysis
-          {:analysis edge-case-analysis
-           :session-or-rulebase edge-case-session
-           :fact-constructor-match-fn (constantly true)}))))
+  (testing "a :fact-constructors spec missing :type-resolver-fn fails schema validation"
+    (is (thrown? Exception
+                 (analyze/generate-annotations-from-analysis
+                  {:analysis edge-case-analysis
+                   :session-or-rulebase edge-case-session
+                   :fact-constructors [{:match-fn (constantly true)}]}))))
 
-  (testing "Providing type-resolver without match-fn throws"
-    (is (thrown-with-msg?
-         Exception
-         #":fact-constructor-match-fn and :fact-constructor-type-resolver-fn must be provided together"
-         (analyze/generate-annotations-from-analysis
-          {:analysis edge-case-analysis
-           :session-or-rulebase edge-case-session
-           :fact-constructor-type-resolver-fn (constantly nil)})))))
+  (testing "a :fact-constructors spec missing :match-fn fails schema validation"
+    (is (thrown? Exception
+                 (analyze/generate-annotations-from-analysis
+                  {:analysis edge-case-analysis
+                   :session-or-rulebase edge-case-session
+                   :fact-constructors [{:type-resolver-fn (constantly nil)}]})))))
+
+(deftest test-fact-constructors-vector
+  (testing "first matching spec in vector order wins"
+    (let [ann (analyze/generate-annotations-from-analysis
+               {:analysis edge-case-analysis
+                :session-or-rulebase edge-case-session
+                :fact-constructors [;; matches, and its resolver wins
+                                    {:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn (fn [_] {:resolved-types [:demo/first-wins]})}
+                                    ;; also matches — shadowed by the first
+                                    {:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})
+          a (ann/get-annotation ann `atr/rule-fact-builder-call)]
+      (is (= [:demo/first-wins] (:clara-rules/insert-types a))
+          "the first matching spec's resolver decided the type")))
+
+  (testing "a non-matching first spec falls through to the next"
+    (let [ann (analyze/generate-annotations-from-analysis
+               {:analysis edge-case-analysis
+                :session-or-rulebase edge-case-session
+                :fact-constructors [{:match-fn (fn [sym] (= 'no.such/ctor sym))
+                                     :type-resolver-fn (fn [_] {:resolved-types [:demo/never]})}
+                                    {:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})
+          a (ann/get-annotation ann `atr/rule-fact-builder-call)]
+      (is (= [:custom-fact-type] (:clara-rules/insert-types a))
+          "the second spec matched and resolved normally"))))
 
 (deftest test-loan-doc-ctor-resolution
   (testing "collect-app-doc-check-input resolved via helpers/->fact chain"

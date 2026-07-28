@@ -110,12 +110,12 @@ Resolved types are **promoted**: a fully-resolved dynamic insert also appears in
   :resolution :full}}
 ```
 
-* **`:source-str`** — the exact source text of the argument form at the boundary callsite (locals are *not* inlined here; the resolver receives the traced form separately).
+* **`:source-str`** — the exact source text of the argument form at the boundary callsite (locals are *not* inlined here; the resolver receives the traced form separately). **Note:** on constructor-path callsites (those carrying `:constructor-sym`), `:source-str`/`:ns-name-sym`/`:filename` instead describe the *constructor* call form — which may live in a helper namespace and reference helper-locals (e.g. `(->fact :demo/tagged {:id id})`).
 * **`:ns-name-sym`** / **`:filename`** — where the callsite was found (may be a helper namespace).
 * **`:status`** — `:resolved`, `:resolved-multi` (several types), or `:unresolved`.
 * **`:resolved-types`** — present when resolved; the fact-type tokens.
-* **`:constructor-sym`** — present when resolved via `:fact-constructor-type-resolver-fn`; the fully-qualified constructor symbol.
-* **`:via`** — present when resolved via `:fact-constructor-type-resolver-fn`; a `ViaChain` tracing how the constructor was reached from the originating `insert!`/`retract!` (see below).
+* **`:constructor-sym`** — present when resolved via a `:fact-constructors` spec; the fully-qualified constructor symbol. Its presence also discriminates constructor-path callsites from boundary-path ones (see note on `:source-str` below).
+* **`:via`** — present when resolved via a `:fact-constructors` spec; a `ViaChain` tracing how the constructor was reached from the originating `insert!`/`retract!` (see below).
 * **`:resolution`** (aggregate) — `:full` when every callsite resolved, `:partial` when some did, `:none` otherwise.
 
 ### `:callsite-resolver-fn`
@@ -196,21 +196,33 @@ The *producing* side (the rule inserting the var itself) is unaffected by the
 spec fn — its `(var the-fn)` callsite is a plain resolver-fn concern and
 carries no alias context.
 
-### `:fact-constructor-match-fn` and `:fact-constructor-type-resolver-fn` — extensible constructor tracing
+### `:fact-constructors` — extensible constructor tracing
 
 When a codebase builds facts through plain functions rather than record/Java
 constructors (e.g. `with-meta`-tagged maps via a shared `->fact` builder),
 those functions are invisible to the automatic constructor-resolution chain
-because the chain only recognizes `->X` / `map->X` / `Class.` patterns. The
-two extension fns let callers declare their own constructors of interest.
+because the chain only recognizes `->X` / `map->X` / `Class.` patterns.
+`:fact-constructors` lets callers declare their own constructors of interest
+as a **vector of specs**:
 
-- **`:fact-constructor-match-fn`** — `(fn [var-sym] -> truthy/nil)` — the
-  predicate that identifies a constructor of interest by its fully-qualified
-  symbol (e.g. `my.helpers/->fact`). kondo already resolves these to FQ
-  symbols, so matching is unambiguous.
-- **`:fact-constructor-type-resolver-fn`** — `(fn [ctx] -> nil or
-  {:resolved-types [token …]})` — called once per discovered constructor
-  callsite in the reachable subtree. Receives a `ConstructorTypeResolverContext`:
+```clojure
+:fact-constructors [{:match-fn         (fn [fq-var-sym] -> truthy/nil)
+                     :type-resolver-fn (fn [ctx] -> nil or {:resolved-types [token …]})}
+                    …]
+```
+
+- **`:match-fn`** — the predicate that identifies a constructor of interest
+  by its fully-qualified symbol (e.g. `my.helpers/->fact`). kondo already
+  resolves these to FQ symbols, so matching is unambiguous.
+- **`:type-resolver-fn`** — called once per discovered constructor callsite
+  in the reachable subtree. Receives a `ConstructorTypeResolverContext`
+  (table below).
+
+When several specs could match the same callee, the **first matching spec in
+vector order wins** — vector order is precedence. Each spec must have both
+keys; `generate-annotations-from-analysis` validates its options map against
+`GenerateAnnotationsOptions` (`s/validate`) at entry, so a malformed spec
+fails fast.
 
 | Key | Description |
 |---|---|
@@ -270,11 +282,10 @@ The analyzer is told about `->fact`:
 (analyze/generate-annotations-from-analysis
  {:analysis analysis
   :session-or-rulebase my-session
-  :fact-constructor-match-fn
-  (fn [sym] (= 'my.helpers/->fact sym))
-  :fact-constructor-type-resolver-fn
-  (fn [{:keys [arg-form]}]
-    {:resolved-types [(second arg-form)]})})
+  :fact-constructors
+  [{:match-fn (fn [sym] (= 'my.helpers/->fact sym))
+    :type-resolver-fn (fn [{:keys [arg-form]}]
+                        {:resolved-types [(second arg-form)]})}]})
 ```
 
 The analyzer traces through `->document-check-input` to find the `(h/->fact …)`
@@ -282,8 +293,18 @@ callsite, reads `:loan-doc-rules/document-check-input` as the type, and promotes
 it into `:clara-rules/insert-types`. The callsite entry carries `:constructor-sym`
 and a `:via` chain showing the full provenance.
 
-**Validation**: both fns must be provided together (or both absent). Providing one
-without the other throws.
+**Validation**: options are checked against `GenerateAnnotationsOptions`
+with `s/validate` at function entry — a spec missing `:match-fn` or
+`:type-resolver-fn` throws.
+
+#### Nested constructors
+
+When constructor calls are nested — `(insert! (->fact :a (->fact :b)))` —
+*each* matched constructor claims the insert and all of their types are
+promoted. This is deliberate: the analyzer favors promoting possibly-too-many
+insert-types over missing one entirely (a false positive links a rule to a
+downstream fact type it may not actually produce; a false negative silently
+breaks the dependency graph).
 
 #### Precedence over `:callsite-resolver-fn`
 

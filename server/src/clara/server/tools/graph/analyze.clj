@@ -144,10 +144,10 @@
 (defn- extract-insert-types
   "Determines the fact types a rule inserts or retracts via `target-fns`:
    statically-traceable record constructors win when present; otherwise
-   constructor-of-interest callsites (when :fact-constructor-match-fn is
-   supplied) are resolved via :fact-constructor-type-resolver-fn; finally
-   every remaining boundary-call argument form goes through the runtime
-   resolution chain (`analyze.callsite`) and the optional `:callsite-resolver-fn`.
+   constructor-of-interest callsites (when :fact-constructors is supplied)
+   are resolved via their matched `:type-resolver-fn`; finally every
+   remaining boundary-call argument form goes through the runtime resolution
+   chain (`analyze.callsite`) and the optional `:callsite-resolver-fn`.
 
    Boundary usages are found via the `:usages-by-callee` index — the merged
    `:var-usages` vector is never scanned per rule (that scan made generation
@@ -155,8 +155,7 @@
 
    Returns {:static-types #{…} :resolved-types #{…} :dynamic-forms …}."
   [reachable target-fns {:keys [usages-by-callee inserter-type-map
-                                constructor-callsite-map
-                                fact-constructor-type-resolver-fn] :as ctx}]
+                                constructor-callsite-map] :as ctx}]
   (let [static-types (extract-constructor-types-from-reachable
                       reachable inserter-type-map)]
     (if (seq static-types)
@@ -185,7 +184,7 @@
                                      (into []
                                            (filter #(contains? reachable %))
                                            (sort-by str (keys constructor-callsite-map))))
-                ctor-result (when (and fact-constructor-type-resolver-fn (seq ctor-inserter-vars))
+                ctor-result (when (seq ctor-inserter-vars)
                               (let [scoped-map (select-keys constructor-callsite-map ctor-inserter-vars)]
                                 (callsite/resolve-constructor-callsites
                                  traced-args
@@ -498,26 +497,39 @@
   "Builds the context map passed to `infer-annotation-for-var`: the shared
    `index/AnalysisIndex` plus the caller-supplied resolution hooks and the
    var-alias linkage."
-  [index callsite-resolver-fn fact-constructor-type-resolver-fn alias-by-rule]
+  [index callsite-resolver-fn alias-by-rule]
   (assoc index
          :callsite-resolver-fn callsite-resolver-fn
-         :fact-constructor-type-resolver-fn fact-constructor-type-resolver-fn
          :alias-by-rule alias-by-rule))
 
+(s/defschema FactConstructorSpec
+  "One constructor of interest for `:fact-constructors`.
+   `:match-fn` — (fn [fq-var-sym] -> truthy/nil) — decides whether a
+   fully-qualified var symbol is a constructor of interest.
+   `:type-resolver-fn` — (fn [callsite/ConstructorTypeResolverContext] -> nil
+   or {:resolved-types [token …]}) — extracts fact types from its callsite.
+   (The `s/=>` fn schemas are documentation: prismatic FnSchema does not
+   validate fn-ness; `s/validate` enforces the required keys only.)"
+  {:match-fn (s/=> s/Any s/Symbol)
+   :type-resolver-fn (s/=> s/Any callsite/ConstructorTypeResolverContext)})
+
 (s/defschema GenerateAnnotationsOptions
-  "Options for `generate-annotations-from-analysis`."
+  "Options for `generate-annotations-from-analysis` — validated with
+   `s/validate` at function entry (edge-only validation; nothing in the hot
+   path is schema-checked).  `:analysis` and `:session-or-rulebase` are
+   `s/Any`: the analysis is a large open clj-kondo map and the session is a
+   Clara LocalSession or rulebase — neither has a useful closed shape here."
   {:analysis s/Any                            ; merged clj-kondo analysis (required)
    :session-or-rulebase s/Any                 ; Clara session or rulebase (required)
    (s/optional-key :rules-filter) [s/Symbol]
-   (s/optional-key :callsite-resolver-fn)     ; (fn [CallsiteResolverContext] -> nil or
+   (s/optional-key :callsite-resolver-fn)     ; (fn [callsite/CallsiteResolverContext] -> nil or
                                                ;   {:resolved-types [token …]})
    (s/=> s/Any callsite/CallsiteResolverContext)
-   (s/optional-key :fact-type-spec-fn)        ; (fn [fact-type] -> nil or {:aliases-var v})
-   (s/=> s/Any s/Keyword)
-   (s/optional-key :fact-constructor-match-fn) ; (fn [var-sym] -> truthy/nil)
-   (s/=> s/Any s/Symbol)
-   (s/optional-key :fact-constructor-type-resolver-fn) ; (fn [ConstructorTypeResolverContext] -> nil or {:resolved-types [token …]})
-   (s/=> s/Any callsite/ConstructorTypeResolverContext)})
+   (s/optional-key :fact-type-spec-fn)        ; (fn [fact-type] -> nil or {:aliases-var v});
+                                               ;   fact-type is s/Any: keywords, fq class-name
+                                               ;   symbols, strings are all legitimate
+   (s/=> s/Any s/Any)
+   (s/optional-key :fact-constructors) [FactConstructorSpec]})
 
 (defn generate-annotations-from-analysis
   "Generates rule annotations (insert/retract types etc.) from a pre-computed `clj-kondo` analysis
@@ -545,18 +557,22 @@
   RHS, a synthetic var-usage links the rule to the aliased var so the var's call chain is explored
   for boundary calls (see `alias/alias-usage-map`). Callsites discovered through that chain bypass the
   ctor chain: recorded `:unresolved` with `:fact-type`/`:fact-type-spec` attached, and handed to
-  `:callsite-resolver-fn` with the same context."
+  `:callsite-resolver-fn` with the same context.
+
+   * `:fact-constructors` — optional vector of `FactConstructorSpec` maps
+  `[{:match-fn … :type-resolver-fn} …]` declaring additional constructors of
+  interest.  When a boundary-call argument chain reaches a callsite whose
+  callee a `:match-fn` accepts (fully-qualified match; first matching spec in
+  vector order wins), that spec's `:type-resolver-fn` is invoked with a
+  `callsite/ConstructorTypeResolverContext` (including a `:via` provenance
+  chain), and the callsite is owned by the constructor path — it never also
+  reaches `:callsite-resolver-fn`."
   [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn fact-type-spec-fn
-           fact-constructor-match-fn fact-constructor-type-resolver-fn]}]
+           fact-constructors] :as options}]
+  (s/validate GenerateAnnotationsOptions options)
   (when-not session-or-rulebase
     (throw (ex-info "generate-annotations-from-analysis requires :session-or-rulebase"
                     {:missing :session-or-rulebase})))
-  ;; Validate: both constructor options must be provided together or not at all.
-  (when (not= (boolean fact-constructor-match-fn)
-              (boolean fact-constructor-type-resolver-fn))
-    (throw (ex-info "generate-annotations-from-analysis: :fact-constructor-match-fn and :fact-constructor-type-resolver-fn must be provided together"
-                    {:fact-constructor-match-fn (boolean fact-constructor-match-fn)
-                     :fact-constructor-type-resolver-fn (boolean fact-constructor-type-resolver-fn)})))
   (doseq [ns-sym (->> analysis
                       :var-definitions
                       (into []
@@ -585,12 +601,11 @@
                {:analysis analysis
                 :get-source get-source
                 :productions-by-name productions-by-name
-                :fact-constructor-match-fn fact-constructor-match-fn})
+                :fact-constructors fact-constructors})
         project-vars (keys (:graph index))
         var-seq (or effective-filter project-vars)
         infer-ctx (build-infer-ctx index
                                    callsite-resolver-fn
-                                   fact-constructor-type-resolver-fn
                                    alias-by-rule)
         annotations
         (into {}

@@ -284,7 +284,8 @@
      :call-path - [inserter-var … containing-var] from `ctor-call-path`
      :direction - :insert or :retract
      :rule - the rule production
-     :resolver-fn - the matched fact-constructor's :type-resolver-fn"
+     :resolver-fn - the `:type-resolver-fn` of the `:fact-constructors` spec
+       that matched this callsite"
   [{:keys [ctor-usage ctor-form boundary-usage call-path direction rule resolver-fn]}]
   (let [boundary-fn-sym (u/fq-sym (:to boundary-usage) (:name boundary-usage))
         ctor-sym (u/fq-sym (:to ctor-usage) (:name ctor-usage))
@@ -306,7 +307,7 @@
                    (catch Throwable t
                      (binding [*out* *err*]
                        (println
-                        (format "clara.server.tools.graph.analyze: :fact-constructor-type-resolver-fn threw: %s"
+                        (format "clara.server.tools.graph.analyze: :fact-constructors :type-resolver-fn threw: %s"
                                 (ex-message t))))
                      nil))
         tokens (into #{} (map normalize-token) (or resolved '()))]
@@ -381,14 +382,17 @@
         traced-args))
 
 (defn- resolve-ctor-usage-for-inserter
-  "Attempts to resolve a single constructor-of-interest usage against the
-   traced boundary arguments of a single inserter var.  Returns `[idx entry]`
-   when a boundary argument is shown to reach the constructor *and* the
-   type-resolver returns a type; nil when the constructor is unreachable,
-   unowned, or unresolved (the argument then falls through to the boundary
-   path instead of being reported twice)."
-  [{:keys [ctor-usage inserter-var graph get-source read-ctor-form cfg-base candidates siblings]}]
-  (let [path (ctor-call-path graph inserter-var ctor-usage)
+  "Attempts to resolve a single constructor-of-interest match against the
+   traced boundary arguments of a single inserter var.  `ctor-match` is an
+   `index/CtorUsageMatch` — {:usage … :type-resolver-fn …}.  Returns
+   `[idx entry]` when a boundary argument is shown to reach the constructor
+   *and* the type-resolver returns a type; nil when the constructor is
+   unreachable, unowned, or unresolved (the argument then falls through to
+   the boundary path instead of being reported twice)."
+  [{:keys [ctor-match inserter-var graph get-source read-ctor-form cfg-base candidates siblings]}]
+  (let [{:keys [usage type-resolver-fn]} ctor-match
+        ctor-usage usage
+        path (ctor-call-path graph inserter-var ctor-usage)
         ctor-form (read-ctor-form ctor-usage get-source)
         owner (owning-arg ctor-usage ctor-form (set (rest path))
                           candidates siblings)]
@@ -398,6 +402,7 @@
                           :ctor-usage ctor-usage
                           :ctor-form ctor-form
                           :call-path path
+                          :resolver-fn type-resolver-fn
                           :boundary-usage (:usage owner)))]
         (when (not= :unresolved (:status entry))
           [(:idx owner) entry])))))
@@ -406,10 +411,11 @@
   "Resolves constructor-of-interest callsites reached from a rule's boundary calls.
 
    `traced-args` — entries from `trace-boundary-args` for this rule var.
-   `constructor-ctr-map` — {inserter-var -> [ctor-usage …]} from
-     `index/build-analysis-index`, scoped to this rule var.
+   `constructor-ctr-map` — an `index/CtorCallsiteMap`
+     ({inserter-var -> [CtorUsageMatch …]} from `index/build-analysis-index`),
+     scoped to this rule var.
    `ctx` — must contain :get-source, :read-ctor-form (memoized), :graph,
-     :direction, :rule, :usages-by-caller, :fact-constructor-type-resolver-fn.
+     :direction, :rule, :usages-by-caller.
 
    A constructor is emitted only when some boundary argument is shown to reach
    it (see `owning-arg`) *and* the resolver returns a type.  A constructor call
@@ -423,21 +429,19 @@
    through `resolve-boundary-callsites`, or the same insert would be reported
    twice (see `analyze/extract-insert-types`)."
   [traced-args constructor-ctr-map {:keys [get-source read-ctor-form graph direction rule
-                                           usages-by-caller
-                                           fact-constructor-type-resolver-fn]}]
+                                           usages-by-caller]}]
   (let [args-by-caller (group-by #(u/fq-sym (:from (:usage %)) (:from-var (:usage %)))
                                  traced-args)
         cfg-base {:direction direction
-                  :rule rule
-                  :resolver-fn fact-constructor-type-resolver-fn}
+                  :rule rule}
         pairs (into []
                     (mapcat
-                     (fn [[inserter-var ctor-usages]]
+                     (fn [[inserter-var ctor-matches]]
                        (let [candidates (sort-by (juxt #(:row (:usage %)) #(:col (:usage %)))
                                                  (get args-by-caller inserter-var))
                              siblings (get usages-by-caller inserter-var)]
                          (keep #(resolve-ctor-usage-for-inserter
-                                 {:ctor-usage %
+                                 {:ctor-match %
                                   :inserter-var inserter-var
                                   :graph graph
                                   :get-source get-source
@@ -445,7 +449,7 @@
                                   :cfg-base cfg-base
                                   :candidates candidates
                                   :siblings siblings})
-                               ctor-usages)))
+                               ctor-matches)))
                      constructor-ctr-map))
         entries (mapv second pairs)
         resolved-types (into #{} (mapcat :resolved-types) entries)]

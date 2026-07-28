@@ -2,6 +2,14 @@
 
 _Status: implemented._
 
+> **Update (gen-annos refactor):** the paired options described below
+> (`:fact-constructor-match-fn` + `:fact-constructor-type-resolver-fn`) were
+> superseded by a single **`:fact-constructors` vector** of
+> `{:match-fn :type-resolver-fn}` specs (first matching spec in vector order
+> wins), validated via `s/validate` against `GenerateAnnotationsOptions`.
+> See `rule-annotations.md` for the current API. The design discussion in this
+> document still applies.
+
 ## Context
 
 The analyzer already traces fact types **through helper functions** — but only when the fact is
