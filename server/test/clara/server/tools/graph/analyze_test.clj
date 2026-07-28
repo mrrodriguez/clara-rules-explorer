@@ -4,7 +4,7 @@
             [clara.rules :as r]
             [clara.server.tools.graph.annotations :as ann]
             [clara.server.tools.graph.analyze :as analyze]
-            [clara.server.tools.graph.analyze.rhs :as rhs]
+            [clara.server.tools.graph.analyze.alias :as alias]
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
             [clara.server.tools.graph.rules.loan-app-rules]
@@ -177,7 +177,7 @@
              (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-unconditional)))))))
 
 ;; ---------------------------------------------------------------------------
-;; Dynamic insert callsites — runtime resolution chain (analyze.rhs)
+;; Dynamic insert callsites — runtime resolution chain (analyze.callsite)
 ;; ---------------------------------------------------------------------------
 
 (defn- resolved-detection
@@ -417,18 +417,18 @@
 (deftest test-lhs-var-bindings
   (testing "fact conditions: :fact-binding pairs with the condition's type"
     (is (= [{:binding '?t :fact-type :widget-transform}]
-           (rhs/lhs-var-bindings [{:type :widget-transform :constraints [] :fact-binding :?t}]))))
+           (alias/lhs-var-bindings [{:type :widget-transform :constraints [] :fact-binding :?t}]))))
   (testing "accumulator conditions: :result-binding pairs with the :from subtree's types"
     (is (= [{:binding '?ts :fact-type :widget-transform}]
-           (rhs/lhs-var-bindings [{:accumulator 'some-acc
-                                   :from {:type :widget-transform}
-                                   :result-binding :?ts}]))))
+           (alias/lhs-var-bindings [{:accumulator 'some-acc
+                                     :from {:type :widget-transform}
+                                     :result-binding :?ts}]))))
   (testing "nested and/or compounds are walked"
     (is (= [{:binding '?x :fact-type :a} {:binding '?y :fact-type :c}]
-           (rhs/lhs-var-bindings ['(:and {:type :a :fact-binding :?x}
-                                         (:or {:type :b} {:type :c :fact-binding :?y}))]))))
+           (alias/lhs-var-bindings ['(:and {:type :a :fact-binding :?x}
+                                           (:or {:type :b} {:type :c :fact-binding :?y}))]))))
   (testing "unbound and test conditions contribute nothing"
-    (is (= [] (rhs/lhs-var-bindings [{:type :a} {:constraints []}])))))
+    (is (= [] (alias/lhs-var-bindings [{:type :a} {:constraints []}])))))
 
 (deftest test-fact-type-spec-fn
   (let [spec-fn (fn [t]

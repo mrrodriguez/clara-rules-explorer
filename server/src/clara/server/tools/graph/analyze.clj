@@ -31,7 +31,8 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [schema.core :as s]
-            [clara.server.tools.graph.analyze.rhs :as rhs]
+            [clara.server.tools.graph.analyze.callsite :as callsite]
+            [clara.server.tools.graph.analyze.alias :as alias]
             [clara.server.tools.graph.analyze.utils :as u]
             [clara.server.tools.graph.analyze.index :as index]
             [clara.server.tools.graph.analyze.synth :as synth]
@@ -146,7 +147,7 @@
    constructor-of-interest callsites (when :fact-constructor-match-fn is
    supplied) are resolved via :fact-constructor-type-resolver-fn; finally
    every remaining boundary-call argument form goes through the runtime
-   resolution chain (`analyze.rhs`) and the optional `:callsite-resolver-fn`.
+   resolution chain (`analyze.callsite`) and the optional `:callsite-resolver-fn`.
 
    Boundary usages are found via the `:usages-by-callee` index — the merged
    `:var-usages` vector is never scanned per rule (that scan made generation
@@ -176,7 +177,7 @@
            :dynamic-forms nil}
           (let [;; Read + locals-trace the boundary arguments once; both paths
                 ;; work from this.
-                traced-args (rhs/trace-boundary-args boundary-usages ctx)
+                traced-args (callsite/trace-boundary-args boundary-usages ctx)
                 ;; Constructor-of-interest resolution runs FIRST — it is the more
                 ;; specific mechanism, and it decides which arguments the generic
                 ;; path still needs to look at.
@@ -186,7 +187,7 @@
                                            (sort-by str (keys constructor-callsite-map))))
                 ctor-result (when (and fact-constructor-type-resolver-fn (seq ctor-inserter-vars))
                               (let [scoped-map (select-keys constructor-callsite-map ctor-inserter-vars)]
-                                (rhs/resolve-constructor-callsites
+                                (callsite/resolve-constructor-callsites
                                  traced-args
                                  scoped-map
                                  ctx)))
@@ -200,14 +201,14 @@
                                  (into [] (remove (comp owned :idx)) traced-args)
                                  traced-args)
                 {:keys [callsites resolved-types]}
-                (rhs/resolve-boundary-callsites remaining-args ctx)
+                (callsite/resolve-boundary-callsites remaining-args ctx)
                 ;; Anything still here is a boundary argument the constructor path
                 ;; did NOT own, so it stands on its own — including when it is
                 ;; unresolved. Dropping those would erase a real insert we cannot
                 ;; explain and inflate `:resolution` to :full.
                 all-callsites (into (vec ctor-callsites) callsites)
                 all-types (into (or (:resolved-types ctor-result) #{}) resolved-types)
-                all-resolution (rhs/resolution-status all-callsites)]
+                all-resolution (callsite/resolution-status all-callsites)]
             {:static-types #{}
              :resolved-types all-types
              :dynamic-forms (when (seq all-callsites)
@@ -260,7 +261,7 @@
   retracts fact types. Returns nil when the var has no output side-effects.
 
   Statically-traceable constructor types and types resolved by the dynamic
-  callsite chain (analyze.rhs) are promoted into :clara-rules/insert-types
+  callsite chain (analyze.callsite) are promoted into :clara-rules/insert-types
   and :clara-rules/retract-types; unresolved or partially-resolved callsites
   remain visible under the dynamic-detection keys.
 
@@ -503,20 +504,6 @@
          :fact-constructor-type-resolver-fn fact-constructor-type-resolver-fn
          :alias-by-rule alias-by-rule))
 
-(s/defschema CallsiteResolverContext
-  "Context map passed to `:callsite-resolver-fn` by
-   `generate-annotations-from-analysis`."
-  {:rule s/Any                               ; full production (:name, :ns-name, :lhs, :rhs, …)
-   :ns-name-sym s/Symbol                     ; ns where the callsite was found
-   :direction (s/enum :insert :retract)
-   :boundary-fn s/Symbol                     ; e.g. `clara.rules/insert!`
-   :arg-form s/Any                           ; the unresolved argument form
-   :source-str s/Str                         ; `pr-str` of `:arg-form`
-   :filename s/Str
-   (s/optional-key :fact-type) s/Keyword     ; present only for alias-discovered callsites
-   (s/optional-key :fact-type-spec)          ; present only for alias-discovered callsites
-   {s/Keyword s/Any}})
-
 (s/defschema GenerateAnnotationsOptions
   "Options for `generate-annotations-from-analysis`."
   {:analysis s/Any                            ; merged clj-kondo analysis (required)
@@ -524,13 +511,13 @@
    (s/optional-key :rules-filter) [s/Symbol]
    (s/optional-key :callsite-resolver-fn)     ; (fn [CallsiteResolverContext] -> nil or
                                                ;   {:resolved-types [token …]})
-   (s/=> s/Any CallsiteResolverContext)
+   (s/=> s/Any callsite/CallsiteResolverContext)
    (s/optional-key :fact-type-spec-fn)        ; (fn [fact-type] -> nil or {:aliases-var v})
    (s/=> s/Any s/Keyword)
    (s/optional-key :fact-constructor-match-fn) ; (fn [var-sym] -> truthy/nil)
    (s/=> s/Any s/Symbol)
    (s/optional-key :fact-constructor-type-resolver-fn) ; (fn [ConstructorTypeResolverContext] -> nil or {:resolved-types [token …]})
-   (s/=> s/Any rhs/ConstructorTypeResolverContext)})
+   (s/=> s/Any callsite/ConstructorTypeResolverContext)})
 
 (defn generate-annotations-from-analysis
   "Generates rule annotations (insert/retract types etc.) from a pre-computed `clj-kondo` analysis
@@ -547,8 +534,8 @@
    * `:rules-filter` — optional coll of rule symbols to filter by.
 
    * `:callsite-resolver-fn` — optional fn invoked once per callsite argument form the automatic
-  constructor-resolution chain cannot resolve (see `analyze.rhs`). Receives a
-  `CallsiteResolverContext`. Returns nil (still unresolved) or `{:resolved-types [tokens …]}`.
+  constructor-resolution chain cannot resolve (see `analyze.callsite`). Receives a
+  `callsite/CallsiteResolverContext`. Returns nil (still unresolved) or `{:resolved-types [tokens …]}`.
   Exceptions are contained: logged and treated as unresolved.
 
    * `:fact-type-spec-fn` — optional fn declaring caller-specific fact patterns. Receives a fact
@@ -556,7 +543,7 @@
   fully.qualified/var-name}` (the var-as-fact pattern — a fact IS a function var, bound on the LHS
   and invoked in the RHS). When a rule binds an alias-mapped fact type and uses the binding in its
   RHS, a synthetic var-usage links the rule to the aliased var so the var's call chain is explored
-  for boundary calls (see `rhs/alias-usage-map`). Callsites discovered through that chain bypass the
+  for boundary calls (see `alias/alias-usage-map`). Callsites discovered through that chain bypass the
   ctor chain: recorded `:unresolved` with `:fact-type`/`:fact-type-spec` attached, and handed to
   `:callsite-resolver-fn` with the same context."
   [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn fact-type-spec-fn
@@ -588,9 +575,9 @@
         ;; usages are injected before graph building so the existing
         ;; reachability explores each aliased var's call chain.
         alias-by-rule (when fact-type-spec-fn
-                        (rhs/alias-usage-map productions-by-name effective-filter
-                                             (group-by u/var-usage-caller (:var-usages analysis))
-                                             fact-type-spec-fn))
+                        (alias/alias-usage-map productions-by-name effective-filter
+                                               (group-by u/var-usage-caller (:var-usages analysis))
+                                               fact-type-spec-fn))
         analysis (cond-> analysis
                    (seq alias-by-rule)
                    (update :var-usages into (mapcat :usages) (vals alias-by-rule)))

@@ -22,7 +22,8 @@
   (:require [clojure.set :as set]
             [schema.core :as s]
             [clara.server.tools.graph.analyze.utils :as u]
-            [clara.server.tools.graph.analyze.rhs :as rhs]))
+            [clara.server.tools.graph.analyze.kondo :as kondo]
+            [clara.server.tools.graph.analyze.ctor :as ctor]))
 
 (def insert-fns
   "clara.rules vars that insert facts into working memory."
@@ -166,7 +167,7 @@
                (let [subtree (reachable-set v)
                      types (into #{}
                                  (comp (mapcat #(get usages-by-caller %))
-                                       (filter #(-> % :name name rhs/constructor-fn-name?))
+                                       (filter #(-> % :name name ctor/constructor-fn-name?))
                                        (keep #(resolve-record-type (:to %) (:name %))))
                                  subtree)]
                  [v types])))
@@ -210,7 +211,7 @@
         reachable-set (memoized-reachability graph)
         direct-inserters (direct-callers graph insert-fns)
         direct-retractors (direct-callers graph retract-fns)
-        resolve-record-type (memoize rhs/resolve-record-type)
+        resolve-record-type (memoize ctor/resolve-record-type)
         inserter-type-map (build-inserter-type-map
                            direct-inserters usages-by-caller reachable-set resolve-record-type)
         retractor-type-map (build-inserter-type-map
@@ -231,6 +232,6 @@
      :retractor-type-map retractor-type-map
      :constructor-callsite-map constructor-callsite-map
      :get-source get-source
-     :read-ctor-form (memoize rhs/read-ctor-form)
+     :read-ctor-form (memoize kondo/read-ctor-form)
      :resolve-record-type resolve-record-type
      :productions-by-name productions-by-name}))

@@ -1,4 +1,4 @@
-(ns clara.server.tools.graph.analyze.rhs
+(ns clara.server.tools.graph.analyze.callsite
   "Runtime resolution of dynamic boundary callsites.
 
    When a rule's RHS reaches clara.rules/insert!/retract! with argument forms
@@ -24,168 +24,28 @@
    the resolver receives the read object as :arg-form and can do so
    knowingly.
 
-   All Clojure syntax understanding comes from clj-kondo; this namespace only
-   reads single forms at kondo-provided positions and resolves symbols via the
-   live namespace.
+   Two resolution passes run over the same traced arguments
+   (`trace-boundary-args`): the constructor-of-interest pass
+   (`resolve-constructor-callsites`, caller-declared constructors reached
+   through the call chain) and the generic boundary pass
+   (`resolve-boundary-callsites`, the chain above).  The constructor pass
+   runs first and *owns* the arguments it accounts for, so no insert is
+   reported twice.
 
-   Var-alias chains (:fact-type-spec-fn): the caller may declare that a fact
-   type aliases a var (the var-as-fact pattern — a fact IS a function var,
-   bound on the LHS and invoked in the RHS). alias-usage-map emits synthetic
-   var-usages linking consuming rules to their aliased vars so the existing
-   reachability explores the var's call chain; callsites discovered through
-   that chain bypass the ctor chain above and are recorded :unresolved with
-   :fact-type/:fact-type-spec context attached (then handed to the resolver)."
-  (:require [clara.rules.schema :as schema]
-            [schema.core :as s]
-            [clojure.string :as str]
-            [clara.server.tools.graph.analyze.utils :as u]))
+   Var-alias chains (`:fact-type-spec-fn`, see `analyze.alias`): callsites
+   discovered through an alias chain bypass the ctor chain and are recorded
+   :unresolved with :fact-type/:fact-type-spec context attached (then handed
+   to the resolver).
+
+   All Clojure syntax understanding comes from clj-kondo; reading forms at
+   kondo positions lives in `analyze.kondo`, constructor recognition in
+   `analyze.ctor`."
+  (:require [schema.core :as s]
+            [clara.server.tools.graph.analyze.utils :as u]
+            [clara.server.tools.graph.analyze.kondo :as kondo]
+            [clara.server.tools.graph.analyze.ctor :as ctor]))
 
 (def ^:private max-resolution-depth 8)
-
-;; ---------------------------------------------------------------------------
-;; Source reading at kondo positions
-;; ---------------------------------------------------------------------------
-
-(defn- source-text-at
-  "Extracts source text from a position range.  Returns nil on any error."
-  [source-str row col end-row end-col]
-  (try
-    (let [lines (str/split-lines source-str)]
-      (when (and row col end-row end-col
-                 (<= 1 row (count lines))
-                 (<= 1 end-row (count lines))
-                 (<= row end-row))
-        (let [relevant-lines (subvec (vec lines) (dec row) end-row)]
-          (if (= (count relevant-lines) 1)
-            (let [line (first relevant-lines)]
-              (when (and (<= 0 (dec col) (count line))
-                         (<= 0 (dec end-col) (count line))
-                         (<= col end-col))
-                (subs line (dec col) (dec end-col))))
-            (let [first-line (first relevant-lines)
-                  last-line (last relevant-lines)
-                  middle-lines (subvec relevant-lines 1 (dec (count relevant-lines)))
-                  trimmed-first (if (<= 0 (dec col) (count first-line))
-                                  (subs first-line (dec col))
-                                  first-line)
-                  trimmed-last (if (<= 0 (dec end-col) (count last-line))
-                                 (subs last-line 0 (dec end-col))
-                                 last-line)]
-              (str/join "\n" (concat [trimmed-first] middle-lines [trimmed-last])))))))
-    (catch Exception _
-      nil)))
-
-(defn- read-boundary-args
-  "Reads the argument forms of the boundary call (`insert!`/`retract!`/…) described
-   by a kondo `:var-usage`.  Returns a (possibly empty) sequence of forms."
-  [{:keys [row end-row col end-col from filename] :as _usage} get-source]
-  (let [source (get-source from filename)
-        call-str (source-text-at source
-                                 row
-                                 col
-                                 end-row
-                                 end-col)]
-    (if call-str
-      (try
-        (rest (read-string call-str))
-        (catch Exception _ nil))
-      nil)))
-
-(defn- read-init-form
-  "Reads the init form following a `:locals` binding symbol in the source —
-   the text from just after the binding symbol's end position onward, parsed
-   as a single form.  Returns nil on any error."
-  [source {:keys [row end-col]}]
-  (try
-    (when (and source row end-col)
-      (let [lines (str/split-lines source)
-            line (nth lines (dec row))
-            tail (str/join "\n" (cons (subs line (dec end-col)) (drop row lines)))]
-        (read-string tail)))
-    (catch Throwable _
-      nil)))
-
-;; ---------------------------------------------------------------------------
-;; Constructor resolution (shared with the static inference path)
-;; ---------------------------------------------------------------------------
-
-(defn constructor-fn-name?
-  "True if the given fn-name string looks like a record constructor (`->X` or `map->X`)."
-  [fn-name]
-  (or (str/starts-with? fn-name "map->")
-      (str/starts-with? fn-name "->")))
-
-(defn resolvable-fact-class [sym]
-  (try
-    (when (class? (resolve sym))
-      sym)
-    (catch Throwable _ nil)))
-
-(defn resolve-record-type
-  "Resolves `class-sym` in the given live namespace to a fact-type token:
-   a Class (imported or fq class name) ⇒ its fq class-name symbol; a `->X`/`map->X`
-   record ctor var ⇒ the fq class-name symbol of the record, but only when the
-   derived class actually loads (rejects constructor-named helper fns such as
-   a custom `->fact` builder).  Returns nil when unresolvable."
-  [ns-sym class-sym]
-  (try
-    (if-let [resolved (ns-resolve (find-ns ns-sym) class-sym)]
-      (cond
-        (class? resolved)
-        (symbol (.getName ^Class resolved))
-
-        (var? resolved)
-        (let [v-meta (meta resolved)
-              ns-str (-> v-meta :ns ns-name name)
-              fn-name (-> v-meta :name name)
-              class-name (cond
-                           (str/starts-with? fn-name "->") (subs fn-name 2)
-                           (str/starts-with? fn-name "map->") (subs fn-name 5))]
-          (when class-name
-            (let [fq-sym (-> ns-str
-                             (str/replace "-" "_")
-                             (str  "." class-name)
-                             symbol)]
-              (resolvable-fact-class fq-sym))))
-
-        :else nil)
-      nil)
-    (catch Exception _ nil)))
-
-(defn- resolve-ctor-form
-  "a seq arg whose head is a record ctor (->X/map->X)
-   or a Java ctor (X., new X, X/new), resolved against the live caller ns.
-   Returns a set of one fq class-name token, or nil.
-
-   `resolve-record-type-fn` is the (per-run memoized) record-type resolver
-   from the index — see `index/AnalysisIndex`."
-  [resolve-record-type-fn caller-ns-sym arg-form]
-  (let [head (first arg-form)]
-    (when (symbol? head)
-      (or
-       ;; Step 1: record constructor (->X …) / (map->X …)
-       (when (constructor-fn-name? (name head))
-         (some-> (resolve-record-type-fn caller-ns-sym head) hash-set))
-       ;; Step 2: Java constructors
-       (cond
-         ;; (new X …)
-         (contains? '#{new clojure.core/new} head)
-         (when (symbol? (second arg-form))
-           (some-> (resolve-record-type-fn caller-ns-sym (second arg-form)) hash-set))
-
-         ;; (X. …)
-         (str/ends-with? (name head) ".")
-         (let [class-name (subs (name head) 0 (dec (count (name head))))
-               class-sym (if (namespace head)
-                           (symbol (namespace head) class-name)
-                           (symbol class-name))]
-           (some-> (resolve-record-type-fn caller-ns-sym class-sym) hash-set))
-
-         ;; (X/new …) — namespace part is the class name
-         (and (namespace head) (= "new" (name head)))
-         (some-> (resolve-record-type-fn caller-ns-sym (symbol (namespace head))) hash-set)
-
-         :else nil)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Step 3: locals tracing
@@ -220,8 +80,8 @@
   [arg-form {:keys [get-source usage] :as ctx} depth]
   (if (and (symbol? arg-form) (< depth max-resolution-depth))
     (if-let [binding (find-local-binding ctx usage arg-form)]
-      (if-let [init-form (read-init-form (get-source (:from usage) (:filename usage))
-                                         binding)]
+      (if-let [init-form (kondo/read-init-form (get-source (:from usage) (:filename usage))
+                                               binding)]
         (trace-arg-form init-form ctx (inc depth))
         arg-form)
       arg-form)
@@ -287,7 +147,7 @@
         (or
          ;; constructors (on the traced form); not for alias-discovered callsites.
          (when (and (not alias-context) (seq? traced))
-           (resolve-ctor-form (:resolve-record-type ctx) live-ns-sym traced))
+           (ctor/resolve-ctor-form (:resolve-record-type ctx) live-ns-sym traced))
          ;; everything else defers to the caller's escape hatch (receives the
          ;; traced form): helper calls, with-meta, var-as-fact, literals.
          (apply-resolver callsite-resolver-fn (resolver-context ctx traced))
@@ -305,7 +165,7 @@
    `(let [f (->fact :t m)] (insert! f))` — the argument `f` names nothing, but
    its traced form is the constructor call.
 
-   Returns `[{:idx … :usage … :arg … :traced … :alias-context …}]`."
+   Returns `[TracedArg …]`."
   [usages {:keys [get-source alias-context-for] :as ctx}]
   (into []
         (comp (mapcat (fn [usage]
@@ -317,7 +177,7 @@
                                     :arg arg
                                     :alias-context alias-ctx
                                     :traced (trace-arg-form arg ctx' 0)}))
-                               (or (read-boundary-args usage get-source) '())))))
+                               (or (kondo/read-boundary-args usage get-source) '())))))
               (map-indexed (fn [i ta] (assoc ta :idx i))))
         usages))
 
@@ -345,8 +205,7 @@
      `:rule`                  - the full production map of the consuming rule (may be nil)
      `:callsite-resolver-fn`  - optional caller escape hatch
 
-   Returns `{:callsites [...] :resolved-types #{…} :resolution :full|:partial|:none}`
-   (`:resolution` is nil when there are no callsites)."
+   Returns a `CallsiteResolution`."
   [traced-args ctx]
   (let [entries
         (into []
@@ -361,6 +220,7 @@
                                                     :else :resolved-multi)}
                                (seq tokens)
                                (assoc :resolved-types (vec (sort-by str tokens)))
+
                                alias-context
                                (merge (select-keys alias-context [:fact-type :fact-type-spec]))))))
                     (distinct))
@@ -369,180 +229,6 @@
     {:callsites entries
      :resolved-types resolved-types
      :resolution (resolution-status entries)}))
-
-;; ---------------------------------------------------------------------------
-;; :fact-type-spec-fn — var-alias chains (caller-guided var-as-fact discovery)
-;; ---------------------------------------------------------------------------
-
-(defn- subtree-fact-types
-  "All fact types in a condition subtree (fact conditions, accumulators, and
-   and/or/not/exists compounds; test conditions contribute none)."
-  [condition]
-  (case (schema/condition-type condition)
-    :fact [(:type condition)]
-    :accumulator (subtree-fact-types (:from condition))
-    (:and :or :not :exists) (mapcat subtree-fact-types (rest condition))
-    :test []
-    []))
-
-(defn lhs-var-bindings
-  "Scans a production's :lhs (constrained DSL data) for bound fact variables:
-   :fact-binding on fact conditions and :result-binding on accumulator
-   conditions (whose :from subtree supplies the fact types — a result binding
-   binds a collection, but the spec lookup keys on the accumulated fact type
-   the same way). Returns [{:binding ?sym :fact-type t} …] with :binding as a
-   symbol (production bindings are keywords like :?t)."
-  [lhs]
-  (letfn [(walk [condition]
-            (case (schema/condition-type condition)
-              :fact (if-let [b (:fact-binding condition)]
-                      [{:binding (symbol (name b)) :fact-type (:type condition)}]
-                      [])
-              :accumulator (if-let [b (:result-binding condition)]
-                             (into []
-                                   (map (fn [t] {:binding (symbol (name b)) :fact-type t}))
-                                   (distinct (subtree-fact-types (:from condition))))
-                             [])
-              (:and :or :not :exists) (mapcat walk (rest condition))
-              :test []
-              []))]
-    (into [] (mapcat walk) lhs)))
-
-(defn- rhs-uses-binding?
-  "True when ?sym occurs as a free symbol in the rule's RHS. Kondo records
-   free ?syms as var-usages (:to :clj-kondo/unknown-namespace) attributed to
-   the rule's snippet var; snippets contain only the RHS form, so any such
-   usage is an RHS usage.  Answered via the by-caller usage index — only the
-   rule's own usages are scanned, never the whole `:var-usages` vector."
-  [usages-by-caller rule-ns rule-local-name binding-sym]
-  (boolean
-   (some #(= binding-sym (:name %))
-         (get usages-by-caller (u/fq-sym rule-ns rule-local-name)))))
-
-(defn- apply-spec-fn
-  "Invokes the caller's `:fact-type-spec-fn` on a fact type; exceptions are
-   contained (logged, treated as no spec)."
-  [fact-type-spec-fn fact-type]
-  (try
-    (fact-type-spec-fn fact-type)
-    (catch Throwable t
-      (binding [*out* *err*]
-        (println (str "clara.server.tools.graph.analyze: :fact-type-spec-fn threw: "
-                      (ex-message t))))
-      nil)))
-
-;; ---------------------------------------------------------------------------
-;; Schemas for `alias-usage-map`
-;; ---------------------------------------------------------------------------
-
-(s/defschema VarAliasSyntheticUsage
-  "A synthetic `:var-usage` linking a rule to its aliased var."
-  {:from s/Symbol
-   :from-var s/Symbol
-   :to s/Symbol
-   :name s/Symbol
-   :via-var-alias {:fact-type s/Keyword
-                   :fact-type-spec {s/Keyword s/Any}
-                   :var s/Symbol}})
-
-(s/defschema VarAliasContext
-  "Per-chain alias context attached to callsites discovered through a
-   var-alias chain."
-  {:fact-type s/Keyword
-   :fact-type-spec {s/Keyword s/Any}
-   :var s/Symbol
-   :root s/Symbol})
-
-(s/defschema AliasUsageMapEntry
-  "Per-rule value in the `alias-usage-map` result."
-  {:usages [VarAliasSyntheticUsage]
-   :contexts [VarAliasContext]})
-
-(s/defschema AliasUsageMap
-  "Return type of `alias-usage-map`."
-  {s/Symbol AliasUsageMapEntry})
-
-;; ---------------------------------------------------------------------------
-;; `alias-usage-map` helpers
-;; ---------------------------------------------------------------------------
-
-(defn- build-alias-pair
-  "Returns nil or a single `{:fact-type :fact-type-spec :var}` entry when
-   `fact-type` maps through `fact-type-spec-fn` to an alias and the binding
-   is used in the rule's RHS."
-  [fact-type-spec-fn usages-by-caller rule-ns rule-local {:keys [binding fact-type]}]
-  (when-let [spec (apply-spec-fn fact-type-spec-fn fact-type)]
-    (when-let [v (:aliases-var spec)]
-      (when (and (symbol? v)
-                 (namespace v)
-                 (rhs-uses-binding? usages-by-caller rule-ns rule-local binding))
-        {:fact-type fact-type
-         :fact-type-spec spec
-         :var v}))))
-
-(defn- build-alias-pairs
-  "Scans the production's `:lhs` for `lhs-var-bindings` and returns the
-   deduplicated vector of alias pair entries for rules whose bound fact types
-   map through `fact-type-spec-fn` to an alias."
-  [production usages-by-caller fact-type-spec-fn rule-ns rule-local]
-  (let [pairs (into []
-                    (comp (mapcat lhs-var-bindings)
-                          (keep (partial build-alias-pair
-                                         fact-type-spec-fn usages-by-caller rule-ns rule-local)))
-                    [(:lhs production)])]
-    (distinct pairs)))
-
-(defn- build-synthetic-usage
-  "Builds a synthetic `:var-usage` map for a single alias pair."
-  [rule-ns rule-local {:keys [fact-type fact-type-spec] aliased-var :var}]
-  {:from rule-ns
-   :from-var rule-local
-   :to (symbol (namespace aliased-var))
-   :name (symbol (name aliased-var))
-   :via-var-alias {:fact-type fact-type
-                   :fact-type-spec fact-type-spec
-                   :var aliased-var}})
-
-(defn- build-alias-context
-  "Builds a context entry for a single alias pair — carried by callsites
-   discovered through the chain (see `:fact-type`, `:fact-type-spec` keys)."
-  [{:keys [fact-type fact-type-spec] aliased-var :var}]
-  {:fact-type fact-type
-   :fact-type-spec fact-type-spec
-   :var aliased-var
-   :root (symbol (namespace aliased-var) (name aliased-var))})
-
-(defn alias-usage-map
-  "Builds the var-alias linkage for the `:fact-type-spec-fn` mechanism.
-
-   For each rule production in `rule-vars`: scans the `:lhs` for bound fact
-   variables (`lhs-var-bindings`), and when `(fact-type-spec-fn fact-type)`
-   returns a spec with `:aliases-var` pointing at a fully-qualified var AND
-   the binding is used in the rule's RHS, emits a synthetic `:var-usage`
-   tagged `:via-var-alias`.  Merged into the analysis before graph building,
-   this lets the existing reachability explore the aliased var's whole call
-   chain for boundary fns.  (If the var is invisible to `clj-kondo` —
-   macro-emitted, unhooked — its chain is empty and nothing is found; that
-   is the caller `:config-dir` situation.)
-
-   `productions-by-name` maps fq rule symbol -> full production.
-   `usages-by-caller` is the by-caller var-usage index of the analysis
-   (pre-alias-injection).
-
-   Returns an `AliasUsageMap` — `{rule-fq-sym {:usages [...] :contexts [...]}}`."
-  [productions-by-name rule-vars usages-by-caller fact-type-spec-fn]
-  (->> rule-vars
-       (keep (fn [rule-fq-sym]
-               (when-let [production (get productions-by-name rule-fq-sym)]
-                 (let [rule-ns (symbol (namespace rule-fq-sym))
-                       rule-local (symbol (name rule-fq-sym))
-                       pairs (build-alias-pairs production usages-by-caller
-                                                fact-type-spec-fn rule-ns rule-local)]
-                   (when (seq pairs)
-                     [rule-fq-sym
-                      {:usages (mapv (partial build-synthetic-usage rule-ns rule-local) pairs)
-                       :contexts (mapv build-alias-context pairs)}])))))
-       (into {})))
 
 ;; ---------------------------------------------------------------------------
 ;; Fact-constructor callsite resolution
@@ -587,29 +273,18 @@
             (recur (into (pop queue) (map #(conj path %) neighbors))
                    (into visited neighbors))))))))
 
-(defn read-ctor-form
-  "The constructor call form as written, read from source at the usage's span.
-   Public: the index memoizes it per run (shared ctor-usages are re-read once
-   per rule otherwise)."
-  [ctor-usage get-source]
-  (let [source (get-source (:from ctor-usage) (:filename ctor-usage))]
-    (when-let [call-str (source-text-at source
-                                        (:row ctor-usage) (:col ctor-usage)
-                                        (:end-row ctor-usage) (:end-col ctor-usage))]
-      (try (read-string call-str) (catch Exception _ nil)))))
-
 (defn- resolve-ctor-callsite
   "Resolves a single constructor-of-interest callsite.
    Returns a callsite entry map.
 
    `cfg` is a map with:
      :ctor-usage  - the kondo :var-usage for the constructor call
-     :ctor-form   - its call form, from `read-ctor-form`
+     :ctor-form   - its call form, from `kondo/read-ctor-form`
      :boundary-usage - the boundary call this constructor was reached from
      :call-path - [inserter-var … containing-var] from `ctor-call-path`
      :direction - :insert or :retract
      :rule - the rule production
-     :resolver-fn - the :fact-constructor-type-resolver-fn"
+     :resolver-fn - the matched fact-constructor's :type-resolver-fn"
   [{:keys [ctor-usage ctor-form boundary-usage call-path direction rule resolver-fn]}]
   (let [boundary-fn-sym (u/fq-sym (:to boundary-usage) (:name boundary-usage))
         ctor-sym (u/fq-sym (:to ctor-usage) (:name ctor-usage))
@@ -732,7 +407,7 @@
 
    `traced-args` — entries from `trace-boundary-args` for this rule var.
    `constructor-ctr-map` — {inserter-var -> [ctor-usage …]} from
-     `build-constructor-callsite-map`, scoped to this rule var.
+     `index/build-analysis-index`, scoped to this rule var.
    `ctx` — must contain :get-source, :read-ctor-form (memoized), :graph,
      :direction, :rule, :usages-by-caller, :fact-constructor-type-resolver-fn.
 
@@ -743,8 +418,7 @@
    the resolver cannot type is left to the boundary path rather than reported
    twice.
 
-   Returns `{:callsites […] :resolved-types #{…} :resolution …}` (the shape
-   `resolve-boundary-callsites` returns) plus `:owned-arg-idxs` — the `:idx` of
+   Returns a `CallsiteResolution` including `:owned-arg-idxs` — the `:idx` of
    every boundary argument a constructor accounted for.  Those must not also go
    through `resolve-boundary-callsites`, or the same insert would be reported
    twice (see `analyze/extract-insert-types`)."
@@ -797,14 +471,38 @@
                             (s/optional-key :fact-type-spec) {s/Keyword s/Any}})})
 
 (s/defschema ViaEntry
+  "A single entry in a constructor callstack chain (internal symbol form;
+   `clara.server.graph.api/ViaEntry` is its serialized string counterpart)."
   {:var-name-sym s/Symbol})
 
 (s/defschema ViaChain
+  "Provenance chain from a boundary fn to a constructor callsite (internal
+   symbol form; `clara.server.graph.api/ViaChain` is its serialized string
+   counterpart)."
   {:boundary-var-name-sym s/Symbol
    :callstack [ViaEntry]})
 
+(s/defschema CallsiteResolverContext
+  "Context map passed to `:callsite-resolver-fn` by
+   `generate-annotations-from-analysis`.
+   `:rule` is the full rulebase production — `s/Any` because productions are
+   large open maps; the keys of interest are :name :ns-name :lhs :rhs :props
+   (relates to `clara.server.graph.api` production schemas, which add
+   serialization concerns and stay at that layer).  `:arg-form` is `s/Any`
+   because it is unevaluated source data of arbitrary shape."
+  {:rule s/Any                               ; full production (:name, :ns-name, :lhs, :rhs, …)
+   :ns-name-sym s/Symbol                     ; ns where the callsite was found
+   :direction (s/enum :insert :retract)
+   :boundary-fn s/Symbol                     ; e.g. `clara.rules/insert!`
+   :arg-form s/Any                           ; the unresolved argument form
+   :source-str s/Str                         ; `pr-str` of `:arg-form`
+   :filename s/Str
+   (s/optional-key :fact-type) s/Keyword     ; present only for alias-discovered callsites
+   (s/optional-key :fact-type-spec)          ; present only for alias-discovered callsites
+   {s/Keyword s/Any}})
+
 (s/defschema ConstructorTypeResolverContext
-  "Context map passed to `:fact-constructor-type-resolver-fn`.
+  "Context map passed to a fact-constructor's `:type-resolver-fn`.
    `:rule` is the full rulebase production — `s/Any` because productions are
    large open maps; the keys of interest are :name :ns-name :lhs :rhs :props
    (relates to `clara.server.graph.api` production schemas, which add

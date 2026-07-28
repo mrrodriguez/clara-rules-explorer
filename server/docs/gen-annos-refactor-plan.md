@@ -34,7 +34,9 @@ land so work can stop/resume at any checkbox.
 - [x] **Chunk 1 — format fix.** `make format`; `format-check` was failing on
   HEAD. → landed as `bfc45dd`.
 
-- [ ] **Chunk 2 — Index pass + performance + inner schemas.**
+- [x] **Chunk 2 — Index pass + performance + inner schemas.** → landed as `5287dde`.
+  Benchmark: 800r×80k 3,260ms → 77ms; 1600r×160k ~21,400ms → 164ms (~linear now).
+  Gates: format/lint/reflection/test all green (79 tests, 543 assertions).
   - New `analyze/utils.clj`: `fq-sym`, `var-usage-caller`/`callee`,
     `KondoVarUsage` schema. Dependency-free to avoid require cycles.
   - New `analyze/index.clj`: the Index pass. Boundary-fn sets move here;
@@ -55,7 +57,9 @@ land so work can stop/resume at any checkbox.
   - Verify: `make format test lint reflection-check`; re-run REPL benchmark
     (expect ~linear; baseline: 800 rules × 80k usages = 3,260 ms).
 
-- [ ] **Chunk 3 — namespace split.** `analyze/rhs.clj` dissolves:
+- [x] **Chunk 3 — namespace split.** `analyze/rhs.clj` dissolves: → landed as the
+  split commit after `5287dde`. Gates green (79 tests, 543 assertions).
+  `CallsiteResolverContext` also moved from `analyze.clj` to `callsite.clj`.
   - `analyze/kondo.clj` — source reading at kondo positions
     (`source-text-at`, `read-boundary-args`, `read-init-form`, `read-ctor-form`).
   - `analyze/ctor.clj` — record/Java ctor resolution (`constructor-fn-name?`,
