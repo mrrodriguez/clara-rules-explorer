@@ -145,7 +145,7 @@
       ;; rename :ns-name-sym → :ns, convert symbol → string
     true (set/rename-keys {:ns-name-sym :ns})
     true (update :ns #(if (symbol? %) (str %) %))
-    true (select-keys #{:source-str :ns :filename :status :resolved-types :resolution-method
+    true (select-keys #{:source-str :ns :filename :status :resolved-types
                         :fact-type :fact-type-spec :constructor-sym :via})
 
       ;; resolve :resolved-types / :fact-type tokens

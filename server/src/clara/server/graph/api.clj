@@ -68,7 +68,6 @@
    :filename s/Str
    (s/optional-key :status) s/Keyword
    (s/optional-key :resolved-types) [s/Str]
-   (s/optional-key :resolution-method) s/Str
    (s/optional-key :constructor-sym) s/Str
    (s/optional-key :via) ViaChain})
 

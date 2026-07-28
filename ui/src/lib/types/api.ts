@@ -55,7 +55,6 @@ export interface DynamicCallsiteEntry {
 	filename: string;
 	status?: string;
 	'resolved-types'?: string[];
-	'resolution-method'?: string;
 	'constructor-sym'?: string;
 	via?: ViaChain;
 }

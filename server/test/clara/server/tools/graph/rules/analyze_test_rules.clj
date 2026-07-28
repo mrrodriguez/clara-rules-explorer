@@ -364,3 +364,15 @@
   (r/insert! (->fact :demo/ctor-owned {:id ?app-id}))
   (r/insert! (with-meta {:id ?app-id} {:type :demo/opaque})))
 
+(r/defrule rule-ctor-identical-forms
+  "Rule L8: two textually-identical constructor forms in one rule — one
+   let-bound, one written inline in a second insert!.  Position identity must
+   keep them straight: the inline constructor owns the second insert, the
+   let-bound constructor owns the first (via its binding), and neither
+   cross-attributes.  With value-equality matching, the inline form would
+   also match the first insert's traced local and be reported twice."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [f (->fact :demo/identical {:id ?app-id})]
+    (r/insert! f)
+    (r/insert! (->fact :demo/identical {:id ?app-id}))))

@@ -1063,6 +1063,20 @@
             "no constructor callsite, so no fabricated :via")
         (is (= :none (:resolution dyn)))))))
 
+(deftest test-constructor-identical-forms-position-identity
+  (testing "two textually-identical ctor forms are attributed by position, not value"
+    (let [ann (ann/get-annotation edge-case-ctor-annotations
+                                  `atr/rule-ctor-identical-forms)
+          dyn (:clara-rules/dynamic-insert-types-detected ann)
+          callsites (:callsites dyn)]
+      (is (= [:demo/identical] (:clara-rules/insert-types ann)))
+      (is (= 2 (count callsites))
+          "one callsite per insert — the inline form is NOT also attributed to the let-bound insert")
+      (is (every? :constructor-sym callsites)
+          "both inserts are owned by the constructor path")
+      (is (= :full (:resolution dyn))
+          "nothing falls through to the boundary path unresolved"))))
+
 (deftest test-constructor-options-validation
   (testing "a :fact-constructors spec missing :type-resolver-fn fails schema validation"
     (is (thrown? Exception

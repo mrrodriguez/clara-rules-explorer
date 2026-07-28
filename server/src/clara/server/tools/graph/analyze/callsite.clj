@@ -73,19 +73,29 @@
     (when-let [id (:id local-usage)]
       (get locals-by-id [filename id]))))
 
-(defn- trace-arg-form
-  "Follows local-symbol arguments to their binding init forms.
-   Returns the deepest form reached — the init form of the innermost traced
-   local — or arg-form itself when it is not a traceable local. Depth-capped."
+(defn- trace-local-form
+  "Follows local-symbol arguments to their binding init forms.  Depth-capped.
+
+   Returns `{:form … :binding …}` — :form is the deepest form reached (the
+   init form of the innermost traced local, or arg-form itself when it is
+   not a traceable local); :binding is the kondo `:locals` entry whose init
+   form IS :form, or nil when no local was traced.  The binding is the
+   *identity link* constructor-ownership rule 3 matches on (see
+   `arg-reaches-ctor?`): it ties the traced form to one exact source
+   position, so two textually-identical forms at different positions can
+   never be confused."
   [arg-form {:keys [get-source usage] :as ctx} depth]
   (if (and (symbol? arg-form) (< depth max-resolution-depth))
     (if-let [binding (find-local-binding ctx usage arg-form)]
       (if-let [init-form (kondo/read-init-form (get-source (:from usage) (:filename usage))
                                                binding)]
-        (trace-arg-form init-form ctx (inc depth))
-        arg-form)
-      arg-form)
-    arg-form))
+        (let [deeper (trace-local-form init-form ctx (inc depth))]
+          (if (:binding deeper)
+            deeper
+            {:form (:form deeper) :binding binding}))
+        {:form arg-form :binding nil})
+      {:form arg-form :binding nil})
+    {:form arg-form :binding nil}))
 
 ;; ---------------------------------------------------------------------------
 ;; Token normalization
@@ -172,11 +182,13 @@
                         (let [alias-ctx (when alias-context-for
                                           (alias-context-for usage))]
                           (map (fn [arg]
-                                 (let [ctx' (assoc ctx :usage usage :alias-context alias-ctx)]
+                                 (let [ctx' (assoc ctx :usage usage :alias-context alias-ctx)
+                                       {:keys [form binding]} (trace-local-form arg ctx' 0)]
                                    {:usage usage
                                     :arg arg
                                     :alias-context alias-ctx
-                                    :traced (trace-arg-form arg ctx' 0)}))
+                                    :traced form
+                                    :traced-binding binding}))
                                (or (kondo/read-boundary-args usage get-source) '())))))
               (map-indexed (fn [i ta] (assoc ta :idx i))))
         usages))
@@ -334,12 +346,22 @@
 
 (defn- arg-reaches-ctor?
   "True when a traced boundary argument demonstrably reaches the given
-   constructor usage — see `owning-arg` for the three ownership routes."
-  [{:keys [traced-arg ctor-usage ctor-form intermediates sibling-usages]}]
-  (let [{:keys [usage traced alias-context]} traced-arg]
+   constructor usage — see `owning-arg` for the three ownership routes.
+
+   Rule 3 matches by *position identity*, not form value: the traced form's
+   originating binding (`:traced-binding`) must have its init form starting
+   at exactly the constructor usage's call-form position.  Two
+   textually-identical constructor forms in one rule can therefore never
+   cross-attribute."
+  [{:keys [traced-arg ctor-usage intermediates sibling-usages get-source]}]
+  (let [{:keys [usage traced-binding alias-context]} traced-arg]
     (and (not alias-context)       ; alias callsites are never auto-resolved
          (or (usage-encloses? usage ctor-usage)
-             (and ctor-form (= traced ctor-form))
+             (and traced-binding
+                  (= (:filename usage) (:filename ctor-usage))
+                  (= (kondo/init-form-start (get-source (:from usage) (:filename usage))
+                                            traced-binding)
+                     [(:row ctor-usage) (:col ctor-usage)]))
              (some (fn [u]
                      (and (usage-encloses? usage u)
                           (contains? intermediates (u/fq-sym (:to u) (:name u)))))
@@ -360,7 +382,10 @@
         `(insert! (my-middle-fn args))`. Works at any depth.
      3. **It is a local bound to it.** The argument's locals-traced form is the
         constructor call: `(let [f (->fact :t m)] (insert! f))`.  A bare local
-        names nothing, so nothing else can join it back.
+        names nothing, so the match is by *position identity*: the traced
+        form's binding init position must equal the constructor usage's
+        call-form position (see `arg-reaches-ctor?`).  Two identical forms
+        at different positions never cross-attribute.
 
    `intermediates` deliberately excludes the constructor symbol itself — only
    rule 1 may match the constructor, and by *usage identity*, not by name.
@@ -372,12 +397,12 @@
 
    nil means no boundary argument demonstrably reaches this constructor: the
    constructor call is not on an insert path out of this rule."
-  [ctor-usage ctor-form intermediates traced-args sibling-usages]
+  [ctor-usage intermediates traced-args sibling-usages get-source]
   (some #(when (arg-reaches-ctor? {:traced-arg %
                                    :ctor-usage ctor-usage
-                                   :ctor-form ctor-form
                                    :intermediates intermediates
-                                   :sibling-usages sibling-usages})
+                                   :sibling-usages sibling-usages
+                                   :get-source get-source})
            %)
         traced-args))
 
@@ -394,8 +419,8 @@
         ctor-usage usage
         path (ctor-call-path graph inserter-var ctor-usage)
         ctor-form (read-ctor-form ctor-usage get-source)
-        owner (owning-arg ctor-usage ctor-form (set (rest path))
-                          candidates siblings)]
+        owner (owning-arg ctor-usage (set (rest path))
+                          candidates siblings get-source)]
     (when owner
       (let [entry (resolve-ctor-callsite
                    (assoc cfg-base
@@ -471,6 +496,9 @@
    :usage u/KondoVarUsage
    :arg s/Any
    :traced s/Any
+   ;; the kondo :locals entry whose init form is :traced (open kondo map;
+   ;; keys of interest: :row :end-col) — nil when :traced is :arg itself
+   :traced-binding (s/maybe s/Any)
    ;; :fact-type is s/Any: keywords, fq class-name symbols, strings are all
    ;; legitimate fact types; :fact-type-spec is an open caller-defined map
    :alias-context (s/maybe {(s/optional-key :fact-type) s/Any

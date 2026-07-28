@@ -66,6 +66,34 @@
     (catch Throwable _
       nil)))
 
+(defn init-form-start
+  "The `[row col]` (1-indexed) where the init form of a `:locals` binding
+   starts: the first readable character at/after the binding symbol's end
+   position, skipping whitespace, commas, and `;` comments — mirroring how
+   `read-init-form` finds the form.  Returns nil on any error."
+  [source {:keys [row end-col]}]
+  (try
+    (when (and source row end-col)
+      (let [lines (str/split-lines source)]
+        (loop [r row
+               off (dec end-col)]
+          (when (<= r (count lines))
+            (let [line (nth lines (dec r))]
+              (cond
+                (>= off (count line))
+                (recur (inc r) 0)
+
+                (or (Character/isWhitespace ^char (nth line off))
+                    (= \, (nth line off)))
+                (recur r (inc off))
+
+                (= \; (nth line off))
+                (recur (inc r) 0)
+
+                :else [r (inc off)]))))))
+    (catch Throwable _
+      nil)))
+
 (defn read-ctor-form
   "The constructor call form as written, read from source at the usage's span.
    Public: the index memoizes it per run (shared ctor-usages are re-read once
