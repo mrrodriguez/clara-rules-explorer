@@ -692,13 +692,13 @@
   ctor chain: recorded `:unresolved` with `:fact-type`/`:fact-type-spec` attached, and handed to
   `:callsite-resolver-fn` with the same context."
   [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn fact-type-spec-fn
-           fact-constructor-match-fn fact-constructor-type-resolver-fn] :as opts}]
+           fact-constructor-match-fn fact-constructor-type-resolver-fn]}]
   (when-not session-or-rulebase
     (throw (ex-info "generate-annotations-from-analysis requires :session-or-rulebase"
                     {:missing :session-or-rulebase})))
   ;; Validate: both constructor options must be provided together or not at all.
-  (when (boolean (not= (boolean fact-constructor-match-fn)
-                       (boolean fact-constructor-type-resolver-fn)))
+  (when (not= (boolean fact-constructor-match-fn)
+              (boolean fact-constructor-type-resolver-fn))
     (throw (ex-info "generate-annotations-from-analysis: :fact-constructor-match-fn and :fact-constructor-type-resolver-fn must be provided together"
                     {:fact-constructor-match-fn (boolean fact-constructor-match-fn)
                      :fact-constructor-type-resolver-fn (boolean fact-constructor-type-resolver-fn)})))

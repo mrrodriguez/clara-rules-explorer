@@ -547,9 +547,19 @@
 
 (defn- resolve-ctor-callsite
   "Resolves a single constructor-of-interest callsite.
-   Returns a callsite entry map."
-  [ctor-usage inserter-var boundary-fn-sym graph direction rule
-   fact-constructor-type-resolver-fn get-source]
+   Returns a callsite entry map.
+
+   `cfg` is a map with:
+     :ctor-usage  - the kondo :var-usage for the constructor call
+     :inserter-var - the direct caller of the boundary fn
+     :boundary-fn-sym - the boundary fn symbol (e.g. clara.rules/insert!)
+     :graph - the call graph
+     :direction - :insert or :retract
+     :rule - the rule production
+     :resolver-fn - the :fact-constructor-type-resolver-fn
+     :get-source - fn to load source text"
+  [{:keys [ctor-usage inserter-var boundary-fn-sym graph direction rule
+           resolver-fn get-source]}]
   (let [ctor-sym (fq-sym (:to ctor-usage) (:name ctor-usage))
         ctor-caller (fq-sym (:from ctor-usage) (:from-var ctor-usage))
         callstack-path
@@ -574,13 +584,13 @@
                               :rule rule}
                        via (assoc :via via))
         resolved (try
-                   (some-> (fact-constructor-type-resolver-fn resolver-ctx)
+                   (some-> (resolver-fn resolver-ctx)
                            :resolved-types seq)
                    (catch Throwable t
                      (binding [*out* *err*]
                        (println
-                        (str "clara.server.tools.graph.analyze: :fact-constructor-type-resolver-fn threw: "
-                             (ex-message t))))
+                        (format "clara.server.tools.graph.analyze: :fact-constructor-type-resolver-fn threw: %s"
+                                (ex-message t))))
                      nil))
         tokens (into #{} (map normalize-token) (or resolved '()))]
     (cond-> {:source-str (pr-str arg-form)
@@ -609,11 +619,17 @@
   (let [boundary-by-caller (into {} (map (fn [u] [(fq-sym (:from u) (:from-var u))
                                                    (fq-sym (:to u) (:name u))]))
                                    boundary-usages)
+        cfg-base {:graph graph
+                  :direction direction
+                  :rule rule
+                  :resolver-fn fact-constructor-type-resolver-fn
+                  :get-source get-source}
         entries (into [] (mapcat (fn [[inserter-var ctor-usages]]
-                                   (let [bfn (get boundary-by-caller inserter-var)]
-                                     (map #(resolve-ctor-callsite % inserter-var bfn graph direction rule
-                                                                  fact-constructor-type-resolver-fn
-                                                                  get-source)
+                                   (let [bfn (get boundary-by-caller inserter-var)
+                                         cfg (assoc cfg-base
+                                                    :inserter-var inserter-var
+                                                    :boundary-fn-sym bfn)]
+                                     (map #(resolve-ctor-callsite (assoc cfg :ctor-usage %))
                                           ctor-usages))))
                                  constructor-ctr-map)
         resolved-types (into #{} (mapcat :resolved-types) entries)]

@@ -77,25 +77,28 @@
   "The fully-qualified symbol for the ->fact constructor in analyze-test-rules."
   'clara.server.tools.graph.rules.analyze-test-rules/->fact)
 
-(defn- ->fact-match-fn
-  "Matches the ->fact constructor symbol."
-  [sym]
-  (= ->fact-sym sym))
+(defn- ->fact-sym-match-fn
+  "Returns a match-fn that matches the given ->fact constructor symbol."
+  [ctor-sym]
+  (fn [sym]
+    (= ctor-sym sym)))
 
 (defn- ->fact-type-resolver
   "Resolves fact types from ->fact callsites. The type is the first argument."
-  [{:keys [arg-form constructor-sym]}]
-  (when (and (= ->fact-sym constructor-sym)
-             (seq? arg-form)
+  [{:keys [arg-form]}]
+  (when (and (seq? arg-form)
              (= 3 (count arg-form)))
     {:resolved-types [(second arg-form)]}))
+
+(def ^:private helpers->fact-sym
+  'clara.server.tools.graph.rules.helpers/->fact)
 
 (def ^:private edge-case-ctor-annotations
   "Edge-case annotations with constructor-of-interest resolution enabled."
   (analyze/generate-annotations-from-analysis
    {:analysis edge-case-analysis
     :session-or-rulebase edge-case-session
-    :fact-constructor-match-fn ->fact-match-fn
+    :fact-constructor-match-fn (->fact-sym-match-fn ->fact-sym)
     :fact-constructor-type-resolver-fn ->fact-type-resolver}))
 
 (def ^:private loan-doc-ctor-annotations
@@ -105,12 +108,8 @@
   (analyze/generate-annotations-from-analysis
    {:analysis loan-doc-analysis
     :session-or-rulebase loan-doc-session
-    :fact-constructor-match-fn (fn [sym]
-                                (= 'clara.server.tools.graph.rules.helpers/->fact sym))
-    :fact-constructor-type-resolver-fn (fn [{:keys [arg-form]}]
-                                        (when (and (seq? arg-form)
-                                                   (= 3 (count arg-form)))
-                                          {:resolved-types [(second arg-form)]}))}))
+    :fact-constructor-match-fn (->fact-sym-match-fn helpers->fact-sym)
+    :fact-constructor-type-resolver-fn ->fact-type-resolver}))
 
 ;; ---------------------------------------------------------------------------
 ;; Static insert types (record constructors traced through RHS and helpers)
