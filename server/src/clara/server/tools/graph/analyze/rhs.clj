@@ -37,7 +37,8 @@
    :fact-type/:fact-type-spec context attached (then handed to the resolver)."
   (:require [clara.rules.schema :as schema]
             [schema.core :as s]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clara.server.tools.graph.analyze.utils :as u]))
 
 (def ^:private max-resolution-depth 8)
 
@@ -154,20 +155,23 @@
 (defn- resolve-ctor-form
   "a seq arg whose head is a record ctor (->X/map->X)
    or a Java ctor (X., new X, X/new), resolved against the live caller ns.
-   Returns a set of one fq class-name token, or nil."
-  [caller-ns-sym arg-form]
+   Returns a set of one fq class-name token, or nil.
+
+   `resolve-record-type-fn` is the (per-run memoized) record-type resolver
+   from the index — see `index/AnalysisIndex`."
+  [resolve-record-type-fn caller-ns-sym arg-form]
   (let [head (first arg-form)]
     (when (symbol? head)
       (or
        ;; Step 1: record constructor (->X …) / (map->X …)
        (when (constructor-fn-name? (name head))
-         (some-> (resolve-record-type caller-ns-sym head) hash-set))
+         (some-> (resolve-record-type-fn caller-ns-sym head) hash-set))
        ;; Step 2: Java constructors
        (cond
          ;; (new X …)
          (contains? '#{new clojure.core/new} head)
          (when (symbol? (second arg-form))
-           (some-> (resolve-record-type caller-ns-sym (second arg-form)) hash-set))
+           (some-> (resolve-record-type-fn caller-ns-sym (second arg-form)) hash-set))
 
          ;; (X. …)
          (str/ends-with? (name head) ".")
@@ -175,11 +179,11 @@
                class-sym (if (namespace head)
                            (symbol (namespace head) class-name)
                            (symbol class-name))]
-           (some-> (resolve-record-type caller-ns-sym class-sym) hash-set))
+           (some-> (resolve-record-type-fn caller-ns-sym class-sym) hash-set))
 
          ;; (X/new …) — namespace part is the class name
          (and (namespace head) (= "new" (name head)))
-         (some-> (resolve-record-type caller-ns-sym (symbol (namespace head))) hash-set)
+         (some-> (resolve-record-type-fn caller-ns-sym (symbol (namespace head))) hash-set)
 
          :else nil)))))
 
@@ -192,31 +196,30 @@
    argument: the `:local-usages` entry matching the arg symbol within the
    boundary usage's position span, linked to its binding via kondo's per-ns-run
    `:id`.  Both lookups are constrained to the boundary usage's `:filename`
-   because ids restart per analyzed namespace and collide in the merged analysis."
-  [analysis usage arg-sym]
+   because ids restart per analyzed namespace and collide in the merged analysis.
+
+   Uses the precomputed `:local-usages-by-name` / `:locals-by-id` indexes
+   (see `index/AnalysisIndex`) — never scans the full analysis vectors."
+  [{:keys [local-usages-by-name locals-by-id]} usage arg-sym]
   (let [{:keys [row col end-row end-col filename]} usage
         within-span? (fn [u]
                        (and (= filename (:filename u))
                             (<= row (:row u) end-row)
                             (or (not= row (:row u)) (<= col (:col u)))
                             (or (not= end-row (:row u)) (< (:col u) end-col))))
-        local-usage (->> (:local-usages analysis)
-                         (filter #(and (= arg-sym (:name %))
-                                       (within-span? %)))
+        local-usage (->> (get local-usages-by-name [filename arg-sym])
+                         (filter within-span?)
                          first)]
     (when-let [id (:id local-usage)]
-      (->> (:locals analysis)
-           (filter #(and (= id (:id %))
-                         (= filename (:filename %))))
-           first))))
+      (get locals-by-id [filename id]))))
 
 (defn- trace-arg-form
   "Follows local-symbol arguments to their binding init forms.
    Returns the deepest form reached — the init form of the innermost traced
    local — or arg-form itself when it is not a traceable local. Depth-capped."
-  [arg-form {:keys [analysis get-source usage] :as ctx} depth]
+  [arg-form {:keys [get-source usage] :as ctx} depth]
   (if (and (symbol? arg-form) (< depth max-resolution-depth))
-    (if-let [binding (find-local-binding analysis usage arg-form)]
+    (if-let [binding (find-local-binding ctx usage arg-form)]
       (if-let [init-form (read-init-form (get-source (:from usage) (:filename usage))
                                          binding)]
         (trace-arg-form init-form ctx (inc depth))
@@ -284,7 +287,7 @@
         (or
          ;; constructors (on the traced form); not for alias-discovered callsites.
          (when (and (not alias-context) (seq? traced))
-           (resolve-ctor-form live-ns-sym traced))
+           (resolve-ctor-form (:resolve-record-type ctx) live-ns-sym traced))
          ;; everything else defers to the caller's escape hatch (receives the
          ;; traced form): helper calls, with-meta, var-as-fact, literals.
          (apply-resolver callsite-resolver-fn (resolver-context ctx traced))
@@ -335,8 +338,9 @@
    `traced-args` — entries from `trace-boundary-args`, already filtered to those
    the constructor path did not own.
 
-   `ctx` keys:
-     `:analysis`              - merged `clj-kondo` analysis (for `:locals` tracing)
+   `ctx` keys (an `index/AnalysisIndex` plus):
+     `:local-usages-by-name` / `:locals-by-id` - locals indexes (for tracing)
+     `:resolve-record-type`   - memoized record-type resolver
      `:direction`             - `:insert` | `:retract`
      `:rule`                  - the full production map of the consuming rule (may be nil)
      `:callsite-resolver-fn`  - optional caller escape hatch
@@ -408,14 +412,12 @@
   "True when ?sym occurs as a free symbol in the rule's RHS. Kondo records
    free ?syms as var-usages (:to :clj-kondo/unknown-namespace) attributed to
    the rule's snippet var; snippets contain only the RHS form, so any such
-   usage is an RHS usage."
-  [analysis rule-ns rule-local-name binding-sym]
+   usage is an RHS usage.  Answered via the by-caller usage index — only the
+   rule's own usages are scanned, never the whole `:var-usages` vector."
+  [usages-by-caller rule-ns rule-local-name binding-sym]
   (boolean
-   (some (fn [u]
-           (and (= binding-sym (:name u))
-                (= rule-ns (:from u))
-                (= rule-local-name (:from-var u))))
-         (:var-usages analysis))))
+   (some #(= binding-sym (:name %))
+         (get usages-by-caller (u/fq-sym rule-ns rule-local-name)))))
 
 (defn- apply-spec-fn
   "Invokes the caller's `:fact-type-spec-fn` on a fact type; exceptions are
@@ -468,12 +470,12 @@
   "Returns nil or a single `{:fact-type :fact-type-spec :var}` entry when
    `fact-type` maps through `fact-type-spec-fn` to an alias and the binding
    is used in the rule's RHS."
-  [fact-type-spec-fn analysis rule-ns rule-local {:keys [binding fact-type]}]
+  [fact-type-spec-fn usages-by-caller rule-ns rule-local {:keys [binding fact-type]}]
   (when-let [spec (apply-spec-fn fact-type-spec-fn fact-type)]
     (when-let [v (:aliases-var spec)]
       (when (and (symbol? v)
                  (namespace v)
-                 (rhs-uses-binding? analysis rule-ns rule-local binding))
+                 (rhs-uses-binding? usages-by-caller rule-ns rule-local binding))
         {:fact-type fact-type
          :fact-type-spec spec
          :var v}))))
@@ -482,11 +484,11 @@
   "Scans the production's `:lhs` for `lhs-var-bindings` and returns the
    deduplicated vector of alias pair entries for rules whose bound fact types
    map through `fact-type-spec-fn` to an alias."
-  [production analysis fact-type-spec-fn rule-ns rule-local]
+  [production usages-by-caller fact-type-spec-fn rule-ns rule-local]
   (let [pairs (into []
                     (comp (mapcat lhs-var-bindings)
                           (keep (partial build-alias-pair
-                                         fact-type-spec-fn analysis rule-ns rule-local)))
+                                         fact-type-spec-fn usages-by-caller rule-ns rule-local)))
                     [(:lhs production)])]
     (distinct pairs)))
 
@@ -524,15 +526,17 @@
    is the caller `:config-dir` situation.)
 
    `productions-by-name` maps fq rule symbol -> full production.
+   `usages-by-caller` is the by-caller var-usage index of the analysis
+   (pre-alias-injection).
 
    Returns an `AliasUsageMap` — `{rule-fq-sym {:usages [...] :contexts [...]}}`."
-  [productions-by-name rule-vars analysis fact-type-spec-fn]
+  [productions-by-name rule-vars usages-by-caller fact-type-spec-fn]
   (->> rule-vars
        (keep (fn [rule-fq-sym]
                (when-let [production (get productions-by-name rule-fq-sym)]
                  (let [rule-ns (symbol (namespace rule-fq-sym))
                        rule-local (symbol (name rule-fq-sym))
-                       pairs (build-alias-pairs production analysis
+                       pairs (build-alias-pairs production usages-by-caller
                                                 fact-type-spec-fn rule-ns rule-local)]
                    (when (seq pairs)
                      [rule-fq-sym
@@ -543,11 +547,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Fact-constructor callsite resolution
 ;; ---------------------------------------------------------------------------
-
-(defn- fq-sym
-  "Returns the fully-qualified symbol [ns name] as a single symbol."
-  [ns name]
-  (symbol (str ns) (str name)))
 
 (defn- pos<=
   "Source-position ordering: `[row col]` before-or-equal `[row col]`."
@@ -588,8 +587,10 @@
             (recur (into (pop queue) (map #(conj path %) neighbors))
                    (into visited neighbors))))))))
 
-(defn- read-ctor-form
-  "The constructor call form as written, read from source at the usage's span."
+(defn read-ctor-form
+  "The constructor call form as written, read from source at the usage's span.
+   Public: the index memoizes it per run (shared ctor-usages are re-read once
+   per rule otherwise)."
   [ctor-usage get-source]
   (let [source (get-source (:from ctor-usage) (:filename ctor-usage))]
     (when-let [call-str (source-text-at source
@@ -610,8 +611,8 @@
      :rule - the rule production
      :resolver-fn - the :fact-constructor-type-resolver-fn"
   [{:keys [ctor-usage ctor-form boundary-usage call-path direction rule resolver-fn]}]
-  (let [boundary-fn-sym (fq-sym (:to boundary-usage) (:name boundary-usage))
-        ctor-sym (fq-sym (:to ctor-usage) (:name ctor-usage))
+  (let [boundary-fn-sym (u/fq-sym (:to boundary-usage) (:name boundary-usage))
+        ctor-sym (u/fq-sym (:to ctor-usage) (:name ctor-usage))
         via (when (seq call-path)
               {:boundary-var-name-sym boundary-fn-sym
                :callstack (conj (mapv (fn [v] {:var-name-sym v}) call-path)
@@ -650,7 +651,7 @@
    constructor is written in.  `[inserter-var]` when the constructor is written
    in the inserter itself; nil when unreachable."
   [graph inserter-var ctor-usage]
-  (let [ctor-caller (fq-sym (:from ctor-usage) (:from-var ctor-usage))]
+  (let [ctor-caller (u/fq-sym (:from ctor-usage) (:from-var ctor-usage))]
     (if (= inserter-var ctor-caller)
       [ctor-caller]
       (shortest-call-path graph inserter-var ctor-caller))))
@@ -665,7 +666,7 @@
              (and ctor-form (= traced ctor-form))
              (some (fn [u]
                      (and (usage-encloses? usage u)
-                          (contains? intermediates (fq-sym (:to u) (:name u)))))
+                          (contains? intermediates (u/fq-sym (:to u) (:name u)))))
                    sibling-usages)))))
 
 (defn- owning-arg
@@ -711,7 +712,7 @@
    type-resolver returns a type; nil when the constructor is unreachable,
    unowned, or unresolved (the argument then falls through to the boundary
    path instead of being reported twice)."
-  [{:keys [ctor-usage inserter-var graph get-source cfg-base candidates siblings]}]
+  [{:keys [ctor-usage inserter-var graph get-source read-ctor-form cfg-base candidates siblings]}]
   (let [path (ctor-call-path graph inserter-var ctor-usage)
         ctor-form (read-ctor-form ctor-usage get-source)
         owner (owning-arg ctor-usage ctor-form (set (rest path))
@@ -732,8 +733,8 @@
    `traced-args` — entries from `trace-boundary-args` for this rule var.
    `constructor-ctr-map` — {inserter-var -> [ctor-usage …]} from
      `build-constructor-callsite-map`, scoped to this rule var.
-   `ctx` — must contain :get-source, :graph, :direction, :rule,
-     :usages-by-container, :fact-constructor-type-resolver-fn.
+   `ctx` — must contain :get-source, :read-ctor-form (memoized), :graph,
+     :direction, :rule, :usages-by-caller, :fact-constructor-type-resolver-fn.
 
    A constructor is emitted only when some boundary argument is shown to reach
    it (see `owning-arg`) *and* the resolver returns a type.  A constructor call
@@ -747,10 +748,10 @@
    every boundary argument a constructor accounted for.  Those must not also go
    through `resolve-boundary-callsites`, or the same insert would be reported
    twice (see `analyze/extract-insert-types`)."
-  [traced-args constructor-ctr-map {:keys [get-source graph direction rule
-                                           usages-by-container
+  [traced-args constructor-ctr-map {:keys [get-source read-ctor-form graph direction rule
+                                           usages-by-caller
                                            fact-constructor-type-resolver-fn]}]
-  (let [args-by-caller (group-by #(fq-sym (:from (:usage %)) (:from-var (:usage %)))
+  (let [args-by-caller (group-by #(u/fq-sym (:from (:usage %)) (:from-var (:usage %)))
                                  traced-args)
         cfg-base {:direction direction
                   :rule rule
@@ -760,12 +761,13 @@
                      (fn [[inserter-var ctor-usages]]
                        (let [candidates (sort-by (juxt #(:row (:usage %)) #(:col (:usage %)))
                                                  (get args-by-caller inserter-var))
-                             siblings (get usages-by-container inserter-var)]
+                             siblings (get usages-by-caller inserter-var)]
                          (keep #(resolve-ctor-usage-for-inserter
                                  {:ctor-usage %
                                   :inserter-var inserter-var
                                   :graph graph
                                   :get-source get-source
+                                  :read-ctor-form read-ctor-form
                                   :cfg-base cfg-base
                                   :candidates candidates
                                   :siblings siblings})
@@ -777,8 +779,22 @@
      :resolved-types resolved-types
      :owned-arg-idxs (into #{} (map first) pairs)
      :resolution (resolution-status entries)}))
+
+;; ---------------------------------------------------------------------------
 ;; Schemas
 ;; ---------------------------------------------------------------------------
+
+(s/defschema TracedArg
+  "One boundary-call argument after reading + locals tracing (the output of
+   `trace-boundary-args`).  `:arg` and `:traced` are unevaluated source data —
+   rule bindings inside them are free symbols.  `:alias-context` is non-nil
+   only for callsites discovered through a var-alias chain."
+  {:idx s/Int
+   :usage u/KondoVarUsage
+   :arg s/Any
+   :traced s/Any
+   :alias-context (s/maybe {(s/optional-key :fact-type) s/Keyword
+                            (s/optional-key :fact-type-spec) {s/Keyword s/Any}})})
 
 (s/defschema ViaEntry
   {:var-name-sym s/Symbol})
@@ -788,7 +804,12 @@
    :callstack [ViaEntry]})
 
 (s/defschema ConstructorTypeResolverContext
-  "Context map passed to `:fact-constructor-type-resolver-fn`."
+  "Context map passed to `:fact-constructor-type-resolver-fn`.
+   `:rule` is the full rulebase production — `s/Any` because productions are
+   large open maps; the keys of interest are :name :ns-name :lhs :rhs :props
+   (relates to `clara.server.graph.api` production schemas, which add
+   serialization concerns and stay at that layer).  `:arg-form` is `s/Any`
+   because it is unevaluated source data of arbitrary shape."
   {:constructor-sym s/Symbol
    :arg-form s/Any
    :ns-name-sym s/Symbol
@@ -796,3 +817,31 @@
    :direction (s/enum :insert :retract)
    :rule s/Any
    (s/optional-key :via) ViaChain})
+
+(s/defschema CallsiteEntry
+  "One captured boundary/constructor callsite, internal form: fact-type tokens
+   are still arbitrary Clojure values (keywords, fq class-name symbols) — the
+   serialize pass stringifies them for the API.  Relates to
+   `clara.server.graph.api/DynamicCallsiteEntry` (its serialized counterpart).
+   `:resolved-types` is `[s/Any]` because the analyzer is type-agnostic by
+   design: token shape is the caller resolver's decision."
+  {:source-str s/Str
+   :ns-name-sym s/Symbol
+   :filename s/Str
+   :status (s/enum :resolved :resolved-multi :unresolved)
+   (s/optional-key :resolved-types) [s/Any]
+   (s/optional-key :constructor-sym) s/Symbol
+   (s/optional-key :via) ViaChain
+   (s/optional-key :fact-type) s/Keyword
+   (s/optional-key :fact-type-spec) {s/Keyword s/Any}})
+
+(s/defschema CallsiteResolution
+  "Result of one callsite-resolution pass — the boundary chain
+   (`resolve-boundary-callsites`) or the constructor-of-interest chain
+   (`resolve-constructor-callsites`).  `:owned-arg-idxs` is present only on
+   the constructor pass result: the `TracedArg` `:idx`s it accounted for,
+   which the boundary pass must skip so no insert is reported twice."
+  {:callsites [CallsiteEntry]
+   :resolved-types #{s/Any}
+   :resolution (s/maybe (s/enum :full :partial :none))
+   (s/optional-key :owned-arg-idxs) #{s/Int}})

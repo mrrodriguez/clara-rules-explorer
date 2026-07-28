@@ -32,6 +32,8 @@
             [clojure.java.io :as io]
             [schema.core :as s]
             [clara.server.tools.graph.analyze.rhs :as rhs]
+            [clara.server.tools.graph.analyze.utils :as u]
+            [clara.server.tools.graph.analyze.index :as index]
             [clara.server.tools.graph.analyze.synth :as synth]
             [clara.server.tools.graph.serialize :as serialize]
             [clara.server.tools.graph.memory :as memory]
@@ -46,65 +48,15 @@
 ;;
 ;; Private Helpers
 ;;
-
-(def ^:private insert-fns
-  #{'clara.rules/insert!
-    'clara.rules/insert-unconditional!
-    'clara.rules/insert-all-unconditional!
-    'clara.rules/insert-all!
-    'clara.rules.engine/insert-facts!
-    'clara.rules/insert
-    'clara.rules/insert-unconditional
-    'clara.rules/insert-all})
-
-(def ^:private retract-fns
-  #{'clara.rules/retract!
-    'clara.rules.engine/rhs-retract-facts!
-    'clara.rules/retract})
-
-(def ^:private boundary-fns
-  (clojure.set/union insert-fns retract-fns))
-
-(defn- fq-name-sym [ns name]
-  (symbol (str ns) (str name)))
-
-(defn- var-usage-caller
-  "Returns the fully-qualified caller symbol from a kondo `:var-usage` map."
-  [usage]
-  (fq-name-sym (:from usage) (:from-var usage)))
-
-(defn- var-usage-callee
-  "Returns the fully-qualified callee symbol from a kondo `:var-usage` map."
-  [usage]
-  (fq-name-sym (:to usage) (:name usage)))
+;; The call graph, reachability, boundary-fn sets, and every precomputed view
+;; over the merged analysis live in `clara.server.tools.graph.analyze.index`
+;; (the Index pass); kondo usage helpers live in
+;; `clara.server.tools.graph.analyze.utils`.
 
 (defn- normalize-key [k]
   (if (string? k)
     (symbol k)
     k))
-
-(defn- build-graph [analysis]
-  ;; :from-var is a symbol for usages inside a def, or nil/absent for
-  ;; top-level forms (clj-kondo never produces the *symbol* `nil`).
-  (reduce (fn [acc {:keys [from from-var to name]}]
-            (if from-var
-              (let [caller (fq-name-sym from from-var)
-                    callee (fq-name-sym to name)]
-                (update acc caller (fnil conj #{}) callee))
-              acc))
-          {}
-          (:var-usages analysis)))
-
-(defn- transitive-reachability [graph start-vars]
-  (loop [seen #{}
-         todo (set start-vars)]
-    (if (empty? todo)
-      seen
-      (let [seen (into seen todo)
-            traversable (clojure.set/difference todo boundary-fns)
-            next-vars (set (mapcat graph traversable))
-            unvisited (clojure.set/difference next-vars seen)]
-        (recur seen unvisited)))))
 
 (defn- extract-required-namespaces [analysis]
   (into []
@@ -180,75 +132,6 @@
     (-> session-or-rulebase eng/components :rulebase)
     session-or-rulebase))
 
-(defn- direct-callers
-  "Returns the set of var names in in `var-names` that directly call any function in `target-fns`
-  according to the call `graph`."
-  [graph var-names target-fns]
-  (into #{}
-        (filter (fn [var-name] (some target-fns (get graph var-name))))
-        var-names))
-
-(defn- precompute-reachability
-  "Returns a map of {var-sym -> reachable-set} for every var in `graph`.
-   reachable-set is the transitive closure of callees, stopping at boundary-fns."
-  [graph vars]
-  (into {}
-        (map (fn [v] [v (transitive-reachability graph [v])]))
-        vars))
-
-(defn- build-inserter-type-map
-  "Bottom-up: for every var that is a direct caller of a target fn,
-   find record constructors (`map->X`, `->X`) in its reachable subtree.
-
-   Returns `{inserter-var -> #{type-symbols}}`.
-
-   Note: because `clj-kondo`'s flat `:var-usages` analysis cannot distinguish
-   argument expressions within a callsite from independent calls in the
-   same function body, a var's reachable subtree may include constructors
-   from unrelated RHS branches (e.g. a helper that builds both a fact and
-   an unrelated record value for a side computation).  Consumers should use
-   manual annotations (`:clara-rules/no-output-types`) to suppress false
-   positives."
-  [direct-callers graph {:keys [var-usages]}]
-  (let [reachable-cache (precompute-reachability graph direct-callers)]
-    (into {}
-          (map (fn [v]
-                 (let [subtree (get reachable-cache v #{})
-                       ;; Find record constructors called from vars in this subtree
-                       types
-                       (into #{}
-                             (comp
-                              (filter (fn [vu]
-                                        (and (contains? subtree (var-usage-caller vu))
-                                             (-> vu :name name rhs/constructor-fn-name?))))
-                              (keep (fn [vu]
-                                      (rhs/resolve-record-type (:to vu) (:name vu)))))
-                             var-usages)]
-                   [v types])))
-          direct-callers)))
-
-(defn- build-constructor-callsite-map
-  "Like `build-inserter-type-map`, but for caller-supplied constructors of
-   interest matched by `fact-constructor-match-fn`.
-
-   Returns `{inserter-var -> [ctor-usage …]}` where each ctor-usage is a
-   kondo `:var-usage` whose callee matched the predicate and whose caller
-   is in the inserter-var's reachable subtree."
-  [direct-callers graph fact-constructor-match-fn {:keys [var-usages]}]
-  (let [reachable-cache (precompute-reachability graph direct-callers)]
-    (into {}
-          (keep (fn [v]
-                  (let [subtree (get reachable-cache v #{})
-                        ctor-usages (into []
-                                          (filter (fn [vu]
-                                                    (and (contains? subtree (fq-name-sym (:from vu) (:from-var vu)))
-                                                         (fact-constructor-match-fn
-                                                          (fq-name-sym (:to vu) (:name vu))))))
-                                          var-usages)]
-                    (when (seq ctor-usages)
-                      [v ctor-usages]))))
-          direct-callers)))
-
 (defn- extract-constructor-types-from-reachable
   "Top-down: given a rule var's reachable set, find which inserter vars are
    in it and union their types from the precomputed inserter-type-map."
@@ -265,31 +148,33 @@
    every remaining boundary-call argument form goes through the runtime
    resolution chain (`analyze.rhs`) and the optional `:callsite-resolver-fn`.
 
+   Boundary usages are found via the `:usages-by-callee` index — the merged
+   `:var-usages` vector is never scanned per rule (that scan made generation
+   quadratic in rules × usages at real-world scale).
+
    Returns {:static-types #{…} :resolved-types #{…} :dynamic-forms …}."
-  [reachable target-fns {:keys [analysis inserter-type-map
+  [reachable target-fns {:keys [usages-by-callee inserter-type-map
                                 constructor-callsite-map
                                 fact-constructor-type-resolver-fn] :as ctx}]
-  (let [usages (:var-usages analysis)
-        direct-caller? (fn [caller]
-                         (and (contains? reachable caller)
-                              (not (contains? target-fns caller))))
-        direct-target-call?
-        (fn [usage]
-          (and (direct-caller? (var-usage-caller usage))
-               (contains? target-fns (var-usage-callee usage))))
-        has-direct-callers? (boolean (some direct-target-call? usages))]
-    (if-not has-direct-callers?
-      {:static-types #{}
+  (let [static-types (extract-constructor-types-from-reachable
+                      reachable inserter-type-map)]
+    (if (seq static-types)
+      {:static-types static-types
        :resolved-types #{}
        :dynamic-forms nil}
-      (let [static-types (extract-constructor-types-from-reachable
-                          reachable inserter-type-map)]
-        (if (seq static-types)
-          {:static-types static-types
+      (let [boundary-usages
+            (into []
+                  (comp (mapcat #(get usages-by-callee %))
+                        (filter (fn [usage]
+                                  (let [caller (u/var-usage-caller usage)]
+                                    (and (contains? reachable caller)
+                                         (not (contains? target-fns caller)))))))
+                  target-fns)]
+        (if (empty? boundary-usages)
+          {:static-types #{}
            :resolved-types #{}
            :dynamic-forms nil}
-          (let [boundary-usages (into [] (filter direct-target-call?) usages)
-                ;; Read + locals-trace the boundary arguments once; both paths
+          (let [;; Read + locals-trace the boundary arguments once; both paths
                 ;; work from this.
                 traced-args (rhs/trace-boundary-args boundary-usages ctx)
                 ;; Constructor-of-interest resolution runs FIRST — it is the more
@@ -333,19 +218,19 @@
 (defn- var-reachability
   "For a given `var-name`, returns a map of:
 
-  * :reachable - set of all transitively reachable vars
+  * :reachable - set of all transitively reachable vars (from the index's
+    shared memoized closure)
 
   * :is-inserter? - true if reachable set includes an insert fn or a direct inserter
 
   * :is-retractor? - true if reachable set includes a retract fn or a direct retractor"
   [var-name
-   {:keys [graph insert-fns retract-fns
-           direct-inserters direct-retractors]}]
-  (let [reachable (transitive-reachability graph [var-name])
-        is-inserter? (some #(or (contains? insert-fns %)
+   {:keys [reachable-set direct-inserters direct-retractors]}]
+  (let [reachable (reachable-set var-name)
+        is-inserter? (some #(or (contains? index/insert-fns %)
                                 (contains? direct-inserters %))
                            reachable)
-        is-retractor? (some #(or (contains? retract-fns %)
+        is-retractor? (some #(or (contains? index/retract-fns %)
                                  (contains? direct-retractors %))
                             reachable)]
     {:reachable reachable
@@ -358,15 +243,15 @@
   from an aliased var was discovered through the alias chain — it bypasses
   the ctor chain and carries :fact-type/:fact-type-spec. Contexts are tried
   in deterministic ((str :fact-type)) order when several alias chains reach
-  the same caller. Returns nil when the rule has no alias contexts."
-  [graph contexts]
+  the same caller.  Reachability comes from the index's shared memoized
+  closure.  Returns nil when the rule has no alias contexts."
+  [reachable-set contexts]
   (when (seq contexts)
-    (let [sorted (sort-by (comp str :fact-type) contexts)
-          reach (memoize (fn [root] (transitive-reachability graph [root])))]
+    (let [sorted (sort-by (comp str :fact-type) contexts)]
       (fn [usage]
-        (let [caller (var-usage-caller usage)]
+        (let [caller (u/var-usage-caller usage)]
           (some (fn [{:keys [root] :as ctx}]
-                  (when (contains? (reach root) caller)
+                  (when (contains? (reachable-set root) caller)
                     (select-keys ctx [:fact-type :fact-type-spec])))
                 sorted))))))
 
@@ -379,22 +264,21 @@
   and :clara-rules/retract-types; unresolved or partially-resolved callsites
   remain visible under the dynamic-detection keys.
 
-  `ctx` must contain :graph, :insert-fns, :retract-fns, :direct-inserters, :direct-retractors,
-  :analysis, :inserter-type-map, :retractor-type-map, :get-source, :productions-by-name,
-  :callsite-resolver-fn, and :alias-by-rule (nil when no :fact-type-spec-fn)."
-  [var-name {:keys [insert-fns retract-fns retractor-type-map productions-by-name alias-by-rule] :as ctx}]
+  `ctx` is the `index/AnalysisIndex` plus :callsite-resolver-fn and
+  :alias-by-rule (nil when no :fact-type-spec-fn)."
+  [var-name {:keys [retractor-type-map productions-by-name alias-by-rule reachable-set] :as ctx}]
   (let [{:keys [is-inserter? is-retractor? reachable]} (var-reachability var-name ctx)]
     (when (or is-inserter? is-retractor?)
       (let [ctx (cond-> (assoc ctx :rule (get productions-by-name var-name))
                   alias-by-rule (assoc :alias-context-for
-                                       (alias-context-for-fn (:graph ctx)
+                                       (alias-context-for-fn reachable-set
                                                              (:contexts (get alias-by-rule var-name)))))
             insert-ctx (assoc ctx :direction :insert)
             retract-ctx (assoc ctx
                                :inserter-type-map retractor-type-map
                                :direction :retract)
-            inserts  (when is-inserter? (extract-insert-types reachable insert-fns insert-ctx))
-            retracts (when is-retractor? (extract-insert-types reachable retract-fns retract-ctx))
+            inserts  (when is-inserter? (extract-insert-types reachable index/insert-fns insert-ctx))
+            retracts (when is-retractor? (extract-insert-types reachable index/retract-fns retract-ctx))
             insert-types (into (:static-types inserts) (:resolved-types inserts))
             retract-types (into (:static-types retracts) (:resolved-types retracts))]
         (cond-> {}
@@ -488,7 +372,7 @@
                 (fn [defs]
                   (into []
                         (comp (remove (fn [d]
-                                        (and (prune-vars (fq-name-sym (:ns d) (:name d)))
+                                        (and (prune-vars (u/fq-sym (:ns d) (:name d)))
                                              (source-region? (:row d)))))
                               (map (fn [d] (update d :name rename))))
                         defs)))
@@ -497,7 +381,7 @@
                   (into []
                         (comp (remove (fn [u]
                                         (and (:from-var u)
-                                             (prune-vars (fq-name-sym (:from u) (:from-var u)))
+                                             (prune-vars (u/fq-sym (:from u) (:from-var u)))
                                              (source-region? (:row u)))))
                               (map (fn [u] (update u :from-var rename))))
                         usages))))))
@@ -610,25 +494,14 @@
             source))))))
 
 (defn- build-infer-ctx
-  "Builds the context map passed to `infer-annotation-for-var`."
-  [graph analysis inserter-type-map retractor-type-map constructor-callsite-map
-   get-source productions-by-name callsite-resolver-fn
-   fact-constructor-type-resolver-fn alias-by-rule]
-  {:graph graph
-   :insert-fns insert-fns
-   :retract-fns retract-fns
-   :direct-inserters (direct-callers graph (keys graph) insert-fns)
-   :direct-retractors (direct-callers graph (keys graph) retract-fns)
-   :analysis analysis
-   :usages-by-container (group-by var-usage-caller (:var-usages analysis))
-   :inserter-type-map inserter-type-map
-   :retractor-type-map retractor-type-map
-   :constructor-callsite-map constructor-callsite-map
-   :get-source get-source
-   :productions-by-name productions-by-name
-   :callsite-resolver-fn callsite-resolver-fn
-   :fact-constructor-type-resolver-fn fact-constructor-type-resolver-fn
-   :alias-by-rule alias-by-rule})
+  "Builds the context map passed to `infer-annotation-for-var`: the shared
+   `index/AnalysisIndex` plus the caller-supplied resolution hooks and the
+   var-alias linkage."
+  [index callsite-resolver-fn fact-constructor-type-resolver-fn alias-by-rule]
+  (assoc index
+         :callsite-resolver-fn callsite-resolver-fn
+         :fact-constructor-type-resolver-fn fact-constructor-type-resolver-fn
+         :alias-by-rule alias-by-rule))
 
 (s/defschema CallsiteResolverContext
   "Context map passed to `:callsite-resolver-fn` by
@@ -716,26 +589,19 @@
         ;; reachability explores each aliased var's call chain.
         alias-by-rule (when fact-type-spec-fn
                         (rhs/alias-usage-map productions-by-name effective-filter
-                                             analysis fact-type-spec-fn))
+                                             (group-by u/var-usage-caller (:var-usages analysis))
+                                             fact-type-spec-fn))
         analysis (cond-> analysis
                    (seq alias-by-rule)
                    (update :var-usages into (mapcat :usages) (vals alias-by-rule)))
-        graph (build-graph analysis)
-        project-vars (keys graph)
+        index (index/build-analysis-index
+               {:analysis analysis
+                :get-source get-source
+                :productions-by-name productions-by-name
+                :fact-constructor-match-fn fact-constructor-match-fn})
+        project-vars (keys (:graph index))
         var-seq (or effective-filter project-vars)
-        inserter-type-map (build-inserter-type-map
-                           (direct-callers graph project-vars insert-fns)
-                           graph analysis)
-        retractor-type-map (build-inserter-type-map
-                            (direct-callers graph project-vars retract-fns)
-                            graph analysis)
-        constructor-callsite-map (when fact-constructor-match-fn
-                                   (build-constructor-callsite-map
-                                    (direct-callers graph project-vars boundary-fns)
-                                    graph fact-constructor-match-fn analysis))
-        infer-ctx (build-infer-ctx graph analysis inserter-type-map retractor-type-map
-                                   constructor-callsite-map
-                                   get-source productions-by-name
+        infer-ctx (build-infer-ctx index
                                    callsite-resolver-fn
                                    fact-constructor-type-resolver-fn
                                    alias-by-rule)
