@@ -318,6 +318,16 @@
               (map-indexed (fn [i ta] (assoc ta :idx i))))
         usages))
 
+(defn resolution-status
+  "Classifies a sequence of callsite entries: nil (empty), :none (all
+   :unresolved), :partial (some :unresolved), or :full (all resolved)."
+  [callsites]
+  (cond
+    (empty? callsites) nil
+    (every? #(= :unresolved (:status %)) callsites) :none
+    (some #(= :unresolved (:status %)) callsites) :partial
+    :else :full))
+
 (defn resolve-boundary-callsites
   "Resolves boundary-call arguments via the ctor chain and the optional
    `:callsite-resolver-fn`.
@@ -354,11 +364,7 @@
         resolved-types (into #{} (mapcat :resolved-types) entries)]
     {:callsites entries
      :resolved-types resolved-types
-     :resolution (cond
-                   (empty? entries) nil
-                   (every? #(= :unresolved (:status %)) entries) :none
-                   (some #(= :unresolved (:status %)) entries) :partial
-                   :else :full)}))
+     :resolution (resolution-status entries)}))
 
 ;; ---------------------------------------------------------------------------
 ;; :fact-type-spec-fn — var-alias chains (caller-guided var-as-fact discovery)
@@ -645,6 +651,19 @@
       [ctor-caller]
       (shortest-call-path graph inserter-var ctor-caller))))
 
+(defn- arg-reaches-ctor?
+  "True when a traced boundary argument demonstrably reaches the given
+   constructor usage — see `owning-arg` for the three ownership routes."
+  [{:keys [traced-arg ctor-usage ctor-form intermediates sibling-usages]}]
+  (let [{:keys [usage traced alias-context]} traced-arg]
+    (and (not alias-context)       ; alias callsites are never auto-resolved
+         (or (usage-encloses? usage ctor-usage)
+             (and ctor-form (= traced ctor-form))
+             (some (fn [u]
+                     (and (usage-encloses? usage u)
+                          (contains? intermediates (fq-sym (:to u) (:name u)))))
+                   sibling-usages)))))
+
 (defn- owning-arg
   "The boundary argument a constructor call was reached *through*, or nil.
 
@@ -673,16 +692,35 @@
    nil means no boundary argument demonstrably reaches this constructor: the
    constructor call is not on an insert path out of this rule."
   [ctor-usage ctor-form intermediates traced-args sibling-usages]
-  (first
-   (filter (fn [{:keys [usage traced alias-context]}]
-             (and (not alias-context)     ; alias callsites are never auto-resolved
-                  (or (usage-encloses? usage ctor-usage)
-                      (and ctor-form (= traced ctor-form))
-                      (some (fn [u]
-                              (and (usage-encloses? usage u)
-                                   (contains? intermediates (fq-sym (:to u) (:name u)))))
-                            sibling-usages))))
-           traced-args)))
+  (some #(when (arg-reaches-ctor? {:traced-arg %
+                                    :ctor-usage ctor-usage
+                                    :ctor-form ctor-form
+                                    :intermediates intermediates
+                                    :sibling-usages sibling-usages})
+           %)
+        traced-args))
+
+(defn- resolve-ctor-usage-for-inserter
+  "Attempts to resolve a single constructor-of-interest usage against the
+   traced boundary arguments of a single inserter var.  Returns `[idx entry]`
+   when a boundary argument is shown to reach the constructor *and* the
+   type-resolver returns a type; nil when the constructor is unreachable,
+   unowned, or unresolved (the argument then falls through to the boundary
+   path instead of being reported twice)."
+  [{:keys [ctor-usage inserter-var graph get-source cfg-base candidates siblings]}]
+  (let [path (ctor-call-path graph inserter-var ctor-usage)
+        ctor-form (read-ctor-form ctor-usage get-source)
+        owner (owning-arg ctor-usage ctor-form (set (rest path))
+                          candidates siblings)]
+    (when owner
+      (let [entry (resolve-ctor-callsite
+                   (assoc cfg-base
+                          :ctor-usage ctor-usage
+                          :ctor-form ctor-form
+                          :call-path path
+                          :boundary-usage (:usage owner)))]
+        (when (not= :unresolved (:status entry))
+          [(:idx owner) entry])))))
 
 (defn resolve-constructor-callsites
   "Resolves constructor-of-interest callsites reached from a rule's boundary calls.
@@ -719,33 +757,22 @@
                        (let [candidates (sort-by (juxt #(:row (:usage %)) #(:col (:usage %)))
                                                  (get args-by-caller inserter-var))
                              siblings (get usages-by-container inserter-var)]
-                         (keep (fn [ctor-usage]
-                                 (let [path (ctor-call-path graph inserter-var ctor-usage)
-                                       ctor-form (read-ctor-form ctor-usage get-source)
-                                       owner (owning-arg ctor-usage ctor-form (set (rest path))
-                                                         candidates siblings)]
-                                   (when owner
-                                     (let [entry (resolve-ctor-callsite
-                                                  (assoc cfg-base
-                                                         :ctor-usage ctor-usage
-                                                         :ctor-form ctor-form
-                                                         :call-path path
-                                                         :boundary-usage (:usage owner)))]
-                                       ;; unresolved => leave the argument to the
-                                       ;; boundary path instead of reporting both
-                                       (when (not= :unresolved (:status entry))
-                                         [(:idx owner) entry])))))
-                               ctor-usages))))
-                    constructor-ctr-map)
+                         (keep #(resolve-ctor-usage-for-inserter
+                                 {:ctor-usage %
+                                  :inserter-var inserter-var
+                                  :graph graph
+                                  :get-source get-source
+                                  :cfg-base cfg-base
+                                  :candidates candidates
+                                  :siblings siblings})
+                               ctor-usages)))
+                    constructor-ctr-map))
         entries (mapv second pairs)
         resolved-types (into #{} (mapcat :resolved-types) entries)]
     {:callsites entries
      :resolved-types resolved-types
      :owned-arg-idxs (into #{} (map first) pairs)
-     :resolution (cond (empty? entries) nil
-                       (every? #(= :unresolved (:status %)) entries) :none
-                       (some #(= :unresolved (:status %)) entries) :partial
-                       :else :full)}))
+     :resolution (resolution-status entries)}))
 ;; Schemas
 ;; ---------------------------------------------------------------------------
 

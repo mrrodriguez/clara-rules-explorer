@@ -322,11 +322,7 @@
                 ;; explain and inflate `:resolution` to :full.
                 all-callsites (into (vec ctor-callsites) callsites)
                 all-types (into (or (:resolved-types ctor-result) #{}) resolved-types)
-                all-resolution (cond
-                                 (empty? all-callsites) nil
-                                 (every? #(= :unresolved (:status %)) all-callsites) :none
-                                 (some #(= :unresolved (:status %)) all-callsites) :partial
-                                 :else :full)]
+                all-resolution (rhs/resolution-status all-callsites)]
             {:static-types #{}
              :resolved-types all-types
              :dynamic-forms (when (seq all-callsites)

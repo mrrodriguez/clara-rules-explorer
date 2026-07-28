@@ -1,7 +1,10 @@
 1. Annotations generation should support an option should be able to take existing annotations
    optionally with merge rules.
 
-2. Updates were made to ctor vs generic callsite resolution that need reviewed/refined and this is
+2. the rhs ns either is misnamed or just needs split - we likely need a callsite ns to deal with
+   callsite details in general.
+
+3. Updates were made to ctor vs generic callsite resolution that need reviewed/refined and this is
    the explanation:
    ```
   The duplicate, in simple terms
