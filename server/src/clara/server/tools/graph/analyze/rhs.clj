@@ -697,10 +697,10 @@
    constructor call is not on an insert path out of this rule."
   [ctor-usage ctor-form intermediates traced-args sibling-usages]
   (some #(when (arg-reaches-ctor? {:traced-arg %
-                                    :ctor-usage ctor-usage
-                                    :ctor-form ctor-form
-                                    :intermediates intermediates
-                                    :sibling-usages sibling-usages})
+                                   :ctor-usage ctor-usage
+                                   :ctor-form ctor-form
+                                   :intermediates intermediates
+                                   :sibling-usages sibling-usages})
            %)
         traced-args))
 
@@ -770,7 +770,7 @@
                                   :candidates candidates
                                   :siblings siblings})
                                ctor-usages)))
-                    constructor-ctr-map))
+                     constructor-ctr-map))
         entries (mapv second pairs)
         resolved-types (into #{} (mapcat :resolved-types) entries)]
     {:callsites entries
