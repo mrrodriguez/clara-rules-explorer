@@ -917,6 +917,152 @@
                    (mapv :var-name-sym callstack))
                 "callstack: boundary-caller → ->fact (direct, no helper)")))))))
 
+(deftest test-constructor-resolver-overrules-callsite-resolver
+  (testing "constructor path owns its callsite; generic resolver handles the rest"
+    (let [seen (atom [])
+          ;; A generic resolver that WOULD also resolve ->fact forms — the kind of
+          ;; overlap that used to double-report a callsite.
+          generic (fn [{:keys [arg-form]}]
+                    (swap! seen conj arg-form)
+                    (cond
+                      (and (seq? arg-form) (= '->fact (first arg-form)))
+                      {:resolved-types [(second arg-form)]}
+
+                      (and (seq? arg-form) (= 'with-meta (first arg-form)))
+                      {:resolved-types [(:type (nth arg-form 2))]}))
+          ann (analyze/generate-annotations-from-analysis
+               {:analysis edge-case-analysis
+                :session-or-rulebase edge-case-session
+                :callsite-resolver-fn generic
+                :fact-constructor-match-fn (->fact-sym-match-fn ->fact-sym)
+                :fact-constructor-type-resolver-fn ->fact-type-resolver})
+          a (ann/get-annotation ann `atr/rule-ctor-and-opaque-inserts)
+          callsites (:callsites (:clara-rules/dynamic-insert-types-detected a))
+          by-type (into {} (map (juxt #(first (:resolved-types %)) identity)) callsites)]
+
+      (is (= [:demo/ctor-owned :demo/opaque]
+             (:clara-rules/insert-types a))
+          "both inserts contribute their type")
+
+      (is (= 2 (count callsites))
+          "one callsite per insert — the constructor insert is NOT double-reported")
+
+      (is (= 1 (count (filter :constructor-sym callsites)))
+          "exactly one callsite carries constructor provenance")
+
+      (testing "the constructor-built insert is owned by the constructor path"
+        (let [cs (by-type :demo/ctor-owned)]
+          (is (= :resolved (:status cs)))
+          (is (= ->fact-sym (:constructor-sym cs)))
+          (is (= 'clara.rules/insert! (:boundary-var-name-sym (:via cs))))
+          (is (= [`atr/rule-ctor-and-opaque-inserts ->fact-sym]
+                 (mapv :var-name-sym (:callstack (:via cs)))))))
+
+      (testing "the opaque insert still reaches :callsite-resolver-fn"
+        (let [cs (by-type :demo/opaque)]
+          (is (= :resolved (:status cs)))
+          (is (nil? (:constructor-sym cs)) "no constructor provenance — it has none")))
+
+      (is (empty? (filter #(and (seq? %) (= '->fact (first %))) @seen))
+          ":callsite-resolver-fn is never invoked for a form the constructor path owns")))
+
+  (testing "coverage follows the call chain, not just lexical nesting"
+    ;; `(insert! (middle-fn …))` — the constructor is NOT inside the insert! call.
+    ;; A generic resolver that *would* resolve the middle-fn call must never be
+    ;; asked, or the insert would be reported twice.
+    (doseq [[rule-sym arg-head fact-type chain]
+            [[`atr/rule-ctor-via-middle-fn 'make-middle-fact :demo/middle
+              [`atr/rule-ctor-via-middle-fn `atr/make-middle-fact ->fact-sym]]
+             [`atr/rule-ctor-via-two-hop-chain 'deep-outer-fact :demo/deep
+              [`atr/rule-ctor-via-two-hop-chain `atr/deep-outer-fact
+               `atr/deep-inner-fact ->fact-sym]]]]
+      (let [seen (atom [])
+            generic (fn [{:keys [arg-form]}]
+                      (swap! seen conj arg-form)
+                      (when (and (seq? arg-form) (= arg-head (first arg-form)))
+                        {:resolved-types [fact-type]}))
+            ann (analyze/generate-annotations-from-analysis
+                 {:analysis edge-case-analysis
+                  :session-or-rulebase edge-case-session
+                  :callsite-resolver-fn generic
+                  :fact-constructor-match-fn (->fact-sym-match-fn ->fact-sym)
+                  :fact-constructor-type-resolver-fn ->fact-type-resolver})
+            a (ann/get-annotation ann rule-sym)
+            callsites (:callsites (:clara-rules/dynamic-insert-types-detected a))
+            cs (first callsites)]
+        (is (= [fact-type] (:clara-rules/insert-types a))
+            (str rule-sym " resolves through the chain"))
+        (is (= 1 (count callsites))
+            (str rule-sym " reports the insert exactly once"))
+        (is (= ->fact-sym (:constructor-sym cs))
+            (str rule-sym " keeps the constructor entry, not the boundary one"))
+        (is (= chain (mapv :var-name-sym (:callstack (:via cs))))
+            (str rule-sym " :via records the full chain"))
+        (is (empty? (filter #(and (seq? %) (= arg-head (first %))) @seen))
+            (str rule-sym ": :callsite-resolver-fn is not asked about the chained arg")))))
+
+  (testing "a constructor bound to a local outside the insert! is still owned once"
+    ;; `(let [f (->fact :t m)] (insert! f))` — the boundary arg is the bare local
+    ;; `f`, so neither lexical nesting nor the call chain identifies it. The
+    ;; constructor path finds the call anyway (it is a var-usage in the rule body),
+    ;; and the boundary path reaches the same form via locals tracing. The traced
+    ;; form is what joins them.
+    (let [seen (atom [])
+          generic (fn [{:keys [arg-form]}]
+                    (swap! seen conj arg-form)
+                    (when (and (seq? arg-form) (= '->fact (first arg-form)))
+                      {:resolved-types [(second arg-form)]}))
+          ann (analyze/generate-annotations-from-analysis
+               {:analysis edge-case-analysis
+                :session-or-rulebase edge-case-session
+                :callsite-resolver-fn generic
+                :fact-constructor-match-fn (->fact-sym-match-fn ->fact-sym)
+                :fact-constructor-type-resolver-fn ->fact-type-resolver})
+          a (ann/get-annotation ann `atr/rule-ctor-bound-to-local)
+          callsites (:callsites (:clara-rules/dynamic-insert-types-detected a))]
+      (is (= [:demo/local-bound] (:clara-rules/insert-types a)))
+      (is (= 1 (count callsites))
+          "the local-bound constructor insert is reported exactly once")
+      (is (= ->fact-sym (:constructor-sym (first callsites)))
+          "the surviving entry is the constructor one, with provenance")
+      (is (empty? (filter #(and (seq? %) (= '->fact (first %))) @seen))
+          ":callsite-resolver-fn is not asked about the locals-traced constructor form"))))
+
+(deftest test-constructor-only-counts-on-an-insert-path
+  (let [ann (analyze/generate-annotations-from-analysis
+             {:analysis edge-case-analysis
+              :session-or-rulebase edge-case-session
+              :fact-constructor-match-fn (->fact-sym-match-fn ->fact-sym)
+              :fact-constructor-type-resolver-fn ->fact-type-resolver})]
+
+    (testing "several inserts, one of them a let-bound constructor"
+      (let [a (ann/get-annotation ann `atr/rule-ctor-local-plus-multiple-inserts)
+            dyn (:clara-rules/dynamic-insert-types-detected a)
+            by-src (into {} (map (juxt :source-str identity)) (:callsites dyn))]
+        (is (= [:demo/inline-y :demo/local-x] (:clara-rules/insert-types a)))
+        (is (= 3 (count (:callsites dyn)))
+            "one callsite per insert — no duplicates, nothing erased")
+        (is (= :partial (:resolution dyn))
+            "the opaque insert is unexplained, so resolution is not :full")
+        (testing "the let-bound constructor is attributed to the insert of the local,"
+          ;; …not to the *other* insert that happens to contain a different
+          ;; ->fact call. Only usage identity may match rule 1.
+          (is (= [:demo/local-x]
+                 (:resolved-types (by-src "(->fact :demo/local-x {:id ?app-id})")))))
+        (is (= :unresolved (:status (by-src "(opaque-fact ?app-id)")))
+            "the third insert survives as an honest unknown")))
+
+    (testing "a constructor that is called but never inserted is not an insert"
+      (let [a (ann/get-annotation ann `atr/rule-ctor-local-never-inserted)
+            dyn (:clara-rules/dynamic-insert-types-detected a)]
+        (is (nil? (:clara-rules/insert-types a))
+            ":demo/never-inserted is not promoted — no insert reaches it")
+        (is (= 1 (count (:callsites dyn)))
+            "only the real insert is reported")
+        (is (nil? (:constructor-sym (first (:callsites dyn))))
+            "no constructor callsite, so no fabricated :via")
+        (is (= :none (:resolution dyn)))))))
+
 (deftest test-constructor-options-validation
   (testing "Providing match-fn without type-resolver throws"
     (is (thrown-with-msg?

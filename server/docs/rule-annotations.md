@@ -285,12 +285,67 @@ and a `:via` chain showing the full provenance.
 **Validation**: both fns must be provided together (or both absent). Providing one
 without the other throws.
 
-**Interaction with existing resolution**: constructor-of-interest callsites are
-discovered and resolved *before* the existing boundary-call resolution path runs.
-When constructor callsites are found, unresolved boundary callsites (those that
-would have been handed to `:callsite-resolver-fn`) are suppressed in favor of the
-richer constructor provenance. Record/Java constructors, `with-meta` maps, and
-the `:fact-type-spec-fn` var-alias flow are unaffected.
+#### Precedence over `:callsite-resolver-fn`
+
+Constructor resolution is the **more specific** mechanism, so it runs first and
+wins. Both hooks can safely be supplied together — a boundary call is never
+reported twice.
+
+A boundary argument is **owned** by the constructor path when it is shown to reach
+a constructor that resolved. Ownership is decided per boundary argument (not per
+rule), because one rule may mix a constructor insert with an unrelated one. Three
+ways an argument reaches a constructor, each matching how the argument is written:
+
+| The argument is… | Example | How it is matched |
+|---|---|---|
+| the constructor call itself | `(insert! (->fact :t m))`, `(insert-all! (mapv #(->fact :t %) xs))` | the constructor's source span is inside the boundary call's |
+| a call that leads to it | `(insert! (my-middle-fn args))` where `my-middle-fn` calls `->fact` | a call written inside the boundary call names a link on the constructor's `:via` callstack — at any depth |
+| a local bound to it | `(let [f (->fact :t m)] (insert! f))` | the locals-traced form equals the resolved constructor call form |
+
+All three are needed, and none subsumes the others. The call graph is
+`{caller-var -> #{callee-vars}}`, so it cannot say which of a rule's several
+`insert!` calls reached a constructor — that needs the source spans clj-kondo puts
+on every var-usage (the same data `read-boundary-args` uses to read the arguments).
+And a bare local names nothing at all, so only the traced form joins it back.
+
+Rule 1 matches the constructor by *usage identity*, never by name — so a rule
+containing two separate `->fact` calls does not attribute both to whichever insert
+happens to contain one of them.
+
+An owned argument is skipped: `:callsite-resolver-fn` is never invoked for it, and
+the constructor entry (with `:constructor-sym` and `:via`) is the only entry
+emitted for that insert. Every other boundary argument reaches
+`:callsite-resolver-fn` normally — `with-meta` maps, literals, var-as-fact —
+*including in the same rule* as a constructor insert, and including when it stays
+unresolved. An insert nobody can explain is reported as `:unresolved` rather than
+dropped, so `:resolution` stays honest.
+
+### A constructor is only an insert if an insert reaches it
+
+A constructor call that **no** boundary argument reaches is not emitted and its
+type is not promoted:
+
+```clojure
+(let [f (->fact :x m)]          ; called, but never inserted
+  (insert! (something-else)))
+;; => insert-types nil, resolution :none
+;;    one :unresolved callsite for (something-else)
+```
+
+This is what keeps the reachable-subtree scan from claiming types a rule never
+emits — the scan finds *candidates*, and ownership decides which are real. A
+constructor the resolver cannot type is likewise not emitted; the argument falls
+through to the boundary path instead of being reported twice.
+
+The trade-off is recall: if an insert reaches a constructor by indirection none of
+the three routes can see — say `(insert-all! (apply f args))`, where the
+constructor-reaching fn is never named in the argument — the type is dropped rather
+than guessed. The boundary callsite then remains `:unresolved`, which is the honest
+signal, and the caller can annotate `:clara-rules/insert-types` explicitly.
+
+Record/Java constructors and the `:fact-type-spec-fn` var-alias flow are unaffected.
+Alias-discovered callsites are deliberately never auto-resolved, so ownership never
+claims them either.
 
 ---
 

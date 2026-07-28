@@ -274,14 +274,13 @@
 ;; The chain + detection-map assembly
 ;; ---------------------------------------------------------------------------
 
-(defn- resolve-arg
-  "Runs the full resolution chain for one boundary-call argument form.
+(defn- resolve-traced-arg
+  "Runs the full resolution chain for an already-locals-traced argument form.
    Returns a set of resolved fact-type tokens (empty when unresolved).
    Alias-discovered callsites (`:alias-context` in ctx) bypass the ctor chain —
    they are never automatically resolved — and go straight to the resolver."
-  [arg-form {:keys [callsite-resolver-fn alias-context] :as ctx} live-ns-sym]
-  (let [traced (trace-arg-form arg-form ctx 0)
-        resolved
+  [traced {:keys [callsite-resolver-fn alias-context] :as ctx} live-ns-sym]
+  (let [resolved
         (or
          ;; constructors (on the traced form); not for alias-discovered callsites.
          (when (and (not alias-context) (seq? traced))
@@ -294,35 +293,52 @@
           (map normalize-token)
           resolved)))
 
+(defn trace-boundary-args
+  "Reads and locals-traces every argument of every boundary usage, once.
+
+   Both resolution paths work from this: the constructor path decides which of
+   these arguments it owns, and the boundary path resolves the rest.  Tracing up
+   front is what lets the constructor path recognise
+   `(let [f (->fact :t m)] (insert! f))` — the argument `f` names nothing, but
+   its traced form is the constructor call.
+
+   Returns `[{:idx … :usage … :arg … :traced … :alias-context …}]`."
+  [usages {:keys [get-source alias-context-for] :as ctx}]
+  (into []
+        (comp (mapcat (fn [usage]
+                        (let [alias-ctx (when alias-context-for
+                                          (alias-context-for usage))]
+                          (map (fn [arg]
+                                 (let [ctx' (assoc ctx :usage usage :alias-context alias-ctx)]
+                                   {:usage usage
+                                    :arg arg
+                                    :alias-context alias-ctx
+                                    :traced (trace-arg-form arg ctx' 0)}))
+                               (or (read-boundary-args usage get-source) '())))))
+              (map-indexed (fn [i ta] (assoc ta :idx i))))
+        usages))
+
 (defn resolve-boundary-callsites
-  "Resolves every argument form of every boundary usage via the ctor chain and
-   the optional `:callsite-resolver-fn`.
+  "Resolves boundary-call arguments via the ctor chain and the optional
+   `:callsite-resolver-fn`.
+
+   `traced-args` — entries from `trace-boundary-args`, already filtered to those
+   the constructor path did not own.
 
    `ctx` keys:
      `:analysis`              - merged `clj-kondo` analysis (for `:locals` tracing)
-     `:get-source`            - `(fn [ns-sym filename] -> source-str)`
      `:direction`             - `:insert` | `:retract`
      `:rule`                  - the full production map of the consuming rule (may be nil)
      `:callsite-resolver-fn`  - optional caller escape hatch
-     `:alias-context-for`     - optional `(fn [usage] -> alias context or nil)`;
-                                when it returns a context for a boundary usage,
-                                the callsite bypasses the ctor chain and carries
-                                `:fact-type`/`:fact-type-spec` (see `alias-usage-map`)
 
    Returns `{:callsites [...] :resolved-types #{…} :resolution :full|:partial|:none}`
    (`:resolution` is nil when there are no callsites)."
-  [usages {:keys [get-source alias-context-for] :as ctx}]
+  [traced-args ctx]
   (let [entries
         (into []
-              (comp (mapcat (fn [usage]
-                              (map (fn [arg] [usage arg])
-                                   (or (read-boundary-args usage get-source) '()))))
-                    (map (fn [[usage arg]]
-                           (let [alias-ctx (when alias-context-for
-                                             (alias-context-for usage))
-                                 tokens (resolve-arg arg
-                                                     (assoc ctx :usage usage :alias-context alias-ctx)
-                                                     (:from usage))]
+              (comp (map (fn [{:keys [usage arg traced alias-context]}]
+                           (let [ctx' (assoc ctx :usage usage :alias-context alias-context)
+                                 tokens (resolve-traced-arg traced ctx' (:from usage))]
                              (cond-> {:source-str (pr-str arg)
                                       :ns-name-sym (:from usage)
                                       :filename (:filename usage)
@@ -331,10 +347,10 @@
                                                     :else :resolved-multi)}
                                (seq tokens)
                                (assoc :resolved-types (vec (sort-by str tokens)))
-                               alias-ctx
-                               (merge (select-keys alias-ctx [:fact-type :fact-type-spec]))))))
+                               alias-context
+                               (merge (select-keys alias-context [:fact-type :fact-type-spec]))))))
                     (distinct))
-              usages)
+              traced-args)
         resolved-types (into #{} (mapcat :resolved-types) entries)]
     {:callsites entries
      :resolved-types resolved-types
@@ -527,6 +543,23 @@
   [ns name]
   (symbol (str ns) (str name)))
 
+(defn- pos<=
+  "Source-position ordering: `[row col]` before-or-equal `[row col]`."
+  [r1 c1 r2 c2]
+  (or (< r1 r2) (and (= r1 r2) (<= c1 c2))))
+
+(defn- usage-encloses?
+  "Does the source span of usage `outer` lexically enclose the start of usage
+   `inner`?  Both must be in the same file.
+
+   This is how a constructor callsite is attributed to the specific
+   `insert!`/`retract!` call it was written inside — `(insert! (->fact …))` —
+   as opposed to merely living somewhere in the same rule var."
+  [outer inner]
+  (and (= (:filename outer) (:filename inner))
+       (pos<= (:row outer) (:col outer) (:row inner) (:col inner))
+       (pos<= (:row inner) (:col inner) (:end-row outer) (:end-col outer))))
+
 (defn- shortest-call-path
   "BFS from start to end in the call graph.
    Returns [start … end] or nil when unreachable.
@@ -545,37 +578,35 @@
             (recur (into (pop queue) (map #(conj path %) neighbors))
                    (into visited neighbors))))))))
 
+(defn- read-ctor-form
+  "The constructor call form as written, read from source at the usage's span."
+  [ctor-usage get-source]
+  (let [source (get-source (:from ctor-usage) (:filename ctor-usage))]
+    (when-let [call-str (source-text-at source
+                                        (:row ctor-usage) (:col ctor-usage)
+                                        (:end-row ctor-usage) (:end-col ctor-usage))]
+      (try (read-string call-str) (catch Exception _ nil)))))
+
 (defn- resolve-ctor-callsite
   "Resolves a single constructor-of-interest callsite.
    Returns a callsite entry map.
 
    `cfg` is a map with:
      :ctor-usage  - the kondo :var-usage for the constructor call
-     :inserter-var - the direct caller of the boundary fn
-     :boundary-fn-sym - the boundary fn symbol (e.g. clara.rules/insert!)
-     :graph - the call graph
+     :ctor-form   - its call form, from `read-ctor-form`
+     :boundary-usage - the boundary call this constructor was reached from
+     :call-path - [inserter-var … containing-var] from `ctor-call-path`
      :direction - :insert or :retract
      :rule - the rule production
-     :resolver-fn - the :fact-constructor-type-resolver-fn
-     :get-source - fn to load source text"
-  [{:keys [ctor-usage inserter-var boundary-fn-sym graph direction rule
-           resolver-fn get-source]}]
-  (let [ctor-sym (fq-sym (:to ctor-usage) (:name ctor-usage))
-        ctor-caller (fq-sym (:from ctor-usage) (:from-var ctor-usage))
-        callstack-path
-        (if (= inserter-var ctor-caller)
-          [{:var-name-sym ctor-caller}]
-          (when-let [path (shortest-call-path graph inserter-var ctor-caller)]
-            (mapv (fn [v] {:var-name-sym v}) path)))
-        via (when callstack-path
+     :resolver-fn - the :fact-constructor-type-resolver-fn"
+  [{:keys [ctor-usage ctor-form boundary-usage call-path direction rule resolver-fn]}]
+  (let [boundary-fn-sym (fq-sym (:to boundary-usage) (:name boundary-usage))
+        ctor-sym (fq-sym (:to ctor-usage) (:name ctor-usage))
+        via (when (seq call-path)
               {:boundary-var-name-sym boundary-fn-sym
-               :callstack (conj callstack-path {:var-name-sym ctor-sym})})
-        source (get-source (:from ctor-usage) (:filename ctor-usage))
-        call-str (source-text-at source
-                                 (:row ctor-usage) (:col ctor-usage)
-                                 (:end-row ctor-usage) (:end-col ctor-usage))
-        arg-form (when call-str
-                   (try (read-string call-str) (catch Exception _ nil)))
+               :callstack (conj (mapv (fn [v] {:var-name-sym v}) call-path)
+                                {:var-name-sym ctor-sym})})
+        arg-form ctor-form
         resolver-ctx (cond-> {:constructor-sym ctor-sym
                               :arg-form arg-form
                               :ns-name-sym (:from ctor-usage)
@@ -603,38 +634,114 @@
       (seq tokens) (assoc :resolved-types (vec (sort-by str tokens)))
       via (assoc :via via))))
 
-(defn resolve-constructor-callsites
-  "Resolves constructor-of-interest callsites discovered in a reachable subtree.
+(defn- ctor-call-path
+  "Call-graph path `[inserter-var … containing-var]` for a constructor usage —
+   how the insert chain gets from the boundary call's caller to the var the
+   constructor is written in.  `[inserter-var]` when the constructor is written
+   in the inserter itself; nil when unreachable."
+  [graph inserter-var ctor-usage]
+  (let [ctor-caller (fq-sym (:from ctor-usage) (:from-var ctor-usage))]
+    (if (= inserter-var ctor-caller)
+      [ctor-caller]
+      (shortest-call-path graph inserter-var ctor-caller))))
 
-   `boundary-usages` — boundary calls (insert!/retract!) for this rule var.
+(defn- owning-arg
+  "The boundary argument a constructor call was reached *through*, or nil.
+
+   Three ways an argument reaches a constructor — one per way the argument can
+   be written, each decided from data clj-kondo already gives us:
+
+     1. **It is the constructor call.** The constructor's source span sits
+        inside the boundary call's: `(insert! (->fact :t m))`, including nested
+        forms such as `(insert-all! (mapv #(->fact :t %) xs))`.
+     2. **It is a call that leads there.** Some call written inside the boundary
+        call names a link on `intermediates` — the call-graph path from the
+        inserter to the constructor's containing var:
+        `(insert! (my-middle-fn args))`. Works at any depth.
+     3. **It is a local bound to it.** The argument's locals-traced form is the
+        constructor call: `(let [f (->fact :t m)] (insert! f))`.  A bare local
+        names nothing, so nothing else can join it back.
+
+   `intermediates` deliberately excludes the constructor symbol itself — only
+   rule 1 may match the constructor, and by *usage identity*, not by name.
+   Otherwise a rule with two separate `->fact` calls would attribute both to
+   whichever boundary call happened to contain one of them.
+
+   `sibling-usages` are the var-usages written in the same var as the boundary
+   calls — the candidates for \"a call written inside this boundary call\".
+
+   nil means no boundary argument demonstrably reaches this constructor: the
+   constructor call is not on an insert path out of this rule."
+  [ctor-usage ctor-form intermediates traced-args sibling-usages]
+  (first
+   (filter (fn [{:keys [usage traced alias-context]}]
+             (and (not alias-context)     ; alias callsites are never auto-resolved
+                  (or (usage-encloses? usage ctor-usage)
+                      (and ctor-form (= traced ctor-form))
+                      (some (fn [u]
+                              (and (usage-encloses? usage u)
+                                   (contains? intermediates (fq-sym (:to u) (:name u)))))
+                            sibling-usages))))
+           traced-args)))
+
+(defn resolve-constructor-callsites
+  "Resolves constructor-of-interest callsites reached from a rule's boundary calls.
+
+   `traced-args` — entries from `trace-boundary-args` for this rule var.
    `constructor-ctr-map` — {inserter-var -> [ctor-usage …]} from
      `build-constructor-callsite-map`, scoped to this rule var.
    `ctx` — must contain :get-source, :graph, :direction, :rule,
-     :fact-constructor-type-resolver-fn.
+     :usages-by-container, :fact-constructor-type-resolver-fn.
 
-   Returns {:callsites […] :resolved-types #{…} :resolution :full|:partial|:none}
-   (same shape as `resolve-boundary-callsites`)."
-  [boundary-usages constructor-ctr-map {:keys [get-source graph direction rule
-                                                fact-constructor-type-resolver-fn]}]
-  (let [boundary-by-caller (into {} (map (fn [u] [(fq-sym (:from u) (:from-var u))
-                                                   (fq-sym (:to u) (:name u))]))
-                                   boundary-usages)
-        cfg-base {:graph graph
-                  :direction direction
+   A constructor is emitted only when some boundary argument is shown to reach
+   it (see `owning-arg`) *and* the resolver returns a type.  A constructor call
+   that no insert flows through is not an insert — dropping it is what keeps a
+   `(let [f (->fact :x)] (insert! (other)))` from claiming `:x`.  A constructor
+   the resolver cannot type is left to the boundary path rather than reported
+   twice.
+
+   Returns `{:callsites […] :resolved-types #{…} :resolution …}` (the shape
+   `resolve-boundary-callsites` returns) plus `:owned-arg-idxs` — the `:idx` of
+   every boundary argument a constructor accounted for.  Those must not also go
+   through `resolve-boundary-callsites`, or the same insert would be reported
+   twice (see `analyze/extract-insert-types`)."
+  [traced-args constructor-ctr-map {:keys [get-source graph direction rule
+                                           usages-by-container
+                                           fact-constructor-type-resolver-fn]}]
+  (let [args-by-caller (group-by #(fq-sym (:from (:usage %)) (:from-var (:usage %)))
+                                 traced-args)
+        cfg-base {:direction direction
                   :rule rule
-                  :resolver-fn fact-constructor-type-resolver-fn
-                  :get-source get-source}
-        entries (into [] (mapcat (fn [[inserter-var ctor-usages]]
-                                   (let [bfn (get boundary-by-caller inserter-var)
-                                         cfg (assoc cfg-base
-                                                    :inserter-var inserter-var
-                                                    :boundary-fn-sym bfn)]
-                                     (map #(resolve-ctor-callsite (assoc cfg :ctor-usage %))
-                                          ctor-usages))))
-                                 constructor-ctr-map)
+                  :resolver-fn fact-constructor-type-resolver-fn}
+        pairs (into []
+                    (mapcat
+                     (fn [[inserter-var ctor-usages]]
+                       (let [candidates (sort-by (juxt #(:row (:usage %)) #(:col (:usage %)))
+                                                 (get args-by-caller inserter-var))
+                             siblings (get usages-by-container inserter-var)]
+                         (keep (fn [ctor-usage]
+                                 (let [path (ctor-call-path graph inserter-var ctor-usage)
+                                       ctor-form (read-ctor-form ctor-usage get-source)
+                                       owner (owning-arg ctor-usage ctor-form (set (rest path))
+                                                         candidates siblings)]
+                                   (when owner
+                                     (let [entry (resolve-ctor-callsite
+                                                  (assoc cfg-base
+                                                         :ctor-usage ctor-usage
+                                                         :ctor-form ctor-form
+                                                         :call-path path
+                                                         :boundary-usage (:usage owner)))]
+                                       ;; unresolved => leave the argument to the
+                                       ;; boundary path instead of reporting both
+                                       (when (not= :unresolved (:status entry))
+                                         [(:idx owner) entry])))))
+                               ctor-usages))))
+                    constructor-ctr-map)
+        entries (mapv second pairs)
         resolved-types (into #{} (mapcat :resolved-types) entries)]
     {:callsites entries
      :resolved-types resolved-types
+     :owned-arg-idxs (into #{} (map first) pairs)
      :resolution (cond (empty? entries) nil
                        (every? #(= :unresolved (:status %)) entries) :none
                        (some #(= :unresolved (:status %)) entries) :partial

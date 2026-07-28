@@ -291,3 +291,76 @@
   =>
   (r/insert-all! (make-tagged-facts [?app-id])))
 
+(defn make-middle-fact
+  "A plain middle fn returning a constructed fact. Note the arity-1 constructor
+   call — the fact type is the whole fact."
+  [id]
+  (->fact :demo/middle {:id id}))
+
+(r/defrule rule-ctor-via-middle-fn
+  "Rule L3: `(insert! (make-middle-fact …))`. The constructor call is NOT written
+   inside the insert! call, so coverage cannot come from lexical nesting — it has
+   to come from the call chain (`make-middle-fact` is a link on the path from this
+   rule to `->fact`)."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (make-middle-fact ?app-id)))
+
+(defn deep-inner-fact [id] (->fact :demo/deep {:id id}))
+(defn deep-outer-fact [id] (deep-inner-fact id))
+
+(r/defrule rule-ctor-via-two-hop-chain
+  "Rule L4: two hops between the insert! and the constructor — the argument names
+   `deep-outer-fact`, which is a link on the chain, while the constructor lives in
+   `deep-inner-fact`."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (deep-outer-fact ?app-id)))
+
+(r/defrule rule-ctor-bound-to-local
+  "Rule L5: the constructor call is bound to a local *outside* the insert! call,
+   so the insert!'s argument is a bare local naming no link in the call chain.
+   The constructor is still discovered — it is a var-usage in the rule's own body
+   — but nothing marks the boundary call as covered."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [f (->fact :demo/local-bound {:id ?app-id})]
+    (r/insert! f)))
+
+(defn opaque-fact
+  "Builds a fact without a constructor of interest — only a `:callsite-resolver-fn`
+   can read it."
+  [id]
+  (with-meta {:id id} {:type :demo/opaque-2}))
+
+(r/defrule rule-ctor-local-plus-multiple-inserts
+  "Rule L6: a let-bound constructor alongside several inserts — one inline
+   constructor, one opaque, one inserting the local."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [f (->fact :demo/local-x {:id ?app-id})]
+    (r/insert! (->fact :demo/inline-y {:id ?app-id}))
+    (r/insert! (opaque-fact ?app-id))
+    (r/insert! f)))
+
+(r/defrule rule-ctor-local-never-inserted
+  "Rule L7: a constructor is called and bound, but the local is never inserted.
+   Nothing about this rule actually emits :demo/never-inserted."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [_f (->fact :demo/never-inserted {:id ?app-id})]
+    (r/insert! (opaque-fact ?app-id))))
+
+(r/defrule rule-ctor-and-opaque-inserts
+  "Rule L2: two inserts in one rule — one built by the ->fact constructor of
+   interest, one by an opaque form only a `:callsite-resolver-fn` can read.
+
+   Exercises the precedence rule: the constructor path owns the first insert
+   (exactly one callsite, carrying :constructor-sym/:via, and the generic
+   resolver is never asked about it), while the second insert still reaches
+   `:callsite-resolver-fn` normally."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (->fact :demo/ctor-owned {:id ?app-id}))
+  (r/insert! (with-meta {:id ?app-id} {:type :demo/opaque})))
+

@@ -267,8 +267,8 @@
 
    Returns {:static-types #{…} :resolved-types #{…} :dynamic-forms …}."
   [reachable target-fns {:keys [analysis inserter-type-map
-                                 constructor-callsite-map
-                                 fact-constructor-type-resolver-fn] :as ctx}]
+                                constructor-callsite-map
+                                fact-constructor-type-resolver-fn] :as ctx}]
   (let [usages (:var-usages analysis)
         direct-caller? (fn [caller]
                          (and (contains? reachable caller)
@@ -289,8 +289,12 @@
            :resolved-types #{}
            :dynamic-forms nil}
           (let [boundary-usages (into [] (filter direct-target-call?) usages)
-                ;; Constructor-of-interest resolution — gather ctor usages
-                ;; for all inserter-vars in the reachable subtree.
+                ;; Read + locals-trace the boundary arguments once; both paths
+                ;; work from this.
+                traced-args (rhs/trace-boundary-args boundary-usages ctx)
+                ;; Constructor-of-interest resolution runs FIRST — it is the more
+                ;; specific mechanism, and it decides which arguments the generic
+                ;; path still needs to look at.
                 ctor-inserter-vars (when constructor-callsite-map
                                      (into []
                                            (filter #(contains? reachable %))
@@ -298,37 +302,31 @@
                 ctor-result (when (and fact-constructor-type-resolver-fn (seq ctor-inserter-vars))
                               (let [scoped-map (select-keys constructor-callsite-map ctor-inserter-vars)]
                                 (rhs/resolve-constructor-callsites
-                                 boundary-usages
+                                 traced-args
                                  scoped-map
                                  ctx)))
-                ;; Boundary-call resolution (existing)
-                {:keys [callsites resolved-types resolution]}
-                (rhs/resolve-boundary-callsites boundary-usages ctx)
-                ;; Merge constructor result with boundary result.
-                ;; Suppress :unresolved boundary callsites when constructor
-                ;; callsites are present (they carry richer provenance).
                 ctor-callsites (:callsites ctor-result)
-                ctor-types (:resolved-types ctor-result)
-                all-callsites (into (vec ctor-callsites)
-                                   (if (seq ctor-callsites)
-                                     (remove #(= :unresolved (:status %)) callsites)
-                                     callsites))
-                all-types (into (or ctor-types #{}) resolved-types)
-                ;; Aggregate resolution status
-                all-resolution
-                (let [ctor-resolution (:resolution ctor-result)]
-                  (cond
-                    (empty? all-callsites) nil
-                    ;; When constructor result covers everything: use its resolution
-                    (and ctor-resolution (= :full ctor-resolution)
-                         (every? #(= :resolved (:status %)) all-callsites))
-                    :full
-                    ;; When no constructor result: preserve original boundary resolution
-                    (not ctor-resolution)
-                    resolution
-                    ;; Otherwise: partial (some resolved, some not)
-                    :else
-                    :partial))]
+                ;; An argument a constructor accounted for is dropped before
+                ;; resolving, so `:callsite-resolver-fn` is never invoked for it
+                ;; and the same insert cannot be reported a second time without
+                ;; provenance.
+                owned (:owned-arg-idxs ctor-result)
+                remaining-args (if (seq owned)
+                                 (into [] (remove (comp owned :idx)) traced-args)
+                                 traced-args)
+                {:keys [callsites resolved-types]}
+                (rhs/resolve-boundary-callsites remaining-args ctx)
+                ;; Anything still here is a boundary argument the constructor path
+                ;; did NOT own, so it stands on its own — including when it is
+                ;; unresolved. Dropping those would erase a real insert we cannot
+                ;; explain and inflate `:resolution` to :full.
+                all-callsites (into (vec ctor-callsites) callsites)
+                all-types (into (or (:resolved-types ctor-result) #{}) resolved-types)
+                all-resolution (cond
+                                 (empty? all-callsites) nil
+                                 (every? #(= :unresolved (:status %)) all-callsites) :none
+                                 (some #(= :unresolved (:status %)) all-callsites) :partial
+                                 :else :full)]
             {:static-types #{}
              :resolved-types all-types
              :dynamic-forms (when (seq all-callsites)
@@ -626,6 +624,7 @@
    :direct-inserters (direct-callers graph (keys graph) insert-fns)
    :direct-retractors (direct-callers graph (keys graph) retract-fns)
    :analysis analysis
+   :usages-by-container (group-by var-usage-caller (:var-usages analysis))
    :inserter-type-map inserter-type-map
    :retractor-type-map retractor-type-map
    :constructor-callsite-map constructor-callsite-map
