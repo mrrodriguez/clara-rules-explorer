@@ -32,6 +32,21 @@ export interface UnlinkedRuleInfo {
 }
 
 /**
+ * A single entry in a constructor callstack chain.
+ */
+export interface ViaEntry {
+	'var-name-sym': string;
+}
+
+/**
+ * Provenance chain from a boundary fn to a constructor callsite.
+ */
+export interface ViaChain {
+	'boundary-var-name-sym': string;
+	callstack: ViaEntry[];
+}
+
+/**
  * A single dynamic insert!/retract! callsite detected in rule source.
  */
 export interface DynamicCallsiteEntry {
@@ -41,6 +56,8 @@ export interface DynamicCallsiteEntry {
 	status?: string;
 	'resolved-types'?: string[];
 	'resolution-method'?: string;
+	'constructor-sym'?: string;
+	via?: ViaChain;
 }
 
 /**

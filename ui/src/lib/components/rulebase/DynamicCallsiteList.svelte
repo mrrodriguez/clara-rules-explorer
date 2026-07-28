@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DynamicDetectionInfo } from '$lib/types/api';
+	import type { DynamicDetectionInfo, ViaChain } from '$lib/types/api';
 	import { factPath } from '$lib/utils';
 	import { resolve } from '$app/paths';
 	import type { Pathname } from '$app/types';
@@ -16,6 +16,16 @@
 	let callsites = $derived(detection?.callsites ?? []);
 	let resolution = $derived(detection?.resolution);
 	let startExpanded = $derived(resolution !== 'full');
+
+	function buildViaEntries(via: ViaChain) {
+		return [
+			{ label: 'boundary', sym: via['boundary-var-name-sym'] },
+			...via.callstack.map((e, i) => ({
+				label: i === via.callstack.length - 1 ? 'constructor' : 'caller',
+				sym: e['var-name-sym']
+			}))
+		];
+	}
 </script>
 
 {#if detection}
@@ -40,6 +50,9 @@
 			{@const code = site['source-str']}
 			{@const types = site['resolved-types']}
 			{@const status = site.status}
+			{@const constructorSym = site['constructor-sym']}
+			{@const via = site.via}
+			{@const viaEntries = via ? buildViaEntries(via) : []}
 			<div class="card bg-light border mb-2">
 				<div class="card-body p-2">
 					{#if startExpanded}
@@ -65,7 +78,39 @@
 								unresolved
 							</span>
 						{/if}
+
+						{#if constructorSym}
+							<span class="d-inline-flex align-items-center border rounded px-2 py-1 bg-white">
+								<i class="bi bi-braces me-2 text-success small"></i>
+								<QualifiedName fullName={constructorSym} size="sm" />
+							</span>
+						{/if}
 					</div>
+
+					{#if via}
+						<details class="mt-2">
+							<summary class="text-muted small" style="cursor: pointer">
+								<i class="bi bi-diagram-3 me-1"></i>
+								Provenance chain
+							</summary>
+							<div class="mt-2 d-flex flex-wrap align-items-center gap-1">
+								{#each viaEntries as entry, idx (entry.sym + idx)}
+									{#if idx > 0}
+										<span class="text-muted small">→</span>
+									{/if}
+									<span
+										class="d-inline-flex flex-column align-items-start border rounded px-2 py-1 bg-white"
+										title="{entry.label}: {entry.sym}"
+									>
+										<span class="text-muted" style="font-size: 0.6rem; line-height: 1;">
+											{entry.label}
+										</span>
+										<QualifiedName fullName={entry.sym} size="sm" />
+									</span>
+								{/each}
+							</div>
+						</details>
+					{/if}
 				</div>
 			</div>
 		{/each}
