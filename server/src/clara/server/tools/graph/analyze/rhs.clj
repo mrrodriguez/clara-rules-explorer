@@ -562,9 +562,13 @@
    `insert!`/`retract!` call it was written inside — `(insert! (->fact …))` —
    as opposed to merely living somewhere in the same rule var."
   [outer inner]
-  (and (= (:filename outer) (:filename inner))
-       (pos<= (:row outer) (:col outer) (:row inner) (:col inner))
-       (pos<= (:row inner) (:col inner) (:end-row outer) (:end-col outer))))
+  (let [{r1 :row c1 :col er1 :end-row ec1 :end-col f1 :filename} outer
+        {r2 :row c2 :col f2 :filename} inner]
+    (boolean
+     (and f1 f2 (= f1 f2)
+          r1 c1 er1 ec1 r2 c2
+          (pos<= r1 c1 r2 c2)
+          (pos<= r2 c2 er1 ec1)))))
 
 (defn- shortest-call-path
   "BFS from start to end in the call graph.
