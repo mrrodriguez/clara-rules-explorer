@@ -83,7 +83,7 @@ When the rule base analyzer detects call sites to `insert!`, `retract!`, or thei
 
 ### The resolution chain
 
-For each callsite argument form (see `clara.server.tools.graph.analyze.rhs`):
+For each callsite argument form (see `clara.server.tools.graph.analyze.callsite`):
 
 1. **Record constructors** — `->MyRecord` / `map->MyRecord` heads are resolved in the live namespace of the consuming rule.
 2. **Java constructors** — `(MyFact. …)`, `(new MyFact …)`, and `(MyFact/new …)` resolve to the class.

@@ -85,13 +85,16 @@ land so work can stop/resume at any checkbox.
     `GenerateAnnotationsOptions`, tests, `rule-annotations.md`,
     `extensible-fact-constructors-plan.md`.
 
-- [ ] **Chunk 5 — schema nits + edge validation.** _(first two bullets landed
-  in `2975cb5`; remaining:)_
-  - Comment every unavoidable `s/Any` (kondo open maps, type-agnostic tokens,
-    full productions — name the keys of interest, relate to api.clj schemas
-    by docstring).
+- [x] **Chunk 5 — schema nits + edge validation.** → completed in `4e21319`
+  (`:fact-type` was genuinely wrong as `s/Keyword` — record facts are
+  class-name symbols; fixed in alias + callsite schemas). First two bullets
+  landed earlier in `2975cb5`.
 
-- [ ] **Chunk 6 — correctness items (fix or document).**
+- [x] **Chunk 6 — correctness items (fix or document).** → landed as `1ca1369`
+  (rule-3 position-identity fix + pinning test; `:resolution-method`
+  removed). Nested-ctor over-promotion + `:source-str` kind difference were
+  documented earlier in `2975cb5`. Gates green (81 tests, 549 assertions;
+  UI format/check/lint clean).
   - **Fix:** `arg-reaches-ctor?` rule 3 identity matching — carry the innermost
     `:locals` binding through `trace-arg-form` (`TracedArg` gains
     `:traced-binding`); match ctor-usage by init-form start position instead
@@ -105,9 +108,15 @@ land so work can stop/resume at any checkbox.
   - **Remove:** dead `:resolution-method` key (no producer) from
     `api.clj`, `serialize.clj`, `ui/src/lib/types/api.ts`.
 
-- [ ] **Chunk 7 — final gates + docs.** `make format format-check test lint
-  reflection-check`; UI `pnpm run format && pnpm run check && pnpm run lint`
-  (if UI touched); confirm docs match shipped behavior.
+- [x] **Chunk 7 — final gates + docs.** All gates green (81 tests, 549
+  assertions; format/lint/reflection; UI format/check/lint). Final
+  benchmark with `:fact-constructors`: 800r×80k = 82ms, 1600r×160k = 180ms
+  (pre-refactor: ~21s at that scale). Docs consistency pass done.
+
+**Refactor complete.** Commits: `bfc45dd` (format) → `627d7e8` (plan) →
+`5287dde` (index/perf) → `645a4ed` (ns split) → `2975cb5` (:fact-constructors)
+→ `4e21319` (schema nits) → `1ca1369` (rule-3 identity + dead key) → final
+docs/commit below.
 
 ---
 
