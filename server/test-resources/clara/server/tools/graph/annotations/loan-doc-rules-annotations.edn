@@ -8,7 +8,16 @@
  {:clara-rules/insert-types [clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta]}
 
  "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
- {:clara-rules/insert-types [DocumentCheckInput]}
+ {:clara-rules/insert-types [:loan-doc-rules/document-check-input]
+  :clara-rules/dynamic-insert-types-detected
+  {:callsites
+   [{:source-str
+     "(->document-check-input {:app-id ?app-id, :required-docs ?required-docs, :given-docs ?given-docs, :missing-required-docs (into [] (remove (comp given-doc-types :doc-type)) ?required-docs)})"
+     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
+     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :status :unresolved}]
+   :resolution :full}
+  :clara-rules/notes "DocumentCheckInput replaced with keyword-meta fact via ->fact helper — unresolved by automatic analysis"}
 
  "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
  {:clara-rules/insert-types [DocumentCheck]}

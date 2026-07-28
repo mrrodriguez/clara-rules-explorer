@@ -10,10 +10,12 @@
     AllGivenDocuments
     RequiredDocument
     AllRequiredDocuments
-    DocumentCheckInput
     DocumentCheck]))
 
 (def count-atom (atom 0))
+
+(defn ->document-check-input [data]
+  (h/->fact :loan-doc-rules/document-check-input data))
 
 (defrecord AllIdCardGivenDocuments [app-id docs])
 
@@ -102,16 +104,18 @@
   [AllRequiredDocuments (= ?app-id app-id) (= ?required-docs docs)]
   =>
   (let [given-doc-types (into #{} (map :doc-type) ?given-docs)]
-    (r/insert! (laf/map->DocumentCheckInput {:app-id ?app-id
-                                             :required-docs ?required-docs
-                                             :given-docs ?given-docs
-                                             :missing-required-docs (into []
-                                                                          (remove (comp given-doc-types :doc-type))
-                                                                          ?required-docs)}))))
+    (r/insert! (->document-check-input {:app-id ?app-id
+                                        :required-docs ?required-docs
+                                        :given-docs ?given-docs
+                                        :missing-required-docs (into []
+                                                                     (remove (comp given-doc-types :doc-type))
+                                                                     ?required-docs)}))))
 
 (r/defrule app-has-all-required-docs
   [Application (= ?app-id app-id)]
-  [DocumentCheckInput (= ?app-id app-id)
+  [:loan-doc-rules/document-check-input
+   [{:keys [app-id required-docs given-docs missing-required-docs]}]
+   (= ?app-id app-id)
    (= ?required-docs required-docs)
    (= ?given-docs given-docs)
    (= ?missing-required-docs missing-required-docs)]
@@ -131,7 +135,9 @@
   ;; annotation sidecar, indicating it has been vetted as having no downstream
   ;; effects (pure side-effect). It exists to test that the no-output-types
   ;; annotation prevents :unlinked-rule detection.
-  [DocumentCheckInput (= ?app-id app-id)
+  [:loan-doc-rules/document-check-input
+   [{:keys [app-id missing-required-docs]}]
+   (= ?app-id app-id)
    (= ?missing-required-docs missing-required-docs)
    (seq ?missing-required-docs)]
   =>

@@ -164,7 +164,7 @@
 
       (is (some? rule-info) "app-has-all-required-docs should exist in rule-matches")
       (is (= 2 (count matches))
-          "Should have 2 match entries (Application + DocumentCheckInput), not 1 with fact-ids")
+          "Should have 2 match entries (Application + document-check-input), not 1 with fact-ids")
       (is (every? #(contains? % :id) matches) "Every match entry should have :id")
       (is (every? #(contains? % :type) matches) "Every match entry should have :type")
       (is (every? #(contains? % :data) matches) "Every match entry should have :data")
@@ -175,8 +175,8 @@
       (let [types (set (map :type matches))]
         (is (contains? types "clara.server.tools.graph.rules.loan_app_facts.Application")
             "Should include Application fact")
-        (is (contains? types "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput")
-            "Should include DocumentCheckInput fact"))
+        (is (contains? types "loan-doc-rules/document-check-input")
+            "Should include document-check-input fact"))
       ;; Verify all match entries share the same bindings data
       (let [bindings (map :data matches)]
         (is (apply = bindings) "All match entries should share identical bindings")))))

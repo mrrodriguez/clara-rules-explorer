@@ -33,7 +33,7 @@
         (is (true? (:source-rule rule)) "Should be a source rule")))
 
     (testing "Middle rules (have both upstream and downstream rules)"
-      ;; app-has-all-required-docs reads DocumentCheckInput (from collect-app-doc-check-input)
+      ;; app-has-all-required-docs reads :loan-doc-rules/document-check-input (from collect-app-doc-check-input)
       ;; and feeds DocumentCheck (to app-outcome rules)
       (let [rule (get rules "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs")]
         (is (false? (:source-rule rule)))

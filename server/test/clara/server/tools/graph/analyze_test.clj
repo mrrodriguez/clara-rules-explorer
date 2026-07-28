@@ -14,7 +14,6 @@
   (:import [clara.server.tools.graph.rules.loan_app_facts
             AllGivenDocuments
             AllRequiredDocuments
-            DocumentCheckInput
             DocumentCheck]
            [clara.server.tools.graph.rules.loan_doc_rules
             AllIdCardGivenDocuments
@@ -88,10 +87,6 @@
       (is (some? (ann/get-annotation ann `ldr/collect-app-req-docs)))
       (is (= [`AllRequiredDocuments]
              (:clara-rules/insert-types (ann/get-annotation ann `ldr/collect-app-req-docs))))
-
-      (is (some? (ann/get-annotation ann `ldr/collect-app-doc-check-input)))
-      (is (= [`DocumentCheckInput]
-             (:clara-rules/insert-types (ann/get-annotation ann `ldr/collect-app-doc-check-input))))
 
       (is (some? (ann/get-annotation ann `ldr/app-has-all-required-docs)))
       (is (= [`DocumentCheck]
@@ -306,6 +301,10 @@
              (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `ldr/dynamic-insert-compliance-metadata))))
       (is (= (unresolved-detection ns-sym filename "(build-audit-trail-entry ?app-id :doc-check-passed)")
              (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `ldr/dynamic-insert-audit-trail))))
+      (is (= (unresolved-detection ns-sym filename
+                                   "(->document-check-input {:app-id ?app-id, :required-docs ?required-docs, :given-docs ?given-docs, :missing-required-docs (into [] (remove (comp given-doc-types :doc-type)) ?required-docs)})")
+             (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `ldr/collect-app-doc-check-input))))
+      (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `ldr/collect-app-doc-check-input))))
       (is (= (resolved-detection ns-sym filename
                                  "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
                                  `StaleDocumentNotice)

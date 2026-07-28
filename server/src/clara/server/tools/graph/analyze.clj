@@ -593,31 +593,32 @@
    (s/=> s/Any s/Keyword)})
 
 (defn generate-annotations-from-analysis
-  "Generates rule annotations (insert/retract types etc.) from a pre-computed
-   `clj-kondo` analysis map.
+  "Generates rule annotations (insert/retract types etc.) from a pre-computed `clj-kondo` analysis
+  map.
 
    Key options (see `GenerateAnnotationsOptions` for the full schema):
 
-   * `:analysis` — the clj-kondo analysis map (required). When produced by
-     `analyze-session-rules` it carries synthesized sources under
-     `::combined-sources`, which take precedence for callsite source extraction.
+   * `:analysis` — the clj-kondo analysis map (required). When produced by `analyze-session-rules`
+  it carries synthesized sources under `::combined-sources`, which take precedence for callsite
+  source extraction.
+
    * `:session-or-rulebase` — Clara session or rulebase (required).
+
    * `:rules-filter` — optional coll of rule symbols to filter by.
-   * `:callsite-resolver-fn` — optional fn invoked once per callsite argument
-     form the automatic constructor-resolution chain cannot resolve (see
-     `analyze.rhs`). Receives a `CallsiteResolverContext`. Returns nil (still
-     unresolved) or `{:resolved-types [tokens …]}`. Exceptions are contained:
-     logged and treated as unresolved.
-   * `:fact-type-spec-fn` — optional fn declaring caller-specific fact patterns.
-     Receives a fact type (from a rule's LHS bindings) and returns a spec map
-     or nil; currently one key: `{:aliases-var fully.qualified/var-name}` (the
-     var-as-fact pattern — a fact IS a function var, bound on the LHS and
-     invoked in the RHS). When a rule binds an alias-mapped fact type and uses
-     the binding in its RHS, a synthetic var-usage links the rule to the aliased
-     var so the var's call chain is explored for boundary calls (see
-     `rhs/alias-usage-map`). Callsites discovered through that chain bypass the
-     ctor chain: recorded `:unresolved` with `:fact-type`/`:fact-type-spec`
-     attached, and handed to `:callsite-resolver-fn` with the same context."
+
+   * `:callsite-resolver-fn` — optional fn invoked once per callsite argument form the automatic
+  constructor-resolution chain cannot resolve (see `analyze.rhs`). Receives a
+  `CallsiteResolverContext`. Returns nil (still unresolved) or `{:resolved-types [tokens …]}`.
+  Exceptions are contained: logged and treated as unresolved.
+
+   * `:fact-type-spec-fn` — optional fn declaring caller-specific fact patterns. Receives a fact
+  type (from a rule's LHS bindings) and returns a spec map or nil; currently one key: `{:aliases-var
+  fully.qualified/var-name}` (the var-as-fact pattern — a fact IS a function var, bound on the LHS
+  and invoked in the RHS). When a rule binds an alias-mapped fact type and uses the binding in its
+  RHS, a synthetic var-usage links the rule to the aliased var so the var's call chain is explored
+  for boundary calls (see `rhs/alias-usage-map`). Callsites discovered through that chain bypass the
+  ctor chain: recorded `:unresolved` with `:fact-type`/`:fact-type-spec` attached, and handed to
+  `:callsite-resolver-fn` with the same context."
   [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn fact-type-spec-fn]}]
   (when-not session-or-rulebase
     (throw (ex-info "generate-annotations-from-analysis requires :session-or-rulebase"

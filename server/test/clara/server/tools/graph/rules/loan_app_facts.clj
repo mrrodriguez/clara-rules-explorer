@@ -10,8 +10,6 @@
 (defrecord RequiredDocument [app-id doc-type])
 (defrecord AllRequiredDocuments [app-id docs])
 
-(defrecord DocumentCheckInput [app-id required-docs given-docs missing-required-docs])
-
 (defrecord MissingRequiredDocument [app-id doc-type])
 
 (defrecord DocumentCheck [app-id status message])

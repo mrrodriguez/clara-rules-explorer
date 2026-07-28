@@ -11,3 +11,7 @@
          ~'=>
          (let [resolved# (var ~name-sym-with-meta)]
            (r/insert! resolved#))))))
+
+(defn ->fact
+  [fact-type fact-data]
+  (with-meta fact-data {:type fact-type}))

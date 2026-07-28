@@ -5,7 +5,6 @@
   (:import
    [clara.server.tools.graph.rules.loan_app_facts
     Application
-
     DocumentCheck
     IdentityCheck
     FraudCheck]))

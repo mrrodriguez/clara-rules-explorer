@@ -325,7 +325,7 @@
               "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"
               "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument"
               "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"
-              "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput"
+              "loan-doc-rules/document-check-input"
               "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"
               "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"
               "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"
