@@ -59,7 +59,8 @@
          (get usages-by-caller (u/fq-sym rule-ns rule-local-name)))))
 
 (defn- apply-spec-fn
-  "Invokes the caller's `:fact-type-spec-fn` on a fact type; exceptions are
+  "Invokes the caller's `:fact-type-spec-fn` on a fact type (keyword, fq
+   class-name symbol, … — whatever the caller's rules use); exceptions are
    contained (logged, treated as no spec)."
   [fact-type-spec-fn fact-type]
   (try
@@ -75,19 +76,23 @@
 ;; ---------------------------------------------------------------------------
 
 (s/defschema VarAliasSyntheticUsage
-  "A synthetic `:var-usage` linking a rule to its aliased var."
+  "A synthetic `:var-usage` linking a rule to its aliased var.
+   `:fact-type` is `s/Any`: LHS condition types may be keywords OR fq
+   class-name symbols (record facts).  `:fact-type-spec` is an open
+   caller-defined map; the only key the analyzer reads is `:aliases-var`."
   {:from s/Symbol
    :from-var s/Symbol
    :to s/Symbol
    :name s/Symbol
-   :via-var-alias {:fact-type s/Keyword
+   :via-var-alias {:fact-type s/Any
                    :fact-type-spec {s/Keyword s/Any}
                    :var s/Symbol}})
 
 (s/defschema VarAliasContext
   "Per-chain alias context attached to callsites discovered through a
-   var-alias chain."
-  {:fact-type s/Keyword
+   var-alias chain.  `:fact-type` is `s/Any` — see
+   `VarAliasSyntheticUsage`."
+  {:fact-type s/Any
    :fact-type-spec {s/Keyword s/Any}
    :var s/Symbol
    :root s/Symbol})

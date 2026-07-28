@@ -471,7 +471,9 @@
    :usage u/KondoVarUsage
    :arg s/Any
    :traced s/Any
-   :alias-context (s/maybe {(s/optional-key :fact-type) s/Keyword
+   ;; :fact-type is s/Any: keywords, fq class-name symbols, strings are all
+   ;; legitimate fact types; :fact-type-spec is an open caller-defined map
+   :alias-context (s/maybe {(s/optional-key :fact-type) s/Any
                             (s/optional-key :fact-type-spec) {s/Keyword s/Any}})})
 
 (s/defschema ViaEntry
@@ -501,7 +503,8 @@
    :arg-form s/Any                           ; the unresolved argument form
    :source-str s/Str                         ; `pr-str` of `:arg-form`
    :filename s/Str
-   (s/optional-key :fact-type) s/Keyword     ; present only for alias-discovered callsites
+   (s/optional-key :fact-type) s/Any         ; present only for alias-discovered callsites;
+                                             ;   s/Any: keywords, fq class-name symbols, strings
    (s/optional-key :fact-type-spec)          ; present only for alias-discovered callsites
    {s/Keyword s/Any}})
 
@@ -534,7 +537,8 @@
    (s/optional-key :resolved-types) [s/Any]
    (s/optional-key :constructor-sym) s/Symbol
    (s/optional-key :via) ViaChain
-   (s/optional-key :fact-type) s/Keyword
+   (s/optional-key :fact-type) s/Any         ; alias context only — s/Any: keywords,
+                                             ;   fq class-name symbols, strings
    (s/optional-key :fact-type-spec) {s/Keyword s/Any}})
 
 (s/defschema CallsiteResolution
@@ -544,6 +548,6 @@
    the constructor pass result: the `TracedArg` `:idx`s it accounted for,
    which the boundary pass must skip so no insert is reported twice."
   {:callsites [CallsiteEntry]
-   :resolved-types #{s/Any}
+   :resolved-types #{s/Any}                  ; type-agnostic tokens — see CallsiteEntry
    :resolution (s/maybe (s/enum :full :partial :none))
    (s/optional-key :owned-arg-idxs) #{s/Int}})

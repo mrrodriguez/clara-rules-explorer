@@ -70,7 +70,12 @@ land so work can stop/resume at any checkbox.
   - `analyze/alias.clj` — var-alias chain machinery (`alias-usage-map` et al.).
   - Update requires in `analyze.clj`, `index.clj`, and tests.
 
-- [ ] **Chunk 4 — `:fact-constructors` vector API.**
+- [x] **Chunk 4 — `:fact-constructors` vector API.** → landed as `2975cb5`.
+  Also pulled forward from chunk 5: `s/validate GenerateAnnotationsOptions`
+  at entry (replaced the manual paired-validation), `:fact-type-spec-fn`
+  input schema `s/Any`. Also pulled forward from chunk 6: nested-ctor
+  over-promotion + `:source-str` kind difference documented in
+  `rule-annotations.md`. Gates green (80 tests, 545 assertions).
   `[{:match-fn (fn [fq-var-sym] -> truthy/nil)
     :type-resolver-fn (fn [ConstructorTypeResolverContext] -> {:resolved-types [...]})}]`
   - `build-constructor-callsite-map` pairs each matched usage with its spec
@@ -80,11 +85,8 @@ land so work can stop/resume at any checkbox.
     `GenerateAnnotationsOptions`, tests, `rule-annotations.md`,
     `extensible-fact-constructors-plan.md`.
 
-- [ ] **Chunk 5 — schema nits + edge validation.**
-  - `s/validate GenerateAnnotationsOptions` at the top of
-    `generate-annotations-from-analysis`.
-  - `:fact-type-spec-fn` input schema `s/Keyword` → `s/Any` (fact types can be
-    class-name symbols/strings).
+- [ ] **Chunk 5 — schema nits + edge validation.** _(first two bullets landed
+  in `2975cb5`; remaining:)_
   - Comment every unavoidable `s/Any` (kondo open maps, type-agnostic tokens,
     full productions — name the keys of interest, relate to api.clj schemas
     by docstring).
