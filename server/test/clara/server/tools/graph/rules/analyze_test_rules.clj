@@ -376,3 +376,122 @@
   (let [f (->fact :demo/identical {:id ?app-id})]
     (r/insert! f)
     (r/insert! (->fact :demo/identical {:id ?app-id}))))
+
+;; ---------------------------------------------------------------------------
+;; Heuristic record-ctor scan fallback fixtures
+;; (defect: spurious record-ctor scan types outranking constructor-of-interest
+;; resolution — see server/docs/defect-spurious-defrecord-ctor-types-resolved.md)
+
+(defrecord UnrelatedScanRecord [x])
+
+(defrecord HiddenHelperRecord [id])
+
+(definterface IScanMarker)
+
+(defrecord MarkerRecord [id]
+  IScanMarker)
+
+(defn helper-with-unrelated-ctor
+  "Builds the rule's fact via the registered ->fact constructor, but its
+   subtree also contains an unrelated record ctor — a stand-in for
+   third-party records reachable through shared helpers (e.g. malli.core/->Tag
+   from the defect report)."
+  [m]
+  (when (:validate? m) (->UnrelatedScanRecord 1))
+  (->fact :demo/scan-precedence m))
+
+(r/defrule rule-scan-must-not-displace-ctor
+  "Defect reproduction: the RHS insert goes through the registered ->fact
+   constructor, while an unrelated record ctor (->UnrelatedScanRecord) is
+   reachable in the same subtree.  Caller-registered resolution must win and
+   the spurious scan type must not appear."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (helper-with-unrelated-ctor {:app-id ?app-id})))
+
+(defn make-hidden-helper-record
+  "Builds a record behind an opaque helper — the record ctor is only visible
+   to the subtree scan, not to boundary-argument resolution."
+  [id]
+  (map->HiddenHelperRecord {:id id}))
+
+(defn helper-inserter
+  "A direct inserter whose boundary argument is an opaque helper call."
+  [id]
+  (r/insert! (make-hidden-helper-record id)))
+
+(defn helper-retractor
+  "A direct retractor whose boundary argument is an opaque helper call."
+  [id]
+  (r/retract! (make-hidden-helper-record id)))
+
+(r/defrule rule-mixed-ctor-and-helper-insert
+  "Two insert paths: the rule's own (insert! (->fact …)) — owned by the
+   constructor-of-interest path — and a call to helper-inserter, a *separate*
+   direct-inserter var that falls to the heuristic scan fallback."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (->fact :demo/mixed-registered {:id ?app-id}))
+  (helper-inserter ?app-id))
+
+(r/defrule rule-retract-via-helper-fallback
+  "Retract symmetry for the heuristic fallback: the retract happens in a
+   helper whose boundary argument is opaque."
+  [HiddenHelperRecord (= ?id id)]
+  =>
+  (helper-retractor ?id))
+
+(r/defrule rule-consume-hidden-helper-record
+  "Puts HiddenHelperRecord on an LHS so the default
+   :rulebase-fact-types-only filter admits its fallback types."
+  [HiddenHelperRecord (= ?id id)]
+  [Application (= ?app-id app-id)]
+  =>
+  (swap! side-effect-counter inc))
+
+(r/defrule rule-consume-local-dummy-record
+  "Puts LocalDummyRecord on an LHS so the default
+   :rulebase-fact-types-only filter admits its fallback types."
+  [LocalDummyRecord (= ?id id)]
+  [Application (= ?app-id app-id)]
+  =>
+  (swap! side-effect-counter inc))
+
+(defn make-marker-record
+  "Builds a MarkerRecord behind an opaque helper."
+  [id]
+  (map->MarkerRecord {:id id}))
+
+(r/defrule rule-insert-marker-record
+  "Inserts a MarkerRecord via an opaque helper; no production's LHS names
+   MarkerRecord directly, so the default filter can only admit it through the
+   ancestors path (rule-consume-marker-via-interface matches its interface)."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (make-marker-record ?app-id)))
+
+(r/defrule rule-consume-marker-via-interface
+  "LHS on the IScanMarker interface — an inserted MarkerRecord matches via
+   the type hierarchy (its Java ancestors include IScanMarker)."
+  [IScanMarker]
+  [Application (= ?app-id app-id)]
+  =>
+  (swap! side-effect-counter inc))
+
+(defrecord QueryOnlyRecord [id])
+
+(defn make-query-only-record
+  "Builds a QueryOnlyRecord behind an opaque helper."
+  [id]
+  (map->QueryOnlyRecord {:id id}))
+
+(r/defrule rule-insert-query-only-record
+  "Inserts a record consumed only by a query — the default filter must still
+   admit it, since query LHS types count as rulebase fact types."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (make-query-only-record ?app-id)))
+
+(r/defquery find-query-only-record
+  [:?id]
+  [QueryOnlyRecord (= ?id id)])

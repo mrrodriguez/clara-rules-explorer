@@ -19,7 +19,11 @@
             AllIdCardGivenDocuments
             StaleDocumentNotice]
            [clara.server.tools.graph.rules.analyze_test_rules
-            LocalDummyRecord]))
+            HiddenHelperRecord
+            LocalDummyRecord
+            MarkerRecord
+            QueryOnlyRecord
+            UnrelatedScanRecord]))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared session fixtures (computed once, reused across deftests)
@@ -111,6 +115,62 @@
     :fact-constructors [{:match-fn (->fact-sym-match-fn helpers->fact-sym)
                          :type-resolver-fn ->fact-type-resolver}]}))
 
+(def ^:private edge-case-annotations-all-fallback
+  "Edge-case annotations with the heuristic fallback scoped to any resolvable
+   record-ctor type (pre-fix recall), no constructor-of-interest resolution."
+  (analyze/generate-annotations-from-analysis
+   {:analysis edge-case-analysis
+    :session-or-rulebase edge-case-session
+    :dynamic-type-fallback-resolution :all-resolvable-fact-types}))
+
+(def ^:private edge-case-ctor-annotations-all-fallback
+  "Ctor-of-interest annotations with unrestricted heuristic fallback recall —
+   exercises that caller-registered resolution still wins over the scan."
+  (analyze/generate-annotations-from-analysis
+   {:analysis edge-case-analysis
+    :session-or-rulebase edge-case-session
+    :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                         :type-resolver-fn ->fact-type-resolver}]
+    :dynamic-type-fallback-resolution :all-resolvable-fact-types}))
+
+(def ^:private edge-case-ctor-annotations-no-fallback
+  "Ctor-of-interest annotations with the heuristic fallback disabled (:none)."
+  (analyze/generate-annotations-from-analysis
+   {:analysis edge-case-analysis
+    :session-or-rulebase edge-case-session
+    :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                         :type-resolver-fn ->fact-type-resolver}]
+    :dynamic-type-fallback-resolution :none}))
+
+;; ---------------------------------------------------------------------------
+;; Dynamic-detection expectation helpers (shared by insert/retract tests)
+;; ---------------------------------------------------------------------------
+
+(def ^:private edge-case-ns-sym
+  'clara.server.tools.graph.rules.analyze-test-rules)
+
+(def ^:private edge-case-filename
+  "clara/server/tools/graph/rules/analyze_test_rules.clj")
+
+(defn- resolved-detection
+  "Expected dynamic-detection map for a single resolved callsite."
+  [ns-sym filename source-str token]
+  {:callsites [{:source-str source-str
+                :ns-name-sym ns-sym
+                :filename filename
+                :status :resolved
+                :resolved-types [token]}]
+   :resolution :full})
+
+(defn- unresolved-detection
+  "Expected dynamic-detection map for a single unresolved callsite."
+  [ns-sym filename source-str]
+  {:callsites [{:source-str source-str
+                :ns-name-sym ns-sym
+                :filename filename
+                :status :unresolved}]
+   :resolution :none})
+
 ;; ---------------------------------------------------------------------------
 ;; Static insert types (record constructors traced through RHS and helpers)
 ;; ---------------------------------------------------------------------------
@@ -137,16 +197,16 @@
   (testing "Edge cases: Clojure record constructors and helper tracing"
     (let [ann edge-case-annotations]
 
-      ;; Rule A: standard Clojure record constructor
+      ;; Rule A: standard Clojure record constructor — resolved through the
+      ;; boundary path (a real callsite), not the subtree scan.
       (let [a (ann/get-annotation ann `atr/rule-record-constructor)]
         (is (some? a))
         (is (= [`LocalDummyRecord] (:clara-rules/insert-types a)))
-        (is (nil? (:clara-rules/dynamic-insert-types-detected a))
-            "No dynamic-insert-types when statically resolved"))
-
-      ;; Rule D: tracing through helper → record constructor
-      (is (= [`DocumentCheck]
-             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-nested-helper-call))))
+        (is (= (resolved-detection edge-case-ns-sym edge-case-filename
+                                   "(map->LocalDummyRecord {:id ?app-id, :value \"standard\"})"
+                                   `LocalDummyRecord)
+               (:clara-rules/dynamic-insert-types-detected a))
+            "direct record ctors at the boundary resolve via the ctor chain"))
 
       ;; Rule H2: insert! with varargs
       (is (= [`LocalDummyRecord]
@@ -179,25 +239,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Dynamic insert callsites — runtime resolution chain (analyze.callsite)
 ;; ---------------------------------------------------------------------------
-
-(defn- resolved-detection
-  "Expected dynamic-detection map for a single resolved callsite."
-  [ns-sym filename source-str token]
-  {:callsites [{:source-str source-str
-                :ns-name-sym ns-sym
-                :filename filename
-                :status :resolved
-                :resolved-types [token]}]
-   :resolution :full})
-
-(defn- unresolved-detection
-  "Expected dynamic-detection map for a single unresolved callsite."
-  [ns-sym filename source-str]
-  {:callsites [{:source-str source-str
-                :ns-name-sym ns-sym
-                :filename filename
-                :status :unresolved}]
-   :resolution :none})
 
 (deftest test-dynamic-insert-types-detected
   (let [ann edge-case-annotations
@@ -268,12 +309,15 @@
         filename "clara/server/tools/graph/rules/analyze_test_rules.clj"]
 
     (testing "Static retract types — record constructors"
-      ;; Rule H3: retract! with varargs
-      (let [h3 (ann/get-annotation ann `atr/rule-retract-varargs)]
+      ;; Rule H3: retract! with varargs — resolved through the boundary path
+      ;; (one callsite per argument), not the subtree scan.
+      (let [h3 (ann/get-annotation ann `atr/rule-retract-varargs)
+            dyn (:clara-rules/dynamic-retract-types-detected h3)]
         (is (some? h3))
         (is (= [`LocalDummyRecord] (:clara-rules/retract-types h3)))
-        (is (nil? (:clara-rules/dynamic-retract-types-detected h3))
-            "No dynamic-retract-types when statically resolved")))
+        (is (= :full (:resolution dyn)))
+        (is (= 2 (count (:callsites dyn))))
+        (is (every? #(= :resolved (:status %)) (:callsites dyn)))))
 
     (testing "Dynamic retract types — Java constructors resolve and promote"
       ;; Rule I1: short Class. constructor
@@ -1142,3 +1186,127 @@
                   'clara.server.tools.graph.rules.helpers/->fact]
                  (mapv :var-name-sym callstack))
               "callstack: collect-app-doc-check-input → ->document-check-input → helpers/->fact"))))))
+
+;; ---------------------------------------------------------------------------
+;; Heuristic record-ctor scan fallback
+;; (defect: spurious record-ctor scan types outranking constructor-of-interest
+;; resolution — caller-driven resolution always wins; the scan is a labeled,
+;; rulebase-scoped, per-inserter-var fallback)
+;; ---------------------------------------------------------------------------
+
+(defn- heuristic-callsites
+  "The callsites in a dynamic-detection map labeled as heuristic scan output."
+  [dyn]
+  (filter (comp :source :via) (:callsites dyn)))
+
+(deftest test-scan-does-not-displace-constructor-of-interest
+  (testing "registered ->fact resolution wins; the spurious scan type is absent"
+    (let [a (ann/get-annotation edge-case-ctor-annotations `atr/rule-scan-must-not-displace-ctor)
+          dyn (:clara-rules/dynamic-insert-types-detected a)]
+      (is (= [:demo/scan-precedence] (:clara-rules/insert-types a)))
+      (is (= :full (:resolution dyn)))
+      (is (= 1 (count (:callsites dyn))))
+      (let [cs (first (:callsites dyn))]
+        (is (= :resolved (:status cs)))
+        (is (= ->fact-sym (:constructor-sym cs)))
+        (is (= [:demo/scan-precedence] (:resolved-types cs)))
+        (is (nil? (-> cs :via :source))
+            "traced ctor callsites carry a callstack, not a heuristic :source")
+        (is (seq (-> cs :via :callstack))))
+      (is (not (str/includes? (str a) "UnrelatedScanRecord"))
+          "the unrelated record ctor reachable in the subtree is never credited")))
+
+  (testing "precedence holds with unrestricted fallback recall (:all-resolvable-fact-types)"
+    (let [a (ann/get-annotation edge-case-ctor-annotations-all-fallback
+                                `atr/rule-scan-must-not-displace-ctor)]
+      (is (= [:demo/scan-precedence] (:clara-rules/insert-types a)))
+      (is (not (str/includes? (str a) "UnrelatedScanRecord"))))))
+
+(deftest test-heuristic-fallback-per-inserter-var
+  (testing "ctor-owned var and unhandled helper-inserter var are judged independently"
+    (let [a (ann/get-annotation edge-case-ctor-annotations `atr/rule-mixed-ctor-and-helper-insert)
+          dyn (:clara-rules/dynamic-insert-types-detected a)
+          heuristic (vec (heuristic-callsites dyn))]
+      (is (some #(= ->fact-sym (:constructor-sym %)) (:callsites dyn))
+          "the rule's own insert resolves via the registered constructor")
+      (is (= 1 (count heuristic)))
+      (let [cs (first heuristic)]
+        (is (= :record-ctor-scan (-> cs :via :source)))
+        (is (= 'clara.rules/insert! (-> cs :via :boundary-var-name-sym)))
+        (is (nil? (-> cs :via :callstack))
+            "heuristic entries have no traced callstack")
+        (is (= "map->HiddenHelperRecord" (:source-str cs)))
+        (is (= edge-case-ns-sym (:ns-name-sym cs)))
+        (is (= edge-case-filename (:filename cs)))
+        (is (= :resolved (:status cs)))
+        (is (= [`HiddenHelperRecord] (:resolved-types cs))))
+      (is (= [:demo/mixed-registered `HiddenHelperRecord]
+             (:clara-rules/insert-types a))
+          "both the ctor-resolved and fallback types are promoted"))))
+
+(deftest test-dynamic-type-fallback-resolution-modes
+  (testing "default :rulebase-fact-types-only"
+    (testing "helper-hidden record ctor with no consuming LHS is dropped"
+      (is (nil? (:clara-rules/insert-types
+                 (ann/get-annotation edge-case-annotations `atr/rule-nested-helper-call)))))
+    (testing "helper-hidden record ctor consumed by an LHS is admitted and labeled"
+      (let [a (ann/get-annotation edge-case-annotations `atr/rule-insert-all-helper)
+            heuristic (vec (heuristic-callsites
+                            (:clara-rules/dynamic-insert-types-detected a)))]
+        (is (= [`LocalDummyRecord] (:clara-rules/insert-types a)))
+        (is (seq heuristic))
+        (is (every? #(= :record-ctor-scan (-> % :via :source)) heuristic))))
+    (testing "subtype admitted via ancestors — an LHS matches its interface"
+      (let [a (ann/get-annotation edge-case-annotations `atr/rule-insert-marker-record)
+            heuristic (vec (heuristic-callsites
+                            (:clara-rules/dynamic-insert-types-detected a)))]
+        (is (= [`MarkerRecord] (:clara-rules/insert-types a)))
+        (is (= 1 (count heuristic)))
+        (is (= :record-ctor-scan (-> heuristic first :via :source)))))
+    (testing "type consumed only by a defquery's LHS is admitted"
+      (let [a (ann/get-annotation edge-case-annotations `atr/rule-insert-query-only-record)]
+        (is (= [`QueryOnlyRecord] (:clara-rules/insert-types a)))))
+    (testing "retract fallback symmetry"
+      (let [a (ann/get-annotation edge-case-annotations `atr/rule-retract-via-helper-fallback)
+            dyn (:clara-rules/dynamic-retract-types-detected a)]
+        (is (= [`HiddenHelperRecord] (:clara-rules/retract-types a)))
+        (is (some #(= :record-ctor-scan (-> % :via :source)) (:callsites dyn))))))
+
+  (testing ":all-resolvable-fact-types restores unfiltered recall"
+    (let [a (ann/get-annotation edge-case-annotations-all-fallback `atr/rule-nested-helper-call)
+          heuristic (vec (heuristic-callsites
+                          (:clara-rules/dynamic-insert-types-detected a)))]
+      (is (= [`DocumentCheck] (:clara-rules/insert-types a)))
+      (is (some #(= :record-ctor-scan (-> % :via :source)) heuristic))))
+
+  (testing ":none disables the fallback entirely"
+    (is (nil? (:clara-rules/insert-types
+               (ann/get-annotation edge-case-ctor-annotations-no-fallback `atr/rule-insert-marker-record))))
+    (is (= [:demo/mixed-registered]
+           (:clara-rules/insert-types
+            (ann/get-annotation edge-case-ctor-annotations-no-fallback `atr/rule-mixed-ctor-and-helper-insert)))
+        "caller-driven resolution is unaffected by :none")))
+
+(deftest test-type-fallback-skipped-tap
+  (testing "filtered types are reported via tap> with full context (off without a tap)"
+    (let [tapped (atom [])
+          tap-fn (fn [v] (swap! tapped conj v))]
+      (add-tap tap-fn)
+      (try
+        (analyze/generate-annotations-from-analysis
+         {:analysis edge-case-analysis
+          :session-or-rulebase edge-case-session})
+        (finally
+          (remove-tap tap-fn)))
+      (let [events (filter #(= :clara-rules/type-fallback-skipped (:event %)) @tapped)]
+        (is (seq events))
+        (is (some #(and (= `DocumentCheck (:skipped-type %))
+                        (= `atr/rule-nested-helper-call (:inserter-var %))
+                        (= :insert (:boundary %))
+                        (= :rulebase-fact-types-only (:mode %))
+                        (= 'map->DocumentCheck (:ctor-name %))
+                        (= 'clara.server.tools.graph.rules.loan-app-facts (:ctor-ns %))
+                        (string? (:filename %)))
+                  events)
+            "the skipped DocumentCheck scan hit carries the full tap context")
+        (is (some #(= `UnrelatedScanRecord (:skipped-type %)) events))))))

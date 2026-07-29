@@ -133,87 +133,128 @@
     (-> session-or-rulebase eng/components :rulebase)
     session-or-rulebase))
 
-(defn- extract-constructor-types-from-reachable
-  "Top-down: given a rule var's reachable set, find which inserter vars are
-   in it and union their types from the precomputed inserter-type-map."
-  [reachable inserter-type-map]
-  (into #{}
-        (mapcat (fn [v] (get inserter-type-map v #{})))
-        reachable))
+(defn- heuristic-fallback-callsites
+  "Emits scan-derived record-ctor types as heuristic callsites for the given
+   fallback inserter vars — direct-inserter vars whose boundary arguments no
+   caller-driven resolution path (constructor-of-interest or boundary chain)
+   accounted for.  Each (var, type) pair becomes one callsite labeled
+   `:via {:source :record-ctor-scan}` so consumers can distinguish the weaker
+   evidence; the inserter's boundary fn is included when known from the graph."
+  [fallback-vars inserter-type-map graph target-fns]
+  (into []
+        (mapcat (fn [v]
+                  (let [boundary-fn (->> (get graph v)
+                                         (filter target-fns)
+                                         (sort-by str)
+                                         first)]
+                    (map (fn [[t {:keys [usage]}]]
+                           (cond-> {:source-str (str (:name usage))
+                                    :ns-name-sym (:from usage)
+                                    :filename (:filename usage)
+                                    :status :resolved
+                                    :resolved-types [t]
+                                    :via {:source :record-ctor-scan}}
+                             boundary-fn (assoc-in [:via :boundary-var-name-sym] boundary-fn)))
+                         (sort-by (comp str key) (get inserter-type-map v))))))
+        fallback-vars))
 
 (defn- extract-insert-types
-  "Determines the fact types a rule inserts or retracts via `target-fns`:
-   statically-traceable record constructors win when present; otherwise
+  "Determines the fact types a rule inserts or retracts via `target-fns`.
+
+   Caller-driven resolution always runs first and is never displaced:
    constructor-of-interest callsites (when :fact-constructors is supplied)
-   are resolved via their matched `:type-resolver-fn`; finally every
-   remaining boundary-call argument form goes through the runtime resolution
-   chain (`analyze.callsite`) and the optional `:callsite-resolver-fn`.
+   are resolved via their matched `:type-resolver-fn`, then every remaining
+   boundary-call argument form goes through the runtime resolution chain
+   (`analyze.callsite`) and the optional `:callsite-resolver-fn`.
+
+   The record-ctor scan (`inserter-type-map`) is a *heuristic fallback*,
+   applied per direct-inserter var: a var's scan types are credited only when
+   no caller-driven path accounted for any of that var's boundary arguments.
+   The scan is name-shape based and subtree-wide — it cannot tell an argument
+   expression apart from an unrelated call in the same body — so it must never
+   override explicit registration (see
+   docs/defect-spurious-defrecord-ctor-types-resolved.md).  Fallback types are
+   emitted as callsites labeled `:via {:source :record-ctor-scan}`; the
+   `:dynamic-type-fallback-resolution` option controls whether the fallback
+   runs at all and the index's type filter scopes what it may credit.
 
    Boundary usages are found via the `:usages-by-callee` index — the merged
    `:var-usages` vector is never scanned per rule (that scan made generation
    quadratic in rules × usages at real-world scale).
 
-   Returns {:static-types #{…} :resolved-types #{…} :dynamic-forms …}."
+   Returns {:resolved-types #{…} :dynamic-forms …}."
   [reachable target-fns {:keys [usages-by-callee inserter-type-map
-                                constructor-callsite-map] :as ctx}]
-  (let [static-types (extract-constructor-types-from-reachable
-                      reachable inserter-type-map)]
-    (if (seq static-types)
-      {:static-types static-types
-       :resolved-types #{}
+                                constructor-callsite-map graph
+                                dynamic-type-fallback-resolution] :as ctx}]
+  (let [boundary-usages
+        (into []
+              (comp (mapcat #(get usages-by-callee %))
+                    (filter (fn [usage]
+                              (let [caller (u/var-usage-caller usage)]
+                                (and (contains? reachable caller)
+                                     (not (contains? target-fns caller)))))))
+              target-fns)]
+    (if (empty? boundary-usages)
+      {:resolved-types #{}
        :dynamic-forms nil}
-      (let [boundary-usages
-            (into []
-                  (comp (mapcat #(get usages-by-callee %))
-                        (filter (fn [usage]
-                                  (let [caller (u/var-usage-caller usage)]
-                                    (and (contains? reachable caller)
-                                         (not (contains? target-fns caller)))))))
-                  target-fns)]
-        (if (empty? boundary-usages)
-          {:static-types #{}
-           :resolved-types #{}
-           :dynamic-forms nil}
-          (let [;; Read + locals-trace the boundary arguments once; both paths
-                ;; work from this.
-                traced-args (callsite/trace-boundary-args boundary-usages ctx)
-                ;; Constructor-of-interest resolution runs FIRST — it is the more
-                ;; specific mechanism, and it decides which arguments the generic
-                ;; path still needs to look at.
-                ctor-inserter-vars (when constructor-callsite-map
-                                     (into []
-                                           (filter #(contains? reachable %))
-                                           (sort-by str (keys constructor-callsite-map))))
-                ctor-result (when (seq ctor-inserter-vars)
-                              (let [scoped-map (select-keys constructor-callsite-map ctor-inserter-vars)]
-                                (callsite/resolve-constructor-callsites
-                                 traced-args
-                                 scoped-map
-                                 ctx)))
-                ctor-callsites (:callsites ctor-result)
-                ;; An argument a constructor accounted for is dropped before
-                ;; resolving, so `:callsite-resolver-fn` is never invoked for it
-                ;; and the same insert cannot be reported a second time without
-                ;; provenance.
-                owned (:owned-arg-idxs ctor-result)
-                remaining-args (if (seq owned)
-                                 (into [] (remove (comp owned :idx)) traced-args)
-                                 traced-args)
-                {:keys [callsites resolved-types]}
-                (callsite/resolve-boundary-callsites remaining-args ctx)
-                ;; Anything still here is a boundary argument the constructor path
-                ;; did NOT own, so it stands on its own — including when it is
-                ;; unresolved. Dropping those would erase a real insert we cannot
-                ;; explain and inflate `:resolution` to :full.
-                all-callsites (into (vec ctor-callsites) callsites)
-                all-types (into (or (:resolved-types ctor-result) #{}) resolved-types)
-                all-resolution (callsite/resolution-status all-callsites)]
-            {:static-types #{}
-             :resolved-types all-types
-             :dynamic-forms (when (seq all-callsites)
-                              (cond-> {:callsites all-callsites}
-                                all-resolution
-                                (assoc :resolution all-resolution)))}))))))
+      (let [;; Read + locals-trace the boundary arguments once; both paths
+            ;; work from this.
+            traced-args (callsite/trace-boundary-args boundary-usages ctx)
+            ;; Constructor-of-interest resolution runs FIRST — it is the more
+            ;; specific mechanism, and it decides which arguments the generic
+            ;; path still needs to look at.
+            ctor-inserter-vars (when constructor-callsite-map
+                                 (into []
+                                       (filter #(contains? reachable %))
+                                       (sort-by str (keys constructor-callsite-map))))
+            ctor-result (when (seq ctor-inserter-vars)
+                          (let [scoped-map (select-keys constructor-callsite-map ctor-inserter-vars)]
+                            (callsite/resolve-constructor-callsites
+                             traced-args
+                             scoped-map
+                             ctx)))
+            ctor-callsites (:callsites ctor-result)
+            ;; An argument a constructor accounted for is dropped before
+            ;; resolving, so `:callsite-resolver-fn` is never invoked for it
+            ;; and the same insert cannot be reported a second time without
+            ;; provenance.
+            owned (:owned-arg-idxs ctor-result)
+            remaining-args (if (seq owned)
+                             (into [] (remove (comp owned :idx)) traced-args)
+                             traced-args)
+            {:keys [callsites resolved-types resolved-arg-idxs]}
+            (callsite/resolve-boundary-callsites remaining-args ctx)
+            ;; Anything still here is a boundary argument the constructor path
+            ;; did NOT own, so it stands on its own — including when it is
+            ;; unresolved. Dropping those would erase a real insert we cannot
+            ;; explain and inflate `:resolution` to :full.
+            all-callsites (into (vec ctor-callsites) callsites)
+            all-types (into (or (:resolved-types ctor-result) #{}) resolved-types)
+            ;; Heuristic record-ctor scan fallback, per direct-inserter var:
+            ;; only vars whose boundary arguments were neither owned by a
+            ;; constructor of interest nor resolved by the boundary chain.
+            handled-vars (into #{}
+                               (comp (filter (fn [{:keys [idx]}]
+                                               (or (contains? owned idx)
+                                                   (contains? resolved-arg-idxs idx))))
+                                     (map (comp u/var-usage-caller :usage)))
+                               traced-args)
+            fallback-vars (when-not (= :none dynamic-type-fallback-resolution)
+                            (into []
+                                  (comp (filter #(contains? reachable %))
+                                        (remove handled-vars))
+                                  (sort-by str (keys inserter-type-map))))
+            fallback-callsites (when (seq fallback-vars)
+                                 (heuristic-fallback-callsites
+                                  fallback-vars inserter-type-map graph target-fns))
+            all-callsites (into all-callsites fallback-callsites)
+            all-types (into all-types (mapcat :resolved-types) fallback-callsites)
+            all-resolution (callsite/resolution-status all-callsites)]
+        {:resolved-types all-types
+         :dynamic-forms (when (seq all-callsites)
+                          (cond-> {:callsites all-callsites}
+                            all-resolution
+                            (assoc :resolution all-resolution)))}))))
 
 (defn- var-reachability
   "For a given `var-name`, returns a map of:
@@ -279,8 +320,8 @@
                                :direction :retract)
             inserts  (when is-inserter? (extract-insert-types reachable index/insert-fns insert-ctx))
             retracts (when is-retractor? (extract-insert-types reachable index/retract-fns retract-ctx))
-            insert-types (into (:static-types inserts) (:resolved-types inserts))
-            retract-types (into (:static-types retracts) (:resolved-types retracts))]
+            insert-types (:resolved-types inserts)
+            retract-types (:resolved-types retracts)]
         (cond-> {}
           (seq insert-types)
           (assoc :clara-rules/insert-types
@@ -495,12 +536,13 @@
 
 (defn- build-infer-ctx
   "Builds the context map passed to `infer-annotation-for-var`: the shared
-   `index/AnalysisIndex` plus the caller-supplied resolution hooks and the
-   var-alias linkage."
-  [index callsite-resolver-fn alias-by-rule]
+   `index/AnalysisIndex` plus the caller-supplied resolution hooks, the
+   var-alias linkage, and the heuristic-fallback mode."
+  [index callsite-resolver-fn alias-by-rule dynamic-type-fallback-resolution]
   (assoc index
          :callsite-resolver-fn callsite-resolver-fn
-         :alias-by-rule alias-by-rule))
+         :alias-by-rule alias-by-rule
+         :dynamic-type-fallback-resolution dynamic-type-fallback-resolution))
 
 (s/defschema FactConstructorSpec
   "One constructor of interest for `:fact-constructors`.
@@ -513,6 +555,54 @@
   {:match-fn (s/=> s/Any s/Symbol)
    :type-resolver-fn (s/=> s/Any callsite/ConstructorTypeResolverContext)})
 
+(defn- type-name-str
+  "Canonical name string for a fact type: Class objects become their binary
+   name; symbols, keywords, and anything else stringify directly."
+  [t]
+  (if (class? t)
+    (.getName ^Class t)
+    (str t)))
+
+(defn- build-fallback-type-filter
+  "Builds the (fn [{:keys [type]}] -> bool) for `:rulebase-fact-types-only`
+   mode: a scanned record-ctor type is admitted when it — or any of its
+   ancestors via the session's `:ancestors-fn` — appears as a fact type on
+   the LHS of some rule/query production.  LHS matching is hierarchical (an
+   inserted subtype satisfies an LHS on its supertype), so a direct set
+   lookup is not enough.
+
+   The ancestors-fn is the session's own, recovered from the rulebase's
+   `:get-alphas-fn` metadata (attached by `clara.rules.compiler` — the same
+   wrapped fn runtime insertion uses); falls back to `clojure.core/ancestors`
+   when absent (e.g. a hand-built rulebase).  Called on the loaded Class,
+   since scan tokens are fq class-name symbols."
+  [rulebase]
+  (let [lhs-type-names (into #{}
+                             (map type-name-str)
+                             (alias/rulebase-fact-types rulebase))
+        ancestors-fn (or (-> rulebase :get-alphas-fn meta :ancestors-fn)
+                         ancestors)
+        allowed? (memoize
+                  (fn [type-sym]
+                    (or (contains? lhs-type-names (str type-sym))
+                        (try
+                          (boolean
+                           (some lhs-type-names
+                                 (map type-name-str
+                                      (ancestors-fn (Class/forName (str type-sym))))))
+                          (catch Throwable _ false)))))]
+    (fn [{:keys [type]}]
+      (allowed? type))))
+
+(s/defschema DynamicTypeFallbackResolution
+  "Modes for the heuristic record-ctor scan fallback (see
+   `extract-insert-types`): `:none` disables it entirely;
+   `:rulebase-fact-types-only` (the default) credits only scanned types that
+   — directly or via the session's `:ancestors-fn` — appear on some
+   rule/query production's LHS; `:all-resolvable-fact-types` credits any
+   resolvable record-ctor type (pre-fix recall)."
+  (s/enum :none :rulebase-fact-types-only :all-resolvable-fact-types))
+
 (s/defschema GenerateAnnotationsOptions
   "Options for `generate-annotations-from-analysis` — validated with
    `s/validate` at function entry (edge-only validation; nothing in the hot
@@ -521,6 +611,7 @@
    Clara LocalSession or rulebase — neither has a useful closed shape here."
   {:analysis s/Any                            ; merged clj-kondo analysis (required)
    :session-or-rulebase s/Any                 ; Clara session or rulebase (required)
+   (s/optional-key :dynamic-type-fallback-resolution) DynamicTypeFallbackResolution
    (s/optional-key :rules-filter) [s/Symbol]
    (s/optional-key :callsite-resolver-fn)     ; (fn [callsite/CallsiteResolverContext] -> nil or
                                                ;   {:resolved-types [token …]})
@@ -566,9 +657,16 @@
   vector order wins), that spec's `:type-resolver-fn` is invoked with a
   `callsite/ConstructorTypeResolverContext` (including a `:via` provenance
   chain), and the callsite is owned by the constructor path — it never also
-  reaches `:callsite-resolver-fn`."
+  reaches `:callsite-resolver-fn`.
+
+   * `:dynamic-type-fallback-resolution` — controls the heuristic record-ctor
+  scan fallback (see `DynamicTypeFallbackResolution`): `:none` |
+  `:rulebase-fact-types-only` (default) | `:all-resolvable-fact-types`.
+  Types the default filter rejects are reported via `tap>` with
+  `:event :clara-rules/type-fallback-skipped` context — register a tap with
+  `add-tap` to trace what was skipped."
   [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn fact-type-spec-fn
-           fact-constructors] :as options}]
+           fact-constructors dynamic-type-fallback-resolution] :as options}]
   (s/validate GenerateAnnotationsOptions options)
   (when-not session-or-rulebase
     (throw (ex-info "generate-annotations-from-analysis requires :session-or-rulebase"
@@ -581,6 +679,9 @@
 
   (let [get-source (build-source-loader (::combined-sources analysis))
         rulebase (get-rulebase session-or-rulebase)
+        fallback-mode (or dynamic-type-fallback-resolution :rulebase-fact-types-only)
+        fallback-type-filter (when (= :rulebase-fact-types-only fallback-mode)
+                               (build-fallback-type-filter rulebase))
         productions-by-name (into {}
                                   (map (fn [p] [(normalize-key (:name p)) p]))
                                   (:productions rulebase))
@@ -601,12 +702,15 @@
                {:analysis analysis
                 :get-source get-source
                 :productions-by-name productions-by-name
-                :fact-constructors fact-constructors})
+                :fact-constructors fact-constructors
+                :fallback-type-filter fallback-type-filter
+                :fallback-mode fallback-mode})
         project-vars (keys (:graph index))
         var-seq (or effective-filter project-vars)
         infer-ctx (build-infer-ctx index
                                    callsite-resolver-fn
-                                   alias-by-rule)
+                                   alias-by-rule
+                                   fallback-mode)
         annotations
         (into {}
               (keep (fn [v]

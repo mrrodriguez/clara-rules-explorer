@@ -151,6 +151,8 @@ List of all rules with lightweight summaries (load order).
 | `status` | string? | Resolution status of this callsite. `"resolved"` (single type), `"resolved-multi"` (multiple types), `"unresolved"` (could not determine). |
 | `resolved-types` | string[]? | Concrete fact type(s) resolved for this callsite. Present when `status` is `"resolved"` or `"resolved-multi"`. |
 | `resolution-method` | string? | Method used for `"resolved-multi"` resolution (e.g., `":repl-config-enumeration"`). |
+| `constructor-sym` | string? | Fully-qualified constructor symbol when resolved via a `:fact-constructors` spec. |
+| `via` | object? | Provenance. Constructor-path callsites carry `boundary-var-name-sym` + `callstack` (how the constructor was reached from the `insert!`/`retract!`). Heuristic record-ctor-scan callsites instead carry `{"source": "record-ctor-scan"}` with no `callstack` — weaker, subtree-wide evidence that caller-driven resolution did not account for the inserter's boundary arguments. See [Rule Annotations](../server/docs/rule-annotations.md#heuristic-record-ctor-scan-fallback). |
 | `fact-type` | string? | Var-alias context: the LHS-bound fact type that linked the aliased var. Present only when the callsite was discovered through a `:fact-type-spec-fn` var-alias chain (such callsites bypass the constructor chain and are `"unresolved"` unless the caller's resolver resolves them). |
 | `fact-type-spec` | object? | The spec map returned for that fact type, with stringified values (e.g., `{"aliases-var": "my.ns/the-fn"}`). Present under the same conditions as `fact-type`. |
 

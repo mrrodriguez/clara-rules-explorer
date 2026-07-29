@@ -115,8 +115,57 @@ Resolved types are **promoted**: a fully-resolved dynamic insert also appears in
 * **`:status`** — `:resolved`, `:resolved-multi` (several types), or `:unresolved`.
 * **`:resolved-types`** — present when resolved; the fact-type tokens.
 * **`:constructor-sym`** — present when resolved via a `:fact-constructors` spec; the fully-qualified constructor symbol. Its presence also discriminates constructor-path callsites from boundary-path ones (see note on `:source-str` below).
-* **`:via`** — present when resolved via a `:fact-constructors` spec; a `ViaChain` tracing how the constructor was reached from the originating `insert!`/`retract!` (see below).
-* **`:resolution`** (aggregate) — `:full` when every callsite resolved, `:partial` when some did, `:none` otherwise.
+* **`:via`** — present when resolved via a `:fact-constructors` spec; a `ViaChain` tracing how the constructor was reached from the originating `insert!`/`retract!` (see below). On *heuristic* callsites (the record-ctor scan fallback, below), `:via` instead carries `{:source :record-ctor-scan}` with no `:callstack`.
+* **`:resolution`** (aggregate) — `:full` when every callsite resolved, `:partial` when some did, `:none` otherwise. Heuristic scan callsites count as resolved; check `:via :source` to distinguish their confidence.
+
+### Heuristic record-ctor scan fallback
+
+For boundary arguments the resolution chain above cannot explain (e.g. a
+record built inside a helper and returned through an opaque call), the
+analyzer runs a **fallback scan**: record constructors (`->X` / `map->X`)
+found anywhere in a direct inserter var's reachable subtree, resolved against
+the live runtime. This is weaker evidence than the chain — clj-kondo's flat
+`:var-usages` cannot tell an argument expression apart from an unrelated call
+in the same body — so it is deliberately subordinate:
+
+* **Caller-driven resolution always wins.** The scan never displaces the
+  constructor-of-interest or boundary-chain paths. It is applied per
+  direct-inserter var, and only for vars whose boundary arguments no
+  caller-driven path accounted for. (Note the granularity: multiple insert
+  sites in the *same* var share that var's verdict.)
+* **Labeled, never silent.** Fallback types are promoted to
+  `:clara-rules/insert-types`/`:retract-types` *and* emitted as callsites
+  carrying `:via {:source :record-ctor-scan}` (with the ctor name as
+  `:source-str` and the inserter's boundary fn as `:boundary-var-name-sym`
+  when known), so consumers can filter or down-weight them.
+* **Scoped by `:dynamic-type-fallback-resolution`** (option to
+  `generate-annotations-from-analysis`):
+  * `:rulebase-fact-types-only` (**default**) — a scanned type is credited
+    only when it, **or any of its ancestors via the session's
+    `:ancestors-fn`**, appears on the LHS of some rule/query production in
+    the session. LHS matching is hierarchical, so a subtype inserted behind a
+    helper still links to a supertype condition. Third-party records that
+    merely pass through the subtree (validation helpers, schema-library
+    internals) are dropped.
+  * `:none` — the scan never runs; annotations come only from caller-driven
+    resolution.
+  * `:all-resolvable-fact-types` — any resolvable record-ctor type is
+    credited (the pre-fix recall, minus the precedence bug).
+* **Traceable skips.** Types rejected by the default filter are reported via
+  `tap>` (inert until a consumer calls `add-tap`):
+
+  ```clojure
+  {:event :clara-rules/type-fallback-skipped
+   :boundary :insert                    ; or :retract
+   :mode :rulebase-fact-types-only
+   :inserter-var my.ns/helper          ; direct inserter var owning the subtree
+   :skipped-type malli.core.Tag        ; the rejected fq class-name symbol
+   :ctor-ns malli.core :ctor-name ->Tag
+   :filename "malli/core.cljc" :row 123 :col 45}
+  ```
+
+Java constructors are out of scan scope by design: they are not vars, and the
+boundary chain already resolves them precisely at the callsite.
 
 ### `:callsite-resolver-fn`
 

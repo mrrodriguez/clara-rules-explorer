@@ -1,6 +1,9 @@
 # Defect: spurious record-constructor types outrank constructor-of-interest resolution
 
-_Filed 2026-07-28 against `2e1e716`. Status: **open**, not fixed. Found while integrating a
+_Filed 2026-07-28 against `2e1e716`. Status: **fixed** — see the "Fix plan"
+section below; implemented as planned (precedence inversion + labeled,
+rulebase-scoped, per-inserter-var fallback + `:dynamic-type-fallback-resolution`
+option + `tap>` skip tracing). Found while integrating a
 downstream consumer that registers `:fact-constructors` hooks for a runtime fact builder._
 
 ## Summary
@@ -216,15 +219,11 @@ pass; (4) is subsumed by the option in step 3._
    run first and are never displaced by the record/Java-ctor scan. The scan
    becomes a *fallback*, never a short-circuit.
 2. **Label heuristic output (fix option 2).** Types derived from the scan are
-   emitted as callsites carrying `:via {:source …}` so downstream consumers can
-   see and filter by confidence. Two source values, distinguishing what was
-   scanned:
-   * `:record-ctor-scan` — `->X`/`map->X` record constructors.
-   * `:class-ctor-scan` — Java constructors (`X.`, `new X`, `X/new`).
-
-   (Today's scan is record-only — `build-inserter-type-map` filters on
-   `ctor/constructor-fn-name?` name shapes. Step 2 below extends it to Java
-   ctors so both labels are real; see the verification gate there.)
+   emitted as callsites carrying `:via {:source :record-ctor-scan}` so
+   downstream consumers can see and filter by confidence. The scan stays
+   **record-ctor only** (`->X`/`map->X`): Java constructors are not vars, must
+   be handled differently, and are already resolved precisely at the boundary
+   by `resolve-ctor-form` — they are deliberately out of scan scope.
 3. **Scope the heuristic to rulebase fact types by default, respecting the
    session's type hierarchy.** The scan credits a resolved record/Java ctor
    class `C` only when `C` **or any of its ancestors** appears as a fact type
@@ -275,6 +274,11 @@ Remove the `(if (seq static-types) …)` hard exit. New flow:
      attribute them to an inserter var.
    * The reproduction sketch dies here: `helper` owns its boundary arg via the
      registered `->fact`, so `user.Unrelated` is never consulted.
+   * **Granularity limit (accepted):** multiple insert sites in the *same* var
+     share that var's verdict — a rule whose own body both `(insert! (->fact
+     …))` and `(insert! (opaque-helper …))` gets no scan fallback for the
+     second site, because the var was already handled. Different inserter vars
+     (e.g. a helper that itself calls `insert!`) are judged independently.
 3. Fallback types are returned in `:resolved-types` (so they still promote into
    `:clara-rules/insert-types` / `:retract-types` in `infer-annotation-for-var`)
    **and** as heuristic callsites in `:dynamic-forms` — one entry per
@@ -283,22 +287,15 @@ Remove the `(if (seq static-types) …)` hard exit. New flow:
 
 ### Step 2 — Heuristic labeling (`callsite.clj`, `serialize.clj`, `api.clj`)
 
-* `callsite/ViaChain` gains `(s/optional-key :source)` with enum values
-  `:record-ctor-scan` / `:class-ctor-scan`;
-  `:boundary-var-name-sym`/`:callstack` become optional (a heuristic entry has
-  a known inserter var but no traced callstack — when the inserter's boundary
-  fn is known from the graph, include `:boundary-var-name-sym`; omit
-  `:callstack`).
-* **Extend the scan to Java ctors.** `build-inserter-type-map`'s usage filter
-  currently accepts only `ctor/constructor-fn-name?` shapes; widen it to also
-  match Java-ctor usage names (`X.`, `X/new`) so the class-ctor label is real,
-  and have the scan record which shape produced each type (needed to pick the
-  `:via :source` label in step 1). **Verification gate:** first confirm in a
-  REPL that clj-kondo emits `:var-usages` entries for `(Foo. …)` / `(new Foo …)`
-  / `(Foo/new …)` calls at all (record ctor usages are known to be emitted;
-  Java interop calls may not be). If kondo emits nothing for Java ctors, drop
-  the extension, keep the scan record-only, and use only `:record-ctor-scan` —
-  the precise boundary-arg path already covers direct Java ctor inserts.
+* `callsite/ViaChain` gains `(s/optional-key :source)` with the enum value
+  `:record-ctor-scan`; `:boundary-var-name-sym`/`:callstack` become optional
+  (a heuristic entry has a known inserter var but no traced callstack — when
+  the inserter's boundary fn is known from the graph, include
+  `:boundary-var-name-sym`; omit `:callstack`).
+* To support that labeling, `inserter-type-map` values change from
+  `#{type-sym}` to `{type-sym {:usage kondo-usage}}` (first usage by source
+  position, kept deterministic) so heuristic callsites carry real provenance:
+  ctor name as `:source-str`, ctor ns as `:ns-name-sym`, and `:filename`.
 * Heuristic callsites use the existing `:status` enum (`:resolved` /
   `:resolved-multi`). `resolution-status` is unchanged: a heuristic-only rule
   reports `:resolution :full`, with `:via :source` carrying the confidence
@@ -319,8 +316,10 @@ Remove the `(if (seq static-types) …)` hard exit. New flow:
   existing function extracts LHS fact types from a rulebase** —
   `clara.tools/inspect` walks network nodes, not production `:lhs` — so this
   walk is ours to keep.
-  * **Verify:** defquery productions live in rulebase `:productions` alongside
-    rules (expected); if not, union the rulebase's query collection.
+  * **Verified:** defquery productions do **not** live in rulebase
+    `:productions` (rules only) — queries hang off `:query-nodes` (each node
+    carries its query map under `:query`). `alias/rulebase-fact-types` unions
+    both, since queries are the terminal consumers we care about.
 * Obtain the session's `:ancestors-fn` from
   `(-> rulebase :get-alphas-fn meta :ancestors-fn)`. Verified:
   `compiler/build-network` stores `:get-alphas-fn` in the rulebase map itself
@@ -349,12 +348,26 @@ Remove the `(if (seq static-types) …)` hard exit. New flow:
   via `resolve-boundary-callsites`) — that path is argument-scoped and stays
   unfiltered.
 * **`tap>`-based skip tracing (off by default).** When the filter rejects a
-  resolved type, emit `(tap> {:event :clara-rules/type-fallback-skipped
-  :inserter-var v :skipped-type t :ctor-kind :record|:class :mode <mode>})`.
+  resolved type, emit a `tap>` with the full context a consumer needs to
+  understand what they are seeing:
+
+  ```clojure
+  (tap> {:event        :clara-rules/type-fallback-skipped
+         :boundary     :insert              ; or :retract
+         :mode         :rulebase-fact-types-only
+         :inserter-var some.ns/helper       ; direct inserter var owning the subtree
+         :skipped-type malli.core.Tag       ; the rejected fq class-name symbol
+         :ctor-ns      malli.core           ; kondo usage :to
+         :ctor-name    ->Tag                ; kondo usage :name
+         :filename     "malli/core.cljc"    ; callsite coordinates when known
+         :row          123 :col 45})
+  ```
+
   No tap is registered by default, so this is inert unless a consumer calls
   `add-tap` — Clojure's tap machinery *is* the opt-in switch, no extra flag
   needed. Note the filter runs at index-build time, so taps fire per
-  (inserter-var, type) pair rather than per rule.
+  (inserter-var, type) pair rather than per rule. Spam is acceptable — this is
+  a tracing aid only.
 
 ### Step 4 — Option plumbing (`analyze.clj`)
 
@@ -379,7 +392,7 @@ Remove the `(if (seq static-types) …)` hard exit. New flow:
   remain visible because the filter respects `:ancestors-fn`.
 * Rules that previously got scan-only `:insert-types` with no provenance now
   either resolve through the boundary path (richer callsite records) or carry
-  `:via {:source :record-ctor-scan|:class-ctor-scan}` markers.
+  `:via {:source :record-ctor-scan}` markers.
 
 ## Tests (`server/test/clara/server/tools/graph/analyze_test.clj` + `rules/analyze_test_rules.clj`)
 
@@ -387,12 +400,13 @@ Remove the `(if (seq static-types) …)` hard exit. New flow:
    `:fact-constructors` `->fact` plus an unrelated reachable `->Unrelated` —
    yields `:insert-types [:my/type]`, a `:resolution :full` callsite, and no
    `user.Unrelated` anywhere in the annotation.
-2. **Per-inserter-var fallback:** a mixed rule — `(insert! (->fact ...))` plus a
-   second boundary call `(insert! (mk-fact))` where `mk-fact` indirectly
-   returns `(->MyFact …)` and `MyFact` is on some production's LHS — resolves
-   the `->fact` arg via the constructor path *and* falls back to `MyFact` for
-   the unresolved inserter var; the fallback callsite carries
-   `:via {:source :record-ctor-scan}`.
+2. **Per-inserter-var fallback:** a mixed rule — the rule's own
+   `(insert! (->fact ...))` (owned by the constructor path) plus a call to a
+   *separate* helper var that itself does `(insert! (mk-fact))`, where
+   `mk-fact` indirectly returns `(->MyFact …)` and `MyFact` is on some
+   production's LHS — resolves the `->fact` arg via the constructor path
+   *and* falls back to `MyFact` for the helper's var; the fallback callsite
+   carries `:via {:source :record-ctor-scan}`.
 3. **Filter modes:** an indirect `->UnrelatedRecord` (on no LHS) — dropped
    under the default; present under `:all-resolvable-fact-types`; and under
    `:none` even an in-LHS indirect record ctor produces no fallback.
@@ -417,14 +431,10 @@ make lint             # clj-kondo
 make reflection-check
 ```
 
-REPL checks via `clj-nrepl-eval` before/while implementing:
+REPL checks via `clj-nrepl-eval` while implementing:
 
-1. **Verification gate (step 2):** lint a snippet containing `(Foo. x)`,
-   `(new Foo x)`, `(Foo/new x)` and inspect the `:var-usages` clj-kondo
-   emits — decides whether the Java-ctor scan extension and the
-   `:class-ctor-scan` label survive.
-2. `(-> session eng/components :rulebase :get-alphas-fn meta :ancestors-fn)`
+1. `(-> session eng/components :rulebase :get-alphas-fn meta :ancestors-fn)`
    returns the expected fn on a hand-built session, including with a custom
    `:ancestors-fn`/`:hierarchy` session option.
-3. The reproduction sketch end-to-end: `generate-annotations-from-analysis`
+2. The reproduction sketch end-to-end: `generate-annotations-from-analysis`
    on a hand-built session, inspect the annotation EDN.

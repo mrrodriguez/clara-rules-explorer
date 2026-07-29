@@ -217,29 +217,37 @@
      `:rule`                  - the full production map of the consuming rule (may be nil)
      `:callsite-resolver-fn`  - optional caller escape hatch
 
-   Returns a `CallsiteResolution`."
+   Returns a `CallsiteResolution` including `:resolved-arg-idxs` — the `:idx`
+   of every traced argument that resolved to at least one type (used by
+   `analyze/extract-insert-types` for per-inserter-var heuristic fallback
+   attribution)."
   [traced-args ctx]
-  (let [entries
-        (into []
-              (comp (map (fn [{:keys [usage arg traced alias-context]}]
+  (let [pairs (into []
+                    (map (fn [{:keys [idx usage arg traced alias-context]}]
                            (let [ctx' (assoc ctx :usage usage :alias-context alias-context)
-                                 tokens (resolve-traced-arg traced ctx' (:from usage))]
-                             (cond-> {:source-str (pr-str arg)
-                                      :ns-name-sym (:from usage)
-                                      :filename (:filename usage)
-                                      :status (cond (empty? tokens) :unresolved
-                                                    (= 1 (count tokens)) :resolved
-                                                    :else :resolved-multi)}
-                               (seq tokens)
-                               (assoc :resolved-types (vec (sort-by str tokens)))
+                                 tokens (resolve-traced-arg traced ctx' (:from usage))
+                                 entry (cond-> {:source-str (pr-str arg)
+                                                :ns-name-sym (:from usage)
+                                                :filename (:filename usage)
+                                                :status (cond (empty? tokens) :unresolved
+                                                              (= 1 (count tokens)) :resolved
+                                                              :else :resolved-multi)}
+                                         (seq tokens)
+                                         (assoc :resolved-types (vec (sort-by str tokens)))
 
-                               alias-context
-                               (merge (select-keys alias-context [:fact-type :fact-type-spec]))))))
-                    (distinct))
-              traced-args)
+                                         alias-context
+                                         (merge (select-keys alias-context [:fact-type :fact-type-spec])))]
+                             [idx entry])))
+                    traced-args)
+        entries (into [] (comp (map second) (distinct)) pairs)
+        resolved-arg-idxs (into #{}
+                                (comp (filter (fn [[_ entry]] (seq (:resolved-types entry))))
+                                      (map first))
+                                pairs)
         resolved-types (into #{} (mapcat :resolved-types) entries)]
     {:callsites entries
      :resolved-types resolved-types
+     :resolved-arg-idxs resolved-arg-idxs
      :resolution (resolution-status entries)}))
 
 ;; ---------------------------------------------------------------------------
@@ -512,9 +520,12 @@
 (s/defschema ViaChain
   "Provenance chain from a boundary fn to a constructor callsite (internal
    symbol form; `clara.server.graph.api/ViaChain` is its serialized string
-   counterpart)."
-  {:boundary-var-name-sym s/Symbol
-   :callstack [ViaEntry]})
+   counterpart).  `:source` marks heuristic provenance — `:record-ctor-scan`
+   when the callsite comes from the subtree-wide record-ctor scan fallback
+   rather than a traced call chain; heuristic entries have no `:callstack`."
+  {(s/optional-key :boundary-var-name-sym) s/Symbol
+   (s/optional-key :callstack) [ViaEntry]
+   (s/optional-key :source) (s/enum :record-ctor-scan)})
 
 (s/defschema CallsiteResolverContext
   "Context map passed to `:callsite-resolver-fn` by
@@ -578,4 +589,5 @@
   {:callsites [CallsiteEntry]
    :resolved-types #{s/Any}                  ; type-agnostic tokens — see CallsiteEntry
    :resolution (s/maybe (s/enum :full :partial :none))
-   (s/optional-key :owned-arg-idxs) #{s/Int}})
+   (s/optional-key :owned-arg-idxs) #{s/Int}
+   (s/optional-key :resolved-arg-idxs) #{s/Int}})

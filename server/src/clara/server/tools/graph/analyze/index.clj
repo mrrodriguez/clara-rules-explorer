@@ -91,8 +91,8 @@
    :reachable-set         (s/=> #{s/Symbol} s/Symbol)
    :direct-inserters      #{s/Symbol}
    :direct-retractors     #{s/Symbol}
-   :inserter-type-map     {s/Symbol #{s/Symbol}}
-   :retractor-type-map    {s/Symbol #{s/Symbol}}
+   :inserter-type-map     {s/Symbol {s/Symbol {:usage u/KondoVarUsage}}}
+   :retractor-type-map    {s/Symbol {s/Symbol {:usage u/KondoVarUsage}}}
    :constructor-callsite-map (s/maybe CtorCallsiteMap)
    :get-source            (s/=> s/Any s/Any s/Any)
    :read-ctor-form        (s/=> s/Any s/Any s/Any)
@@ -154,27 +154,72 @@
 ;; Bottom-up type maps (built via the by-caller index, never full scans)
 ;; ---------------------------------------------------------------------------
 
+(defn- usage-pos
+  "Deterministic source-position sort key for a kondo usage."
+  [usage]
+  [(str (:filename usage)) (or (:row usage) 0) (or (:col usage) 0)])
+
 (defn- build-inserter-type-map
   "Bottom-up: for every var that directly calls a boundary fn, find record
    constructors (`map->X`, `->X`) resolvable to fact types within its
-   reachable subtree.  Returns {inserter-var -> #{fq-class-name-sym …}}.
+   reachable subtree.  Returns
+   {inserter-var -> {fq-class-name-sym {:usage kondo-usage}}} — the usage is
+   the first (by source position) constructor usage that resolved to the
+   type, kept as provenance for heuristic callsites.
 
-   Note: because `clj-kondo`'s flat `:var-usages` analysis cannot distinguish
-   argument expressions within a callsite from independent calls in the same
-   function body, a var's reachable subtree may include constructors from
-   unrelated RHS branches (e.g. a helper that builds both a fact and an
-   unrelated record value for a side computation).  Consumers should use
-   manual annotations (`:clara-rules/no-output-types`) to suppress false
-   positives."
-  [direct-callers usages-by-caller reachable-set resolve-record-type]
+   This scan is a *heuristic fallback* for the caller-driven resolution paths
+   (see `analyze/extract-insert-types`): because `clj-kondo`'s flat
+   `:var-usages` analysis cannot distinguish argument expressions within a
+   callsite from independent calls in the same function body, a var's
+   reachable subtree may include constructors from unrelated RHS branches
+   (e.g. a helper that builds both a fact and an unrelated record value for a
+   side computation).
+
+   `type-filter` (optional) is a (fn [{:keys [inserter-var usage type]}] ->
+   bool) consulted per resolved type — typically the
+   `:rulebase-fact-types-only` restriction of
+   `:dynamic-type-fallback-resolution`.  Rejected types are excluded and
+   reported via `tap>` with full context (inert unless a consumer registers a
+   tap).  `boundary` (:insert or :retract) and `mode` only enrich the tap
+   context."
+  [direct-callers usages-by-caller reachable-set resolve-record-type
+   {:keys [type-filter boundary mode]}]
   (into {}
         (map (fn [v]
                (let [subtree (reachable-set v)
-                     types (into #{}
+                     pairs (into []
                                  (comp (mapcat #(get usages-by-caller %))
                                        (filter #(-> % :name name ctor/constructor-fn-name?))
-                                       (keep #(resolve-record-type (:to %) (:name %))))
-                                 subtree)]
+                                       (keep (fn [usage]
+                                               (when-let [t (resolve-record-type (:to usage) (:name usage))]
+                                                 (if (or (nil? type-filter)
+                                                         (type-filter {:inserter-var v
+                                                                       :usage usage
+                                                                       :type t}))
+                                                   [t {:usage usage}]
+                                                   (do (tap> {:event :clara-rules/type-fallback-skipped
+                                                              :boundary boundary
+                                                              :mode mode
+                                                              :inserter-var v
+                                                              :skipped-type t
+                                                              :ctor-ns (:to usage)
+                                                              :ctor-name (:name usage)
+                                                              :filename (:filename usage)
+                                                              :row (:row usage)
+                                                              :col (:col usage)})
+                                                       nil))))))
+                                 subtree)
+                     ;; Deterministic: keep the first usage by source position
+                     ;; when several constructors resolve to the same type.
+                     types (reduce (fn [m [t {:keys [usage] :as entry}]]
+                                     (let [old (get m t)]
+                                       (if (or (nil? old)
+                                               (neg? (compare (usage-pos usage)
+                                                              (usage-pos (:usage old)))))
+                                         (assoc m t entry)
+                                         m)))
+                                   {}
+                                   pairs)]
                  [v types])))
         direct-callers))
 
@@ -213,8 +258,16 @@
   "Derives the `AnalysisIndex` from a merged clj-kondo `analysis` map.
 
    `fact-constructors` (optional, [{:match-fn :type-resolver-fn} …]) enables
-   the constructor-of-interest callsite map."
-  [{:keys [analysis get-source productions-by-name fact-constructors]}]
+   the constructor-of-interest callsite map.
+
+   `fallback-type-filter` (optional) is a (fn [{:keys [inserter-var usage
+   type]}] -> bool) restricting which record-ctor types the heuristic
+   inserter/retractor type maps may credit (see
+   `analyze/:dynamic-type-fallback-resolution`); rejected types are excluded
+   and reported via `tap>`.  `fallback-mode` is the mode keyword, used only
+   for tap context."
+  [{:keys [analysis get-source productions-by-name fact-constructors
+           fallback-type-filter fallback-mode]}]
   (let [usages (:var-usages analysis)
         graph (build-graph usages)
         usages-by-caller (group-by u/var-usage-caller usages)
@@ -228,9 +281,15 @@
         direct-retractors (direct-callers graph retract-fns)
         resolve-record-type (memoize ctor/resolve-record-type)
         inserter-type-map (build-inserter-type-map
-                           direct-inserters usages-by-caller reachable-set resolve-record-type)
+                           direct-inserters usages-by-caller reachable-set resolve-record-type
+                           {:type-filter fallback-type-filter
+                            :boundary :insert
+                            :mode fallback-mode})
         retractor-type-map (build-inserter-type-map
-                            direct-retractors usages-by-caller reachable-set resolve-record-type)
+                            direct-retractors usages-by-caller reachable-set resolve-record-type
+                            {:type-filter fallback-type-filter
+                             :boundary :retract
+                             :mode fallback-mode})
         constructor-callsite-map (when (seq fact-constructors)
                                    (build-constructor-callsite-map
                                     (direct-callers graph boundary-fns)

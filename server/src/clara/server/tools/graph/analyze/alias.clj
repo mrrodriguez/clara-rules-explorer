@@ -24,6 +24,20 @@
     :test []
     []))
 
+(defn rulebase-fact-types
+  "All fact types appearing on the LHS of any production in the rulebase:
+   rules from `:productions` plus queries from `:query-nodes` (queries are
+   *not* in `:productions` — each query node carries its query map under
+   `:query`).  Covers fact conditions, accumulator :from subtrees, and
+   and/or/not/exists compounds.  Types are returned as-is — keywords,
+   class-name symbols, or Class objects (callers normalize for comparison)."
+  [rulebase]
+  (into #{}
+        (comp (mapcat :lhs)
+              (mapcat subtree-fact-types))
+        (concat (:productions rulebase)
+                (keep :query (vals (:query-nodes rulebase))))))
+
 (defn lhs-var-bindings
   "Scans a production's :lhs (constrained DSL data) for bound fact variables:
    :fact-binding on fact conditions and :result-binding on accumulator

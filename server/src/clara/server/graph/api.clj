@@ -56,9 +56,13 @@
   {:var-name-sym s/Str})
 
 (s/defschema ViaChain
-  "Provenance chain from a boundary fn to a constructor callsite."
-  {:boundary-var-name-sym s/Str
-   :callstack [ViaEntry]})
+  "Provenance chain from a boundary fn to a constructor callsite.
+   `:source` marks heuristic provenance — `:record-ctor-scan` when the
+   callsite comes from the subtree-wide record-ctor scan fallback rather
+   than a traced call chain; heuristic entries have no `:callstack`."
+  {(s/optional-key :boundary-var-name-sym) s/Str
+   (s/optional-key :callstack) [ViaEntry]
+   (s/optional-key :source) s/Keyword})
 
 (s/defschema DynamicCallsiteEntry
   "A single dynamic-insert/retract callsite with source coordinates
