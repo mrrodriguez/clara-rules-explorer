@@ -8,3 +8,6 @@ filters, then the button can be disabled visually and functionally due to the fi
 
 3. Add a "clear all filters" button to list view filtering that clears namespace filters as well as
    filters on attributes of the items.
+
+4. Write a doc that details the vocab and meaning of words and concepts and maybe diagrams or mini
+   examples used throughout the analyzer.

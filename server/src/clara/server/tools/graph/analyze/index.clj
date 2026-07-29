@@ -159,6 +159,31 @@
   [usage]
   [(str (:filename usage)) (or (:row usage) 0) (or (:col usage) 0)])
 
+(defn- resolve-ctor-type-entry
+  "Resolves a single kondo usage to a [type {:usage usage}] entry when the
+   usage names a record constructor (`->X` / `map->X`) that resolves to a
+   loadable type.  Returns nil for non-constructor usages and unresolvable
+   types.  When `type-filter` is present, rejected types fire a `tap>` event
+   and return nil."
+  [usage {:keys [inserter-var resolve-record-type type-filter boundary mode]}]
+  (when-let [t (resolve-record-type (:to usage) (:name usage))]
+    (if (or (nil? type-filter)
+            (type-filter {:inserter-var inserter-var
+                          :usage usage
+                          :type t}))
+      [t {:usage usage}]
+      (do (tap> {:event :clara-rules/type-fallback-skipped
+                 :boundary boundary
+                 :mode mode
+                 :inserter-var inserter-var
+                 :skipped-type t
+                 :ctor-ns (:to usage)
+                 :ctor-name (:name usage)
+                 :filename (:filename usage)
+                 :row (:row usage)
+                 :col (:col usage)})
+          nil))))
+
 (defn- build-inserter-type-map
   "Bottom-up: for every var that directly calls a boundary fn, find record
    constructors (`map->X`, `->X`) resolvable to fact types within its
@@ -175,53 +200,43 @@
    (e.g. a helper that builds both a fact and an unrelated record value for a
    side computation).
 
-   `type-filter` (optional) is a (fn [{:keys [inserter-var usage type]}] ->
+   `:type-filter` (optional) is a (fn [{:keys [inserter-var usage type]}] ->
    bool) consulted per resolved type — typically the
    `:rulebase-fact-types-only` restriction of
    `:dynamic-type-fallback-resolution`.  Rejected types are excluded and
    reported via `tap>` with full context (inert unless a consumer registers a
-   tap).  `boundary` (:insert or :retract) and `mode` only enrich the tap
+   tap).  `:boundary` (:insert or :retract) and `:mode` only enrich the tap
    context."
-  [direct-callers usages-by-caller reachable-set resolve-record-type
-   {:keys [type-filter boundary mode]}]
-  (into {}
-        (map (fn [v]
-               (let [subtree (reachable-set v)
-                     pairs (into []
-                                 (comp (mapcat #(get usages-by-caller %))
-                                       (filter #(-> % :name name ctor/constructor-fn-name?))
-                                       (keep (fn [usage]
-                                               (when-let [t (resolve-record-type (:to usage) (:name usage))]
-                                                 (if (or (nil? type-filter)
-                                                         (type-filter {:inserter-var v
-                                                                       :usage usage
-                                                                       :type t}))
-                                                   [t {:usage usage}]
-                                                   (do (tap> {:event :clara-rules/type-fallback-skipped
-                                                              :boundary boundary
-                                                              :mode mode
-                                                              :inserter-var v
-                                                              :skipped-type t
-                                                              :ctor-ns (:to usage)
-                                                              :ctor-name (:name usage)
-                                                              :filename (:filename usage)
-                                                              :row (:row usage)
-                                                              :col (:col usage)})
-                                                       nil))))))
-                                 subtree)
-                     ;; Deterministic: keep the first usage by source position
-                     ;; when several constructors resolve to the same type.
-                     types (reduce (fn [m [t {:keys [usage] :as entry}]]
-                                     (let [old (get m t)]
-                                       (if (or (nil? old)
-                                               (neg? (compare (usage-pos usage)
-                                                              (usage-pos (:usage old)))))
-                                         (assoc m t entry)
-                                         m)))
-                                   {}
-                                   pairs)]
-                 [v types])))
-        direct-callers))
+  [{:keys [direct-callers usages-by-caller reachable-set
+           resolve-record-type type-filter boundary mode]
+    :or {type-filter nil}}]
+  (let [entry-opts {:resolve-record-type resolve-record-type
+                    :type-filter type-filter
+                    :boundary boundary
+                    :mode mode}]
+    (into {}
+          (map (fn [v]
+                 (let [subtree (reachable-set v)
+                       entry-opts' (assoc entry-opts :inserter-var v)
+                       pairs (into []
+                                   (comp (mapcat #(get usages-by-caller %))
+                                         (filter #(-> % :name name ctor/constructor-fn-name?))
+                                         (keep #(resolve-ctor-type-entry % entry-opts')))
+                                   subtree)
+                       ;; Deterministic: keep the first usage by source
+                       ;; position when several constructors resolve to the
+                       ;; same type.
+                       types (reduce (fn [m [t {:keys [usage] :as entry}]]
+                                       (let [old (get m t)]
+                                         (if (or (nil? old)
+                                                 (neg? (compare (usage-pos usage)
+                                                                (usage-pos (:usage old)))))
+                                           (assoc m t entry)
+                                           m)))
+                                     {}
+                                     pairs)]
+                   [v types])))
+          direct-callers)))
 
 (defn- build-constructor-callsite-map
   "Like `build-inserter-type-map`, but for caller-supplied constructors of
@@ -281,13 +296,19 @@
         direct-retractors (direct-callers graph retract-fns)
         resolve-record-type (memoize ctor/resolve-record-type)
         inserter-type-map (build-inserter-type-map
-                           direct-inserters usages-by-caller reachable-set resolve-record-type
-                           {:type-filter fallback-type-filter
+                           {:direct-callers direct-inserters
+                            :usages-by-caller usages-by-caller
+                            :reachable-set reachable-set
+                            :resolve-record-type resolve-record-type
+                            :type-filter fallback-type-filter
                             :boundary :insert
                             :mode fallback-mode})
         retractor-type-map (build-inserter-type-map
-                            direct-retractors usages-by-caller reachable-set resolve-record-type
-                            {:type-filter fallback-type-filter
+                            {:direct-callers direct-retractors
+                             :usages-by-caller usages-by-caller
+                             :reachable-set reachable-set
+                             :resolve-record-type resolve-record-type
+                             :type-filter fallback-type-filter
                              :boundary :retract
                              :mode fallback-mode})
         constructor-callsite-map (when (seq fact-constructors)

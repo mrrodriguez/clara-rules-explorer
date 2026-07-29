@@ -140,7 +140,7 @@
    accounted for.  Each (var, type) pair becomes one callsite labeled
    `:via {:source :record-ctor-scan}` so consumers can distinguish the weaker
    evidence; the inserter's boundary fn is included when known from the graph."
-  [fallback-vars inserter-type-map graph target-fns]
+  [{:keys [fallback-vars inserter-type-map graph target-fns]}]
   (into []
         (mapcat (fn [v]
                   (let [boundary-fn (->> (get graph v)
@@ -157,6 +157,39 @@
                              boundary-fn (assoc-in [:via :boundary-var-name-sym] boundary-fn)))
                          (sort-by (comp str key) (get inserter-type-map v))))))
         fallback-vars))
+
+(defn- compute-heuristic-fallback-callsites
+  "Computes heuristic record-ctor scan callsites for direct-inserter vars
+   whose boundary arguments were handled by neither the
+   constructor-of-interest path nor the boundary resolution chain.  Returns a
+   (possibly nil) vector of callsites labeled
+   `:via {:source :record-ctor-scan}`.
+
+   `:dynamic-type-fallback-resolution :none` disables the fallback entirely;
+   `handled-vars` collects callers that had at least one boundary argument
+   owned by a constructor-of-interest (`:owned-arg-idxs`) or resolved through
+   the boundary chain (`:resolved-arg-idxs`) — a var with any handled
+   argument cedes its scan types."
+  [{:keys [reachable traced-args owned-arg-idxs resolved-arg-idxs
+           inserter-type-map graph target-fns
+           dynamic-type-fallback-resolution]}]
+  (let [handled-vars (into #{}
+                           (comp (filter (fn [{:keys [idx]}]
+                                           (or (contains? owned-arg-idxs idx)
+                                               (contains? resolved-arg-idxs idx))))
+                                 (map (comp u/var-usage-caller :usage)))
+                           traced-args)
+        fallback-vars (when-not (= :none dynamic-type-fallback-resolution)
+                        (into []
+                              (comp (filter #(contains? reachable %))
+                                    (remove handled-vars))
+                              (sort-by str (keys inserter-type-map))))]
+    (when (seq fallback-vars)
+      (heuristic-fallback-callsites
+       {:fallback-vars fallback-vars
+        :inserter-type-map inserter-type-map
+        :graph graph
+        :target-fns target-fns}))))
 
 (defn- extract-insert-types
   "Determines the fact types a rule inserts or retracts via `target-fns`.
@@ -230,23 +263,15 @@
             ;; explain and inflate `:resolution` to :full.
             all-callsites (into (vec ctor-callsites) callsites)
             all-types (into (or (:resolved-types ctor-result) #{}) resolved-types)
-            ;; Heuristic record-ctor scan fallback, per direct-inserter var:
-            ;; only vars whose boundary arguments were neither owned by a
-            ;; constructor of interest nor resolved by the boundary chain.
-            handled-vars (into #{}
-                               (comp (filter (fn [{:keys [idx]}]
-                                               (or (contains? owned idx)
-                                                   (contains? resolved-arg-idxs idx))))
-                                     (map (comp u/var-usage-caller :usage)))
-                               traced-args)
-            fallback-vars (when-not (= :none dynamic-type-fallback-resolution)
-                            (into []
-                                  (comp (filter #(contains? reachable %))
-                                        (remove handled-vars))
-                                  (sort-by str (keys inserter-type-map))))
-            fallback-callsites (when (seq fallback-vars)
-                                 (heuristic-fallback-callsites
-                                  fallback-vars inserter-type-map graph target-fns))
+            fallback-callsites (compute-heuristic-fallback-callsites
+                                {:reachable reachable
+                                 :traced-args traced-args
+                                 :owned-arg-idxs owned
+                                 :resolved-arg-idxs resolved-arg-idxs
+                                 :inserter-type-map inserter-type-map
+                                 :graph graph
+                                 :target-fns target-fns
+                                 :dynamic-type-fallback-resolution dynamic-type-fallback-resolution})
             all-callsites (into all-callsites fallback-callsites)
             all-types (into all-types (mapcat :resolved-types) fallback-callsites)
             all-resolution (callsite/resolution-status all-callsites)]
