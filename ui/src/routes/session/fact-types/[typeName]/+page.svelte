@@ -2,6 +2,8 @@
 	import { page } from '$app/state';
 	import type { SessionFactGroup } from '$lib/types/api';
 	import QualifiedName from '$lib/components/ui/QualifiedName.svelte';
+	import LocateInListButton from '$lib/components/ui/LocateInListButton.svelte';
+	import { fromRouteId } from '$lib/utils';
 	import FactGroup from './FactGroup.svelte';
 	import SessionSectionHeader from './SessionSectionHeader.svelte';
 
@@ -54,12 +56,17 @@
 				{/if}
 			</h3>
 		</div>
-		{#if detail}
-			<div class="text-end border-start ps-4 ms-4">
-				<div class="display-6 fw-bold text-primary mb-0">{detail.count}</div>
-				<div class="fs-7 text-muted text-uppercase fw-bold">Active Instances</div>
-			</div>
-		{/if}
+		<div class="d-flex align-items-center gap-3">
+			{#if page.params.typeName}
+				<LocateInListButton name={fromRouteId(page.params.typeName)} />
+			{/if}
+			{#if detail}
+				<div class="text-end border-start ps-4">
+					<div class="display-6 fw-bold text-primary mb-0">{detail.count}</div>
+					<div class="fs-7 text-muted text-uppercase fw-bold">Active Instances</div>
+				</div>
+			{/if}
+		</div>
 	</div>
 
 	{#if !detail || detail.count === 0}

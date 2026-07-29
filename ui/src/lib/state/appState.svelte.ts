@@ -28,6 +28,10 @@ export class AppState {
 
 	activeContextualMenu = $state<ContextualMenuType | null>(null);
 
+	// Locate-in-list signalling (summary → list communication)
+	locateRequest = $state<{ name: string; timestamp: number } | null>(null);
+	activeItemFilteredOut = $state<boolean>(false);
+
 	// Derived state
 	isDark = $derived(this.uiTheme === 'dark');
 
@@ -70,6 +74,14 @@ export class AppState {
 
 	toggleContextualMenu(menu: ContextualMenuType) {
 		this.activeContextualMenu = this.activeContextualMenu === menu ? null : menu;
+	}
+
+	requestLocate(name: string) {
+		this.locateRequest = { name, timestamp: Date.now() };
+	}
+
+	clearLocateRequest() {
+		this.locateRequest = null;
 	}
 }
 

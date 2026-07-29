@@ -1,4 +1,5 @@
 <script lang="ts" generics="T extends { name: string }">
+	import { tick } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import FilterDropdown from '$lib/components/rulebase/nav/FilterDropdown.svelte';
 	import FilterDropdownItem from '$lib/components/rulebase/nav/FilterDropdownItem.svelte';
@@ -8,6 +9,7 @@
 	import { NamespaceFilter } from '$lib/components/rulebase/nav/namespaceFilter.svelte';
 	import { RulebaseFilter } from '$lib/components/rulebase/nav/rulebaseFilter.svelte';
 	import { toRouteId } from '$lib/utils';
+	import { appState } from '$lib/state/appState.svelte';
 
 	let {
 		items,
@@ -249,6 +251,78 @@
 	function isActive(name: string) {
 		return activeId !== undefined && activeId === toRouteId(name);
 	}
+
+	// ── Scroll container ref ─────────────────────────────────────────────────
+
+	let scrollContainer: HTMLDivElement | undefined = $state();
+
+	// ── Filtered-out detection for the active item ───────────────────────────
+
+	const isActiveItemFilteredOut = $derived.by(() => {
+		if (!activeId) return false;
+
+		const item = items.find((i) => toRouteId(i.name) === activeId);
+		if (!item) return false;
+
+		// Check search
+		if (searchTerm.length > 0) {
+			const needle = searchTerm.toLowerCase();
+			const match = searchFields(item).some((f) => f.toLowerCase().includes(needle));
+			if (!match) return true;
+		}
+
+		// Check namespace filter
+		if (nsFilter.active) {
+			const ns = groupKey(item) || '(no namespace)';
+			if (nsFilter.hiddenNamespaces[ns]) return true;
+		}
+
+		// Check rulebase attribute filter
+		if (rulebaseFilter.active) {
+			if (!matchesRulebaseFilter(item)) return true;
+		}
+
+		return false;
+	});
+
+	// Sync filtered-out state to appState so summary views can disable the button.
+	$effect(() => {
+		appState.activeItemFilteredOut = isActiveItemFilteredOut;
+	});
+
+	// Reset on destroy so a stale value doesn't leak to the next domain.
+	$effect(() => {
+		return () => {
+			appState.activeItemFilteredOut = false;
+		};
+	});
+
+	// ── Locate-in-list handler ───────────────────────────────────────────────
+
+	// Guard to avoid re-triggering when we clear the request ourselves.
+	let handlingLocate = $state(false);
+
+	$effect(() => {
+		const req = appState.locateRequest;
+		if (!req || !activeId || handlingLocate) return;
+		if (toRouteId(req.name) !== activeId) return;
+
+		handlingLocate = true;
+
+		// Clear search so the item is visible (filters remain — button is
+		// disabled when filters hide the item, so this won't fire then).
+		searchTerm = '';
+
+		// Wait for Svelte to flush the DOM update, then scroll into view.
+		tick().then(() => {
+			const el = scrollContainer?.querySelector('.list-group-item.active');
+			if (el) {
+				el.scrollIntoView({ block: 'nearest' });
+			}
+			appState.clearLocateRequest();
+			handlingLocate = false;
+		});
+	});
 </script>
 
 <div
@@ -369,7 +443,7 @@
 	{/if}
 
 	<!-- Content area -->
-	<div class="list-group list-group-flush flex-grow-1 overflow-auto">
+	<div class="list-group list-group-flush flex-grow-1 overflow-auto" bind:this={scrollContainer}>
 		{#if view.searchActive}
 			<!-- Flat search results -->
 			{#each view.searchFiltered as item (item.name)}

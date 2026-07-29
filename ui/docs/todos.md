@@ -1,7 +1,7 @@
 1. Annotations generation should support an option should be able to take existing annotations
    optionally with merge rules.
 
-2. all list views should have a button that will automatically select the list item that corresponds
+2. DONE all list views should have a button that will automatically select the list item that corresponds
    to the summary you are currently viewing. this will involve auto expanded a namespace if it is
 not already. If the summary being viewed is being filtered from the list view due to existing
 filters, then the button can be disabled visually and functionally due to the filter.

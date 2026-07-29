@@ -2,6 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import RulebaseComponentTypeBadge from '$lib/components/rulebase/RulebaseComponentTypeBadge.svelte';
 	import QualifiedName from '$lib/components/ui/QualifiedName.svelte';
+	import LocateInListButton from '$lib/components/ui/LocateInListButton.svelte';
 	import { resolve } from '$app/paths';
 	import type { Pathname } from '$app/types';
 
@@ -25,11 +26,14 @@
 		<div class="min-width-0 flex-grow-1">
 			<QualifiedName fullName={name} size="lg" class="text-{color}" />
 		</div>
-		{#if !fullView && type !== 'fact'}
-			<a href={resolvedHref} class="btn btn-outline-{color} btn-sm flex-shrink-0 ms-2">
-				<i class="bi bi-arrows-fullscreen me-1"></i> Full View
-			</a>
-		{/if}
+		<div class="d-flex gap-1 flex-shrink-0 ms-2">
+			<LocateInListButton {name} />
+			{#if !fullView && type !== 'fact'}
+				<a href={resolvedHref} class="btn btn-outline-{color} btn-sm">
+					<i class="bi bi-arrows-fullscreen me-1"></i> Full View
+				</a>
+			{/if}
+		</div>
 	</div>
 	<!-- Row 2: Type badge + other badges -->
 	{#if type !== 'fact'}
