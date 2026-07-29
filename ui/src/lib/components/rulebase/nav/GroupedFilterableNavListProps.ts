@@ -52,4 +52,11 @@ export interface GroupedFilterableNavListProps<T extends { name: string }> {
 	 * Multiple checked filters are combined with OR logic.
 	 */
 	filters?: FilterOption<T>[];
+	/**
+	 * Callback invoked whenever the active item's visibility under current
+	 * filters changes. The parent layout typically wires this to update a
+	 * reactive context that summary views read to disable the "Locate in
+	 * List" button.
+	 */
+	onFilteredOutChange?: (filteredOut: boolean) => void;
 }

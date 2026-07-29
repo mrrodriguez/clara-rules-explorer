@@ -11,9 +11,10 @@
 
 	interface Props {
 		rules: RuleListItem[];
+		onFilteredOutChange?: (filteredOut: boolean) => void;
 	}
 
-	let { rules }: Props = $props();
+	let { rules, onFilteredOutChange }: Props = $props();
 
 	const groupKey = (rule: RuleListItem) => rule.ns;
 	const activeId = $derived(page.params.id);
@@ -85,4 +86,5 @@
 	itemRight={ruleRight}
 	{activeId}
 	filters={ruleFilters}
+	{onFilteredOutChange}
 />

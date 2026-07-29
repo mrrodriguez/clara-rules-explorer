@@ -4,6 +4,8 @@
 	import GroupedFilterableNavList from '$lib/components/rulebase/nav/GroupedFilterableNavList.svelte';
 	import { page } from '$app/state';
 
+	let { onFilteredOutChange }: { onFilteredOutChange?: (filteredOut: boolean) => void } = $props();
+
 	const factTypes = $derived<SessionFactTypeInfo[]>(
 		page.data.sessionFactTypes?.types
 			? [...page.data.sessionFactTypes.types].sort((a, b) => a.name.localeCompare(b.name))
@@ -41,4 +43,5 @@
 	itemLabel="types"
 	{itemRight}
 	{activeId}
+	{onFilteredOutChange}
 />

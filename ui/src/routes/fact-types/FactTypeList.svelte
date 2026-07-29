@@ -6,9 +6,10 @@
 
 	interface Props {
 		factTypes: FactTypeSummary[];
+		onFilteredOutChange?: (filteredOut: boolean) => void;
 	}
 
-	let { factTypes }: Props = $props();
+	let { factTypes, onFilteredOutChange }: Props = $props();
 
 	const groupKey = (ft: FactTypeSummary) => splitQualifiedName(ft.name).namespace;
 	const activeId = $derived(page.params.id);
@@ -22,4 +23,5 @@
 	searchPlaceholder="Search fact types..."
 	itemLabel="fact types"
 	{activeId}
+	{onFilteredOutChange}
 />

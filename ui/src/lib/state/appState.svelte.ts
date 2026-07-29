@@ -28,9 +28,10 @@ export class AppState {
 
 	activeContextualMenu = $state<ContextualMenuType | null>(null);
 
-	// Locate-in-list signalling (summary → list communication)
+	// Locate-in-list signalling (summary → list communication).
+	// This is an ephemeral event, not ongoing derived state — the parent
+	// layout handles filtered-out state via callback + context instead.
 	locateRequest = $state<{ name: string; timestamp: number } | null>(null);
-	activeItemFilteredOut = $state<boolean>(false);
 
 	// Derived state
 	isDark = $derived(this.uiTheme === 'dark');

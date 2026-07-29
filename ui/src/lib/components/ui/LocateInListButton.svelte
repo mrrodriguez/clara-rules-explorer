@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { appState } from '$lib/state/appState.svelte';
+	import { getListFilterState } from '$lib/state/listFilterContext.svelte';
 
 	interface Props {
 		/** Fully-qualified name of the item to locate in the list. */
@@ -8,7 +9,8 @@
 
 	let { name }: Props = $props();
 
-	const disabled = $derived(appState.activeItemFilteredOut);
+	const filterState = getListFilterState();
+	const disabled = $derived(filterState.activeItemFilteredOut);
 
 	function handleClick() {
 		appState.requestLocate(name);

@@ -6,9 +6,10 @@
 
 	interface Props {
 		queries: QueryListItem[];
+		onFilteredOutChange?: (filteredOut: boolean) => void;
 	}
 
-	let { queries }: Props = $props();
+	let { queries, onFilteredOutChange }: Props = $props();
 
 	const groupKey = (query: QueryListItem) => query.ns;
 	const activeId = $derived(page.params.id);
@@ -22,4 +23,5 @@
 	searchPlaceholder="Search queries..."
 	itemLabel="queries"
 	{activeId}
+	{onFilteredOutChange}
 />

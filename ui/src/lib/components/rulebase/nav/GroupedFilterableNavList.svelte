@@ -22,7 +22,8 @@
 		activeId,
 		border = true,
 		itemLabel = 'items',
-		filters = []
+		filters = [],
+		onFilteredOutChange
 	}: GroupedFilterableNavListProps<T> = $props();
 
 	// ── State ────────────────────────────────────────────────────────────────
@@ -285,16 +286,10 @@
 		return false;
 	});
 
-	// Sync filtered-out state to appState so summary views can disable the button.
+	// Propagate filtered-out status to the parent layout via callback so it
+	// can relay the value through context to sibling summary views.
 	$effect(() => {
-		appState.activeItemFilteredOut = isActiveItemFilteredOut;
-	});
-
-	// Reset on destroy so a stale value doesn't leak to the next domain.
-	$effect(() => {
-		return () => {
-			appState.activeItemFilteredOut = false;
-		};
+		onFilteredOutChange?.(isActiveItemFilteredOut);
 	});
 
 	// ── Locate-in-list handler ───────────────────────────────────────────────
