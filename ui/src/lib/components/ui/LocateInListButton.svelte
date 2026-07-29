@@ -21,10 +21,10 @@
 	class="btn btn-outline-secondary btn-sm"
 	title={disabled
 		? 'This item is hidden by active filters. Clear filters to enable.'
-		: 'Locate this item in the list'}
+		: 'Reveal this item in the sidebar list'}
 	{disabled}
 	onclick={handleClick}
 >
 	<i class="bi bi-list-ol me-1"></i>
-	Locate in List
+	Reveal
 </button>

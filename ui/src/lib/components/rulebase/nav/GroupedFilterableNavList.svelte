@@ -304,9 +304,14 @@
 
 		handlingLocate = true;
 
-		// Clear search so the item is visible (filters remain — button is
-		// disabled when filters hide the item, so this won't fire then).
+		// Clear search so the item is visible in grouped mode, and
+		// explicitly expand the active namespace in case the user
+		// manually collapsed it (the auto-expand effect only fires on
+		// activeNs change).
 		searchTerm = '';
+		if (activeNs) {
+			expandedGroups[activeNs] = true;
+		}
 
 		// Wait for Svelte to flush the DOM update, then scroll into view.
 		tick().then(() => {
