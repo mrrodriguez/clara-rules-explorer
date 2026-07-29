@@ -227,6 +227,15 @@
 
 	const filteredNsOrder = $derived(nsFilter.getFiltered(view.nsOrder));
 
+	// ── Clear all filters ───────────────────────────────────────────────────
+
+	const anyFilterActive = $derived(nsFilter.active || rulebaseFilter.active);
+
+	function clearAllFilters() {
+		nsFilter.showAll();
+		rulebaseFilter.clearAll();
+	}
+
 	// ── Group helpers ────────────────────────────────────────────────────────
 
 	function toggleGroup(ns: string) {
@@ -422,6 +431,16 @@
 				/>
 			{/each}
 		</FilterDropdown>
+	{/if}
+
+	<!-- Clear all filters (visible when any filter is active) -->
+	{#if anyFilterActive}
+		<div class="px-2 pt-1">
+			<button class="btn btn-outline-danger btn-sm w-100" onclick={clearAllFilters}>
+				<i class="bi bi-x-circle me-1"></i>
+				Clear all filters
+			</button>
+		</div>
 	{/if}
 
 	<!-- Collapse / Expand all (only in grouped mode, > 1 namespace) -->
