@@ -1,20 +1,60 @@
 import { describe, it, expect } from 'vitest';
-import { toUrlId, fromUrlId, getShortName, splitQualifiedName } from './utils';
+import {
+	toRouteId,
+	fromRouteId,
+	getShortName,
+	splitQualifiedName,
+	rulePath,
+	queryPath,
+	factPath
+} from './utils';
 
 describe('utils', () => {
-	describe('toUrlId', () => {
+	describe('toRouteId', () => {
 		it('should replace slash with dot', () => {
-			expect(toUrlId('my.ns/my-rule')).toBe('my.ns.my-rule');
+			expect(toRouteId('my.ns/my-rule')).toBe('my.ns.my-rule');
+		});
+
+		it('should preserve dots in namespace', () => {
+			expect(toRouteId('clojure.core/str')).toBe('clojure.core.str');
 		});
 	});
 
-	describe('fromUrlId', () => {
+	describe('fromRouteId', () => {
 		it('should restore slash from dot', () => {
-			expect(fromUrlId('my.ns.my-rule')).toBe('my.ns/my-rule');
+			expect(fromRouteId('my.ns.my-rule')).toBe('my.ns/my-rule');
+		});
+
+		it('should handle URL-unsafe characters in decoded params', () => {
+			// SvelteKit decodes percent-encoded params, so fromRouteId receives
+			// the raw characters (e.g., 'my.ns.my-rule?') directly.
+			expect(fromRouteId('my.ns.my-rule?')).toBe('my.ns/my-rule?');
 		});
 
 		it('should be idempotent for strings without dots', () => {
-			expect(fromUrlId('my-rule')).toBe('my-rule');
+			expect(fromRouteId('my-rule')).toBe('my-rule');
+		});
+	});
+
+	describe('rulePath', () => {
+		it('should encode URL-unsafe characters', () => {
+			expect(rulePath('my.ns/my-rule?')).toBe('/rules/my.ns.my-rule%3F');
+		});
+
+		it('should handle full path', () => {
+			expect(rulePath('my.ns/my-rule?', true)).toBe('/rules/my.ns.my-rule%3F/full');
+		});
+	});
+
+	describe('queryPath', () => {
+		it('should encode URL-unsafe characters', () => {
+			expect(queryPath('my.ns/my-query#test')).toBe('/queries/my.ns.my-query%23test');
+		});
+	});
+
+	describe('factPath', () => {
+		it('should encode URL-unsafe characters', () => {
+			expect(factPath('my.ns.MyType?extra')).toBe('/fact-types/my.ns.MyType%3Fextra');
 		});
 	});
 

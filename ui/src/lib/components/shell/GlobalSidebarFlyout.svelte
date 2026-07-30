@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { appState } from '$lib/state/appState.svelte';
 	import { CONTEXTUAL_MENU_CONFIG } from '$lib/constants';
-	import { toUrlId } from '$lib/utils';
+	import { toRouteId } from '$lib/utils';
 	import ProductionReferenceLink from '$lib/components/rulebase/ProductionReferenceLink.svelte';
 	import FactTypeReferenceLink from '$lib/components/rulebase/FactTypeReferenceLink.svelte';
 	import type { ProductionReference } from '$lib/types/api';
@@ -48,7 +48,7 @@
 							<FactTypeReferenceLink type={item as string} />
 						{/each}
 					{:else if activeMenu.contentType === 'production'}
-						{#each activeMenu.items as item (toUrlId((item as ProductionReference).name))}
+						{#each activeMenu.items as item (toRouteId((item as ProductionReference).name))}
 							<ProductionReferenceLink ref={item as ProductionReference} fullView={true} />
 						{/each}
 					{/if}

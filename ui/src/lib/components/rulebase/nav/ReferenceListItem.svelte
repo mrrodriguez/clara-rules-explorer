@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import NavigationListItem from '$lib/components/nav/NavigationListItem.svelte';
+	import NavigationListItem from '$lib/components/rulebase/nav/NavigationListItem.svelte';
 	import QualifiedName from '$lib/components/ui/QualifiedName.svelte';
 
 	interface Props {

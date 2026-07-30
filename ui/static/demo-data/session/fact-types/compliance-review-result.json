@@ -1,0 +1,33 @@
+{
+	"name": "compliance-review-result",
+	"count": 1,
+	"inserted-from": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 14,
+					"type": "compliance-review-result",
+					"data": {
+						"app-id": "app-1",
+						"status": "pass",
+						"reviewer": "metadata-review"
+					},
+					"is-root": false,
+					"inserted-from": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					],
+					"used-by": []
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		}
+	],
+	"used-by": [],
+	"ids": [14]
+}

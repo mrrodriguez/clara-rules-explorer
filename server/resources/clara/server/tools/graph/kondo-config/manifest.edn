@@ -1,0 +1,5 @@
+{:files
+ ["config.edn"
+  "imports/clara/rules/config.edn"
+  "imports/clara/rules/hooks/clara_rules.clj_kondo"
+  "manifest.edn"]}

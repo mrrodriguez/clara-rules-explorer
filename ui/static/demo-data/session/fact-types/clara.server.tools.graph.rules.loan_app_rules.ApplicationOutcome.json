@@ -3,11 +3,11 @@
 	"count": 1,
 	"inserted-from": [
 		{
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 			"type": "rule",
 			"facts": [
 				{
-					"id": 12,
+					"id": 13,
 					"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 					"data": {
 						"app-id": "app-1",
@@ -31,7 +31,7 @@
 					"is-root": false,
 					"inserted-from": [
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -54,7 +54,7 @@
 			"type": "query",
 			"facts": [
 				{
-					"id": 12,
+					"id": 13,
 					"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 					"data": {
 						"app-id": "app-1",
@@ -78,7 +78,7 @@
 					"is-root": false,
 					"inserted-from": [
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -95,5 +95,5 @@
 			"ns": ""
 		}
 	],
-	"ids": [12]
+	"ids": [13]
 }

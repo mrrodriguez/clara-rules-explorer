@@ -16,6 +16,11 @@
 					"inserted-from": [],
 					"used-by": [
 						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
 							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 							"type": "rule"
@@ -41,7 +46,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -51,6 +56,59 @@
 		}
 	],
 	"used-by": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 1,
+					"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+					"data": {
+						"app-id": "app-1"
+					},
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+							"ns": "clara.server.tools.graph.rules.loan-app-rules",
+							"type": "rule"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		},
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 			"type": "rule",
@@ -65,6 +123,11 @@
 					"inserted-from": [],
 					"used-by": [
 						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
 							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 							"type": "rule"
@@ -90,7 +153,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -113,6 +176,11 @@
 					"inserted-from": [],
 					"used-by": [
 						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
 							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 							"type": "rule"
@@ -138,7 +206,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -161,6 +229,11 @@
 					"inserted-from": [],
 					"used-by": [
 						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
 							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 							"type": "rule"
@@ -186,7 +259,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -209,6 +282,11 @@
 					"inserted-from": [],
 					"used-by": [
 						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
 							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 							"type": "rule"
@@ -234,7 +312,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -257,6 +335,11 @@
 					"inserted-from": [],
 					"used-by": [
 						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
 							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 							"type": "rule"
@@ -282,7 +365,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -292,7 +375,7 @@
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 			"type": "rule",
 			"facts": [
 				{
@@ -305,6 +388,11 @@
 					"inserted-from": [],
 					"used-by": [
 						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
 							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 							"type": "rule"
@@ -330,7 +418,7 @@
 							"type": "rule"
 						},
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}

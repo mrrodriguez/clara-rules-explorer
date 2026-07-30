@@ -1,5 +1,5 @@
 import { base } from '$app/paths';
-import { toUrlId } from '$lib/utils';
+import { toRouteId } from '$lib/utils';
 import type {
 	RuleSummary,
 	QuerySummary,
@@ -99,7 +99,7 @@ export async function fetchRule(
 	customFetch: typeof fetch = fetch
 ): Promise<RuleSummary> {
 	const response = await customFetch(
-		getUrl(`${API_BASE}/rules/${encodeURIComponent(toUrlId(name))}`)
+		getUrl(`${API_BASE}/rules/${encodeURIComponent(toRouteId(name))}`)
 	);
 	if (!response.ok) {
 		throw new Error(`Failed to fetch rule ${name}: ${response.statusText}`);
@@ -115,7 +115,7 @@ export async function fetchQuery(
 	customFetch: typeof fetch = fetch
 ): Promise<QuerySummary> {
 	const response = await customFetch(
-		getUrl(`${API_BASE}/queries/${encodeURIComponent(toUrlId(name))}`)
+		getUrl(`${API_BASE}/queries/${encodeURIComponent(toRouteId(name))}`)
 	);
 	if (!response.ok) {
 		throw new Error(`Failed to fetch query ${name}: ${response.statusText}`);
@@ -131,7 +131,7 @@ export async function fetchFactType(
 	customFetch: typeof fetch = fetch
 ): Promise<FactTypeSummary> {
 	const response = await customFetch(
-		getUrl(`${API_BASE}/fact-types/${encodeURIComponent(toUrlId(name))}`)
+		getUrl(`${API_BASE}/fact-types/${encodeURIComponent(toRouteId(name))}`)
 	);
 	if (!response.ok) {
 		throw new Error(`Failed to fetch fact type ${name}: ${response.statusText}`);
@@ -164,7 +164,7 @@ export async function fetchSessionFactTypeInstances(
 	customFetch: typeof fetch = fetch
 ): Promise<SessionFactTypeInstancesResponse> {
 	const response = await customFetch(
-		getUrl(`${API_BASE}/session/fact-types/${encodeURIComponent(toUrlId(typeName))}`)
+		getUrl(`${API_BASE}/session/fact-types/${encodeURIComponent(toRouteId(typeName))}`)
 	);
 	if (!response.ok) {
 		throw new Error(`Failed to fetch instances for type ${typeName}: ${response.statusText}`);
@@ -194,7 +194,7 @@ export async function fetchSessionRuleActivity(
 	customFetch: typeof fetch = fetch
 ): Promise<SessionProductionActivityResponse> {
 	const response = await customFetch(
-		getUrl(`${API_BASE}/session/rules/${encodeURIComponent(toUrlId(ruleName))}`)
+		getUrl(`${API_BASE}/session/rules/${encodeURIComponent(toRouteId(ruleName))}`)
 	);
 	if (!response.ok) {
 		throw new Error(
@@ -216,7 +216,7 @@ export async function fetchSessionQueryActivity(
 	customFetch: typeof fetch = fetch
 ): Promise<SessionProductionActivityResponse> {
 	const response = await customFetch(
-		getUrl(`${API_BASE}/session/queries/${encodeURIComponent(toUrlId(queryName))}`)
+		getUrl(`${API_BASE}/session/queries/${encodeURIComponent(toRouteId(queryName))}`)
 	);
 	if (!response.ok) {
 		throw new Error(

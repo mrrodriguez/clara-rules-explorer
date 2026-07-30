@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { factPath } from '$lib/utils';
-	import ReferenceListItem from '$lib/components/nav/ReferenceListItem.svelte';
+	import ReferenceListItem from '$lib/components/rulebase/nav/ReferenceListItem.svelte';
 
 	interface Props {
 		type: string;

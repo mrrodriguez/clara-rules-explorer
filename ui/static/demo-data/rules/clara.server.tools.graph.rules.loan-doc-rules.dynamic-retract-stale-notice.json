@@ -1,0 +1,39 @@
+{
+	"source-rule": false,
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice",
+	"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+		}
+	],
+	"retract-types": ["clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"],
+	"notes": "Stale document notice retracted via Java constructor — fully resolved",
+	"annotation-sources": ["clara-rules/retract-types", "clara-rules/notes"],
+	"insert-types": [],
+	"dynamic-retract-types-detected": {
+		"callsites": [
+			{
+				"source-str": "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")",
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "resolved",
+				"resolved-types": ["clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"]
+			}
+		],
+		"resolution": "full"
+	},
+	"rhs-form": "(do\n (r/retract!\n  (StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"type": "rule"
+		}
+	],
+	"doc": "When doc check passes, retract any stale-document notice via Java constructor.\n   The analyzer captures the retract callsite with source coordinates.",
+	"sink-rule": true,
+	"props": {}
+}

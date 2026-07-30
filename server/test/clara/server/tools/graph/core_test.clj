@@ -110,7 +110,7 @@
           (is (some #{"clara.server.tools.graph.rules.loan_app_facts.Application" "clara.server.tools.graph.rules.loan_app_facts.GivenDocument"}
                     (:lhs-types summary)))
           ;; Verify summary includes downstream info directly
-          (is (some (fn [d] (= "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input" (:name d))) 
+          (is (some (fn [d] (= "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input" (:name d)))
                     (:downstream summary))))))
 
     (testing "Queries summary"
@@ -120,14 +120,14 @@
           (is (= #{"?app-id"} (:params summary)))
           (is (some #{"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"} (:lhs-types summary)))
           ;; Verify summary includes upstream info directly
-          (is (some (fn [u] (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved" (:name u))) 
+          (is (some (fn [u] (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?" (:name u)))
                     (:upstream summary))))
 
         (is (contains? queries-map "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"))
         (let [summary (get queries-map "clara.server.tools.graph.rules.loan-doc-rules/find-document-check")]
           (is (= #{"?app-id"} (:params summary)))
           (is (some #{"clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"} (:lhs-types summary)))
-          (is (some (fn [u] (= "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs" (:name u))) 
+          (is (some (fn [u] (= "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs" (:name u)))
                     (:upstream summary))))))
 
     (testing "Fact types summary"
@@ -167,22 +167,21 @@
       (let [collect-given "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
             collect-req "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
             collect-input "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
-            
+
             summary-given (get rules collect-given)
             summary-input (get rules collect-input)]
-        
+
         ;; collect-app-given-docs inserts AllGivenDocuments
         ;; collect-app-doc-check-input reads AllGivenDocuments
         ;; Thus collect-app-given-docs -> collect-app-doc-check-input
-        
+
         (is (some #{"clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"} (:insert-types summary-given)))
         (is (some #{"clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"} (:lhs-types summary-input)))
-        
+
         ;; Note: summary upstream/downstream entries are maps: {:ns ... :name ... :type ...}
         (is (some (fn [d] (= collect-input (:name d))) (:downstream summary-given)))
         (is (some (fn [u] (= collect-given (:name u))) (:upstream summary-input)))
         (is (some (fn [u] (= collect-req (:name u))) (:upstream summary-input)))))))
-
 
 (deftest test-dep-graph-full
   (let [session (->test-session)
@@ -192,24 +191,35 @@
       (is (= {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
               {:downstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"}},
-              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
+              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
               {:downstream
                #{"clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"},
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"},
                :upstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
               "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"
               {:upstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"},
+               :downstream
+               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
+                 "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"}},
               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
               {:downstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"}},
               "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"
               {:upstream
-               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"}},
+               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
               {:upstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
@@ -224,26 +234,46 @@
               {:upstream
                #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"},
                :downstream
-               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
+               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+                 "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
+                 "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata"
+                 "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
+                 "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
                  "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"}},
-              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
+              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
               {:upstream
-               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
+               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
                  "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"},
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"},
                :downstream
                #{"clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"}},
-              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
+              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
               {:upstream
-               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
+               #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
                  "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"},
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"},
                :downstream
                #{"clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"
-                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"}}}
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
+                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"}},
+              "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+              "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+              "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+              "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}}}
              graph)))))
 
 ;;;;
@@ -290,11 +320,14 @@
     (testing "Fact type summary maintains insertion order (rules first, then queries)"
       (is (= ["clara.server.tools.graph.rules.loan_app_facts.Application"
               "clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
+              "extract-doc-meta"
+              "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta"
               "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"
               "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument"
               "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"
-              "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput"
+              "loan-doc-rules/document-check-input"
               "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"
+              "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"
               "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"
               "clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
               "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"]
@@ -302,14 +335,15 @@
 
     (testing "Fact type summary entry structure"
       (is (= {:name "clara.server.tools.graph.rules.loan_app_facts.Application"
-              :used-by-rules ["clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs"
+              :used-by-rules ["clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta"
+                              "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs"
                               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
                               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
                               "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
                               "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
-                              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"
-                              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"
-                              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending"]
+                              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+                              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                              "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"]
               :used-by-queries []
               :inserted-by-rules []
               :retracted-by-rules []}
@@ -340,7 +374,7 @@
       (let [rule-list (core/rules-list analysis)
             unlinked-item (first (filter #(= unlinked-rule-name (:name %)) rule-list))]
         (is (contains? unlinked-item :unlinked-rule))
-        (is (not (contains? unlinked-item :downstream))))))
+        (is (not (contains? unlinked-item :downstream)))))))
 
 (deftest test-no-output-types-annotation-prevents-unlinked
   (testing "Rule with :clara-rules/no-output-types true is not flagged as unlinked"
@@ -353,4 +387,64 @@
       (is (empty? (:insert-types rule)))
       (is (empty? (:retract-types rule)))
       (is (false? (:sink-rule rule))
-          "No-output rule should not be considered a sink")))))
+          "No-output rule should not be considered a sink"))))
+
+(deftest test-dynamic-detection-in-rules-list
+  (let [session (->test-session)
+        analysis (core/rulebase-analysis session loan-doc-annotations)
+        rule-list (core/rules-list analysis)
+        rule-by-name #(first (filter (fn [r] (= (:name r) %)) rule-list))]
+
+    (testing "Unresolved dynamic-insert rule via helper call"
+      (let [rule (rule-by-name "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review")]
+        (is (contains? rule :unlinked-rule))
+        (is (empty? (:insert-types rule)))
+        (let [dyn (:dynamic-insert-types-detected rule)]
+          (is (= :none (:resolution dyn)))
+          (is (= 1 (count (:callsites dyn))))
+          (is (= [{:source-str "(build-compliance-review ?app-id)"
+                   :ns "clara.server.tools.graph.rules.loan-doc-rules"
+                   :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+                   :status :unresolved}]
+                 (:callsites dyn))))))
+
+    (testing "Unresolved dynamic-insert rule via metadata helper"
+      (let [rule (rule-by-name "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata")]
+        (is (contains? rule :unlinked-rule))
+        (is (empty? (:insert-types rule)))
+        (let [dyn (:dynamic-insert-types-detected rule)]
+          (is (= :none (:resolution dyn)))
+          (is (= 1 (count (:callsites dyn))))
+          (is (= [{:source-str "(build-compliance-via-metadata ?app-id)"
+                   :ns "clara.server.tools.graph.rules.loan-doc-rules"
+                   :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+                   :status :unresolved}]
+                 (:callsites dyn))))))
+
+    (testing "Resolved dynamic-retract rule"
+      (let [rule (rule-by-name "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice")]
+        (is (= ["clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"]
+               (:retract-types rule)))
+        (let [dyn (:dynamic-retract-types-detected rule)]
+          (is (= :full (:resolution dyn)))
+          (is (= 1 (count (:callsites dyn))))
+          (is (= [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
+                   :ns "clara.server.tools.graph.rules.loan-doc-rules"
+                   :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+                   :status :resolved
+                   :resolved-types
+                   ["clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"]}]
+                 (:callsites dyn))))))
+
+    (testing "Unresolved dynamic-insert rule has callsite info but no insert-types"
+      (let [rule (rule-by-name "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail")]
+        (is (contains? rule :unlinked-rule))
+        (is (empty? (:insert-types rule)))
+        (let [dyn (:dynamic-insert-types-detected rule)]
+          (is (= :none (:resolution dyn)))
+          (is (= 1 (count (:callsites dyn))))
+          (is (= [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
+                   :ns "clara.server.tools.graph.rules.loan-doc-rules"
+                   :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+                   :status :unresolved}]
+                 (:callsites dyn))))))))

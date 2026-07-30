@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { fromUrlId } from '$lib/utils';
+	import { fromRouteId } from '$lib/utils';
 	import FactTypeSummary from './FactTypeSummary.svelte';
 
 	let { data } = $props();
 
-	let factTypeName = $derived(fromUrlId(data.id));
+	let factTypeName = $derived(fromRouteId(data.id));
 </script>
 
 {#if data.factType}

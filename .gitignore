@@ -4,11 +4,12 @@ node_modules
 .cpcache
 .lsp
 **/.clj-kondo/.cache/
+.cache
 .nrepl-port
 target
 /server/demo-data/
-.envrc
 .direnv
+.envrc.local
 docs/internal
 ui/docs/internal
 

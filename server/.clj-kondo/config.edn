@@ -1,0 +1,2 @@
+{:exclude-files "src/clara/server/vendor/.*"
+ :lint-as {clara.server.tools.graph.rules.helpers/def-fact-fn clojure.core/defn}}

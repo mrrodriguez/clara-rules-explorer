@@ -2,6 +2,25 @@
   (:require [clara.server.tools.graph.annotations :as ann]
             [clojure.test :refer [deftest is testing]]))
 
+(deftest test-normalize-rule-name
+  (testing "symbol → string"
+    (is (= "my.ns/rule-a" (ann/normalize-rule-name 'my.ns/rule-a))))
+  (testing "string is identity"
+    (is (= "my.ns/rule-a" (ann/normalize-rule-name "my.ns/rule-a"))))
+  (testing "keyword passes through"
+    (is (= :my.ns/rule-a (ann/normalize-rule-name :my.ns/rule-a)))))
+
+(deftest test-get-annotation
+  (let [annotations {"my.ns/rule-a" {:clara-rules/insert-types [:TypeA]}}]
+    (testing "string key lookup"
+      (is (= {:clara-rules/insert-types [:TypeA]}
+             (ann/get-annotation annotations "my.ns/rule-a"))))
+    (testing "symbol key lookup is normalized"
+      (is (= {:clara-rules/insert-types [:TypeA]}
+             (ann/get-annotation annotations 'my.ns/rule-a))))
+    (testing "missing key returns nil"
+      (is (nil? (ann/get-annotation annotations "nonexistent"))))))
+
 (deftest test-resolve-annotations--no-sidecar
   (let [production {:ns-name 'user
                     :name "user/my-rule"
@@ -69,3 +88,150 @@
           sidecar {"user/my-rule" {:clara-rules/insert-types [`String]}}
           resolved (ann/resolve-annotations production sidecar)]
       (is (= [String] (:insert-types resolved))))))
+
+(deftest test-merge-annotations
+  (let [rule-a "my.ns/rule-a"
+        rule-b "my.ns/rule-b"
+        rule-c "my.ns/rule-c"]
+
+    (testing "rules only in annos1 are kept unchanged"
+      (let [annos1 {rule-a {:clara-rules/insert-types [:TypeA]
+                            :clara-rules/notes "note-a"}}
+            merged (ann/merge-annotations annos1 {})]
+        (is (= {:clara-rules/insert-types [:TypeA]
+                :clara-rules/notes "note-a"}
+               (get merged rule-a)))))
+
+    (testing "rules only in annos2 are added"
+      (let [annos2 {rule-a {:clara-rules/insert-types [:TypeA]}}
+            merged (ann/merge-annotations {} annos2)]
+        (is (= {:clara-rules/insert-types [:TypeA]}
+               (get merged rule-a)))))
+
+    (testing "both maps empty"
+      (is (= {} (ann/merge-annotations {} {}))))
+
+    (testing "symbol keys are normalized to strings"
+      (let [annos1-sym {'my.ns/rule-a {:clara-rules/insert-types [:TypeA]}}
+            annos2     {rule-a        {:clara-rules/notes "from-annos2"}}
+            merged (ann/merge-annotations annos1-sym annos2)]
+        (is (= {:clara-rules/insert-types [:TypeA]
+                :clara-rules/notes "from-annos2"}
+               (get merged rule-a))
+            "symbol key in annos1 matches string key in annos2 after normalization")))
+
+    (testing "types are concatenated with default :merge strategy"
+      (let [annos1 {rule-a {:clara-rules/insert-types [:TypeA]}}
+            annos2 {rule-a {:clara-rules/insert-types [:TypeB]}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (= [:TypeA :TypeB]
+               (:clara-rules/insert-types (get merged rule-a)))
+            "both type vectors concatenated, annos1 first")))
+
+    (testing "duplicate types are deduped during merge"
+      (let [annos1 {rule-a {:clara-rules/insert-types [:TypeA :TypeB]}}
+            annos2 {rule-a {:clara-rules/insert-types [:TypeB :TypeC]}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (= [:TypeA :TypeB :TypeC]
+               (:clara-rules/insert-types (get merged rule-a))))))
+
+    (testing ":replace strategy uses annos2 types only"
+      (let [annos1 {rule-a {:clara-rules/insert-types [:TypeA]}}
+            annos2 {rule-a {:clara-rules/insert-types [:TypeB]
+                            :clara-rules/merge-props {:clara-rules/insert-types :replace}}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (= [:TypeB]
+               (:clara-rules/insert-types (get merged rule-a)))
+            "annos2 types replace annos1 types")))
+
+    (testing ":replace strategy for retract-types"
+      (let [annos1 {rule-a {:clara-rules/retract-types [:TypeA]}}
+            annos2 {rule-a {:clara-rules/retract-types [:TypeB]
+                            :clara-rules/merge-props {:clara-rules/retract-types :replace}}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (= [:TypeB]
+               (:clara-rules/retract-types (get merged rule-a))))))
+
+    (testing "merge strategies are independent per field"
+      (let [annos1 {rule-a {:clara-rules/insert-types [:TypeA]
+                            :clara-rules/retract-types [:RetA]}}
+            annos2 {rule-a {:clara-rules/insert-types [:TypeB]
+                            :clara-rules/retract-types [:RetB]
+                            :clara-rules/merge-props {:clara-rules/insert-types :replace
+                                                      :clara-rules/retract-types :merge}}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (= [:TypeB]
+               (:clara-rules/insert-types (get merged rule-a)))
+            "insert-types replaced by annos2")
+        (is (= [:RetA :RetB]
+               (:clara-rules/retract-types (get merged rule-a)))
+            "retract-types concatenated")))
+
+    (testing "no-output-types: annos2 wins when both declare"
+      (let [annos1 {rule-a {:clara-rules/no-output-types false}}
+            annos2 {rule-a {:clara-rules/no-output-types true}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (true? (:clara-rules/no-output-types (get merged rule-a))))))
+
+    (testing "no-output-types: annos2 wins, annos1 didn't declare"
+      (let [annos1 {rule-a {:clara-rules/insert-types [:TypeA]}}
+            annos2 {rule-a {:clara-rules/no-output-types true}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (true? (:clara-rules/no-output-types (get merged rule-a))))))
+
+    (testing "no-output-types: annos1 kept when annos2 doesn't declare"
+      (let [annos1 {rule-a {:clara-rules/no-output-types true}}
+            annos2 {rule-a {:clara-rules/insert-types [:TypeA]}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (true? (:clara-rules/no-output-types (get merged rule-a))))))
+
+    (testing "notes: annos2 wins when both declare"
+      (let [annos1 {rule-a {:clara-rules/notes "annos1-note"}}
+            annos2 {rule-a {:clara-rules/notes "annos2-note"}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (= "annos2-note" (:clara-rules/notes (get merged rule-a))))))
+
+    (testing "notes: annos1 kept when annos2 doesn't declare"
+      (let [annos1 {rule-a {:clara-rules/notes "annos1-note"}}
+            annos2 {rule-a {:clara-rules/insert-types [:TypeA]}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (= "annos1-note" (:clara-rules/notes (get merged rule-a))))))
+
+    (testing "dynamic-insert-types-detected from annos2 flows through when annos1 lacks it"
+      (let [annos1 {rule-a {}}
+            annos2 {rule-a {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "form", :ns-name-sym 'ns, :filename "file"}]}}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (= {:callsites [{:source-str "form", :ns-name-sym 'ns, :filename "file"}]}
+               (:clara-rules/dynamic-insert-types-detected (get merged rule-a))))))
+
+    (testing "dynamic-insert-types-detected: annos2 controls — annos2's value wins"
+      (let [annos1 {rule-a {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "form-1", :ns-name-sym 'ns, :filename "file"}]}}}
+            annos2 {rule-a {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "form-2", :ns-name-sym 'ns, :filename "file"}]}}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (= {:callsites [{:source-str "form-2", :ns-name-sym 'ns, :filename "file"}]}
+               (:clara-rules/dynamic-insert-types-detected (get merged rule-a))))))
+
+    (testing "dynamic-insert-types-detected: omitted when annos2 doesn't declare it"
+      (let [annos1 {rule-a {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "form", :ns-name-sym 'ns, :filename "file"}]}}}
+            annos2 {rule-a {:clara-rules/insert-types [:TypeA]}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (nil? (:clara-rules/dynamic-insert-types-detected (get merged rule-a))))))
+
+    (testing "multiple rules with different merge outcomes"
+      (let [annos1 {rule-a {:clara-rules/insert-types [:TypeA]}
+                    rule-b {:clara-rules/retract-types [:RetB1]}}
+            annos2 {rule-a {:clara-rules/insert-types [:TypeA2]}
+                    rule-b {:clara-rules/retract-types [:RetB2]}
+                    rule-c {:clara-rules/insert-types [:TypeC]}}
+            merged (ann/merge-annotations annos1 annos2)]
+        (is (= [:TypeA :TypeA2]
+               (:clara-rules/insert-types (get merged rule-a)))
+            "rule-a: types concatenated")
+        (is (= [:RetB1 :RetB2]
+               (:clara-rules/retract-types (get merged rule-b)))
+            "rule-b: retract types concatenated")
+        (is (= {:clara-rules/insert-types [:TypeC]}
+               (get merged rule-c))
+            "rule-c: new rule from annos2 added")))))
+
+

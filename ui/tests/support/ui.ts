@@ -15,11 +15,11 @@ export const ui = {
 	list: {
 		/** Returns a locator for an item in an EntityList by its name (title attribute) */
 		item(page: Page, name: string) {
-			return page.locator('.list-group-item').filter({ hasText: name });
+			return page.locator('a.list-group-item').filter({ hasText: name });
 		},
 		/** Returns the first item in an EntityList */
 		firstItem(page: Page) {
-			return page.locator('.list-group-item').first();
+			return page.locator('a.list-group-item').first();
 		}
 	},
 	summary: {
@@ -44,6 +44,78 @@ export const ui = {
 		/** Returns the No Output muted icon in the rule list */
 		noOutputIcon(page: Page) {
 			return page.locator('.list-group-item i.bi-sign-stop.text-secondary');
+		}
+	},
+	groupedNav: {
+		/** The search/filter input */
+		searchInput(page: Page, placeholder: string) {
+			return page.locator(`input[placeholder="${placeholder}"]`);
+		},
+		/** The namespace multi-select filter dropdown toggle button */
+		namespaceFilterButton(page: Page) {
+			return page.locator('button.btn-outline-secondary').filter({ has: page.locator('i.bi-funnel') });
+		},
+		/** The namespace filter dropdown menu (when open) */
+		namespaceFilterDropdown(page: Page) {
+			return page.locator('.dropdown-menu.show');
+		},
+		/** A namespace toggle button inside the filter dropdown */
+		namespaceToggle(page: Page, nsLabel: string) {
+			return page.locator('.dropdown-menu.show button[data-ns]').filter({ hasText: nsLabel });
+		},
+		/** All namespace toggle buttons inside the filter dropdown */
+		allNamespaceToggles(page: Page) {
+			return page.locator('.dropdown-menu.show button[data-ns]');
+		},
+		/** Returns true if the namespace toggle for the given ns is checked (check-square icon) */
+		isNamespaceChecked(page: Page, nsLabel: string) {
+			return page
+				.locator('.dropdown-menu.show button[data-ns]')
+				.filter({ hasText: nsLabel })
+				.locator('i.bi-check-square');
+		},
+		/** The "Show all namespaces" button in the dropdown */
+		showAllNamespacesButton(page: Page) {
+			return page.locator('.dropdown-menu.show button.dropdown-item').filter({ hasText: 'Show all namespaces' });
+		},
+		/** A namespace group toggle button (button, not anchor) */
+		groupToggle(page: Page, ns: string) {
+			return page.locator('button.list-group-item').filter({ hasText: ns });
+		},
+		/** All namespace group toggle buttons */
+		allGroupToggles(page: Page) {
+			return page.locator('button.list-group-item');
+		},
+		/** The "Expand all" button */
+		expandAllButton(page: Page) {
+			return page.locator('button.btn-link').filter({ hasText: 'Expand all' });
+		},
+		/** The "Collapse all" button */
+		collapseAllButton(page: Page) {
+			return page.locator('button.btn-link').filter({ hasText: 'Collapse all' });
+		},
+		/** The empty state message (when no items match) */
+		emptyState(page: Page) {
+			return page.locator('.text-muted.fst-italic');
+		},
+
+		// ── Rulebase filter menu (the "Filters" button with checkboxes) ──
+
+		/** The rulebase filter menu toggle button */
+		filterMenuButton(page: Page) {
+			return page.locator('button.btn-outline-secondary').filter({ has: page.locator('i.bi-funnel-fill') });
+		},
+		/** The rulebase filter dropdown menu (when open) — scoped by its unique content */
+		filterMenuDropdown(page: Page) {
+			return page.locator('.dropdown-menu.show').filter({ hasText: 'Clear all filters' });
+		},
+		/** A filter checkbox inside the filter menu dropdown */
+		filterOption(page: Page, label: string) {
+			return page.locator('.dropdown-menu.show button.dropdown-item').filter({ hasText: label });
+		},
+		/** The "Clear all filters" button inside the filter menu dropdown */
+		clearAllFiltersButton(page: Page) {
+			return page.locator('.dropdown-menu.show button.dropdown-item').filter({ hasText: 'Clear all filters' });
 		}
 	}
 };

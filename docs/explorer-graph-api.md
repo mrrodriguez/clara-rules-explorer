@@ -112,6 +112,50 @@ List of all rules with lightweight summaries (load order).
 | `upstream` | array? | Rules/query-names whose insert types feed this rule |
 | `downstream` | array? | Rules/queries that consume this rule's insert types |
 
+**Optional dynamic detection fields:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `dynamic-insert-types-detected` | object? | Present when the analyzer detected dynamic `insert!` callsites. Each callsite carries a resolution status: constructor callsites resolve automatically (see `analyze.rhs`); everything else defers to the caller-supplied `:callsite-resolver-fn` or remains captured as unresolved. |
+| `dynamic-retract-types-detected` | object? | Same as above, for `retract!` callsites. |
+
+**Dynamic detection object** (`dynamic-insert-types-detected` / `dynamic-retract-types-detected`):
+
+```json
+{
+  "resolution": "full",
+  "callsites": [
+    {
+      "source-str": "(with-meta {:app-id ?app-id} {:type :case/metadata-output})",
+      "ns": "my.ns",
+      "filename": "src/my/ns.clj",
+      "status": "resolved",
+      "resolved-types": [":case/metadata-output"]
+    }
+  ]
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `resolution` | string? | Aggregate resolution status: `"full"` (all callsites resolved), `"partial"` (some resolved), `"none"` (none resolved). Omitted for plain (unprocessed) dynamic detections. |
+| `callsites` | object[] | One entry per dynamic `insert!`/`retract!` call site. |
+
+**Callsite entry:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `source-str` | string | The extracted Clojure argument form passed to `insert!`/`retract!`. |
+| `ns` | string | Fully qualified namespace string (e.g., `"my.ns"`). |
+| `filename` | string | Source file path where the callsite was detected. |
+| `status` | string? | Resolution status of this callsite. `"resolved"` (single type), `"resolved-multi"` (multiple types), `"unresolved"` (could not determine). |
+| `resolved-types` | string[]? | Concrete fact type(s) resolved for this callsite. Present when `status` is `"resolved"` or `"resolved-multi"`. |
+| `resolution-method` | string? | Method used for `"resolved-multi"` resolution (e.g., `":repl-config-enumeration"`). |
+| `constructor-sym` | string? | Fully-qualified constructor symbol when resolved via a `:fact-constructors` spec. |
+| `via` | object? | Provenance. Constructor-path callsites carry `boundary-var-name-sym` + `callstack` (how the constructor was reached from the `insert!`/`retract!`). Heuristic record-ctor-scan callsites instead carry `{"source": "record-ctor-scan"}` with no `callstack` — weaker, subtree-wide evidence that caller-driven resolution did not account for the inserter's boundary arguments. See [Rule Annotations](../server/docs/rule-annotations.md#heuristic-record-ctor-scan-fallback). |
+| `fact-type` | string? | Var-alias context: the LHS-bound fact type that linked the aliased var. Present only when the callsite was discovered through a `:fact-type-spec-fn` var-alias chain (such callsites bypass the constructor chain and are `"unresolved"` unless the caller's resolver resolves them). |
+| `fact-type-spec` | object? | The spec map returned for that fact type, with stringified values (e.g., `{"aliases-var": "my.ns/the-fn"}`). Present under the same conditions as `fact-type`. |
+
 **`unlinked-rule` object:**
 
 | Key | Type | Description |
@@ -486,34 +530,11 @@ IDs are stable **within a single snapshot** and deterministic for the same sessi
 
 ## Annotations & Metadata
 
-The API supports two paths for declaring rule metadata used in dependency graph construction:
+The API supports inline rule `:props` maps and sidecar EDN files to declare rule metadata (such as insert and retract types). 
 
-### Path A — Rule `:props` map
+For the complete schema, merge configurations, and dynamic callsite details, refer to the dedicated [Rule Annotations Documentation](../server/docs/rule-annotations.md).
 
-Keys in the `defrule` body `:props` map:
-- `:clara-rules/insert-types` — types the RHS may insert
-- `:clara-rules/retract-types` — types the RHS may retract
-- `:clara-rules/no-output-types` — boolean; when `true`, marks the rule as a pure side-effect rule with no downstream inserts/retracts (suppresses unlinked-rule detection)
-- `:clara-rules/notes` — free-form documentation
-
-### Path B — Sidecar EDN file
-
-Keyed by rule FQ-name with `clara-rules/` qualified keys:
-
-```edn
-{"my.app/cool-customer" {:clara-rules/insert-types [my.app.HappyCustomer]
-                          :clara-rules/notes "auto-generated"}
- "my.app/legacy-rule"   {:clara-rules/insert-types [my.app.V2Fact]
-                          :clara-rules/merge-props {:clara-rules/insert-types :replace}}}
-```
-
-**Precedence**: By default, sidecar `insert-types` and `retract-types` are **merged** (unioned) with props. Use `:clara-rules/merge-props` with a per-category map to override the strategy per type:
-
-| Key | Value | Description |
-|-----|-------|-------------|
-| `:clara-rules/merge-props` | map | Per-category merge strategy. Each key is an annotation category (`:clara-rules/insert-types`, `:clara-rules/retract-types`), each value is `:merge` (default) or `:replace`. |
-
-Notes always use override semantics: sidecar note wins if present, otherwise falls back to props.
+### Annotation Resolution Status
 
 The `resolved-annotation-data` field on each rule/query maps each annotation key to its resolution status:
 

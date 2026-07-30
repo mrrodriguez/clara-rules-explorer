@@ -24,18 +24,18 @@ We set `prerender.handleUnseenRoutes: 'ignore'` in `svelte.config.js` to prevent
 
 ## 3. Step-by-Step Implementation
 
-### Step 1: Install Svelte Static Adapter
-Install the static adapter as a devDependency in the `ui` directory:
+### Step 1: Scrape Demo Data
+Before building, make sure the backend is running locally (default: port `9001` per `ui/bin/scrape-demo-data.js`). Then run the scraper script in the `ui` directory to fetch the current API responses and save them as static JSON files:
 ```bash
 cd ui
 pnpm install
-pnpm add -D @sveltejs/adapter-static
+pnpm run scrape:demo
 ```
 
 ### Step 2: Build the Demo Files
 Compile the static build files:
 ```bash
-pnpm build:demo
+pnpm run build:demo
 ```
 This script (configured in `ui/package.json`) runs the build with `VITE_DEMO_MODE=true` and sets the repository subdirectory base path (`BASE_PATH="/clara-rules-explorer"`).
 

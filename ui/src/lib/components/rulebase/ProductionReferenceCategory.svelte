@@ -10,6 +10,7 @@
 		items?: (ProductionReference | string)[];
 		fullView?: boolean;
 		class?: string;
+		maxVisibleItems?: number;
 		children?: Snippet;
 	}
 
@@ -19,8 +20,15 @@
 		items = [],
 		fullView = false,
 		class: className = '',
+		maxVisibleItems = 6,
 		children
 	}: Props = $props();
+
+	const scrollable = $derived(items.length >= maxVisibleItems);
+
+	// Per-item height: py-2 (1rem vertical) + QualifiedName two-line text (~2rem) = ~3rem.
+	// Add 0.25rem buffer so the last visible item renders nearly fully.
+	const scrollMaxHeight = $derived(`${maxVisibleItems * 3 + 0.25}rem`);
 </script>
 
 <div class="mb-3 {className}">
@@ -29,10 +37,18 @@
 			<i class="bi {icon} me-2 opacity-75"></i>
 		{/if}
 		{title}
+		{#if items.length > 0}
+			<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle ms-2"
+				>{items.length}</span
+			>
+		{/if}
 	</h6>
 
 	{#if items.length > 0}
-		<div class="list-group list-group-flush border rounded shadow-sm overflow-hidden">
+		<div
+			class="list-group list-group-flush border rounded shadow-sm"
+			style={scrollable ? `max-height: ${scrollMaxHeight}; overflow-y: auto;` : ''}
+		>
 			{#each items as item (typeof item === 'string' ? item : item.name)}
 				{#if typeof item === 'string'}
 					<FactTypeReferenceLink type={item} />

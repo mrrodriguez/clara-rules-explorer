@@ -59,7 +59,7 @@ This skill provides guidance and enforcement of Svelte 5 and SvelteKit developme
   - **Reactive State (`.svelte.ts`)**: Variables that change over time and trigger UI updates (e.g., `uiTheme`, `isSidebarOpen`). These belong in state classes using `$state`.
   - **Static Configuration (`.ts`)**: Constant objects, lookup tables, or metadata that never change (e.g., `NAV_CONFIG`, `CONTEXTUAL_MENU_CONFIG`). These MUST be moved to a `src/lib/constants.ts` or similar file to keep state files lean.
   - **UI Types:** Place UI-specific types (e.g., `ContextualMenuType`) in `src/lib/types/ui.ts` to prevent circular dependencies between state and constants.
-- **Exported Prop Types:** Export an interface for component props (e.g., `export interface MyComponentProps`) so that parent components can use it for type-safe configuration arrays.
+- **Exported Prop Types:** Export an interface for component props (e.g., `export interface MyComponentProps`) so that parent components can use it for type-safe configuration arrays. For generic components, extract the interface to a co-located `<ComponentName>Props.ts` file — Svelte's instance `<script>` does not support `export` on types that reference component-level generics. Import it into the component and re-use the same type in `$props()`.
 - **Reactive Configs:** When defining configuration arrays that depend on reactive props (like `data`), wrap the array in a `$derived` rune. This avoids "state referenced locally" warnings and ensures the UI stays in sync with incoming data.
   - *Correct:* `const cards = $derived<CardProps[]>([...])`
   - *Incorrect:* `const cards: CardProps[] = [...]` (Only captures initial value)
@@ -93,45 +93,39 @@ cd ui && pnpm run test:e2e
   - Fix all TypeScript errors before merging code
   - Address all ESLint warnings to maintain code quality
 
-### 6. Documentation & Learning (Personal)
-The user is learning Svelte 5 by drawing analogies to React. This journey is documented in `ui/docs/svelte-overview.md`.
-- **Proactive Documentation:** When you encounter or implement a Svelte concept that is not yet covered (or could be better explained) in `ui/docs/svelte-overview.md`, you MUST propose an update to that file to capture the learning for the user.
-- **Skill Maintenance:** You MUST treat this `SKILL.md` file as a living document. Whenever you establish a new best practice or architectural rule during development, you must update this file to ensure the standard is captured for future turns.
-- **Analogy Consistency:** Maintain the "React Developer" perspective when updating the overview.
-
-### 7. Performance & Optimization
+### 6. Performance & Optimization
 - **Component Rendering:** Avoid unnecessary re-renders by properly using `$derived` and `$state` values
 - **Event Handling:** Use Svelte's built-in event delegation for better performance
 - **Data Fetching:** Prefer SvelteKit's server-side rendering and data fetching capabilities for improved performance
 - **Memory Management:** Clean up subscriptions and effects properly to avoid memory leaks
 - **Bundle Optimization:** Minimize the use of heavy dependencies and consider code splitting for large applications
 
-### 8. SvelteKit Specific Practices
+### 7. SvelteKit Specific Practices
 - **Routing:** Use SvelteKit's file-system based routing consistently and take advantage of dynamic routes
 - **Server-Side Rendering:** Utilize SvelteKit's SSR capabilities for better performance and SEO
 - **API Routes:** Implement API routes in `src/routes/api/` with proper error handling
 - **Middleware:** Use SvelteKit's middleware for cross-cutting concerns like authentication
 - **Static Assets:** Place static assets in `static/` directory and use the `asset` helper for dynamic asset references
 
-### 9. Testing
+### 8. Testing
 - **Unit Tests:** Write unit tests for components using Vitest and the Svelte testing library.
 - **End-to-End Tests:** Use Playwright for comprehensive end-to-end testing. E2E tests are located in `tests/` and should match the `*.e2e.ts` file pattern.
 - **Test Coverage:** Aim for high test coverage, especially for business logic and complex components.
 - **Mocking:** Use appropriate mocking strategies for API calls and external dependencies.
 
-### 10. Accessibility
+### 9. Accessibility
 - **Semantic HTML:** Use proper semantic HTML elements for better accessibility
 - **ARIA Attributes:** Implement appropriate ARIA attributes where needed
 - **Keyboard Navigation:** Ensure components are fully keyboard accessible
 - **Screen Reader Support:** Test with screen readers to ensure proper reading order and labeling
 
-### 11. Security
+### 10. Security
 - **XSS Prevention:** Svelte's default templating prevents XSS, but be careful with user-provided content
 - **Input Sanitization:** Sanitize user input when processing it
 - **Security Headers:** Configure appropriate security headers in SvelteKit
 - **Authentication:** Implement proper authentication and authorization patterns
 
-### 12. Deployment & CI/CD
+### 11. Deployment & CI/CD
 - **Build Optimization:** Use SvelteKit's built-in optimizations for production builds
 - **Environment Variables:** Use proper environment variables for different deployment environments
 - **Monitoring:** Implement basic application monitoring and error tracking

@@ -7,6 +7,7 @@
             [schema.core :as s]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.memory :as memory]
+            [clara.server.tools.graph.analyze :as analyze]
             [clojure.string :as str]))
 
 (defn- json-mapper []
@@ -50,6 +51,36 @@
    (s/optional-key :fact-binding) s/Any
    s/Keyword s/Any})
 
+(s/defschema ViaEntry
+  "A single entry in a constructor callstack chain."
+  {:var-name-sym s/Str})
+
+(s/defschema ViaChain
+  "Provenance chain from a boundary fn to a constructor callsite.
+   `:source` marks heuristic provenance — `:record-ctor-scan` when the
+   callsite comes from the subtree-wide record-ctor scan fallback rather
+   than a traced call chain; heuristic entries have no `:callstack`."
+  {(s/optional-key :boundary-var-name-sym) s/Str
+   (s/optional-key :callstack) [ViaEntry]
+   (s/optional-key :source) s/Keyword})
+
+(s/defschema DynamicCallsiteEntry
+  "A single dynamic-insert/retract callsite with source coordinates
+   and optional resolution info."
+  {:source-str s/Str
+   :ns s/Str
+   :filename s/Str
+   (s/optional-key :status) s/Keyword
+   (s/optional-key :resolved-types) [s/Str]
+   (s/optional-key :constructor-sym) s/Str
+   (s/optional-key :via) ViaChain})
+
+(s/defschema DynamicDetectionInfo
+  "Info about dynamic insert/retract callsites detected by the analyzer."
+  {(s/optional-key :callsites) [DynamicCallsiteEntry]
+   (s/optional-key :resolution) (s/enum :full :partial :none)
+   (s/optional-key :fact-instance-derived-types) [s/Str]})
+
 (s/defschema RuleListItem
   "Lightweight rule summary (list endpoint)."
   {:name          s/Str
@@ -61,10 +92,12 @@
    :source-rule   s/Bool
    :sink-rule     s/Bool
    (s/optional-key :unlinked-rule) (s/maybe {:downstream (s/enum :unknown)
-                                              :reason s/Str})
+                                             :reason s/Str})
    (s/optional-key :no-output-types) s/Bool
    (s/optional-key :upstream)   [ProductionDep]
-   (s/optional-key :downstream) [ProductionDep]})
+   (s/optional-key :downstream) [ProductionDep]
+   (s/optional-key :dynamic-insert-types-detected) DynamicDetectionInfo
+   (s/optional-key :dynamic-retract-types-detected) DynamicDetectionInfo})
 
 (s/defschema Rule
   "Full rule detail with LHS/RHS forms, props, and annotations."
@@ -189,65 +222,89 @@
                  status-404? {:status (s/eq 404) :body ring-error-body}))
 
 (defn- get-snapshot [session-atom snapshot-cache]
-  (let [session @session-atom]
-    (if (and @snapshot-cache (= (:session @snapshot-cache) session))
-      (:snapshot @snapshot-cache)
+  (let [session @session-atom
+        cached @snapshot-cache]
+    (if (and cached (= (:session cached) session))
+      (:snapshot cached)
       (let [snapshot (memory/session-snapshot session)]
         (reset! snapshot-cache {:session session :snapshot snapshot})
         snapshot))))
 
+(defn- enriched-annotations
+  "Returns annotations enriched with fact-type provenance from the session's
+   working memory when a live session is available.  Takes already-derefed
+   values (not atoms) to make it clear this is a pure function."
+  [session annotations]
+  (if (instance? clara.rules.engine.LocalSession session)
+    (analyze/enrich-annotations-from-session session annotations)
+    annotations))
+
+(defn- get-analysis
+  "Returns the cached rulebase-analysis, rebuilding only when the session or
+   annotations have changed.  Each detail handler was previously calling
+   core/rulebase-analysis on every request, which builds all rules, queries,
+   fact-types, the dep graph, and nodes — even to serve a single rule lookup."
+  [session-atom annotations-atom analysis-cache]
+  (let [session @session-atom
+        annotations @annotations-atom
+        cached @analysis-cache]
+    (if (and cached
+             (identical? (:session cached) session)
+             (identical? (:annotations cached) annotations))
+      (:analysis cached)
+      (let [analysis (core/rulebase-analysis
+                      session
+                      (enriched-annotations session annotations))]
+        (reset! analysis-cache {:session session
+                                :annotations annotations
+                                :analysis analysis})
+        analysis))))
+
 (s/defn handle-get-rulebase-summary :- {:status (s/eq 200) :body RulebaseSummary}
-  [session-atom annotations-atom _req]
-  (let [analysis (core/rulebase-analysis @session-atom @annotations-atom)]
-    {:status 200
-     :body (core/rulebase-summary analysis)}))
+  [session-atom annotations-atom analysis-cache _req]
+  {:status 200
+   :body (core/rulebase-summary (get-analysis session-atom annotations-atom analysis-cache))})
 
 (defn- handle-get-analysis
-  [session-atom annotations-atom _req]
+  [session-atom annotations-atom analysis-cache _req]
   {:status 200
-   :body (core/rulebase-analysis @session-atom @annotations-atom)})
+   :body (get-analysis session-atom annotations-atom analysis-cache)})
 
 (s/defn handle-get-rules :- {:status (s/eq 200) :body {:rules [RuleListItem]}}
-  [session-atom annotations-atom _req]
-  (let [analysis (core/rulebase-analysis @session-atom @annotations-atom)]
-    {:status 200
-     :body {:rules (core/rules-list analysis)}}))
+  [session-atom annotations-atom analysis-cache _req]
+  {:status 200
+   :body {:rules (core/rules-list (get-analysis session-atom annotations-atom analysis-cache))}})
 
 (s/defn handle-get-rule :- GetRuleResponse
-  [session-atom annotations-atom req]
+  [session-atom annotations-atom analysis-cache req]
   (let [fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
-        analysis (core/rulebase-analysis @session-atom @annotations-atom)
-        rule (get-in analysis [:rules fq-name])]
+        rule (get-in (get-analysis session-atom annotations-atom analysis-cache) [:rules fq-name])]
     (if rule
       {:status 200 :body rule}
       {:status 404 :body {:error "Rule not found"}})))
 
 (s/defn handle-get-queries :- {:status (s/eq 200) :body {:queries [QueryListItem]}}
-  [session-atom annotations-atom _req]
-  (let [analysis (core/rulebase-analysis @session-atom @annotations-atom)]
-    {:status 200
-     :body {:queries (core/queries-list analysis)}}))
+  [session-atom annotations-atom analysis-cache _req]
+  {:status 200
+   :body {:queries (core/queries-list (get-analysis session-atom annotations-atom analysis-cache))}})
 
 (s/defn handle-get-query :- GetQueryResponse
-  [session-atom annotations-atom req]
+  [session-atom annotations-atom analysis-cache req]
   (let [fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
-        analysis (core/rulebase-analysis @session-atom @annotations-atom)
-        query (get-in analysis [:queries fq-name])]
+        query (get-in (get-analysis session-atom annotations-atom analysis-cache) [:queries fq-name])]
     (if query
       {:status 200 :body query}
       {:status 404 :body {:error "Query not found"}})))
 
 (s/defn handle-get-fact-types :- {:status (s/eq 200) :body {:fact-types [FactTypeListItem]}}
-  [session-atom annotations-atom _req]
-  (let [analysis (core/rulebase-analysis @session-atom @annotations-atom)]
-    {:status 200
-     :body {:fact-types (core/fact-types-list analysis)}}))
+  [session-atom annotations-atom analysis-cache _req]
+  {:status 200
+   :body {:fact-types (core/fact-types-list (get-analysis session-atom annotations-atom analysis-cache))}})
 
 (s/defn handle-get-fact-type :- GetFactTypeResponse
-  [session-atom annotations-atom req]
+  [session-atom annotations-atom analysis-cache req]
   (let [p (get-in req [:path-params :fq-name])
-        analysis (core/rulebase-analysis @session-atom @annotations-atom)
-        fact-types (:fact-types analysis)
+        fact-types (:fact-types (get-analysis session-atom annotations-atom analysis-cache))
         fact-type (or (get fact-types p)
                       (get fact-types (fq-name-from-param p)))]
     (if fact-type
@@ -318,33 +375,33 @@
   {:status 501 :body {:error "Reload not implemented in api.clj (requires config path)"}})
 
 (defn router
-  [session-atom annotations-atom]
+  [session-atom annotations-atom analysis-cache]
   (let [snapshot-cache (atom nil)]
     (ring/router
      [["/v1"
        ["/rulebase-summary"
-        {:get (partial handle-get-rulebase-summary session-atom annotations-atom)}]
+        {:get (partial handle-get-rulebase-summary session-atom annotations-atom analysis-cache)}]
 
        ["/analysis"
-        {:get (partial handle-get-analysis session-atom annotations-atom)}]
+        {:get (partial handle-get-analysis session-atom annotations-atom analysis-cache)}]
 
        ["/rules"
         [""
-         {:get (partial handle-get-rules session-atom annotations-atom)}]
+         {:get (partial handle-get-rules session-atom annotations-atom analysis-cache)}]
         ["/:fq-name"
-         {:get (partial handle-get-rule session-atom annotations-atom)}]]
+         {:get (partial handle-get-rule session-atom annotations-atom analysis-cache)}]]
 
        ["/queries"
         [""
-         {:get (partial handle-get-queries session-atom annotations-atom)}]
+         {:get (partial handle-get-queries session-atom annotations-atom analysis-cache)}]
         ["/:fq-name"
-         {:get (partial handle-get-query session-atom annotations-atom)}]]
+         {:get (partial handle-get-query session-atom annotations-atom analysis-cache)}]]
 
        ["/fact-types"
         [""
-         {:get (partial handle-get-fact-types session-atom annotations-atom)}]
+         {:get (partial handle-get-fact-types session-atom annotations-atom analysis-cache)}]
         ["/:fq-name"
-         {:get (partial handle-get-fact-type session-atom annotations-atom)}]]
+         {:get (partial handle-get-fact-type session-atom annotations-atom analysis-cache)}]]
 
        ["/session"
         ["/fact-types"
@@ -373,7 +430,18 @@
                                   {:mapper (json-mapper)}))
              :middleware [muuntaja/format-middleware]}})))
 
-(defn app [session-atom annotations-atom]
-  (ring/ring-handler
-   (router session-atom annotations-atom)
-   (ring/create-default-handler)))
+(defn warm-analysis-cache!
+  "Eagerly populates the analysis cache.  Call during server startup so the
+   first request does not pay the full rulebase-analysis build cost."
+  [session-atom annotations-atom analysis-cache]
+  (get-analysis session-atom annotations-atom analysis-cache)
+  nil)
+
+(defn app
+  "Returns {:keys [handler analysis-cache]}."
+  [session-atom annotations-atom]
+  (let [analysis-cache (atom nil)]
+    {:handler (ring/ring-handler
+               (router session-atom annotations-atom analysis-cache)
+               (ring/create-default-handler))
+     :analysis-cache analysis-cache}))

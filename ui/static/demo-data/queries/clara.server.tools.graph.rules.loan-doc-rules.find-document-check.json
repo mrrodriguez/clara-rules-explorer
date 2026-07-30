@@ -1,5 +1,5 @@
 {
-	"ns": "",
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/find-document-check",
 	"params": ["?app-id"],
 	"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],

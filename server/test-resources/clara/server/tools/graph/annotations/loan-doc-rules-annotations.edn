@@ -1,14 +1,86 @@
-{clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs
+{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
  {:clara-rules/insert-types [AllGivenDocuments]}
 
- clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
  {:clara-rules/insert-types [AllRequiredDocuments]}
 
- clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input
- {:clara-rules/insert-types [DocumentCheckInput]}
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta"
+ {:clara-rules/insert-types [clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta]}
 
- clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs
+"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
  {:clara-rules/insert-types [DocumentCheck]}
 
- clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs
- {:clara-rules/no-output-types true}}
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs"
+ {:clara-rules/no-output-types true}
+
+ ;; Resolved via :fact-constructor-match-fn / :fact-constructor-type-resolver-fn
+ ;; The analyzer traces through ->document-check-input → helpers/->fact to
+ ;; discover the :loan-doc-rules/document-check-input fact type.
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
+ {:clara-rules/insert-types [:loan-doc-rules/document-check-input]
+  :clara-rules/dynamic-insert-types-detected
+  {:callsites
+   [{:source-str "(h/->fact :loan-doc-rules/document-check-input data)"
+     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
+     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :status :resolved
+     :resolved-types [:loan-doc-rules/document-check-input]
+     :constructor-sym clara.server.tools.graph.rules.helpers/->fact
+     :via {:boundary-var-name-sym clara.rules/insert!
+           :callstack [{:var-name-sym clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input}
+                       {:var-name-sym clara.server.tools.graph.rules.loan-doc-rules/->document-check-input}
+                       {:var-name-sym clara.server.tools.graph.rules.helpers/->fact}]}}]
+   :resolution :full}}
+
+ ;; ---------------------------------------------------------------------------
+ ;; Dynamic rule annotations — consistent with the automatic session-based
+ ;; pipeline (see clara.server.tools.graph.analyze / analyze.rhs): direct
+ ;; constructor callsites resolve; helper calls defer to the caller.
+ ;; ---------------------------------------------------------------------------
+
+ ;; Unresolved: helper-call insert (automatic chain reports unresolved; resolve
+ ;; via :callsite-resolver-fn or declare insert-types manually)
+ "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
+ {:clara-rules/dynamic-insert-types-detected
+  {:callsites
+   [{:source-str "(build-compliance-review ?app-id)"
+     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
+     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :status :unresolved}]
+   :resolution :none}
+  :clara-rules/notes "Compliance review inserted via helper call — unresolved by automatic analysis"}
+
+ ;; Unresolved: helper-call insert (metadata variant)
+ "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata"
+ {:clara-rules/dynamic-insert-types-detected
+  {:callsites
+   [{:source-str "(build-compliance-via-metadata ?app-id)"
+     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
+     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :status :unresolved}]
+   :resolution :none}
+  :clara-rules/notes "Compliance review inserted via metadata helper — unresolved by automatic analysis"}
+
+ ;; Resolved: direct Java-constructor retract (the automatic chain resolves this)
+ "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
+ {:clara-rules/retract-types [StaleDocumentNotice]
+  :clara-rules/dynamic-retract-types-detected
+  {:callsites
+   [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
+     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
+     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :status :resolved
+     :resolved-types [StaleDocumentNotice]}]
+   :resolution :full}
+  :clara-rules/notes "Stale document notice retracted via Java constructor — fully resolved"}
+
+ ;; Unresolved: opaque builder insert
+ "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
+ {:clara-rules/dynamic-insert-types-detected
+  {:callsites
+   [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
+     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
+     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+     :status :unresolved}]
+   :resolution :none}
+  :clara-rules/notes "Audit trail insert via opaque builder — unresolved, type unknown"}}

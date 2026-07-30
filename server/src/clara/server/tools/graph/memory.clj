@@ -1,11 +1,26 @@
 (ns clara.server.tools.graph.memory
-  "Logic for analyzing and snapshotting Clara Rules working memory."
+  "Helpers for analyzing and snapshotting Clara Rules working memory."
   (:require [clara.server.vendor.tools.inspect :as inspect]
             [clara.rules.engine :as eng]
             [clara.rules.memory :as mem]
             [clara.rules.platform :as platform]
             [clara.server.tools.graph.serialize :as serialize]
             [clara.server.tools.graph.core :as core]))
+
+(defn- deterministic-fact-str
+  "Returns a deterministic pr-str representation of a fact for stable sorting.
+   Recursively sorts maps and sets to guarantee consistent ordering."
+  [fact]
+  (let [pruned (serialize/prune-fns fact)]
+    (letfn [(canonicalize [x]
+              (cond
+                (map? x) (into (sorted-map)
+                               (map (fn [[k v]] [(canonicalize k) (canonicalize v)]))
+                               x)
+                (set? x) (into (sorted-set) (map canonicalize) x)
+                (sequential? x) (mapv canonicalize x)
+                :else x))]
+      (pr-str (canonicalize pruned)))))
 
 (defn- extract-match-facts
   "Returns a sequence of actual facts involved in a match, skipping accumulator
@@ -42,7 +57,7 @@
                    ft (fact-type-fn fact)]
                [(get fact-type-order ft Integer/MAX_VALUE)
                 (str ft)
-                (hash fact)]))
+                (deterministic-fact-str fact)]))
            facts))
 
 (defn- build-id-map [sorted-facts]
@@ -179,7 +194,7 @@
          :let [id (get-fact-id fact)]
          :when id
          :let [fact-entry (get fact-table id)]]
-     (assoc fact-entry :data bindings))))
+     (assoc fact-entry :data (serialize/prune-fns bindings)))))
 
 (defn- build-rule-match-index
   [rule-matches

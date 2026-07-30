@@ -7,7 +7,7 @@
 			"type": "rule",
 			"facts": [
 				{
-					"id": 13,
+					"id": 16,
 					"type": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
 					"data": {
 						"app-id": "app-1",
@@ -33,5 +33,5 @@
 		}
 	],
 	"used-by": [],
-	"ids": [13]
+	"ids": [16]
 }

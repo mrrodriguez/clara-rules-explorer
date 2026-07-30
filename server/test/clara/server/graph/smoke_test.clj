@@ -1,19 +1,19 @@
 (ns clara.server.graph.smoke-test
   (:require [clara.rules :as r]
-            [clj-http.client
-             :as client]
+            [clj-http.client :as client]
             [jsonista.core :as json]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clara.server.graph.server :as server]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clojure.java.io :as io]))
 
-(def port 9001)
+(def ^:dynamic *port* 9001)
 
 (defn ->url
   [path]
-  (format "http://localhost:%s/v1%s" port path))
+  (format "http://localhost:%s/v1%s" *port* path))
 
 (defn run-app-outcome-approved
   [session]
@@ -31,12 +31,21 @@
   (some-> (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn")
           .getPath))
 
-(defn run-smoke-test []
-  (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
-                                  'clara.server.tools.graph.rules.loan-app-rules)
-                    run-app-outcome-approved)
-        server (server/start! {:port port :session session :annotations-file loan-doc-annotations-path})]
-    server))
+(defn run-rules
+  ([]
+   (run-rules {:with-facts? true}))
+  ([{:keys [with-facts?]}]
+   (cond-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                         'clara.server.tools.graph.rules.loan-app-rules)
+     with-facts? run-app-outcome-approved)))
+
+(defn run-smoke-test
+  ([]
+   (run-smoke-test {:session-opts {:with-facts? true}}))
+  ([{:keys [session-opts]}]
+   (let [session (run-rules session-opts)
+         server (server/start! {:port *port* :session session :annotations-file loan-doc-annotations-path})]
+     server)))
 
 (defn get-rules []
   (-> (client/get (->url "/rules") {:accept :json})
@@ -115,12 +124,81 @@
 
 (defn post-annotations-reload []
   (-> (client/post (->url "/annotations/reload") {:accept :json})
-      :body
-      json/read-value))
+      :status))
+
+(def ^:dynamic *server* nil)
+
+(defn with-server [f]
+  (binding [*port* 19001]
+    (let [server (run-smoke-test)]
+      (binding [*server* server]
+        (try
+          (f)
+          (finally
+            (server/stop!)))))))
+
+(use-fixtures :once with-server)
+
+(deftest test-rulebase-analysis-endpoints
+  (testing "Summary and analysis"
+    (let [summary (get-rulebase-summary)
+          analysis (get-analysis)]
+      (is (some? summary))
+      (is (some? analysis))))
+
+  (testing "Rules endpoints"
+    (let [rules (get-rules)
+          rule (get-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved%3F")]
+      (is (seq rules))
+      (is (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?" (get rule "name")))))
+
+  (testing "Queries endpoints"
+    (let [queries (get-queries)
+          query (get-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome")]
+      (is (seq queries))
+      (is (= "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome" (get query "name")))))
+
+  (testing "Fact types endpoints"
+    (let [fact-types (get-fact-types)
+          fact-type (get-fact-type "clara.server.tools.graph.rules.loan_app_facts.Application")]
+      (is (seq fact-types))
+      (is (= "clara.server.tools.graph.rules.loan_app_facts.Application" (get fact-type "name"))))))
+
+(deftest test-session-state-endpoints
+  (testing "Session snapshot and facts"
+    (let [ss (get-session-snapshot)
+          session-fact-types (get-session-fact-types)
+          session-fact-type (get-session-fact-type "clara.server.tools.graph.rules.loan_app_facts.Application")]
+      (is (some? ss))
+      (is (seq session-fact-types))
+      (is (= "clara.server.tools.graph.rules.loan_app_facts.Application" (get session-fact-type "name")))
+
+      (testing "Individual fact retrieval"
+        (let [fact-id (ffirst (get ss "facts"))
+              fact (get-session-fact fact-id)]
+          (is (some? fact))
+          (is (= (str fact-id) (str (get fact "id"))))))))
+
+  (testing "Session rules and queries"
+    (let [session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved%3F")
+          session-query (get-session-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome")]
+      (is (some? session-rule))
+      (is (some? session-query)))))
+
+(deftest test-annotations-endpoints
+  (testing "Annotations retrieval and reload"
+    (let [annotations (get-annotations)
+          annotations-reload (post-annotations-reload)]
+      (is (some? annotations))
+      (is (= 200 annotations-reload)))))
 
 (comment
   ;; Start the server with a pre-populated session
   (def s (run-smoke-test))
+
+  (def s (run-smoke-test {:session-opts {:with-facts? false}}))
+
+  (.stop s)
 
   ;; --- Rulebase analysis (static, no session required) ---
 
@@ -128,7 +206,9 @@
   (def analysis (get-analysis))
 
   (def rules (get-rules))
-  (def rule (get-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved"))
+  (def rule (get-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved%3F"))
+  (def rule (get-rule "clara.server.tools.graph.rules.loan-doc-rules.dynamic-insert-audit-trail"))
+  (def rule (get-rule "clara.server.tools.graph.rules.loan-doc-rules.dynamic-insert-compliance-review"))
 
   (def queries (get-queries))
   (def query (get-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome"))
@@ -146,7 +226,7 @@
   ;; Pick a fact id from the snapshot, e.g.:
   (def fact (get-session-fact (ffirst (get ss "facts"))))
 
-  (def session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved"))
+  (def session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved%3F"))
   (def session-query (get-session-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome"))
 
   ;; --- Annotations ---

@@ -5,72 +5,60 @@ rules, queries, and facts.
 
 👉 **[Try the Live Interactive Demo](https://www.metasimple.org/clara-rules-explorer/)**
 
-> [!WARNING] > **Experimental Project:** This repository is currently in an exploratory,
+> [!WARNING]
+> **Experimental Project:** This repository is currently in an exploratory,
 > experimental stage. There are no deployed release versions, and it should not
 > be considered production-ready. It is active research and development that
 > may be developed into a releasable artifact in the future.
 
 ## Overview
 
-Clara Rules Explorer provides both visibility for both the static rulebase and
-runtime session working memory. It consists of a graph analysis HTTP API server
-and a modern web interface UI.
+Clara Rules Explorer provides visibility into both the static rulebase and
+runtime session working memory of a Clara rules system. It consists of two
+independent sub-projects:
+
+- A Clojure **server** that analyzes Clara sessions and exposes a
+  [Graph API](./docs/explorer-graph-api.md) over HTTP.
+- A SvelteKit **UI** that provides an interactive browser-based explorer
+  consuming that API.
 
 ### Key Features
 
-- **Dependency Analysis:** Map the dependencies and data flow for rule/query
-  (aka. production) chains.
-- **Session State Visualization:** Inspect the current state of a session,
-  including working memory and rule activation history.
+- **Dependency Analysis:** Map the data flow for rule/query (production) chains
+  through the Rete network.
+- **Session State Visualization:** Inspect working memory, rule activation
+  history, and fact instances at a point in time.
 - **Fact Type Tracking:** Group and analyze facts by their origin
   (inserted-from) and usage (used-by).
 
-## Project Structure
+## Project Layout
 
-The repository is organized as follows:
-
-- [**`server/`**](./server/): A Clojure-based HTTP server that exposes the
-  [Graph API](./docs/explorer-graph-api.md). It uses `clara.server.tools.graph.*`
-  to perform data analysis over Clara sessions or rulebases.
-- [**`ui/`**](./ui/): A high-performance web interface built with SvelteKit 2
-  and Svelte 5. It interacts with the Server API to provide a rich, interactive
-  experience.
-- [**`docs/`**](./docs/): Technical documentation, including API references and
-  architecture overviews.
+| Directory | Description |
+|-----------|-------------|
+| [`server/`](./server/) | Clojure HTTP server — graph analysis engine and REST API. See [server/README.md](./server/README.md). |
+| [`ui/`](./ui/) | SvelteKit 2 + Svelte 5 web interface. See [ui/README.md](./ui/README.md). |
+| [`docs/`](./docs/) | Cross-cutting documentation — API reference, demo setup, CI. |
 
 ## Getting Started
 
-### Prerequisites
+See the sub-project READMEs for detailed prerequisites and instructions:
 
-- **Server:** Java 11+ and [Clojure CLI tools](https://clojure.org/guides/install_clojure).
-- **UI:** [Node.js](https://nodejs.org/) (v20+) and `pnpm`.
-
-### Quick Start
-
-1.  **Start the Server:**
-    Navigate to the `server/` directory and run the development server:
-
-    ```bash
-    cd server
-    clj -M:dev -m clara.server.graph.main
-    ```
-
-    _See [server/README.md](./server/README.md) for more details on configuration and API endpoints._
-
-2.  **Start the UI:**
-    In a new terminal, navigate to the `ui/` directory:
-    ```bash
-    cd ui
-    pnpm install
-    pnpm dev
-    ```
-    The UI will be available at `http://localhost:5173`.
+- **[Server Quick Start](./server/README.md#quick-start)** — generate a demo
+  session and start the API server.
+- **[UI Quick Start](./ui/README.md#getting-started)** — install dependencies
+  and launch the dev server.
 
 ## Documentation
 
-- [Explorer Graph API](./docs/explorer-graph-api.md)
-- [Explorer API Reference](./docs/explorer-api-reference.md)
-- [UI Architecture](./ui/docs/app-arch.md)
+- [Explorer Graph API](./docs/explorer-graph-api.md) — HTTP API endpoints,
+  request/response shapes, and JSON schemas.
+- [Static Demo Setup](./docs/static-demo-setup.md) — build and host a fully
+  static demo on GitHub Pages.
+- [GitHub Actions Setup](./docs/gha-setup.md) — CI workflow configuration.
+- [UI Architecture](./ui/docs/app-arch.md) — UI component architecture and
+  design decisions.
+- Server internals: see [`server/docs/`](./server/docs/) for rule annotations,
+  internal models, and analysis notes.
 
 ## License
 

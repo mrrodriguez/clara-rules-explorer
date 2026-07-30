@@ -5,6 +5,7 @@
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [jsonista.core :as j]
             [ring.mock.request :as mock]
@@ -27,7 +28,7 @@
 (defn- ->handler
   ([] (->handler (->test-session)))
   ([session]
-   (api/app (atom session) (atom loan-doc-annotations))))
+   (:handler (api/app (atom session) (atom loan-doc-annotations)))))
 
 (deftest test-not-found
   (let [handler (->handler)]
@@ -68,9 +69,9 @@
           (is (contains? names "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"))
           (is (contains? names "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs"))
           (is (contains? names "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"))
-          (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved"))
-          (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied"))
-          (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending")))))))
+          (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"))
+          (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"))
+          (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?")))))))
 
 (deftest test-v1-rules-fq-name
   (let [handler (->handler)]
@@ -80,6 +81,35 @@
         (let [body (parse-json (:body response))]
           (is (= "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs" (:name body)))
           (is (seq (:downstream body))))))))
+
+(deftest test-v1-queries
+  (let [handler (->handler)]
+    (testing "GET /v1/queries — list with :ns populated"
+      (let [response (handler (mock/request :get "/v1/queries"))]
+        (is (= 200 (:status response)))
+        (let [body (parse-json (:body response))
+              queries (:queries body)]
+          (is (vector? queries))
+          (is (= 2 (count queries)))
+          ;; Verify names are present
+          (let [names (set (map :name queries))]
+            (is (contains? names "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"))
+            (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome")))
+          ;; Verify :ns is populated for every query (derived from :name)
+          (doseq [q queries]
+            (is (string? (:ns q)))
+            (is (not (str/blank? (:ns q)))
+                (str "Expected non-blank :ns for query " (:name q)))))))
+
+    (testing "GET /v1/queries/:fq-name — detail with :ns populated"
+      (let [response (handler (mock/request :get "/v1/queries/clara.server.tools.graph.rules.loan-doc-rules.find-document-check"))]
+        (is (= 200 (:status response)))
+        (let [body (parse-json (:body response))]
+          (is (= "clara.server.tools.graph.rules.loan-doc-rules/find-document-check" (:name body)))
+          (is (= "clara.server.tools.graph.rules.loan-doc-rules" (:ns body)))
+          (is (seq (:lhs-types body)))
+          (is (contains? (set (:params body)) "?app-id"))
+          (is (seq (:lhs body))))))))
 
 (deftest test-v1-fact-types
   (let [handler (->handler)]

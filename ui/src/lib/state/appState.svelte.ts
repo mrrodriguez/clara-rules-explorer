@@ -28,6 +28,11 @@ export class AppState {
 
 	activeContextualMenu = $state<ContextualMenuType | null>(null);
 
+	// Locate-in-list signalling (summary → list communication).
+	// This is an ephemeral event, not ongoing derived state — the parent
+	// layout handles filtered-out state via callback + context instead.
+	locateRequest = $state<{ name: string; timestamp: number } | null>(null);
+
 	// Derived state
 	isDark = $derived(this.uiTheme === 'dark');
 
@@ -70,6 +75,14 @@ export class AppState {
 
 	toggleContextualMenu(menu: ContextualMenuType) {
 		this.activeContextualMenu = this.activeContextualMenu === menu ? null : menu;
+	}
+
+	requestLocate(name: string) {
+		this.locateRequest = { name, timestamp: Date.now() };
+	}
+
+	clearLocateRequest() {
+		this.locateRequest = null;
 	}
 }
 

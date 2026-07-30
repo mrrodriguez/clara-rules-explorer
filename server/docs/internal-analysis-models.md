@@ -1,6 +1,6 @@
 # Clara Rules Explorer — Internal Models
 
-This document covers the **internal** Clojure structures and analysis logic that power the explorer. For the external API contract (endpoints, response shapes), see [`docs/explorer-graph-api.md`](./explorer-graph-api.md).
+This document covers the **internal** Clojure structures and analysis logic that power the explorer. For the external API contract (endpoints, response shapes), see [`docs/explorer-graph-api.md`](../../docs/explorer-graph-api.md).  For how rule annotations (insert/retract types) are auto-detected from source code via clj-kondo, see [`server/docs/analyze-pipeline-concepts.md`](analyze-pipeline-concepts.md).
 
 ## Internal Rule & Query Structures
 

@@ -8,15 +8,6 @@
             [clojure.string :as str])
   (:import [clara.rules.engine LocalSession]))
 
-(defn- remove-nil-vals
-  "Returns the map `m` with all entries whose value is nil removed."
-  [m]
-  (->> m
-       (reduce-kv (fn [m' k v]
-                    (if (nil? v) (dissoc! m' k) m'))
-                  (transient m))
-       persistent!))
-
 (defn- get-rulebase [session-or-rulebase]
   (if (instance? LocalSession session-or-rulebase)
     (-> session-or-rulebase eng/components :rulebase)
@@ -54,7 +45,7 @@
           (update :upstream serialize-deps)
           (update :downstream serialize-deps)
           (select-keys [:upstream :downstream])
-          remove-nil-vals))))
+          serialize/remove-nil-vals))))
 
 (defn- rule-is-source?
   [{p-name :name :keys [rhs] :as _production} dep-graph]
@@ -76,13 +67,26 @@
               (filter dep-is-rule?)
               empty?))))
 
-(defn- rule-summary
-  [production
+(defn- get-production-ns-name-sym
+  [{p-name :name p-ns-name :ns-name}]
+  (or p-ns-name
+      (when-let [derived-ns-str (cond
+                                  (string? p-name) (-> p-name symbol namespace)
+                                  (symbol? p-name) (namespace p-name)
+                                  (keyword? p-name) (namespace p-name))]
+        (symbol derived-ns-str))))
+
+(defn- production-summary
+  "Builds a summary map for a single production (rule or query).
+  When :ns-name is nil (as with queries in the underlying clara-rules schema),
+  derives the namespace from the fully-qualified :name."
+  [{p-name :name :as production}
    sidecar-annotations
    dep-graph
    production-map]
   (let [ann (ann/resolve-annotations production sidecar-annotations)
-        {p-ns-name :ns-name p-name :name} production
+        ;; Queries in clara.rules.schema/Query have no :ns-name — derive it.
+        p-ns-name (get-production-ns-name-sym production)
         serialize-fact-type (partial serialize/serialize-fact-type p-ns-name)
 
         {:keys [upstream downstream]} (get-production-deps-summary dep-graph
@@ -94,7 +98,13 @@
                        (empty? (:insert-types ann))
                        (empty? (:retract-types ann)))
         source-rule? (rule-is-source? production dep-graph)
-        sink-rule? (and (not unlinked?) (rule-is-sink? production dep-graph production-map))
+        sink-rule? (and (not unlinked?)
+                        (not (:no-output-types ann))
+                        (rule-is-sink? production dep-graph production-map))
+        dynamic-inserts (some-> (:dynamic-insert-types-detected ann)
+                                (serialize/serialize-dynamic-detection p-ns-name))
+        dynamic-retracts (some-> (:dynamic-retract-types-detected ann)
+                                 (serialize/serialize-dynamic-detection p-ns-name))
         summary
         (cond-> {:name               p-name
                  :ns                 (str p-ns-name)
@@ -130,7 +140,10 @@
           (assoc :params (serialize/stringify-idents-coll (:params production)))
 
           (seq upstream) (assoc :upstream upstream)
-          (seq downstream) (assoc :downstream downstream))]
+          (seq downstream) (assoc :downstream downstream)
+
+          (some? dynamic-inserts) (assoc :dynamic-insert-types-detected dynamic-inserts)
+          (some? dynamic-retracts) (assoc :dynamic-retract-types-detected dynamic-retracts))]
     summary))
 
 (defn- detect-unresolved
@@ -211,10 +224,10 @@
     (->> productions
          (sequence
           (comp filter-xf
-                (mapcat (juxt :name #(rule-summary %
-                                                   sidecar-annotations
-                                                   dep-graph
-                                                   production-map)))))
+                (mapcat (juxt :name #(production-summary %
+                                                         sidecar-annotations
+                                                         dep-graph
+                                                         production-map)))))
          (apply array-map))))
 
 (defn- build-rule-summary-map
@@ -315,17 +328,22 @@
    :fact-type-count (count (:fact-types analysis))})
 
 (defn rules-list
-  "Returns a sequence of lightweight rule summaries, preserving load order."
+  "Returns a sequence of lightweight rule summaries, preserving load order.
+   Omits :upstream and :downstream — they are only needed in the detail view
+   and add significant payload weight at scale (3k+ rules)."
   [analysis]
   (mapv #(select-keys % [:name :ns :doc :lhs-types :insert-types :retract-types
                          :source-rule :sink-rule :unlinked-rule
-                         :no-output-types :upstream :downstream])
+                         :no-output-types
+                         :dynamic-insert-types-detected
+                         :dynamic-retract-types-detected])
         (vals (:rules analysis))))
 
 (defn queries-list
-  "Returns a sequence of lightweight query summaries, preserving load order."
+  "Returns a sequence of lightweight query summaries, preserving load order.
+   Omits :upstream and :downstream — they are only needed in the detail view."
   [analysis]
-  (mapv #(select-keys % [:name :ns :doc :lhs-types :params :upstream :downstream])
+  (mapv #(select-keys % [:name :ns :doc :lhs-types :params])
         (vals (:queries analysis))))
 
 (defn fact-types-list

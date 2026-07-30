@@ -7,7 +7,7 @@
 			"type": "root",
 			"facts": [
 				{
-					"id": 11,
+					"id": 12,
 					"type": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
 					"data": {
 						"app-id": "app-1",
@@ -18,7 +18,7 @@
 					"inserted-from": [],
 					"used-by": [
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -29,11 +29,11 @@
 	],
 	"used-by": [
 		{
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 			"type": "rule",
 			"facts": [
 				{
-					"id": 11,
+					"id": 12,
 					"type": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
 					"data": {
 						"app-id": "app-1",
@@ -44,7 +44,7 @@
 					"inserted-from": [],
 					"used-by": [
 						{
-							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 							"ns": "clara.server.tools.graph.rules.loan-app-rules",
 							"type": "rule"
 						}
@@ -54,5 +54,5 @@
 			"ns": "clara.server.tools.graph.rules.loan-app-rules"
 		}
 	],
-	"ids": [11]
+	"ids": [12]
 }

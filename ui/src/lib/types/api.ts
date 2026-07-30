@@ -32,6 +32,47 @@ export interface UnlinkedRuleInfo {
 }
 
 /**
+ * A single entry in a constructor callstack chain.
+ */
+export interface ViaEntry {
+	'var-name-sym': string;
+}
+
+/**
+ * Provenance chain from a boundary fn to a constructor callsite.
+ */
+export interface ViaChain {
+	'boundary-var-name-sym': string;
+	callstack: ViaEntry[];
+}
+
+/**
+ * A single dynamic insert!/retract! callsite detected in rule source.
+ */
+export interface DynamicCallsiteEntry {
+	'source-str': string;
+	ns: string;
+	filename: string;
+	status?: string;
+	'resolved-types'?: string[];
+	'constructor-sym'?: string;
+	via?: ViaChain;
+}
+
+/**
+ * Detection info for dynamic insert!/retract! callsites in a rule.
+ *
+ * `callsites` are statically-resolved call sites with full provenance.
+ * `fact-instance-derived-types` are runtime-derived types when static
+ * analysis cannot fully resolve the constructor.
+ */
+export interface DynamicDetectionInfo {
+	resolution: 'full' | 'partial' | 'none';
+	callsites?: DynamicCallsiteEntry[];
+	'fact-instance-derived-types'?: string[];
+}
+
+/**
  * Base properties shared by both Rules and Queries.
  */
 export interface BaseRuleOrQuery {
@@ -58,6 +99,8 @@ export interface RuleSummary extends BaseRuleOrQuery {
 	'sink-rule'?: boolean;
 	'unlinked-rule'?: UnlinkedRuleInfo | null;
 	'no-output-types'?: boolean | null;
+	'dynamic-insert-types-detected'?: DynamicDetectionInfo;
+	'dynamic-retract-types-detected'?: DynamicDetectionInfo;
 }
 
 /**
@@ -122,6 +165,8 @@ export interface RuleListItem {
 	'sink-rule'?: boolean;
 	'unlinked-rule'?: UnlinkedRuleInfo | null;
 	'no-output-types'?: boolean | null;
+	'dynamic-insert-types-detected'?: DynamicDetectionInfo;
+	'dynamic-retract-types-detected'?: DynamicDetectionInfo;
 	upstream?: ProductionReference[];
 	downstream?: ProductionReference[];
 }

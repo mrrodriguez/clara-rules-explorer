@@ -7,7 +7,7 @@
 			"type": "rule",
 			"facts": [
 				{
-					"id": 6,
+					"id": 7,
 					"type": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
 					"data": {
 						"app-id": "app-1",
@@ -52,7 +52,7 @@
 			"type": "rule",
 			"facts": [
 				{
-					"id": 6,
+					"id": 7,
 					"type": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
 					"data": {
 						"app-id": "app-1",
@@ -91,5 +91,5 @@
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
 		}
 	],
-	"ids": [6]
+	"ids": [7]
 }

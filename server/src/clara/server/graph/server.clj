@@ -36,8 +36,9 @@
   (reset! session-atom session)
   (reload-annotations!)
 
-  (let [base-app (api/app session-atom annotations-atom)
-        final-app (wrap-reload base-app)]
+  (let [{:keys [handler analysis-cache]} (api/app session-atom annotations-atom)
+        _ (api/warm-analysis-cache! session-atom annotations-atom analysis-cache)
+        final-app (wrap-reload handler)]
     (when-let [server  @server-instance]
       (Server/.stop server))
     (reset! server-instance
