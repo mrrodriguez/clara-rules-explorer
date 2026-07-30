@@ -15,6 +15,11 @@
 	"upstream": [
 		{
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 			"type": "rule"
 		},

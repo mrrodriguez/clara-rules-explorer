@@ -1,8 +1,8 @@
 {
 	"matches": [
 		{
-			"id": 10,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"id": 2,
+			"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
 			"data": {
 				"?app-id": "app-1"
 			},
@@ -45,13 +45,19 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 17,
-			"type": "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail",
-			"data": {
-				"app-id": "app-1",
-				"action": "doc-check-passed",
-				"timestamp": 1785077342558
-			},
+			"id": 8,
+			"type": "clojure.lang.PersistentVector",
+			"data": [
+				"clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",
+				{
+					"app-id": "app-1",
+					"doc-type": "id-card"
+				},
+				{
+					"app-id": "app-1",
+					"doc-type": "id-card"
+				}
+			],
 			"is-root": false,
 			"inserted-from": [
 				{

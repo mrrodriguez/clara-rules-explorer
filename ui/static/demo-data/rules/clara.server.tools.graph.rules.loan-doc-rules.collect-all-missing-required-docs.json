@@ -2,11 +2,16 @@
 	"source-rule": false,
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs",
-	"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput"],
+	"lhs-types": ["loan-doc-rules/document-check-input"],
 	"lhs": [
 		{
-			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput",
-			"constraints": "[\n(= ?app-id app-id)\n\n(= ?missing-required-docs missing-required-docs)\n\n(seq ?missing-required-docs)\n]"
+			"type": "loan-doc-rules/document-check-input",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= ?missing-required-docs missing-required-docs)\n\n(seq ?missing-required-docs)\n]",
+			"args": [
+				{
+					"keys": ["app-id", "missing-required-docs"]
+				}
+			]
 		}
 	],
 	"no-output-types": true,

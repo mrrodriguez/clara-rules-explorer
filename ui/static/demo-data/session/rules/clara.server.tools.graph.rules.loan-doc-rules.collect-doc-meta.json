@@ -1,25 +1,19 @@
 {
 	"matches": [
 		{
-			"id": 1,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"id": 9,
+			"type": "clojure.lang.PersistentVector",
 			"data": {
 				"?app-id": "app-1",
-				"?extract-doc-meta": "#'clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta",
-				"?docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "paycheck"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "bank-statement"
-					}
-				]
+				"?extract-doc-meta": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": null
+				},
+				"?docs": {
+					"app-id": "app-1",
+					"doc-type": "paycheck"
+				}
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -62,30 +56,29 @@
 			]
 		},
 		{
-			"id": 5,
-			"type": "extract-doc-meta",
+			"id": 3,
+			"type": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 			"data": {
 				"?app-id": "app-1",
-				"?extract-doc-meta": "#'clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta",
-				"?docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "paycheck"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "bank-statement"
-					}
-				]
+				"?extract-doc-meta": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": null
+				},
+				"?docs": {
+					"app-id": "app-1",
+					"doc-type": "paycheck"
+				}
 			},
 			"is-root": false,
 			"inserted-from": [
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}
@@ -95,29 +88,28 @@
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
 				}
 			]
 		},
 		{
-			"id": 3,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+			"id": 12,
+			"type": "clojure.lang.Symbol",
 			"data": {
 				"?app-id": "app-1",
-				"?extract-doc-meta": "#'clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta",
-				"?docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "paycheck"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "bank-statement"
-					}
-				]
+				"?extract-doc-meta": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": null
+				},
+				"?docs": {
+					"app-id": "app-1",
+					"doc-type": "paycheck"
+				}
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -140,25 +132,19 @@
 			]
 		},
 		{
-			"id": 4,
+			"id": 1,
 			"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
 			"data": {
 				"?app-id": "app-1",
-				"?extract-doc-meta": "#'clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta",
-				"?docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "paycheck"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "bank-statement"
-					}
-				]
+				"?extract-doc-meta": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": null
+				},
+				"?docs": {
+					"app-id": "app-1",
+					"doc-type": "paycheck"
+				}
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -176,25 +162,19 @@
 			]
 		},
 		{
-			"id": 2,
+			"id": 1,
 			"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
 			"data": {
 				"?app-id": "app-1",
-				"?extract-doc-meta": "#'clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta",
-				"?docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "paycheck"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "bank-statement"
-					}
-				]
+				"?extract-doc-meta": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": null
+				},
+				"?docs": {
+					"app-id": "app-1",
+					"doc-type": "paycheck"
+				}
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -214,32 +194,22 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 15,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
+			"id": 4,
+			"type": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
 			"data": {
 				"app-id": "app-1",
-				"doc-metas": [
-					{
-						"doc-meta": {
-							"clara.server.tools.graph.rules.loan-doc-rules/no-doc-meta": true
-						}
-					},
-					{
-						"doc-meta": {
-							"clara.server.tools.graph.rules.loan-doc-rules/no-doc-meta": true
-						}
-					},
-					{
-						"doc-meta": {
-							"clara.server.tools.graph.rules.loan-doc-rules/no-doc-meta": true
-						}
-					}
-				]
+				"status": "pass",
+				"message": null
 			},
 			"is-root": false,
 			"inserted-from": [
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}

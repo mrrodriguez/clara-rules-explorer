@@ -10,7 +10,7 @@
 	let { name }: Props = $props();
 
 	const filterState = getListFilterState();
-	const disabled = $derived(filterState.activeItemFilteredOut);
+	const disabled = $derived(filterState?.activeItemFilteredOut ?? false);
 
 	function handleClick() {
 		appState.requestLocate(name);

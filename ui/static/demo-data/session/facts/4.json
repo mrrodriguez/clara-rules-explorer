@@ -1,22 +1,23 @@
 {
 	"id": 4,
-	"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+	"type": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
 	"data": {
 		"app-id": "app-1",
-		"doc-type": "paycheck"
+		"status": "pass",
+		"message": null
 	},
-	"is-root": true,
-	"inserted-from": [],
-	"used-by": [
+	"is-root": false,
+	"inserted-from": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}
-	]
+	],
+	"used-by": []
 }

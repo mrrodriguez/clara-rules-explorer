@@ -1,8 +1,9 @@
 {
 	"id": 1,
-	"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+	"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
 	"data": {
-		"app-id": "app-1"
+		"app-id": "app-1",
+		"doc-type": "id-card"
 	},
 	"is-root": true,
 	"inserted-from": [],
@@ -13,33 +14,8 @@
 			"type": "rule"
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		},
-		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		},
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		},
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		},
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		},
-		{
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
-			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"type": "rule"
 		}
 	]

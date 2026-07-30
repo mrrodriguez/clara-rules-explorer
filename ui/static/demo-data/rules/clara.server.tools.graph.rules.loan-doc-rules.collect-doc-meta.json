@@ -1,4 +1,8 @@
 {
+	"dynamic-insert-types-detected": {
+		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.FraudCheck"],
+		"resolution": "partial"
+	},
 	"source-rule": true,
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
@@ -29,7 +33,10 @@
 	"retract-types": [],
 	"notes": null,
 	"annotation-sources": ["clara-rules/insert-types"],
-	"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta"],
+	"insert-types": [
+		"clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
+		"clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
+	],
 	"rhs-form": "(do\n (let\n  [doc-metas (mapv ?extract-doc-meta ?docs)]\n  (r/insert!\n   (laf/map->AllGivenDocumentsMeta\n    {:app-id ?app-id, :doc-metas doc-metas}))))\n",
 	"doc": null,
 	"sink-rule": true,

@@ -1,0 +1,221 @@
+{
+	"name": "clojure.lang.Symbol",
+	"count": 3,
+	"inserted-from": [
+		{
+			"name": "Root Facts (External)",
+			"type": "root",
+			"facts": [
+				{
+					"id": 11,
+					"type": "clojure.lang.Symbol",
+					"data": "clara.server.tools.graph.rules.loan-app-facts/map->DocumentCheck",
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+							"ns": "clara.server.tools.graph.rules.loan-app-rules",
+							"type": "rule"
+						}
+					]
+				},
+				{
+					"id": 12,
+					"type": "clojure.lang.Symbol",
+					"data": "clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 13,
+					"type": "clojure.lang.Symbol",
+					"data": "clara.server.tools.graph.rules.loan-app-facts/map->IdentityCheck",
+					"is-root": false,
+					"inserted-from": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+							"ns": "clara.server.tools.graph.rules.loan-app-rules",
+							"type": "rule"
+						}
+					],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
+							"ns": "",
+							"type": "query"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-app-rules"
+		}
+	],
+	"used-by": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 12,
+					"type": "clojure.lang.Symbol",
+					"data": "clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 12,
+					"type": "clojure.lang.Symbol",
+					"data": "clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 12,
+					"type": "clojure.lang.Symbol",
+					"data": "clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						},
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 11,
+					"type": "clojure.lang.Symbol",
+					"data": "clara.server.tools.graph.rules.loan-app-facts/map->DocumentCheck",
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+							"ns": "clara.server.tools.graph.rules.loan-app-rules",
+							"type": "rule"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-app-rules"
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
+			"type": "query",
+			"facts": [
+				{
+					"id": 13,
+					"type": "clojure.lang.Symbol",
+					"data": "clara.server.tools.graph.rules.loan-app-facts/map->IdentityCheck",
+					"is-root": false,
+					"inserted-from": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+							"ns": "clara.server.tools.graph.rules.loan-app-rules",
+							"type": "rule"
+						}
+					],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
+							"ns": "",
+							"type": "query"
+						}
+					]
+				}
+			],
+			"ns": ""
+		}
+	],
+	"ids": [13, 12, 11]
+}

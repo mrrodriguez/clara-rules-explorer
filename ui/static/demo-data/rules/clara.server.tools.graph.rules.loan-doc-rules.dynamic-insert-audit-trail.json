@@ -9,7 +9,7 @@
 			}
 		],
 		"resolution": "partial",
-		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"]
+		"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
 	},
 	"source-rule": false,
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
@@ -24,7 +24,7 @@
 	"retract-types": [],
 	"notes": "Audit trail insert via opaque builder — unresolved, type unknown",
 	"annotation-sources": ["clara-rules/insert-types", "clara-rules/notes"],
-	"insert-types": ["clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"],
+	"insert-types": ["clojure.lang.PersistentVector"],
 	"rhs-form": "(do (r/insert! (build-audit-trail-entry ?app-id :doc-check-passed)))\n",
 	"upstream": [
 		{

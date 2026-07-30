@@ -61,10 +61,15 @@ export interface DynamicCallsiteEntry {
 
 /**
  * Detection info for dynamic insert!/retract! callsites in a rule.
+ *
+ * `callsites` are statically-resolved call sites with full provenance.
+ * `fact-instance-derived-types` are runtime-derived types when static
+ * analysis cannot fully resolve the constructor.
  */
 export interface DynamicDetectionInfo {
 	resolution: 'full' | 'partial' | 'none';
-	callsites: DynamicCallsiteEntry[];
+	callsites?: DynamicCallsiteEntry[];
+	'fact-instance-derived-types'?: string[];
 }
 
 /**

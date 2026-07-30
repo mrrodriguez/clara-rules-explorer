@@ -1,6 +1,6 @@
 {
 	"dynamic-insert-types-detected": {
-		"fact-instance-derived-types": ["extract-doc-meta"],
+		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"],
 		"resolution": "partial"
 	},
 	"source-rule": true,
@@ -11,8 +11,8 @@
 	"retract-types": [],
 	"notes": null,
 	"annotation-sources": ["clara-rules/insert-types"],
-	"insert-types": ["extract-doc-meta"],
-	"rhs-form": "(do\n (clojure.core/let\n  [resolved__61559__auto__ #'extract-doc-meta]\n  (clara.rules/insert! resolved__61559__auto__)))\n",
+	"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"],
+	"rhs-form": "(do\n (clojure.core/let\n  [resolved__25945__auto__ #'extract-doc-meta]\n  (clara.rules/insert! resolved__25945__auto__)))\n",
 	"doc": null,
 	"sink-rule": true,
 	"props": {}
