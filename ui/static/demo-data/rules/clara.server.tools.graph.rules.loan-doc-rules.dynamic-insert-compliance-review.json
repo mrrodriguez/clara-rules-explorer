@@ -9,7 +9,9 @@
 			}
 		],
 		"resolution": "partial",
-		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.FraudCheck"]
+		"fact-instance-derived-types": [
+			"clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"
+		]
 	},
 	"source-rule": false,
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
@@ -24,7 +26,7 @@
 	"retract-types": [],
 	"notes": "Compliance review inserted via helper call — unresolved by automatic analysis",
 	"annotation-sources": ["clara-rules/insert-types", "clara-rules/notes"],
-	"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.FraudCheck"],
+	"insert-types": ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"],
 	"rhs-form": "(do (r/insert! (build-compliance-review ?app-id)))\n",
 	"upstream": [
 		{

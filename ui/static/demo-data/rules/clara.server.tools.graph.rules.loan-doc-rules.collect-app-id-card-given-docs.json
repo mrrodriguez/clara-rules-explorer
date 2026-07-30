@@ -1,6 +1,8 @@
 {
 	"dynamic-insert-types-detected": {
-		"fact-instance-derived-types": ["clojure.lang.PersistentVector"],
+		"fact-instance-derived-types": [
+			"clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"
+		],
 		"resolution": "partial"
 	},
 	"source-rule": true,
@@ -27,7 +29,7 @@
 	"retract-types": [],
 	"notes": null,
 	"annotation-sources": ["clara-rules/insert-types"],
-	"insert-types": ["clojure.lang.PersistentVector"],
+	"insert-types": ["clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"],
 	"rhs-form": "(do\n (r/insert!\n  (map->AllIdCardGivenDocuments {:app-id ?app-id, :docs ?docs})))\n",
 	"doc": null,
 	"sink-rule": true,

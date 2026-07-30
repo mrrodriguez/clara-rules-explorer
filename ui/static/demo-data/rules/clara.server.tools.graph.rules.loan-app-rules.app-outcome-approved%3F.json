@@ -21,10 +21,6 @@
 			"type": "query"
 		}
 	],
-	"dynamic-insert-types-detected": {
-		"fact-instance-derived-types": ["clojure.lang.Symbol"],
-		"resolution": "partial"
-	},
 	"source-rule": false,
 	"ns": "clara.server.tools.graph.rules.loan-app-rules",
 	"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
@@ -55,10 +51,7 @@
 	"retract-types": [],
 	"notes": null,
 	"annotation-sources": ["clara-rules/insert-types"],
-	"insert-types": [
-		"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-		"clojure.lang.Symbol"
-	],
+	"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
 	"rhs-form": "(do\n (r/insert!\n  (map->ApplicationOutcome\n   {:app-id ?app-id,\n    :status :approved,\n    :message \"Application approved\",\n    :passed-checks\n    [{:check-type :document}\n     {:check-type :identity}\n     {:check-type :fraud}]})))\n",
 	"upstream": [
 		{

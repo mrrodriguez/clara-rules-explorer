@@ -1,12 +1,13 @@
 {
 	"matches": [
 		{
-			"id": 2,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+			"id": 10,
+			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
 			"data": {
 				"?document-check": {
 					"app-id": "app-1",
-					"doc-type": "paycheck"
+					"status": "pass",
+					"message": "All required documents found"
 				},
 				"?app-id": "app-1"
 			},

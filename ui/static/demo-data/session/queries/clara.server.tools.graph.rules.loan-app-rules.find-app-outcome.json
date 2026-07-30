@@ -2,9 +2,27 @@
 	"matches": [
 		{
 			"id": 13,
-			"type": "clojure.lang.Symbol",
+			"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 			"data": {
-				"?outcome": "clara.server.tools.graph.rules.loan-app-facts/map->IdentityCheck",
+				"?outcome": {
+					"app-id": "app-1",
+					"status": "approved",
+					"message": "Application approved",
+					"passed-checks": [
+						{
+							"check-type": "document"
+						},
+						{
+							"check-type": "identity"
+						},
+						{
+							"check-type": "fraud"
+						}
+					],
+					"failed-checks": null,
+					"checks-complete": null,
+					"checks-incomplete": null
+				},
 				"?app-id": "app-1"
 			},
 			"is-root": false,

@@ -1,25 +1,69 @@
 {
 	"types": [
 		{
-			"name": "clojure.lang.PersistentVector",
-			"count": 6
+			"name": "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview",
+			"count": 1
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
-			"count": 2
+			"name": "extract-doc-meta",
+			"count": 1
 		},
 		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
 			"count": 1
 		},
 		{
-			"name": "clojure.lang.Symbol",
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+			"count": 1
+		},
+		{
+			"name": "loan-doc-rules/document-check-input",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
 			"count": 3
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+			"count": 1
+		},
+		{
+			"name": "compliance-review-result",
+			"count": 1
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
+			"count": 1
 		},
 		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 			"count": 1
 		}
 	],
-	"total-count": 13
+	"total-count": 18
 }

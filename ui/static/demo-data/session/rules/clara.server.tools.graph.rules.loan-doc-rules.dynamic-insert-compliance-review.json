@@ -1,8 +1,8 @@
 {
 	"matches": [
 		{
-			"id": 2,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+			"id": 10,
+			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
 			"data": {
 				"?app-id": "app-1"
 			},
@@ -45,20 +45,15 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 4,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
+			"id": 18,
+			"type": "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview",
 			"data": {
 				"app-id": "app-1",
 				"status": "pass",
-				"message": null
+				"reviewer": "automated-review"
 			},
 			"is-root": false,
 			"inserted-from": [
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",

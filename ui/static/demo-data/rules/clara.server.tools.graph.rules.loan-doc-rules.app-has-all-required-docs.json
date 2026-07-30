@@ -41,10 +41,6 @@
 			"type": "query"
 		}
 	],
-	"dynamic-insert-types-detected": {
-		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.GivenDocument"],
-		"resolution": "partial"
-	},
 	"source-rule": false,
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
@@ -70,10 +66,7 @@
 	"retract-types": [],
 	"notes": null,
 	"annotation-sources": ["clara-rules/insert-types"],
-	"insert-types": [
-		"clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
-		"clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
-	],
+	"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
 	"rhs-form": "(do\n (let\n  [status\n   (if (seq ?missing-required-docs) :fail :pass)\n   message\n   (case\n    status\n    :fail\n    \"Missing required documents\"\n    \"All required documents found\")]\n  (r/insert!\n   (laf/map->DocumentCheck\n    {:app-id ?app-id, :status status, :message message}))))\n",
 	"upstream": [
 		{

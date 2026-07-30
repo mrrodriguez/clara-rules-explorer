@@ -6,10 +6,6 @@
 			"type": "rule"
 		}
 	],
-	"dynamic-insert-types-detected": {
-		"fact-instance-derived-types": ["clojure.lang.PersistentVector"],
-		"resolution": "partial"
-	},
 	"source-rule": true,
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
@@ -35,10 +31,7 @@
 	"retract-types": [],
 	"notes": null,
 	"annotation-sources": ["clara-rules/insert-types"],
-	"insert-types": [
-		"clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
-		"clojure.lang.PersistentVector"
-	],
+	"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"],
 	"rhs-form": "(do\n (r/insert!\n  (laf/map->AllRequiredDocuments {:app-id ?app-id, :docs ?docs})))\n",
 	"doc": null,
 	"sink-rule": false,

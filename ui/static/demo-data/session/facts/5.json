@@ -1,26 +1,20 @@
 {
 	"id": 5,
-	"type": "clojure.lang.PersistentVector",
-	"data": [
-		[
-			{
-				"app-id": "app-1",
-				"doc-type": "bank-statement"
-			}
-		]
-	],
+	"type": "extract-doc-meta",
+	"data": "#'clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta",
 	"is-root": false,
 	"inserted-from": [
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		},
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}
 	],
-	"used-by": []
+	"used-by": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	]
 }

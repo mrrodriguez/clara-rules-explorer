@@ -2,6 +2,6 @@
 	"name": "extract-doc-meta",
 	"used-by-rules": ["clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta"],
 	"used-by-queries": [],
-	"inserted-by-rules": [],
+	"inserted-by-rules": ["clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule"],
 	"retracted-by-rules": []
 }
