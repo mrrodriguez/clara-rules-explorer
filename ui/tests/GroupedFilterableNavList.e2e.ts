@@ -18,7 +18,7 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 		expect(groupCount).toBeGreaterThanOrEqual(2);
 
 		const search = ui.groupedNav.searchInput(page, 'Search rules...');
-		await search.fill('approved');
+		await search.fill('args-demo');
 
 		// Group toggles disappear in search mode
 		await expect(ui.groupedNav.allGroupToggles(page)).toHaveCount(0);
@@ -26,7 +26,7 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 		// Only matching rules are visible
 		const items = page.locator('a.list-group-item');
 		await expect(items).toHaveCount(1);
-		await expect(items.first()).toContainText('app-outcome-approved');
+		await expect(items.first()).toContainText('app-outcome-approved-args-demo');
 
 		// Clear search — back to grouped mode
 		await search.fill('');
@@ -44,9 +44,9 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 
 	test('search is case-insensitive', async ({ page }) => {
 		const search = ui.groupedNav.searchInput(page, 'Search rules...');
-		await search.fill('APPROVED');
+		await search.fill('ARGS-DEMO');
 		await expect(page.locator('a.list-group-item')).toHaveCount(1);
-		await expect(page.locator('a.list-group-item').first()).toContainText('app-outcome-approved');
+		await expect(page.locator('a.list-group-item').first()).toContainText('app-outcome-approved-args-demo');
 	});
 
 	// ── Namespace groups ──────────────────────────────────────────────────
@@ -314,10 +314,10 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 	test('clicking a rule item navigates to its summary', async ({ page }) => {
 		await ui.groupedNav.expandAllButton(page).click();
 
-		const ruleItem = page.locator('a.list-group-item').filter({ hasText: 'app-outcome-approved' });
+		const ruleItem = page.locator('a.list-group-item').filter({ hasText: 'app-outcome-approved?' });
 		await ruleItem.click();
 
-		await expect(ui.summary.title(page, 'app-outcome-approved')).toBeVisible();
+		await expect(ui.summary.title(page, 'app-outcome-approved?')).toBeVisible();
 		await expect(page.getByText('Select a rule from the list')).not.toBeVisible();
 	});
 

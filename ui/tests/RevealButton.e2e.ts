@@ -96,12 +96,12 @@ test.describe('Reveal button', () => {
 		await ui.sidebar.navigateTo(page, 'Rules');
 		await expect(page).toHaveURL(/\/rules/);
 
-		// Pick 'app-outcome-approved' — it has source-rule: false, so the
+		// Pick 'app-outcome-approved?' — it has source-rule: false, so the
 		// "Source Rule" filter will hide it.
 		await ui.groupedNav.expandAllButton(page).click();
 		await page
 			.locator('a.list-group-item')
-			.filter({ hasText: 'app-outcome-approved' })
+			.filter({ hasText: 'app-outcome-approved?' })
 			.click();
 
 		const reveal = page.locator('button').filter({ hasText: 'Reveal' });
