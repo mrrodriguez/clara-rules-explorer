@@ -81,6 +81,10 @@ The sidecar file can control the merging strategy per category by specifying a `
 
 When the rule base analyzer detects call sites to `insert!`, `retract!`, or their variants (like `insert-all!`) whose fact type cannot be determined by static constructor tracing, it captures each callsite and attempts **runtime-guided resolution**. The session rulebase is the source of truth: RHS forms come from the compiled productions, so macro-emitted rules are captured too.
 
+> **Internal architecture:** The full pipeline — entry points, index building,
+> resolution chains, heuristic fallbacks — is documented in
+> [`server/docs/analyze-pipeline-concepts.md`](analyze-pipeline-concepts.md).
+
 ### The resolution chain
 
 For each callsite argument form (see `clara.server.tools.graph.analyze.callsite`):
