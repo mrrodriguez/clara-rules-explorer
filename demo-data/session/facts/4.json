@@ -9,6 +9,11 @@
 	"inserted-from": [],
 	"used-by": [
 		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		},
+		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"

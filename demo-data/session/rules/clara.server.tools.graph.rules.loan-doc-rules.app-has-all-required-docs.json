@@ -31,6 +31,11 @@
 			"inserted-from": [],
 			"used-by": [
 				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
@@ -56,15 +61,15 @@
 					"type": "rule"
 				},
 				{
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 					"ns": "clara.server.tools.graph.rules.loan-app-rules",
 					"type": "rule"
 				}
 			]
 		},
 		{
-			"id": 8,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput",
+			"id": 9,
+			"type": "loan-doc-rules/document-check-input",
 			"data": {
 				"?app-id": "app-1",
 				"?required-docs": [
@@ -108,7 +113,7 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 9,
+			"id": 10,
 			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
 			"data": {
 				"app-id": "app-1",
@@ -130,7 +135,22 @@
 					"type": "query"
 				},
 				{
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 					"ns": "clara.server.tools.graph.rules.loan-app-rules",
 					"type": "rule"
 				}

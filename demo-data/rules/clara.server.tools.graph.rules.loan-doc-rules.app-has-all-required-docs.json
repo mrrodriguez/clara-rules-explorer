@@ -2,17 +2,37 @@
 	"downstream": [
 		{
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 			"type": "rule"
 		},
 		{
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
 			"type": "rule"
 		},
 		{
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice",
 			"type": "rule"
 		},
 		{
@@ -26,7 +46,7 @@
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
 	"lhs-types": [
 		"clara.server.tools.graph.rules.loan_app_facts.Application",
-		"clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput"
+		"loan-doc-rules/document-check-input"
 	],
 	"lhs": [
 		{
@@ -34,8 +54,13 @@
 			"constraints": "[\n(= ?app-id app-id)\n]"
 		},
 		{
-			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput",
-			"constraints": "[\n(= ?app-id app-id)\n\n(= ?required-docs required-docs)\n\n(= ?given-docs given-docs)\n\n(= ?missing-required-docs missing-required-docs)\n]"
+			"type": "loan-doc-rules/document-check-input",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= ?required-docs required-docs)\n\n(= ?given-docs given-docs)\n\n(= ?missing-required-docs missing-required-docs)\n]",
+			"args": [
+				{
+					"keys": ["app-id", "required-docs", "given-docs", "missing-required-docs"]
+				}
+			]
 		}
 	],
 	"retract-types": [],

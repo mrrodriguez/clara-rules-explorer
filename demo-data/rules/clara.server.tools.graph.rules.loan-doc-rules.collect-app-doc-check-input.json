@@ -11,6 +11,33 @@
 			"type": "rule"
 		}
 	],
+	"dynamic-insert-types-detected": {
+		"callsites": [
+			{
+				"source-str": "(h/->fact :loan-doc-rules/document-check-input data)",
+				"via": {
+					"boundary-var-name-sym": "clara.rules/insert!",
+					"callstack": [
+						{
+							"var-name-sym": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
+						},
+						{
+							"var-name-sym": "clara.server.tools.graph.rules.loan-doc-rules/->document-check-input"
+						},
+						{
+							"var-name-sym": "clara.server.tools.graph.rules.helpers/->fact"
+						}
+					]
+				},
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"constructor-sym": "clara.server.tools.graph.rules.helpers/->fact",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "resolved",
+				"resolved-types": ["loan-doc-rules/document-check-input"]
+			}
+		],
+		"resolution": "full"
+	},
 	"source-rule": false,
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
@@ -36,8 +63,8 @@
 	"retract-types": [],
 	"notes": null,
 	"annotation-sources": ["clara-rules/insert-types"],
-	"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput"],
-	"rhs-form": "(do\n (let\n  [given-doc-types (into #{} (map :doc-type) ?given-docs)]\n  (r/insert!\n   (laf/map->DocumentCheckInput\n    {:app-id ?app-id,\n     :required-docs ?required-docs,\n     :given-docs ?given-docs,\n     :missing-required-docs\n     (into\n      []\n      (remove (comp given-doc-types :doc-type))\n      ?required-docs)}))))\n",
+	"insert-types": ["loan-doc-rules/document-check-input"],
+	"rhs-form": "(do\n (let\n  [given-doc-types (into #{} (map :doc-type) ?given-docs)]\n  (r/insert!\n   (->document-check-input\n    {:app-id ?app-id,\n     :required-docs ?required-docs,\n     :given-docs ?given-docs,\n     :missing-required-docs\n     (into\n      []\n      (remove (comp given-doc-types :doc-type))\n      ?required-docs)}))))\n",
 	"upstream": [
 		{
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",

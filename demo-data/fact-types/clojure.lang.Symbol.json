@@ -1,0 +1,7 @@
+{
+	"name": "clojure.lang.Symbol",
+	"used-by-rules": [],
+	"used-by-queries": [],
+	"inserted-by-rules": ["clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"],
+	"retracted-by-rules": []
+}

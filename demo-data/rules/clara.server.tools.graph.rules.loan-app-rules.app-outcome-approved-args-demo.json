@@ -1,0 +1,61 @@
+{
+	"downstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
+			"type": "query"
+		}
+	],
+	"source-rule": false,
+	"ns": "clara.server.tools.graph.rules.loan-app-rules",
+	"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo",
+	"lhs-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :approved)\n]",
+			"args": [
+				{
+					"keys": ["app-id", "status"]
+				}
+			]
+		}
+	],
+	"retract-types": [],
+	"notes": null,
+	"annotation-sources": ["clara-rules/insert-types"],
+	"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
+	"rhs-form": "(do (println (str \"Args demo: app \" ?app-id \" is approved\")))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
+			"type": "rule"
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
+			"type": "rule"
+		}
+	],
+	"doc": "Demonstrates LHS args destructuring — approved outcome with destructured fields.",
+	"sink-rule": false,
+	"props": {
+		"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"]
+	}
+}

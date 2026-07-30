@@ -1,0 +1,41 @@
+{
+	"dynamic-insert-types-detected": {
+		"callsites": [
+			{
+				"source-str": "(build-compliance-review ?app-id)",
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "unresolved"
+			}
+		],
+		"resolution": "partial",
+		"fact-instance-derived-types": [
+			"clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"
+		]
+	},
+	"source-rule": false,
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
+	"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+		}
+	],
+	"retract-types": [],
+	"notes": "Compliance review inserted via helper call — unresolved by automatic analysis",
+	"annotation-sources": ["clara-rules/insert-types", "clara-rules/notes"],
+	"insert-types": ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"],
+	"rhs-form": "(do (r/insert! (build-compliance-review ?app-id)))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"type": "rule"
+		}
+	],
+	"doc": "After document checks pass, trigger a compliance review via Java constructor.\n   The analyzer sees the ComplianceReview. call but cannot statically determine\n   its return type — captured as a dynamic insert callsite.",
+	"sink-rule": true,
+	"props": {}
+}

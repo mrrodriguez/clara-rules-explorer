@@ -1,0 +1,39 @@
+{
+	"dynamic-insert-types-detected": {
+		"callsites": [
+			{
+				"source-str": "(build-audit-trail-entry ?app-id :doc-check-passed)",
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "unresolved"
+			}
+		],
+		"resolution": "partial",
+		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"]
+	},
+	"source-rule": false,
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
+	"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
+	"lhs": [
+		{
+			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+		}
+	],
+	"retract-types": [],
+	"notes": "Audit trail insert via opaque builder — unresolved, type unknown",
+	"annotation-sources": ["clara-rules/insert-types", "clara-rules/notes"],
+	"insert-types": ["clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"],
+	"rhs-form": "(do (r/insert! (build-audit-trail-entry ?app-id :doc-check-passed)))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"type": "rule"
+		}
+	],
+	"doc": "After document checks pass, write an audit trail entry via opaque builder.\n   The analyzer detects an insert but cannot resolve the fact type — the\n   builder is a custom non-record function. This stays unresolved.",
+	"sink-rule": true,
+	"props": {}
+}

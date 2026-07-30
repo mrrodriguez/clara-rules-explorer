@@ -1,22 +1,38 @@
 {
 	"id": 13,
-	"type": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
+	"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 	"data": {
 		"app-id": "app-1",
-		"docs": [
+		"status": "approved",
+		"message": "Application approved",
+		"passed-checks": [
 			{
-				"app-id": "app-1",
-				"doc-type": "id-card"
+				"check-type": "document"
+			},
+			{
+				"check-type": "identity"
+			},
+			{
+				"check-type": "fraud"
 			}
-		]
+		],
+		"failed-checks": null,
+		"checks-complete": null,
+		"checks-incomplete": null
 	},
 	"is-root": false,
 	"inserted-from": [
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"type": "rule"
 		}
 	],
-	"used-by": []
+	"used-by": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
+			"ns": "",
+			"type": "query"
+		}
+	]
 }

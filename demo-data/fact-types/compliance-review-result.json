@@ -1,0 +1,9 @@
+{
+	"name": "compliance-review-result",
+	"used-by-rules": [],
+	"used-by-queries": [],
+	"inserted-by-rules": [
+		"clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata"
+	],
+	"retracted-by-rules": []
+}

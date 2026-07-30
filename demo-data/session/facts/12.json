@@ -1,38 +1,18 @@
 {
 	"id": 12,
-	"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+	"type": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
 	"data": {
 		"app-id": "app-1",
-		"status": "approved",
-		"message": "Application approved",
-		"passed-checks": [
-			{
-				"check-type": "document"
-			},
-			{
-				"check-type": "identity"
-			},
-			{
-				"check-type": "fraud"
-			}
-		],
-		"failed-checks": null,
-		"checks-complete": null,
-		"checks-incomplete": null
+		"status": "pass",
+		"message": null
 	},
-	"is-root": false,
-	"inserted-from": [
-		{
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
-			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"type": "rule"
-		}
-	],
+	"is-root": true,
+	"inserted-from": [],
 	"used-by": [
 		{
-			"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
-			"ns": "",
-			"type": "query"
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"type": "rule"
 		}
 	]
 }

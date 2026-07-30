@@ -10,6 +10,11 @@
 			"inserted-from": [],
 			"used-by": [
 				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
@@ -42,7 +47,7 @@
 			]
 		},
 		{
-			"id": 9,
+			"id": 10,
 			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
 			"data": {
 				"?app-id": "app-1"
@@ -62,6 +67,21 @@
 					"type": "query"
 				},
 				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
 					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved",
 					"ns": "clara.server.tools.graph.rules.loan-app-rules",
 					"type": "rule"
@@ -69,7 +89,7 @@
 			]
 		},
 		{
-			"id": 10,
+			"id": 11,
 			"type": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 			"data": {
 				"?app-id": "app-1"
@@ -85,7 +105,7 @@
 			]
 		},
 		{
-			"id": 11,
+			"id": 12,
 			"type": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
 			"data": {
 				"?app-id": "app-1"
@@ -103,7 +123,7 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 12,
+			"id": 13,
 			"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 			"data": {
 				"app-id": "app-1",

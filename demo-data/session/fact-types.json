@@ -1,11 +1,23 @@
 {
 	"types": [
 		{
+			"name": "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview",
+			"count": 1
+		},
+		{
+			"name": "extract-doc-meta",
+			"count": 1
+		},
+		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
 			"count": 1
 		},
 		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+			"count": 1
+		},
+		{
+			"name": "loan-doc-rules/document-check-input",
 			"count": 1
 		},
 		{
@@ -17,15 +29,19 @@
 			"count": 1
 		},
 		{
+			"name": "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail",
+			"count": 1
+		},
+		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
 			"count": 3
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
 			"count": 1
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheckInput",
+			"name": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
 			"count": 1
 		},
 		{
@@ -37,6 +53,10 @@
 			"count": 1
 		},
 		{
+			"name": "compliance-review-result",
+			"count": 1
+		},
+		{
 			"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
 			"count": 1
 		},
@@ -45,5 +65,5 @@
 			"count": 1
 		}
 	],
-	"total-count": 13
+	"total-count": 18
 }

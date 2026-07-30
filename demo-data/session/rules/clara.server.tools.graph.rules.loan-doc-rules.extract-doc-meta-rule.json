@@ -1,0 +1,25 @@
+{
+	"matches": [],
+	"inserted-facts": [
+		{
+			"id": 5,
+			"type": "extract-doc-meta",
+			"data": "#'clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta",
+			"is-root": false,
+			"inserted-from": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			]
+		}
+	]
+}
