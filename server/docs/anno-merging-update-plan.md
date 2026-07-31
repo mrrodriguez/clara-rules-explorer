@@ -987,8 +987,9 @@ breaking-change phase for pre-existing tests and fixtures.**
   **Follow-up (not done — file is out of scope for this session):**
   `../docs/explorer-graph-api.md` still documents the old contract (`:annotations-file`,
   `:annotation-sources`, `"resolved"`/`"resolved-multi"`/`"unresolved"` statuses, sidecar
-  reload). It needs the same vocabulary swap: `:layers`, `:provenance`,
-  `"full"`/`"partial"`/`"none"`, merged-annotations reload.
+  reload). It needs the vocabulary swap: `:layers`, `"full"`/`"partial"`/`"none"`,
+  merged-annotations reload. (Note: `:annotation-sources` has no replacement on the
+  API — per review R7, provenance is library-internal and not exposed over HTTP.)
 - [x] 6.8 **Gate:** `make test format lint reflection-check` green; `cd ../ui && pnpm run check`
   if the API contract changed.
 
@@ -1001,6 +1002,22 @@ breaking-change phase for pre-existing tests and fixtures.**
 
 Phases 1–5 are self-contained and testable against fixture maps: no session, no rulebase, no
 classpath.
+
+### Review follow-ups (server/docs/review.md)
+
+- [x] R1 `AnnotationsMap` schema: `s/cond-pre` as map key is wrong — replace.
+- [x] R2 `api/enriched-annotations` takes the bare annotations map; the caller unwraps
+  MergedAnnotations — no duck-typed signature.
+- [x] R3 Makefile target for `dev/regen_fixture.clj`.
+- [x] R4 Docstrings must not cite this ephemeral plan; cite `rule-annotations.md` (permanent,
+  source of truth) and code refs.
+- [x] R5 Generated layer gets a distinguished `:id`: `:clara.tools.graph.analyze/generated`
+  (main `--generate-analysis`, regen script, fixture file).
+- [x] R6 Split the annotations ns into a group under `clara.server.tools.graph.annotations.*`
+  (callsite vs merge vs report vs rebase); top-level keeps normalization + production lookup.
+- [x] R7 Remove `:provenance` from the HTTP API and the FE type — unused downstream of the
+  merge itself (it stays in the library: merge output, validate-layers).
+- [x] R8 Gate: `make test format lint reflection-check`; `cd ../ui && pnpm run check`.
 
 ## 11. Open questions
 

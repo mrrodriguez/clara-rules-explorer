@@ -8,7 +8,7 @@
             [clojure.java.io :as io]
             [clojure.tools.cli :refer [parse-opts]]
             [clara.server.tools.graph.analyze :as analyze]
-            [clara.server.tools.graph.annotations :as annotations]
+            [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.core :as core]
             [clojure.pprint :as pprint])
   (:import [java.io EOFException]))
@@ -163,28 +163,28 @@
                  {:analysis analysis
                   :session-or-rulebase loaded-session})))
 
-            generated-layer (annotations/layer
-                             {:id :generated
+            generated-layer (ann.merge/layer
+                             {:id :clara.tools.graph.analyze/generated
                               :source {:generated-from (str session)}
                               :annotations generated})
 
             ;; Curation-aware analysis: the rule-:props base, the freshly
             ;; generated discovery layer, then any caller-supplied layers
             ;; folded over it (lowest precedence first).
-            layers (into [(annotations/props-layer loaded-session) generated-layer]
-                         (map annotations/read-layer)
+            layers (into [(ann.merge/props-layer loaded-session) generated-layer]
+                         (map ann.merge/read-layer)
                          (:layer options))
 
             _ (println "Running rulebase analysis...")
             analysis (core/rulebase-analysis loaded-session
-                                             (annotations/merge-layers layers))
+                                             (ann.merge/merge-layers layers))
 
             _ (.mkdirs (io/file generate-analysis-dir))
 
             annotations-path (str generate-analysis-dir "/annotations.edn")
             analysis-path (str generate-analysis-dir "/analysis.edn")]
 
-        (annotations/write-layer! annotations-path generated-layer)
+        (ann.merge/write-layer! annotations-path generated-layer)
         (println (format "Annotations written to: %s" annotations-path))
 
         (spit analysis-path

@@ -82,9 +82,6 @@ export interface BaseRuleOrQuery {
 	'lhs-types': string[];
 	lhs: LhsElement[];
 	notes: string | null;
-	/** Per annotation key, which layer(s) claimed the merged value — a layer id,
-	 * an array of layer ids (union/deep-merged keys), or 'derived'. */
-	provenance: Record<string, string | string[]> | null;
 	props: Record<string, unknown> | null;
 	upstream?: ProductionReference[];
 	downstream?: ProductionReference[];

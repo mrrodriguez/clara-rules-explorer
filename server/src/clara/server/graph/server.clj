@@ -2,7 +2,7 @@
   "Lifecycle management for the Clara Rules Explorer server."
   (:require [ring.adapter.jetty :as jetty]
             [clara.server.graph.api :as api]
-            [clara.server.tools.graph.annotations :as ann])
+            [clara.server.tools.graph.annotations.merge :as ann.merge])
   (:import
    [org.eclipse.jetty.server
     Server]))
@@ -17,8 +17,8 @@
    map is taken as an in-memory layer."
   [x]
   (if (string? x)
-    (ann/read-layer x)
-    (ann/layer x)))
+    (ann.merge/read-layer x)
+    (ann.merge/layer x)))
 
 (defn- load-merged-annotations
   "Folds the rule-:props layer (base) plus the configured `:layers` through
@@ -26,9 +26,9 @@
    POST /v1/annotations/reload picks up edits; in-memory layers are kept
    as-is."
   [session layers]
-  (ann/merge-layers (into [(ann/props-layer session)]
-                          (map ->layer)
-                          layers)))
+  (ann.merge/merge-layers (into [(ann.merge/props-layer session)]
+                                (map ->layer)
+                                layers)))
 
 (defn- reload-annotations! []
   (let [{:keys [session layers]} @config-atom]

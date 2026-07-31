@@ -39,6 +39,8 @@
             [clara.server.tools.graph.serialize :as serialize]
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.annotations :as ann]
+            [clara.server.tools.graph.annotations.callsite :as ann.callsite]
+            [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.rules.engine :as eng])
   (:import [clara.rules.engine LocalSession]))
 
@@ -274,9 +276,9 @@
                                  :dynamic-type-fallback-resolution dynamic-type-fallback-resolution})
             all-callsites (into all-callsites fallback-callsites)
             all-types (into all-types (mapcat :resolved-types) fallback-callsites)
-            ;; callsite identity (docs/anno-merging-update-plan.md §4.4): the
-            ;; discovering layer derives ids — it has the full entries.
-            all-callsites (ann/assign-callsite-ids all-callsites)
+            ;; callsite identity: the discovering layer derives ids — it has
+            ;; the full entries (see annotations.callsite/assign-callsite-ids).
+            all-callsites (ann.callsite/assign-callsite-ids all-callsites)
             all-resolution (callsite/resolution-status all-callsites)]
         {:resolved-types all-types
          :dynamic-forms (when (seq all-callsites)
@@ -918,9 +920,9 @@
         productions  (:productions rulebase)
 
         pam-annotations
-        (ann/annotations (ann/merge-layers [(ann/props-layer rulebase)
-                                            (ann/layer {:id :enriched
-                                                        :annotations enriched})]))
+        (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/props-layer rulebase)
+                                                        (ann.merge/layer {:id :enriched
+                                                                          :annotations enriched})]))
 
         pam
         (into {}

@@ -4,6 +4,7 @@
    and derivation are covered in annotations_merge_test.clj."
   (:require [clara.rules :as r]
             [clara.server.tools.graph.annotations :as ann]
+            [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clojure.test :refer [deftest is testing]]))
 
@@ -58,7 +59,7 @@
 
 (deftest test-props-layer
   (let [session (r/mk-session 'clara.server.tools.graph.rules.loan-app-rules)
-        layer (ann/props-layer session)
+        layer (ann.merge/props-layer session)
         outcome-class (Class/forName "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome")]
     (testing "layer identity"
       (is (= :props (:id layer)))
@@ -70,8 +71,8 @@
                       "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
                       :clara-rules/insert-types]))))
     (testing "composes at any position in the fold, carrying props through (§5.5)"
-      (let [merged (ann/merge-layers [layer])
-            rule (get (ann/annotations merged)
+      (let [merged (ann.merge/merge-layers [layer])
+            rule (get (ann.merge/annotations merged)
                       "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?")]
         (is (= [outcome-class]
                (:clara-rules/insert-types rule)))))))

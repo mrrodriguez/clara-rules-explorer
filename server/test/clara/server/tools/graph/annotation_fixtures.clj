@@ -2,7 +2,7 @@
   "Shared access to the loan-doc annotation layer fixture
    (test-resources/.../loan-doc-rules-annotations.edn), regenerated as a
    Layer per docs/anno-merging-update-plan.md phase 6.6."
-  (:require [clara.server.tools.graph.annotations :as ann]
+  (:require [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clojure.java.io :as io]))
 
 (def loan-doc-layer-path
@@ -14,5 +14,5 @@
    layer plus the generated layer fixture (the same fold the server
    performs)."
   [session]
-  (ann/merge-layers [(ann/props-layer session)
-                     (ann/read-layer loan-doc-layer-path)]))
+  (ann.merge/merge-layers [(ann.merge/props-layer session)
+                           (ann.merge/read-layer loan-doc-layer-path)]))

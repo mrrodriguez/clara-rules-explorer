@@ -1,4 +1,4 @@
-{:id :generated,
+{:id :clara.tools.graph.analyze/generated,
  :source
  {:generated-from "clara.server.tools.graph.rules.loan-doc-rules"},
  :annotations
@@ -227,12 +227,12 @@
   "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule"
   #:clara-rules{:dynamic-insert-types-detected
                 {:callsites
-                 [{:source-str "resolved__43966__auto__",
+                 [{:source-str "resolved__44034__auto__",
                    :ns-name-sym
                    clara.server.tools.graph.rules.loan-doc-rules,
                    :filename
                    "clara/server/tools/graph/rules/loan_doc_rules.clj",
                    :status :none,
                    :callsite-id
-                   "clara.server.tools.graph.rules.loan-doc-rules:-:a3146853:0"}],
+                   "clara.server.tools.graph.rules.loan-doc-rules:-:0d0ffd93:0"}],
                  :resolution :none}}}}

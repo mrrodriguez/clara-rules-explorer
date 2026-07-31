@@ -82,12 +82,9 @@
   derives the namespace from the fully-qualified :name.
 
   `annotations` is the merged rule→annotation map (see
-  annotations/merge-layers); `provenance` is the per-rule, per-key origin
-  map from the same merge (F8 — replaces the old two-source
-  :annotation-sources)."
+  annotations/merge-layers)."
   [{p-name :name :as production}
    annotations
-   provenance
    dep-graph
    production-map]
   (let [ann (ann/production-annotation annotations production)
@@ -122,7 +119,6 @@
                  :lhs                (-> production :lhs
                                          serialize/prune-fns
                                          serialize/serialize-lhs)
-                 :provenance               (get provenance p-name)
                  :notes                    (:notes ann)}
 
           is-rule?
@@ -221,7 +217,6 @@
   [{:keys [production-type
            productions
            annotations
-           provenance
            dep-graph
            production-map]}]
   (let [filter-xf (case production-type
@@ -233,26 +228,23 @@
           (comp filter-xf
                 (mapcat (juxt :name #(production-summary %
                                                          annotations
-                                                         provenance
                                                          dep-graph
                                                          production-map)))))
          (apply array-map))))
 
 (defn- build-rule-summary-map
-  [productions annotations provenance dep-graph production-map]
+  [productions annotations dep-graph production-map]
   (build-production-summary-map {:production-type :rule
                                  :productions productions
                                  :annotations annotations
-                                 :provenance provenance
                                  :dep-graph dep-graph
                                  :production-map production-map}))
 
 (defn- build-query-summary-map
-  [productions annotations provenance dep-graph production-map]
+  [productions annotations dep-graph production-map]
   (build-production-summary-map {:production-type :query
                                  :productions productions
                                  :annotations annotations
-                                 :provenance provenance
                                  :dep-graph dep-graph
                                  :production-map production-map}))
 
@@ -315,7 +307,7 @@
   [session-or-rulebase annotations]
   (let [{:keys [productions id-to-node] :as rulebase} (get-rulebase session-or-rulebase)
 
-        {:keys [annotations provenance]} (->merged annotations)
+        annotations (:annotations (->merged annotations))
 
         production-annotation-map (build-production-annotation-map productions annotations)
 
@@ -324,13 +316,11 @@
 
         rules (build-rule-summary-map productions
                                       annotations
-                                      provenance
                                       dep-graph
                                       production-map)
 
         queries (build-query-summary-map productions
                                          annotations
-                                         provenance
                                          dep-graph
                                          production-map)
 

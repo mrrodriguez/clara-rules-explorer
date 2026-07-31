@@ -100,15 +100,11 @@
    (s/optional-key :dynamic-retract-types-detected) DynamicDetectionInfo})
 
 (s/defschema Rule
-  "Full rule detail with LHS/RHS forms, props, and annotations.  `:provenance`
-   records, per annotation key, which layer(s) claimed the merged value (or
-   `:derived` when the derivation pass produced it) — see
-   docs/anno-merging-update-plan.md §4.6."
+  "Full rule detail with LHS/RHS forms, props, and annotations."
   (merge RuleListItem
          {:props              {s/Str s/Any}
           :lhs                [LhsCondition]
           :rhs-form           s/Str
-          :provenance         (s/maybe {s/Keyword s/Any})
           (s/optional-key :notes) (s/maybe s/Str)}))
 
 (s/defschema QueryListItem
@@ -126,7 +122,6 @@
   (merge QueryListItem
          {:props              {s/Str s/Any}
           :lhs                [LhsCondition]
-          :provenance         (s/maybe {s/Keyword s/Any})
           (s/optional-key :notes) (s/maybe s/Str)}))
 
 (s/defschema FactTypeListItem
@@ -172,10 +167,12 @@
    :ids           [s/Int]})
 
 ;; Internal atoms shape — the annotations atom holds a MergedAnnotations
-;; value (see annotations/merge-layers); bare rule→annotation maps are also
-;; accepted for callers that do not care about provenance.
+;; value (keyword keys; see annotations/merge-layers); bare rule→annotation
+;; maps (string keys) are also accepted for callers that do not care about
+;; provenance.
 (s/defschema AnnotationsMap
-  {(s/cond-pre s/Keyword s/Str) s/Any})
+  (s/cond-pre {s/Keyword s/Any}
+              {s/Str s/Any}))
 
 ;; ---------------------------------------------------------------------------
 ;; Handler helpers
@@ -237,16 +234,23 @@
 
 (defn- enriched-annotations
   "Returns annotations enriched with fact-type provenance from the session's
-   working memory when a live session is available.  Takes already-derefed
-   values (not atoms) to make it clear this is a pure function.  Accepts a
-   MergedAnnotations value or a bare rule→annotation map; returns a bare map."
-  [session annotations]
-  (let [bare (if (and (map? annotations) (some #{:annotations} (keys annotations)))
-               (:annotations annotations)
-               annotations)]
-    (if (instance? clara.rules.engine.LocalSession session)
-      (analyze/enrich-annotations-from-session session bare)
-      bare)))
+   working memory when a live session is available.  Takes a bare
+   rule→annotation map (the caller unwraps any MergedAnnotations) and returns
+   a bare map."
+  [session bare-annotations]
+  (if (instance? clara.rules.engine.LocalSession session)
+    (analyze/enrich-annotations-from-session session bare-annotations)
+    bare-annotations))
+
+(defn- ->bare-annotations
+  "Unwraps a MergedAnnotations value to the bare rule→annotation map; bare
+   maps pass through.  (Key membership is tested with `some` — a bare map may
+   be a string-keyed sorted map, where a keyword `contains?` throws
+   ClassCastException.)"
+  [x]
+  (if (and (map? x) (some #{:annotations} (keys x)))
+    (:annotations x)
+    x))
 
 (defn- get-analysis
   "Returns the cached rulebase-analysis, rebuilding only when the session or
@@ -263,7 +267,7 @@
       (:analysis cached)
       (let [analysis (core/rulebase-analysis
                       session
-                      (enriched-annotations session annotations))]
+                      (enriched-annotations session (->bare-annotations annotations)))]
         (reset! analysis-cache {:session session
                                 :annotations annotations
                                 :analysis analysis})

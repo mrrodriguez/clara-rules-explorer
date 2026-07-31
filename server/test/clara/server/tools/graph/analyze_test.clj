@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [clara.rules :as r]
             [clara.server.tools.graph.annotations :as ann]
+            [clara.server.tools.graph.annotations.callsite :as ann.callsite]
             [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.analyze.alias :as alias]
             [clara.server.tools.graph.memory :as memory]
@@ -154,10 +155,10 @@
 
 (defn- resolved-detection
   "Expected dynamic-detection map for a single resolved callsite.  Ids are
-   derived with the same `ann/assign-callsite-ids` the generator uses —
+   derived with the same `ann.callsite/assign-callsite-ids` the generator uses —
    test-callsite-id-stability pins the hash algorithm itself."
   [ns-sym filename source-str token]
-  {:callsites (ann/assign-callsite-ids
+  {:callsites (ann.callsite/assign-callsite-ids
                [{:source-str source-str
                  :ns-name-sym ns-sym
                  :filename filename
@@ -168,7 +169,7 @@
 (defn- unresolved-detection
   "Expected dynamic-detection map for a single unresolved callsite."
   [ns-sym filename source-str]
-  {:callsites (ann/assign-callsite-ids
+  {:callsites (ann.callsite/assign-callsite-ids
                [{:source-str source-str
                  :ns-name-sym ns-sym
                  :filename filename
@@ -502,7 +503,7 @@
                  (ann/get-annotation ann `atr/rule-consume-widget-transform))]
         (is (= :none (:resolution dyn))
             "alias-discovered callsites bypass the ctor chain — never automatically resolved")
-        (is (= (ann/assign-callsite-ids
+        (is (= (ann.callsite/assign-callsite-ids
                 [(assoc aliased-callsite
                         :status :none
                         :fact-type :widget-transform
@@ -534,7 +535,7 @@
             dyn (:clara-rules/dynamic-insert-types-detected
                  (ann/get-annotation ann `atr/rule-consume-widget-transform))]
         (is (= :full (:resolution dyn)))
-        (is (= (ann/assign-callsite-ids
+        (is (= (ann.callsite/assign-callsite-ids
                 [(assoc aliased-callsite
                         :status :full
                         :resolved-types [:widget-output]
@@ -695,7 +696,7 @@
                                      {:session-or-rulebase session
                                       :include-ns-prefixes ["fake."]})
                           :session-or-rulebase session})]
-        (is (= {:callsites (ann/assign-callsite-ids
+        (is (= {:callsites (ann.callsite/assign-callsite-ids
                             [{:source-str "{:fake true}"
                               :ns-name-sym ns-sym
                               :filename "fake/eval_rules.clj"

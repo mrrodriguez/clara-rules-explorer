@@ -39,9 +39,9 @@
 
    Callsite `:status` and dimension `:resolution` use one three-valued
    vocabulary — `:none` / `:partial` / `:full` (see
-   docs/anno-merging-update-plan.md §4.3).  The analyzer emits only `:full`
-   and `:none`; `:partial` is reachable through curation and through
-   dimension-level aggregation.
+   docs/rule-annotations.md).  The analyzer emits only `:full` and `:none`;
+   `:partial` is reachable through curation and through dimension-level
+   aggregation.
 
    All Clojure syntax understanding comes from clj-kondo; reading forms at
    kondo positions lives in `analyze.kondo`, constructor recognition in
@@ -200,11 +200,11 @@
         usages))
 
 (defn resolution-status
-  "Aggregates a callsite vector into a dimension-level resolution
-   (docs/anno-merging-update-plan.md §4.3): nil (no callsites — the dimension
-   is absent), :full (all :full), :none (all :none), :partial (otherwise).
-   Shared by the analyzer and by `annotations/aggregate-resolution`, which
-   additionally excludes quarantined (`:dangling?`) callsites first."
+  "Aggregates a callsite vector into a dimension-level resolution: nil (no
+   callsites — the dimension is absent), :full (all :full), :none (all
+   :none), :partial (otherwise).  Shared by the analyzer and by
+   `annotations.callsite/aggregate-resolution`, which additionally excludes
+   quarantined (`:dangling?`) callsites first."
   [callsites]
   (cond
     (empty? callsites) nil

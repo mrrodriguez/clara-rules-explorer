@@ -1,7 +1,7 @@
 (ns clara.server.tools.graph.core-test
   (:require [clara.rules :as r]
             [clara.server.tools.graph.annotation-fixtures :as fixtures]
-            [clara.server.tools.graph.annotations :as ann]
+            [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
@@ -305,7 +305,7 @@
 (deftest test-dep-graph-hierarchy
   (testing "Dependency graph edges with type hierarchy (ancestor-fn)"
     (let [session (r/mk-session [car-producer vehicle-consumer])
-          analysis (core/rulebase-analysis session (ann/annotations (ann/merge-layers [(ann/props-layer session)])))
+          analysis (core/rulebase-analysis session (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/props-layer session)])))
           graph (:dep-graph analysis)]
       (is (contains? (get-in graph ["clara.server.tools.graph.core-test/car-producer" :downstream])
                      "clara.server.tools.graph.core-test/vehicle-consumer"))

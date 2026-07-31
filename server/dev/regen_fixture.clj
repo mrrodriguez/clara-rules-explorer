@@ -2,7 +2,7 @@
 ;; as a Layer (docs/anno-merging-update-plan.md phase 6.6).
 ;;
 ;; Run from server/:
-;;   clojure -M:test -i dev/regen_fixture.clj
+;;   make regen-fixture
 ;;
 ;; The fixture mirrors generation with constructor-of-interest resolution for
 ;; helpers/->fact (see analyze_test's loan-doc-ctor-annotations) plus the
@@ -11,7 +11,7 @@
 (ns regen-fixture
   (:require [clara.rules :as r]
             [clara.server.tools.graph.analyze :as analyze]
-            [clara.server.tools.graph.annotations :as ann]
+            [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clojure.pprint :as pprint]))
@@ -42,9 +42,9 @@
                          :type-resolver-fn ->fact-type-resolver}]}))
 
 (let [path "test-resources/clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn"]
-  (ann/write-layer! path
-                    (ann/layer {:id :generated
-                                :source {:generated-from "clara.server.tools.graph.rules.loan-doc-rules"}
-                                :annotations generated}))
+  (ann.merge/write-layer! path
+                          (ann.merge/layer {:id :clara.tools.graph.analyze/generated
+                                            :source {:generated-from "clara.server.tools.graph.rules.loan-doc-rules"}
+                                            :annotations generated}))
   (println "wrote" path)
   (println (with-out-str (pprint/pprint generated))))

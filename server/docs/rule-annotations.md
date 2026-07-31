@@ -22,9 +22,8 @@ Rule annotations support the following qualified keys:
 ## Sources of Annotations
 
 Annotations come in **layers** — one per source — folded together by
-`clara.server.tools.graph.annotations/merge-layers`, lowest precedence
-first.  See [anno-merging-update-plan.md](anno-merging-update-plan.md) §4–§5
-for the full data model and merge semantics.
+`clara.server.tools.graph.annotations.merge/merge-layers`, lowest precedence
+first.
 
 ### Rule `:props` — the base layer
 
@@ -40,7 +39,7 @@ Annotations can be declared directly in the Clojure source code within the rule'
   (insert! (->Cold)))
 ```
 
-`annotations/props-layer` reads every production's whole `:props` map off the
+`clara.server.tools.graph.annotations.merge/props-layer` reads every production's whole `:props` map off the
 compiled rulebase — nothing is filtered.  Folded first (the convention), it
 is the base that generated and curated layers add to; a higher layer can
 still overrule a props value with `:replace` or a tombstone (below).
@@ -64,9 +63,8 @@ by the rule's fully qualified name:
 ```
 
 Layers are **sparse**: omitting a key means "no opinion" — the lower layer's
-value survives.  Layers are read with `annotations/read-layer` and written
-with `annotations/write-layer!`; in-memory layers are first-class
-(`annotations/layer`).
+value survives.  Layers are read with `read-layer` and written
+with `write-layer!`; in-memory layers are first-class (`layer`).
 
 ---
 
@@ -131,6 +129,41 @@ resolved callsite types are promoted into `:clara-rules/insert-types` /
 anyone hand-writing a type.  `:type-derivation :additive` (default) unions
 authored and callsite-derived types; `:from-callsites` makes the callsite
 record authoritative for any dimension that has one.
+
+---
+
+## The Annotations Library
+
+The library is split into a namespace group under
+`clara.server.tools.graph.annotations`:
+
+| Namespace | Contents |
+|---|---|
+| `…graph.annotations` | Rule-name normalization (`normalize-rule-name`, `normalize-annotations`, `get-annotation`) and per-production lookup (`production-annotation`) |
+| `…graph.annotations.callsite` | Callsite format and identity: `callsite-id`, `assign-callsite-ids`, `aggregate-resolution` |
+| `…graph.annotations.merge` | Layers and merging: `layer`, `read-layer`, `write-layer!`, `props-layer`, `merge-layers`, `derive-conclusions`, `annotations`, `provenance` |
+| `…graph.annotations.report` | `unresolved-report` (the curation work list) and `validate-layers` (pure lint) |
+| `…graph.annotations.rebase` | `rebase-layer` — remap a layer across a namespace rename |
+
+Layers produced by `clara.server.graph.main --generate-analysis` (and by the
+fixture generator, `make regen-fixture`) carry the distinguished id
+`:clara.tools.graph.analyze/generated`; nothing in the library privileges
+that id — it is a marker for humans and tooling.
+
+**Dangling references.** Only the analyzer *discovers* callsites; every other
+layer *annotates* ones that already exist.  A merged callsite entry with no
+discovered form (no `:source-str`) is dangling — by default it is
+quarantined (`:dangling? true`, excluded from type derivation and the
+resolution aggregate, and reported by `unresolved-report` /
+`validate-layers`); `:on-dangling :keep` treats it as ordinary and `:drop`
+removes it.  A curating layer should carry `:source-str` as a redundant
+witness — one line, ignored by the merge whenever a discovered entry
+supplies one, and the only context left when the entry dangles.
+
+**Rebasing.** Renaming a namespace dangles every curated callsite in it.
+`rebase-layer` remaps rule names, discovery fields, and type tokens across a
+known old→new namespace mapping and recomputes callsite ids, so a curated
+layer survives the rename without re-confirmation.
 
 ---
 

@@ -5,7 +5,10 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [clara.server.tools.graph.annotations :as ann]))
+            [clara.server.tools.graph.annotations.callsite :as ann.callsite]
+            [clara.server.tools.graph.annotations.merge :as ann]
+            [clara.server.tools.graph.annotations.rebase :as ann.rebase]
+            [clara.server.tools.graph.annotations.report :as ann.report]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixtures
@@ -363,21 +366,21 @@
            :ns-name-sym 'acme.pricing
            :constructor-sym 'acme.facts/make-fact}]
     (testing "format is ns:ctor:hash8 — pinned hash protects the algorithm"
-      (is (= "acme.pricing:make-fact:ef421c1c" (ann/callsite-id c))))
+      (is (= "acme.pricing:make-fact:ef421c1c" (ann.callsite/callsite-id c))))
     (testing "assign-callsite-ids appends the group ordinal"
       (is (= ["acme.pricing:make-fact:ef421c1c:0"]
-             (mapv :callsite-id (ann/assign-callsite-ids [c])))))
+             (mapv :callsite-id (ann.callsite/assign-callsite-ids [c])))))
     (testing "boundary-path callsites (no constructor) use `-`"
       (is (re-find #"^acme.pricing:-:[0-9a-f]{8}:0$"
-                   (:callsite-id (first (ann/assign-callsite-ids
+                   (:callsite-id (first (ann.callsite/assign-callsite-ids
                                          [(dissoc c :constructor-sym)]))))))
     (testing "an unrelated edit elsewhere leaves the id unchanged"
-      (is (= (ann/callsite-id c)
-             (ann/callsite-id (assoc c :via {:boundary-var-name-sym 'other/ns}
-                                     :filename "other/file.clj")))))
+      (is (= (ann.callsite/callsite-id c)
+             (ann.callsite/callsite-id (assoc c :via {:boundary-var-name-sym 'other/ns}
+                                              :filename "other/file.clj")))))
     (testing "editing the callsite's own form changes the id"
-      (is (not= (ann/callsite-id c)
-                (ann/callsite-id (assoc c :source-str "(f/make-fact :gold {:total ?total})")))))))
+      (is (not= (ann.callsite/callsite-id c)
+                (ann.callsite/callsite-id (assoc c :source-str "(f/make-fact :gold {:total ?total})")))))))
 
 (deftest duplicate-group-ordinals
   (let [dup {:source-str "(insert! x)"
@@ -388,13 +391,13 @@
                :constructor-sym 'acme.facts/make-fact}]
     (testing "textually identical siblings get distinct ordinals"
       (is (= ["acme.pricing:make-fact:0ed8c382:0" "acme.pricing:make-fact:0ed8c382:1"]
-             (mapv :callsite-id (ann/assign-callsite-ids [dup dup])))))
+             (mapv :callsite-id (ann.callsite/assign-callsite-ids [dup dup])))))
     (testing "an unrelated callsite in the same rule does not renumber the group"
-      (let [[_ d0 d1] (mapv :callsite-id (ann/assign-callsite-ids [other dup dup]))]
+      (let [[_ d0 d1] (mapv :callsite-id (ann.callsite/assign-callsite-ids [other dup dup]))]
         (is (= ["acme.pricing:make-fact:0ed8c382:0" "acme.pricing:make-fact:0ed8c382:1"]
                [d0 d1]))))
     (testing "ids are unique by construction across the vector"
-      (let [ids (mapv :callsite-id (ann/assign-callsite-ids [dup dup other]))]
+      (let [ids (mapv :callsite-id (ann.callsite/assign-callsite-ids [dup dup other]))]
         (is (apply distinct? ids))))))
 
 (deftest ids-derived-on-read
@@ -512,7 +515,7 @@
                                           {:callsites [generated-callsite resolved-cs partial-cs]}}
                             "acme.pricing/other-rule"
                             #:clara-rules{:insert-types [:t]}}})
-        report (ann/unresolved-report (ann/merge-layers [richer]))]
+        report (ann.report/unresolved-report (ann/merge-layers [richer]))]
     (testing "summary counts rules and callsites needing work, by status"
       (is (= {:rules 1 :callsites 2 :by-resolution {:none 1 :partial 1} :dangling 0}
              (:summary report))))
@@ -528,7 +531,7 @@
       (is (not (contains? (:rules report) "acme.pricing/other-rule"))))))
 
 (deftest unresolved-report-dangling
-  (let [report (ann/unresolved-report (ann/merge-layers [generated-layer dangling-curated-layer]))]
+  (let [report (ann.report/unresolved-report (ann/merge-layers [generated-layer dangling-curated-layer]))]
     (testing "quarantined entries are reported separately, not as work"
       (is (= 1 (get-in report [:summary :dangling])))
       (is (= 1 (get-in report [:summary :callsites]))))
@@ -551,13 +554,13 @@
   (let [layer (ann/layer {:id :curated
                           :annotations {"acme.pricing/discount-rule" #:clara-rules{:notes "ok"}
                                         "acme.pricing/nope-rule" #:clara-rules{:notes "typo"}}})
-        findings (ann/validate-layers [layer] {:known-rule-names #{"acme.pricing/discount-rule"}})
+        findings (ann.report/validate-layers [layer] {:known-rule-names #{"acme.pricing/discount-rule"}})
         unknown (:unknown-rule (findings-by-type findings))]
     (is (= 1 (count unknown)))
     (is (= :error (:severity (first unknown))))
     (is (= "acme.pricing/nope-rule" (:rule (first unknown))))
     (testing "offline validation (no :known-rule-names) skips the check"
-      (is (empty? (:unknown-rule (findings-by-type (ann/validate-layers [layer]))))))))
+      (is (empty? (:unknown-rule (findings-by-type (ann.report/validate-layers [layer]))))))))
 
 (deftest validate-resolved-without-types
   (let [layer (ann/layer {:id :curated
@@ -567,7 +570,7 @@
                                                    [{:callsite-id "id:1"
                                                      :source-str "(x)"
                                                      :status :full}]}}}})
-        findings (:resolved-without-types (findings-by-type (ann/validate-layers [layer])))]
+        findings (:resolved-without-types (findings-by-type (ann.report/validate-layers [layer])))]
     (is (= 1 (count findings)))
     (is (= :error (:severity (first findings))))
     (is (= "id:1" (:callsite-id (first findings))))))
@@ -583,7 +586,7 @@
                                                      :from-layer :curated
                                                      :dangling? true}]
                                                    :resolution :none}}}})
-        findings (:authored-derived-field (findings-by-type (ann/validate-layers [layer])))]
+        findings (:authored-derived-field (findings-by-type (ann.report/validate-layers [layer])))]
     (testing ":resolution, :from-layer, and :dangling? are all flagged"
       (is (= 3 (count findings))))
     (is (every? #(= :warn (:severity %)) findings))))
@@ -591,7 +594,7 @@
 (deftest validate-dangling-callsite
   (let [findings (:dangling-callsite
                   (findings-by-type
-                   (ann/validate-layers [generated-layer dangling-curated-layer])))]
+                   (ann.report/validate-layers [generated-layer dangling-curated-layer])))]
     (is (= 1 (count findings)))
     (is (= :warn (:severity (first findings))))
     (is (= :curated (:layer (first findings))))
@@ -618,7 +621,7 @@
                                                        :status :full
                                                        :resolved-types [:t]}]}}}})
         findings (:ambiguous-callsite-reference
-                  (findings-by-type (ann/validate-layers [generated curator])))]
+                  (findings-by-type (ann.report/validate-layers [generated curator])))]
     (testing "a curator referencing a multi-member group id is warned"
       (is (= 1 (count findings)))
       (is (= id0 (:callsite-id (first findings)))))
@@ -633,14 +636,14 @@
         real (ann/layer {:id :real
                          :annotations {"rule/a" #:clara-rules{:insert-types [:y]}}})
         findings (:no-op-entry
-                  (findings-by-type (ann/validate-layers [base noop real])))]
+                  (findings-by-type (ann.report/validate-layers [base noop real])))]
     (testing "restating the merged value beneath is flagged; adding to it is not"
       (is (= 1 (count findings)))
       (is (= :noop (:layer (first findings)))))))
 
 (deftest validate-clean-layers
   (testing "the worked-example stack validates clean (no spurious findings)"
-    (is (= [] (ann/validate-layers [generated-layer curated-layer])))))
+    (is (= [] (ann.report/validate-layers [generated-layer curated-layer])))))
 
 ;; ---------------------------------------------------------------------------
 ;; §5.7 — type derivation (phase 5)
@@ -782,8 +785,8 @@
                           :annotations {"rule/a" #:clara-rules{:insert-types [:props/t]}}})
         findings (:derivation-dropped-authored-type
                   (findings-by-type
-                   (ann/validate-layers [props generated]
-                                        {:type-derivation :from-callsites})))]
+                   (ann.report/validate-layers [props generated]
+                                               {:type-derivation :from-callsites})))]
     (testing "the dropped props type is reported with its layer"
       (is (= 1 (count findings)))
       (is (= :props (:layer (first findings))))
@@ -791,7 +794,7 @@
     (testing "the check is silent under :additive"
       (is (empty? (:derivation-dropped-authored-type
                    (findings-by-type
-                    (ann/validate-layers [props generated]))))))))
+                    (ann.report/validate-layers [props generated]))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; phase 7 — rebase-layer
@@ -817,8 +820,8 @@
                                               :ns-name-sym 'other.ns
                                               :filename "other/ns.clj"
                                               :status :none}]}}}})
-        rebased (ann/rebase-layer curated '{acme.pricing acme.billing
-                                            acme.facts acme.facts-v2})]
+        rebased (ann.rebase/rebase-layer curated '{acme.pricing acme.billing
+                                                   acme.facts acme.facts-v2})]
     (testing "rule-name keys are remapped"
       (is (contains? (:annotations rebased) "acme.billing/discount-rule")))
     (testing "callsite discovery fields and type tokens are remapped"
@@ -831,7 +834,7 @@
     (testing "ids are recomputed from the remapped basis"
       (let [cs (get-in rebased [:annotations "acme.billing/discount-rule"
                                 :clara-rules/dynamic-insert-types-detected :callsites 0])]
-        (is (= (ann/callsite-id (dissoc cs :callsite-id))
+        (is (= (ann.callsite/callsite-id (dissoc cs :callsite-id))
                (subs (:callsite-id cs) 0 (str/last-index-of (:callsite-id cs) ":"))))
         (is (str/starts-with? (:callsite-id cs) "acme.billing:make-fact:"))))
     (testing "unmapped namespaces pass through unchanged"
@@ -866,7 +869,7 @@
                           {"acme.pricing/rule"
                            #:clara-rules{:dynamic-insert-types-detected
                                          {:callsites [dup dup]}}}})
-        rebased (ann/rebase-layer layer '{acme.pricing acme.billing})
+        rebased (ann.rebase/rebase-layer layer '{acme.pricing acme.billing})
         ids (mapv :callsite-id
                   (get-in rebased [:annotations "acme.billing/rule"
                                    :clara-rules/dynamic-insert-types-detected :callsites]))]
