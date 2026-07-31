@@ -13,16 +13,18 @@ The explorer server wraps a Clara `session` in a Ring/Jetty HTTP server and expo
 | **Rulebase analysis** | `/v1/...` | `clara.server.tools.graph.core` | Stateless — derived from the compiled rulebase |
 | **Session state** | `/v1/session/...` | `clara.server.tools.graph.memory` | Point-in-time snapshot of working memory |
 
-The session and sidecar annotations are held in atoms so the host application can swap them at runtime without restarting.
+The session and merged annotations are held in atoms so the host application can swap them at runtime without restarting.
 
 ### Server bootstrap
 
 ```clojure
 (require '[clara.server.graph.server :as server])
 
-(def s (server/start! {:session    my-session
-                       :port       9999
-                       :annotations-file "/etc/clara/annotations.edn"})) ;; optional
+;; Layers are folded lowest precedence first.  The rule-:props base layer is
+;; always included first; additional layers overlay it.
+(def s (server/start! {:session my-session
+                       :port    9999
+                       :layers  ["/etc/clara/curated-annotations.edn"]}))
 (server/stop!)  ;; when done
 ```
 
@@ -308,18 +310,42 @@ Single fact-type detail. Same shape as list item.
 
 #### `GET /v1/annotations`
 
-Returns the currently loaded sidecar annotations map.
+Returns the currently loaded merged annotations (a `MergedAnnotations` value with `:annotations`, `:layers`, and `:provenance`). The `:annotations` payload is the merged rule→annotation map; `:provenance` records which layer(s) supplied each key (library-internal, not exposed over HTTP).
 
 **Response** `200`:
 ```json
 {
-  "my.app/cool-customer": { "insert-types": ["my.app.HappyCustomer"], "notes": "auto-generated" }
+  "annotations": {
+    "my.app/cool-customer": {
+      "insert-types": ["my.app.HappyCustomer"],
+      "notes": "curated",
+      "dynamic-insert-types-detected": {
+        "callsites": [
+          {
+            "callsite-id": "my.app:->HappyCustomer:abc12345:0",
+            "source-str": "(->HappyCustomer ?cust)",
+            "ns-name-sym": "my.app",
+            "filename": "my/app.clj",
+            "status": "full",
+            "resolved-types": ["my.app.HappyCustomer"]
+          }
+        ],
+        "resolution": "full"
+      }
+    }
+  },
+  "layers": [
+    {"id": "props", "source": "rulebase"},
+    {"id": "generated", "source": "generated-from session.bin"},
+    {"id": "curated", "source": "/etc/clara/curated-annotations.edn"}
+  ],
+  "provenance": {}
 }
 ```
 
 #### `POST /v1/annotations/reload`
 
-Re-reads the sidecar EDN file from disk. Idempotent. Returns the new annotations map. Currently returns `501` (not implemented in `api.clj` — reload is handled at the server layer via middleware).
+Re-reads file-backed annotation layers from disk. In-memory layers are kept as-is. Idempotent. Returns the new `MergedAnnotations` value (same shape as `GET`).
 
 ---
 
@@ -530,39 +556,39 @@ IDs are stable **within a single snapshot** and deterministic for the same sessi
 
 ## Annotations & Metadata
 
-The API supports inline rule `:props` maps and sidecar EDN files to declare rule metadata (such as insert and retract types). 
+Annotations come in **layers** — one per source — folded together with sparse-overlay semantics (omission = no opinion, explicit `null` = erase, deep callsite merge by `:callsite-id`). The three layer sources are:
 
-For the complete schema, merge configurations, and dynamic callsite details, refer to the dedicated [Rule Annotations Documentation](../server/docs/rule-annotations.md).
+| Layer | Source | Description |
+|-------|--------|-------------|
+| `:props` | Rule `:props` maps on the compiled rulebase | Always folded first as the base |
+| Generated | Auto-discovered via clj-kondo static analysis | Callsite discovery and resolution |
+| Curated | User-authored EDN files | Hand-resolved types, notes, overrides |
 
-### Annotation Resolution Status
+For the complete schema, merge strategies, callsite identity format, and derivation modes, refer to the dedicated [Rule Annotations Documentation](../server/docs/rule-annotations.md).
 
-The `resolved-annotation-data` field on each rule/query maps each annotation key to its resolution status:
+### Dynamic Callsite Status
+
+Each callsite entry carries a `:status` from the three-valued resolution vocabulary:
 
 | Value | Meaning |
 |-------|---------|
-| `"props"` | Declared only in defrule props |
-| `"sidecar"` | Declared only in the sidecar file (or replaced from sidecar) |
-| `"merge"` | Declared in both, merged together |
+| `"full"` | All fact types resolved — produces graph edges |
+| `"partial"` | Some types known, some unknown |
+| `"none"` | No types resolved — needs curation |
 
-```json
-{ "clara-rules/insert-types": "merge",
-  "clara-rules/retract-types": null,
-  "clara-rules/notes": "sidecar" }
-```
-
-A `null` value indicates the key was not declared in either path.
+The dimension-level `:resolution` (on `dynamic-insert-types-detected` / `dynamic-retract-types-detected`) aggregates across callsites: all-`:full` → `"full"`, all-`:none` → `"none"`, otherwise `"partial"`.
 
 ---
 
 ## Unresolved Detection
 
-The `:unresolved` collection in `/v1/analysis` tracks rules whose RHS appears to contain `insert!` / `retract!` but no types are declared in either props or sidecar. Each entry:
+The `:unresolved` collection in `/v1/analysis` tracks rules whose RHS appears to contain `insert!` / `retract!` but no types could be resolved from any annotation layer. Each entry:
 
 ```json
 {
   "rule": "my.ns/orphan-rule",
   "reason": "RHS likely contains insertion/retraction calls but no :clara-rules/insert-types or :clara-rules/retract-types declared.",
-  "hint": "Add :clara-rules/insert-types to the rule's properties map or a sidecar annotation file."
+  "hint": "Add :clara-rules/insert-types to the rule's properties map or a curated annotation layer."
 }
 ```
 
@@ -582,7 +608,7 @@ Example: `GET /v1/rules/my.app.cold-rule` resolves to `my.app/cold-rule`.
 |--------|---------|
 | `clara.server.tools.graph.core` | Static rulebase analysis, dep graph, LHS walker |
 | `clara.server.tools.graph.memory` | Working-memory snapshots and indices |
-| `clara.server.tools.graph.annotations` | Sidecar EDN loader and annotation merging |
+| `clara.server.tools.graph.annotations` | Layered annotations: format, merge, callsite identity, derivation, rebase, validation |
 | `clara.server.tools.graph.serialize` | JSON-safe serialization (fn redaction, type resolution) |
 | `clara.server.graph.api` | Reitit routes and Ring handler |
 | `clara.server.graph.server` | Jetty lifecycle (start/stop) |

@@ -1,8 +1,6 @@
 # Annotation Layering & Merging — Update Plan
 
-Status: **proposal**. Nothing here is implemented yet. This is a greenfield redesign of the
-annotation format and its merge semantics; it is not constrained by the current shapes and does
-not preserve them.
+Status: **implemented**. All phases 1–7 are complete (see checkboxes below).
 
 Scope: `clara.server.tools.graph.annotations` (format + merge), with touch points in
 `analyze` / `analyze.callsite` (callsite identity, resolution vocabulary),

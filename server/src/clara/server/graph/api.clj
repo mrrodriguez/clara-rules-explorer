@@ -383,10 +383,6 @@
   {:status 200
    :body @annotations-atom})
 
-(defn- handle-post-annotations-reload
-  [_session-atom _annotations-atom _req]
-  {:status 501 :body {:error "Reload not implemented in api.clj (requires config path)"}})
-
 (defn router
   [session-atom annotations-atom analysis-cache]
   (let [snapshot-cache (atom nil)]
@@ -432,10 +428,7 @@
 
        ["/annotations"
         [""
-         {:get (partial handle-get-annotations session-atom annotations-atom)}]
-
-        ["/reload"
-         {:post (partial handle-post-annotations-reload session-atom annotations-atom)}]]]]
+         {:get (partial handle-get-annotations session-atom annotations-atom)}]]]]
 
      {:data {:muuntaja (m/create
                         (assoc-in m/default-options
