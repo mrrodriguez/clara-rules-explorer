@@ -153,22 +153,26 @@
   "clara/server/tools/graph/rules/analyze_test_rules.clj")
 
 (defn- resolved-detection
-  "Expected dynamic-detection map for a single resolved callsite."
+  "Expected dynamic-detection map for a single resolved callsite.  Ids are
+   derived with the same `ann/assign-callsite-ids` the generator uses —
+   test-callsite-id-stability pins the hash algorithm itself."
   [ns-sym filename source-str token]
-  {:callsites [{:source-str source-str
-                :ns-name-sym ns-sym
-                :filename filename
-                :status :resolved
-                :resolved-types [token]}]
+  {:callsites (ann/assign-callsite-ids
+               [{:source-str source-str
+                 :ns-name-sym ns-sym
+                 :filename filename
+                 :status :full
+                 :resolved-types [token]}])
    :resolution :full})
 
 (defn- unresolved-detection
   "Expected dynamic-detection map for a single unresolved callsite."
   [ns-sym filename source-str]
-  {:callsites [{:source-str source-str
-                :ns-name-sym ns-sym
-                :filename filename
-                :status :unresolved}]
+  {:callsites (ann/assign-callsite-ids
+               [{:source-str source-str
+                 :ns-name-sym ns-sym
+                 :filename filename
+                 :status :none}])
    :resolution :none})
 
 ;; ---------------------------------------------------------------------------
@@ -295,7 +299,7 @@
             dyn (:clara-rules/dynamic-insert-types-detected a)]
         (is (= :partial (:resolution dyn)))
         (is (= 2 (count (:callsites dyn))))
-        (is (= #{:resolved :unresolved} (set (map :status (:callsites dyn)))))
+        (is (= #{:full :none} (set (map :status (:callsites dyn)))))
         (is (= [`DocumentCheck] (:clara-rules/insert-types a))
             "only the ctor arg's type is promoted")))))
 
@@ -317,7 +321,7 @@
         (is (= [`LocalDummyRecord] (:clara-rules/retract-types h3)))
         (is (= :full (:resolution dyn)))
         (is (= 2 (count (:callsites dyn))))
-        (is (every? #(= :resolved (:status %)) (:callsites dyn)))))
+        (is (every? #(= :full (:status %)) (:callsites dyn)))))
 
     (testing "Dynamic retract types — Java constructors resolve and promote"
       ;; Rule I1: short Class. constructor
@@ -373,7 +377,7 @@
             (first (:callsites dyn))]
         (is (re-matches #"resolved__\d+__auto__" source-str)
             "arg is the macro's gensym'd local; assert the shape, never the exact gensym")
-        (is (= :unresolved status))
+        (is (= :none status))
         (is (= 'clara.server.tools.graph.rules.loan-doc-rules ns-name-sym))
         (is (= "clara/server/tools/graph/rules/loan_doc_rules.clj" filename)))))
 
@@ -424,7 +428,7 @@
       (is (= [:extract-doc-meta] (:clara-rules/insert-types a))
           "resolver-provided fact type is promoted (arbitrary token shapes pass through)")
       (let [{:keys [source-str status resolved-types]} (first (:callsites dyn))]
-        (is (= :resolved status))
+        (is (= :full status))
         (is (= [:extract-doc-meta] resolved-types))
         (is (re-matches #"resolved__\d+__auto__" source-str)
             "the callsite still shows the literal boundary arg (the gensym local)"))
@@ -498,10 +502,11 @@
                  (ann/get-annotation ann `atr/rule-consume-widget-transform))]
         (is (= :none (:resolution dyn))
             "alias-discovered callsites bypass the ctor chain — never automatically resolved")
-        (is (= [(assoc aliased-callsite
-                       :status :unresolved
-                       :fact-type :widget-transform
-                       :fact-type-spec {:aliases-var `atr/widget-transform})]
+        (is (= (ann/assign-callsite-ids
+                [(assoc aliased-callsite
+                        :status :none
+                        :fact-type :widget-transform
+                        :fact-type-spec {:aliases-var `atr/widget-transform})])
                (:callsites dyn)))
         (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-consume-widget-transform))))
 
@@ -529,11 +534,12 @@
             dyn (:clara-rules/dynamic-insert-types-detected
                  (ann/get-annotation ann `atr/rule-consume-widget-transform))]
         (is (= :full (:resolution dyn)))
-        (is (= [(assoc aliased-callsite
-                       :status :resolved
-                       :resolved-types [:widget-output]
-                       :fact-type :widget-transform
-                       :fact-type-spec {:aliases-var `atr/widget-transform})]
+        (is (= (ann/assign-callsite-ids
+                [(assoc aliased-callsite
+                        :status :full
+                        :resolved-types [:widget-output]
+                        :fact-type :widget-transform
+                        :fact-type-spec {:aliases-var `atr/widget-transform})])
                (:callsites dyn)))
         (is (= [:widget-output]
                (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-consume-widget-transform)))
@@ -689,10 +695,11 @@
                                      {:session-or-rulebase session
                                       :include-ns-prefixes ["fake."]})
                           :session-or-rulebase session})]
-        (is (= {:callsites [{:source-str "{:fake true}"
-                             :ns-name-sym ns-sym
-                             :filename "fake/eval_rules.clj"
-                             :status :unresolved}]
+        (is (= {:callsites (ann/assign-callsite-ids
+                            [{:source-str "{:fake true}"
+                              :ns-name-sym ns-sym
+                              :filename "fake/eval_rules.clj"
+                              :status :none}])
                 :resolution :none}
                (:clara-rules/dynamic-insert-types-detected
                 (ann/get-annotation annotations 'fake.eval-rules/fake-eval-rule)))
@@ -835,7 +842,8 @@
           :clara-rules/dynamic-insert-types-detected
           {:callsites [{:source-str "(->fact ...)"
                         :ns-name-sym 'some.ns
-                        :filename "some/ns.clj"}]
+                        :filename "some/ns.clj"
+                        :status :none}]
            :resolution :full}}}
         fe  (analyze/enrich-annotations-from-session session existing-annos)
         crd (get fe "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
@@ -869,7 +877,7 @@
           {:callsites [{:source-str "(build-compliance-review ?app-id)"
                         :ns-name-sym 'clara.server.tools.graph.rules.loan-doc-rules
                         :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-                        :status :unresolved}]
+                        :status :none}]
            :resolution :none}
           :clara-rules/notes "Compliance review inserted via helper call"}}
         fe  (analyze/enrich-annotations-from-session session existing-annos)
@@ -919,7 +927,7 @@
         (is (= :full (:resolution dyn)))
         (is (= 1 (count (:callsites dyn))))
         (let [cs (first (:callsites dyn))]
-          (is (= :resolved (:status cs)))
+          (is (= :full (:status cs)))
           (is (= ->fact-sym (:constructor-sym cs)))
           (is (= [:demo/tagged] (:resolved-types cs)))
           (is (= "(->fact :demo/tagged {:id id})"
@@ -951,7 +959,7 @@
         (is (= :full (:resolution dyn)))
         (is (= [:custom-fact-type] (:clara-rules/insert-types ann)))
         (let [cs (first (:callsites dyn))]
-          (is (= :resolved (:status cs)))
+          (is (= :full (:status cs)))
           (is (= ->fact-sym (:constructor-sym cs)))
           (is (= [:custom-fact-type] (:resolved-types cs)))
           (let [{:keys [boundary-var-name-sym callstack]} (:via cs)]
@@ -996,7 +1004,7 @@
 
       (testing "the constructor-built insert is owned by the constructor path"
         (let [cs (by-type :demo/ctor-owned)]
-          (is (= :resolved (:status cs)))
+          (is (= :full (:status cs)))
           (is (= ->fact-sym (:constructor-sym cs)))
           (is (= 'clara.rules/insert! (:boundary-var-name-sym (:via cs))))
           (is (= [`atr/rule-ctor-and-opaque-inserts ->fact-sym]
@@ -1004,7 +1012,7 @@
 
       (testing "the opaque insert still reaches :callsite-resolver-fn"
         (let [cs (by-type :demo/opaque)]
-          (is (= :resolved (:status cs)))
+          (is (= :full (:status cs)))
           (is (nil? (:constructor-sym cs)) "no constructor provenance — it has none")))
 
       (is (empty? (filter #(and (seq? %) (= '->fact (first %))) @seen))
@@ -1093,7 +1101,7 @@
           ;; ->fact call. Only usage identity may match rule 1.
           (is (= [:demo/local-x]
                  (:resolved-types (by-src "(->fact :demo/local-x {:id ?app-id})")))))
-        (is (= :unresolved (:status (by-src "(opaque-fact ?app-id)")))
+        (is (= :none (:status (by-src "(opaque-fact ?app-id)")))
             "the third insert survives as an honest unknown")))
 
     (testing "a constructor that is called but never inserted is not an insert"
@@ -1174,7 +1182,7 @@
       (is (= :full (:resolution dyn)))
       (is (= 1 (count (:callsites dyn))))
       (let [cs (first (:callsites dyn))]
-        (is (= :resolved (:status cs)))
+        (is (= :full (:status cs)))
         (is (= 'clara.server.tools.graph.rules.helpers/->fact
                (:constructor-sym cs)))
         (is (= [:loan-doc-rules/document-check-input]
@@ -1207,7 +1215,7 @@
       (is (= :full (:resolution dyn)))
       (is (= 1 (count (:callsites dyn))))
       (let [cs (first (:callsites dyn))]
-        (is (= :resolved (:status cs)))
+        (is (= :full (:status cs)))
         (is (= ->fact-sym (:constructor-sym cs)))
         (is (= [:demo/scan-precedence] (:resolved-types cs)))
         (is (nil? (-> cs :via :source))
@@ -1238,7 +1246,7 @@
         (is (= "map->HiddenHelperRecord" (:source-str cs)))
         (is (= edge-case-ns-sym (:ns-name-sym cs)))
         (is (= edge-case-filename (:filename cs)))
-        (is (= :resolved (:status cs)))
+        (is (= :full (:status cs)))
         (is (= [`HiddenHelperRecord] (:resolved-types cs))))
       (is (= [:demo/mixed-registered `HiddenHelperRecord]
              (:clara-rules/insert-types a))

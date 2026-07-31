@@ -44,7 +44,7 @@
    (run-smoke-test {:session-opts {:with-facts? true}}))
   ([{:keys [session-opts]}]
    (let [session (run-rules session-opts)
-         server (server/start! {:port *port* :session session :annotations-file loan-doc-annotations-path})]
+         server (server/start! {:port *port* :session session :layers [loan-doc-annotations-path]})]
      server)))
 
 (defn get-rules []

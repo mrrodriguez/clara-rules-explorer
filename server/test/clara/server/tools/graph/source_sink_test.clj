@@ -1,16 +1,14 @@
 (ns clara.server.tools.graph.source-sink-test
   (:require [clara.rules :as r]
-            [clara.server.tools.graph.annotations :as ann]
+            [clara.server.tools.graph.annotation-fixtures :as fixtures]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
-            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]))
 
-(def ^:private loan-doc-annotations
-  (some-> (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn")
-          .getPath
-          ann/load-sidecar))
+(defn- loan-doc-annotations
+  [session]
+  (fixtures/loan-doc-merged-annotations session))
 
 (defn- ->loan-app-session
   []
@@ -19,7 +17,7 @@
 
 (deftest test-source-sink-indicators-loan-app
   (let [session (->loan-app-session)
-        analysis (core/rulebase-analysis session loan-doc-annotations)
+        analysis (core/rulebase-analysis session (loan-doc-annotations session))
         rules (:rules analysis)
         queries (:queries analysis)]
 

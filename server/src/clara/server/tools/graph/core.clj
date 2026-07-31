@@ -79,12 +79,18 @@
 (defn- production-summary
   "Builds a summary map for a single production (rule or query).
   When :ns-name is nil (as with queries in the underlying clara-rules schema),
-  derives the namespace from the fully-qualified :name."
+  derives the namespace from the fully-qualified :name.
+
+  `annotations` is the merged rule→annotation map (see
+  annotations/merge-layers); `provenance` is the per-rule, per-key origin
+  map from the same merge (F8 — replaces the old two-source
+  :annotation-sources)."
   [{p-name :name :as production}
-   sidecar-annotations
+   annotations
+   provenance
    dep-graph
    production-map]
-  (let [ann (ann/resolve-annotations production sidecar-annotations)
+  (let [ann (ann/production-annotation annotations production)
         ;; Queries in clara.rules.schema/Query have no :ns-name — derive it.
         p-ns-name (get-production-ns-name-sym production)
         serialize-fact-type (partial serialize/serialize-fact-type p-ns-name)
@@ -116,7 +122,7 @@
                  :lhs                (-> production :lhs
                                          serialize/prune-fns
                                          serialize/serialize-lhs)
-                 :annotation-sources       (:annotation-sources ann)
+                 :provenance               (get provenance p-name)
                  :notes                    (:notes ann)}
 
           is-rule?
@@ -214,7 +220,8 @@
   "Builds a summary map for the `productions` while maintaining the given load order."
   [{:keys [production-type
            productions
-           sidecar-annotations
+           annotations
+           provenance
            dep-graph
            production-map]}]
   (let [filter-xf (case production-type
@@ -225,24 +232,27 @@
          (sequence
           (comp filter-xf
                 (mapcat (juxt :name #(production-summary %
-                                                         sidecar-annotations
+                                                         annotations
+                                                         provenance
                                                          dep-graph
                                                          production-map)))))
          (apply array-map))))
 
 (defn- build-rule-summary-map
-  [productions sidecar-annotations dep-graph production-map]
+  [productions annotations provenance dep-graph production-map]
   (build-production-summary-map {:production-type :rule
                                  :productions productions
-                                 :sidecar-annotations sidecar-annotations
+                                 :annotations annotations
+                                 :provenance provenance
                                  :dep-graph dep-graph
                                  :production-map production-map}))
 
 (defn- build-query-summary-map
-  [productions sidecar-annotations dep-graph production-map]
+  [productions annotations provenance dep-graph production-map]
   (build-production-summary-map {:production-type :query
                                  :productions productions
-                                 :sidecar-annotations sidecar-annotations
+                                 :annotations annotations
+                                 :provenance provenance
                                  :dep-graph dep-graph
                                  :production-map production-map}))
 
@@ -280,27 +290,47 @@
            (apply array-map)))))
 
 (defn- build-production-annotation-map
-  [productions sidecar-annotations]
+  [productions annotations]
   (into {}
         (for [p productions]
-          [(:name p) (ann/resolve-annotations p sidecar-annotations)])))
+          [(:name p) (ann/production-annotation annotations p)])))
+
+(defn- ->merged
+  "Coerces the second argument of `rulebase-analysis`: a MergedAnnotations
+   value passes through; a bare rule→annotation map is treated as merged
+   content with no provenance.  (Key membership is tested with `some` — a
+   bare map may be a string-keyed sorted map, where a keyword `contains?`
+   throws ClassCastException.)"
+  [x]
+  (if (and (map? x)
+           (some #{:annotations} (keys x))
+           (some #{:provenance} (keys x)))
+    x
+    {:annotations (or x {}) :provenance {}}))
 
 (defn rulebase-analysis
-  [session-or-rulebase sidecar-annotations]
+  "Analyzes a rulebase against merged annotations.  `annotations` is either
+   a MergedAnnotations value (annotations/merge-layers output — annotations
+   and provenance are both used) or a bare rule→annotation map."
+  [session-or-rulebase annotations]
   (let [{:keys [productions id-to-node] :as rulebase} (get-rulebase session-or-rulebase)
 
-        production-annotation-map (build-production-annotation-map productions sidecar-annotations)
+        {:keys [annotations provenance]} (->merged annotations)
+
+        production-annotation-map (build-production-annotation-map productions annotations)
 
         dep-graph (build-dep-graph rulebase production-annotation-map)
         production-map (build-production-map productions)
 
         rules (build-rule-summary-map productions
-                                      sidecar-annotations
+                                      annotations
+                                      provenance
                                       dep-graph
                                       production-map)
 
         queries (build-query-summary-map productions
-                                         sidecar-annotations
+                                         annotations
+                                         provenance
                                          dep-graph
                                          production-map)
 

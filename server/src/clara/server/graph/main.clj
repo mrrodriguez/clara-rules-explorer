@@ -40,8 +40,10 @@
 
 (def cli-options
   [["-s" "--session PATH" "Path to serialized Clara session file."]
-   ["-a" "--annotations PATH" "Path to an EDN sidecar annotations file."
-    :default nil]
+   ["-l" "--layer PATH" (str "Path to an EDN annotation layer file.  Repeatable; layers are folded"
+                             " lowest precedence first, over the rule-:props base layer.")
+    :default []
+    :assoc-fn (fn [m k v] (update m k conj v))]
    ["-f" "--facts PATH" (str "Path to serialized facts file."
                              "  Defaults to <session-path>.facts when omitted.")
     :default nil]
@@ -61,8 +63,8 @@
   (println "Options:")
   (println summary)
   (println "\nExamples:")
-  (println "  clojure -M -m clara.server.graph.main -s session.bin -a annotations.edn")
-  (println "  clojure -M -m clara.server.graph.main --generate-analysis out -s session.bin")
+  (println "  clojure -M -m clara.server.graph.main -s session.bin -l curated-annos.edn")
+  (println "  clojure -M -m clara.server.graph.main --generate-analysis out -s session.bin -l curated-annos.edn")
   (println))
 (defn- exit [code]
   (System/exit code))
@@ -133,7 +135,7 @@
 
    Annotations are auto-discovered from the session's rule namespaces via
    clj-kondo, with the session rulebase as the source of truth for rules."
-  [{:keys [session facts load-session-state-fn generate-analysis-dir]}]
+  [{:keys [session facts load-session-state-fn generate-analysis-dir] :as options}]
   (when-not session
     (println "Error: --session is required with --generate-analysis")
     (exit 1))
@@ -152,7 +154,7 @@
     (let [loaded-session (load-session-state session facts-path load-session-state-fn)]
       (println "Session loaded.")
 
-      (let [annotations
+      (let [generated
             (do
               (println "Auto-discovering annotations from session namespaces...")
               (let [analysis (analyze/analyze-session-rules
@@ -161,15 +163,28 @@
                  {:analysis analysis
                   :session-or-rulebase loaded-session})))
 
+            generated-layer (annotations/layer
+                             {:id :generated
+                              :source {:generated-from (str session)}
+                              :annotations generated})
+
+            ;; Curation-aware analysis: the rule-:props base, the freshly
+            ;; generated discovery layer, then any caller-supplied layers
+            ;; folded over it (lowest precedence first).
+            layers (into [(annotations/props-layer loaded-session) generated-layer]
+                         (map annotations/read-layer)
+                         (:layer options))
+
             _ (println "Running rulebase analysis...")
-            analysis (core/rulebase-analysis loaded-session annotations)
+            analysis (core/rulebase-analysis loaded-session
+                                             (annotations/merge-layers layers))
 
             _ (.mkdirs (io/file generate-analysis-dir))
 
             annotations-path (str generate-analysis-dir "/annotations.edn")
             analysis-path (str generate-analysis-dir "/analysis.edn")]
 
-        (annotations/write-annotations! annotations-path annotations)
+        (annotations/write-layer! annotations-path generated-layer)
         (println (format "Annotations written to: %s" annotations-path))
 
         (spit analysis-path
@@ -180,21 +195,20 @@
 (defn run-explorer-server
   "Starts the explorer server with the given options."
   [options facts-path]
-  (let [{:keys [session annotations port load-session-state-fn]} options]
+  (let [{:keys [session layer port load-session-state-fn]} options]
     (println (format "Loading session from: %s" session))
     (when (or (not load-session-state-fn) (file-exists? facts-path))
       (println (format "Loading facts from:   %s" facts-path)))
-    (when annotations
-      (if (file-exists? annotations)
-        (println (format "Loading annotations: %s" annotations))
-        (println (format "Warning: annotations file not found: %s" annotations))))
+    (doseq [layer-path layer]
+      (if (file-exists? layer-path)
+        (println (format "Loading annotation layer: %s" layer-path))
+        (println (format "Warning: annotation layer file not found: %s" layer-path))))
     (let [loaded-session (load-session-state session facts-path load-session-state-fn)]
       (println (format "Session deserialized. Starting server on port %s ..." port))
       (server/start!
-       (cond-> {:session loaded-session
-                :port port}
-         (and annotations (file-exists? annotations))
-         (assoc :annotations-file annotations)))
+       {:session loaded-session
+        :port port
+        :layers (into [] (filter file-exists?) layer)})
       (println (format "Clara Graph Server running at http://localhost:%s" port))
       (println (format "API endpoints at http://localhost:%s/v1/" port))
       (println "Press Ctrl+C to stop."))))
@@ -212,7 +226,7 @@
      --generate-analysis DIR         Output directory for annotations and analysis EDN files.
 
    Optional:
-     -a, --annotations PATH  EDN sidecar annotations file.
+     -l, --layer PATH        EDN annotation layer file (repeatable).
      -f, --facts PATH        Serialized facts file (default: <session>.facts).
      -p, --port PORT         Server port (default: 9999).
      --load-session-state-fn SYMBOL  Symbol naming a function to load the session state.

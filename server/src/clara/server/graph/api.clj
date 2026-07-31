@@ -70,7 +70,7 @@
   {:source-str s/Str
    :ns s/Str
    :filename s/Str
-   (s/optional-key :status) s/Keyword
+   (s/optional-key :status) (s/enum :none :partial :full)
    (s/optional-key :resolved-types) [s/Str]
    (s/optional-key :constructor-sym) s/Str
    (s/optional-key :via) ViaChain})
@@ -100,12 +100,15 @@
    (s/optional-key :dynamic-retract-types-detected) DynamicDetectionInfo})
 
 (s/defschema Rule
-  "Full rule detail with LHS/RHS forms, props, and annotations."
+  "Full rule detail with LHS/RHS forms, props, and annotations.  `:provenance`
+   records, per annotation key, which layer(s) claimed the merged value (or
+   `:derived` when the derivation pass produced it) — see
+   docs/anno-merging-update-plan.md §4.6."
   (merge RuleListItem
          {:props              {s/Str s/Any}
           :lhs                [LhsCondition]
           :rhs-form           s/Str
-          :annotation-sources [s/Keyword]
+          :provenance         (s/maybe {s/Keyword s/Any})
           (s/optional-key :notes) (s/maybe s/Str)}))
 
 (s/defschema QueryListItem
@@ -123,7 +126,7 @@
   (merge QueryListItem
          {:props              {s/Str s/Any}
           :lhs                [LhsCondition]
-          :annotation-sources [s/Keyword]
+          :provenance         (s/maybe {s/Keyword s/Any})
           (s/optional-key :notes) (s/maybe s/Str)}))
 
 (s/defschema FactTypeListItem
@@ -168,9 +171,11 @@
    :used-by       [FactTypeRoleGroup]
    :ids           [s/Int]})
 
-;; Internal atoms shape
+;; Internal atoms shape — the annotations atom holds a MergedAnnotations
+;; value (see annotations/merge-layers); bare rule→annotation maps are also
+;; accepted for callers that do not care about provenance.
 (s/defschema AnnotationsMap
-  {s/Str s/Any})
+  {(s/cond-pre s/Keyword s/Str) s/Any})
 
 ;; ---------------------------------------------------------------------------
 ;; Handler helpers
@@ -233,11 +238,15 @@
 (defn- enriched-annotations
   "Returns annotations enriched with fact-type provenance from the session's
    working memory when a live session is available.  Takes already-derefed
-   values (not atoms) to make it clear this is a pure function."
+   values (not atoms) to make it clear this is a pure function.  Accepts a
+   MergedAnnotations value or a bare rule→annotation map; returns a bare map."
   [session annotations]
-  (if (instance? clara.rules.engine.LocalSession session)
-    (analyze/enrich-annotations-from-session session annotations)
-    annotations))
+  (let [bare (if (and (map? annotations) (some #{:annotations} (keys annotations)))
+               (:annotations annotations)
+               annotations)]
+    (if (instance? clara.rules.engine.LocalSession session)
+      (analyze/enrich-annotations-from-session session bare)
+      bare)))
 
 (defn- get-analysis
   "Returns the cached rulebase-analysis, rebuilding only when the session or

@@ -6,7 +6,7 @@
    RHS).  `alias-usage-map` emits synthetic var-usages linking consuming rules
    to their aliased vars so the existing reachability explores the var's call
    chain; callsites discovered through that chain bypass the ctor chain (see
-   `analyze.callsite`) and are recorded :unresolved with
+   `analyze.callsite`) and are recorded :none (unresolved) with
    :fact-type/:fact-type-spec context attached (then handed to the caller's
    `:callsite-resolver-fn`)."
   (:require [clara.rules.schema :as schema]

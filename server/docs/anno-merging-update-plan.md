@@ -859,22 +859,145 @@ hand-written sidecars are rewritten into the `Layer` shape by wrapping them in
 Annotations" and "Annotation Merging" sections are rewritten against §4–§5, including the **F5**
 correction.
 
-## 10. Phasing
+## 10. Phasing — executable checklist
 
-1. **Format + merge core.** `Layer`, `RuleAnnotation`, `MergedAnnotations` schemas; `merge-layers`
-   with deep callsite merge, tombstones, key preservation, layer-level and rule-level
-   `merge-props`; `write-layer!` without `*print-meta*`. Pure data — unit tests only.
-2. **Resolution vocabulary.** Collapse `:resolved`/`:resolved-multi`/`:unresolved` to
-   `:none`/`:partial`/`:full` in `analyze.callsite` and the serialize/API layers; new aggregation.
-3. **Callsite identity.** `callsite-id`, `assign-callsite-ids`, emission on write, dangling policy.
-4. **Reporting + validation.** `unresolved-report`, `validate-layers`.
-5. **Derivation.** `derive-conclusions`, `:type-derivation :from-callsites`.
-6. **Integration.** `props-layer` and the retirement of `resolve-annotations`; `server/start!`
-   `:layers`; `--generate-analysis` layer arguments; `tools.graph.core` lookup; docs.
-7. **Layer rebasing.** `rebase-layer` — remap callsite ids across a known old→new namespace
-   mapping, so renaming or moving a namespace does not dangle every curated callsite in it. Held
-   to its own phase: it is a convenience over a correct-but-tedious re-confirmation, and nothing
-   before it depends on it.
+Status legend: `[ ]` pending · `[x]` done · `[~]` in progress. Every phase ends with a
+**gate** step; do not check a phase complete unless its gate passes. Verification commands
+are run from `server/` unless noted. If work stops mid-phase, the last unchecked step is the
+resume point.
+
+New API is built **alongside** the old during phases 1–5 (old tests keep passing); the old
+functions are removed in phase 6, which is also where pre-existing tests and the
+`test-resources/.../loan-doc-rules-annotations.edn` fixture are rewritten.
+
+### Phase 1 — Format + merge core
+
+`Layer`, `RuleAnnotation`, `MergedAnnotations` schemas; `merge-layers` with deep callsite
+merge, tombstones, key preservation, layer-level and rule-level `merge-props`;
+`write-layer!` without `*print-meta*`. Pure data — unit tests only.
+
+- [x] 1.1 Schemas (`schema.core`, matching `analyze.callsite`): `LayerId`, `Layer`,
+  `RuleAnnotation`, `Resolution`, `CallsiteEntry`, `ResolutionEvidence`, `DetectionMap`,
+  `MergedAnnotations`, `Origin`, `MergeProps` (§4).
+- [x] 1.2 `layer` / `read-layer` / `write-layer!` (§6). `read-layer` normalizes rule-name keys
+  to strings and defaults `:source` to the path; `write-layer!` does **not** bind
+  `*print-meta*` (**F7**).
+- [x] 1.3 Per-rule merge: omission = no opinion (**F1**), unknown keys preserved for
+  overlapping and non-overlapping rules (**F2**), explicit `nil` tombstones (§5.4),
+  `merge-props` precedence rule-level → layer-level → default (§5.1), per-key defaults (§5.2).
+- [x] 1.4 Deep detection-map merge keyed by `:callsite-id`: field-level win, id-keyed union,
+  `a`-order then `b`-appended, `:from-layer` on the conclusion, `:resolution` recomputed via
+  the §4.3 aggregation, never merged (**F4**). (Id derivation for entries that omit one is
+  phase 3; phase 1 tests supply ids in the fixtures.)
+- [x] 1.5 `merge-layers` fold: lowest precedence first, throws on repeated layer `:id`,
+  builds `:layers` listing and per-rule/per-key `:provenance` (§4.6); `annotations` and
+  `provenance` accessors.
+- [x] 1.6 Unit tests (new `annotations_merge_test.clj` or similar — do not touch the legacy
+  `annotations_test.clj` yet): **F1**, **F2**, tombstones on every mergeable key, short-circuit
+  shape, callsite deep merge (field win / union / ordering / `:from-layer`), `:resolution`
+  recompute (**F4**), aggregation across `:none`/`:partial`/`:full` combos, `merge-props`
+  precedence, three-layer precedence + fold associativity, duplicate `:id` throw, round-trip
+  `write-layer!` → `read-layer` fixed point with no reader metadata (**F7**).
+- [x] 1.7 **Gate:** `make test format lint reflection-check` green.
+
+### Phase 2 — Resolution vocabulary
+
+Collapse `:resolved`/`:resolved-multi`/`:unresolved` to `:none`/`:partial`/`:full` in
+`analyze.callsite` and the serialize/API layers; new aggregation.
+
+- [x] 2.1 `analyze.callsite`: `:status` becomes `(s/enum :none :partial :full)`; emission sites
+  (`callsite.clj` ~:232, ~:338) map empty→`:none`, resolved→`:full`; `resolution-status`
+  becomes the §4.3 aggregate (moved to or shared with `annotations`).
+- [x] 2.2 Sweep other emission/consumption sites: `analyze.clj` (:154–155, `extract-*` types),
+  `serialize.clj` (:148–153), `graph/api.clj` (:74–81), `tools.graph.core`.
+- [x] 2.3 Update `analyze_test.clj` and any other tests asserting the old statuses.
+- [x] 2.4 **Gate:** `make test format lint reflection-check` green; no `:resolved`,
+  `:resolved-multi`, or `:unresolved` literals remain outside historical docs
+  (`grep -rn "resolved-multi\|:unresolved" src test`).
+
+### Phase 3 — Callsite identity
+
+`callsite-id`, `assign-callsite-ids`, emission on write, dangling policy (§4.4, §5.6).
+
+- [x] 3.1 `callsite-id`: `ns:ctor:hash8` — SHA-256 over `(pr-str [ns-name-sym constructor-sym
+  source-str])`, first 8 hex; `ctor` is the short name or `-`.
+- [x] 3.2 `assign-callsite-ids` for one rule+dimension vector: duplicate-group ordinals;
+  collision detection within the group with hash lengthening.
+- [x] 3.3 Ids derived on read (`read-layer`) and on generation
+  (`generate-annotations-from-analysis`) for any entry that omits one.
+- [x] 3.4 Dangling policy in `merge-layers`: `:on-dangling` `:quarantine` (default) / `:keep` /
+  `:drop`; quarantined entries get `:dangling? true` and are excluded from type derivation and
+  the resolution aggregate; layer-introduced entries carrying their own `:source-str` are not
+  dangling.
+- [x] 3.5 Unit tests: id stability under unrelated edits, id change on callsite-form edit,
+  distinct ordinals for duplicate siblings, no renumbering when unrelated callsites are
+  added/removed, quarantine semantics, layer-introduced entries.
+- [x] 3.6 **Gate:** `make test format lint reflection-check` green.
+
+### Phase 4 — Reporting + validation
+
+- [x] 4.1 `unresolved-report` (§7.1): `:summary` (`:rules`, `:callsites`, `:by-resolution`,
+  `:dangling`), `:rules` reading material, `:dangling` entries with `:from-layer` and
+  `:resolution-evidence`.
+- [x] 4.2 `validate-layers` (§7.2): six problem classes, optional `:known-rule-names`.
+  (`:derivation-dropped-authored-type` needs derivation — implemented and tested in phase 5.)
+  Note: `:authored-derived-field` on a detection-map `:resolution` fires only for
+  non-discovering layers — the analyzer legitimately writes the `:resolution` it derived.
+- [x] 4.3 Unit tests: report counts and shape; each validation class fires (and only when it
+  should).
+- [x] 4.4 **Gate:** `make test format lint reflection-check` green.
+
+### Phase 5 — Derivation
+
+- [x] 5.1 `derive-conclusions` (§5.7): recompute dimension `:resolution`; promote callsite
+  types into `:clara-rules/insert-types` / `:retract-types`; `:additive` (default) vs
+  `:from-callsites`; reads only the merged annotation; idempotent; exposed separately; provenance
+  records `:derived` for promoted keys.
+- [x] 5.2 Wire `:type-derivation` opt into `merge-layers`.
+- [x] 5.3 Unit tests: both modes, downgrade case, props-survival clause (§5.5), no resurrection
+  of replaced/tombstoned types (§5.7), idempotence, plus the
+  `:derivation-dropped-authored-type` validation class (carried over from 4.2).
+- [x] 5.4 **Gate:** `make test format lint reflection-check` green.
+
+### Phase 6 — Integration
+
+`props-layer` and the retirement of `resolve-annotations`; `server/start!` `:layers`;
+`--generate-analysis` layer arguments; `tools.graph.core` lookup; docs. **This is the
+breaking-change phase for pre-existing tests and fixtures.**
+
+- [x] 6.1 `props-layer` (§5.5): whole `:props` map copied, no filtering; unit test that it
+  composes at any fold position and carries non-`:clara-rules/` keys through untouched.
+- [x] 6.2 Remove `merge-annotations`, `load-sidecar`, `write-annotations!`,
+  `resolve-annotations`; rewrite `annotations_test.clj` against the new API (keep the
+  normalization contract tests — `normalize-rule-name` / `normalize-annotations` /
+  `get-annotation` stay).
+- [x] 6.3 `tools.graph.core` (:87, :119, :286): per-production lookup reads the merged map +
+  `:provenance`; `analyze.clj` (:921) same.
+- [x] 6.4 `graph.server` `start!`: `:annotations-file` → `:layers` (ordered vector of paths or
+  in-memory layers); `POST /v1/annotations/reload` re-reads file-backed layers.
+- [x] 6.5 `graph.main --generate-analysis`: accept repeated layer arguments merged **under**
+  the freshly generated layer; generated layer is written with ids and the new format.
+- [x] 6.6 Regenerate `test-resources/clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn`
+  as a `Layer` (`{:id :generated :source … :annotations …}`) with `:callsite-id`s, new
+  statuses, and derived conclusions; update `core_test.clj`, `api_test.clj`, `smoke_test.clj`,
+  `source_sink_test.clj` to load it via `read-layer`.
+- [x] 6.7 Docs: rewrote `docs/rule-annotations.md` "Sources of Annotations" and "Annotation
+  Merging" against §4–§5, including the **F5** correction (last-declared-wins for
+  `:no-output-types`); updated the detection-map example (`:callsite-id`, new statuses).
+  **Follow-up (not done — file is out of scope for this session):**
+  `../docs/explorer-graph-api.md` still documents the old contract (`:annotations-file`,
+  `:annotation-sources`, `"resolved"`/`"resolved-multi"`/`"unresolved"` statuses, sidecar
+  reload). It needs the same vocabulary swap: `:layers`, `:provenance`,
+  `"full"`/`"partial"`/`"none"`, merged-annotations reload.
+- [x] 6.8 **Gate:** `make test format lint reflection-check` green; `cd ../ui && pnpm run check`
+  if the API contract changed.
+
+### Phase 7 — Layer rebasing
+
+- [x] 7.1 `rebase-layer`: remap callsite ids across a known old→new namespace mapping.
+- [x] 7.2 Unit tests: rename mapping re-bases ids and re-hashes; unmapped namespaces pass
+  through; ordinal groups preserved.
+- [x] 7.3 **Gate:** `make test format lint reflection-check` green.
 
 Phases 1–5 are self-contained and testable against fixture maps: no session, no rulebase, no
 classpath.

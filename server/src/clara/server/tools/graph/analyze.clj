@@ -151,7 +151,7 @@
                            (cond-> {:source-str (str (:name usage))
                                     :ns-name-sym (:from usage)
                                     :filename (:filename usage)
-                                    :status :resolved
+                                    :status :full
                                     :resolved-types [t]
                                     :via {:source :record-ctor-scan}}
                              boundary-fn (assoc-in [:via :boundary-var-name-sym] boundary-fn)))
@@ -274,6 +274,9 @@
                                  :dynamic-type-fallback-resolution dynamic-type-fallback-resolution})
             all-callsites (into all-callsites fallback-callsites)
             all-types (into all-types (mapcat :resolved-types) fallback-callsites)
+            ;; callsite identity (docs/anno-merging-update-plan.md §4.4): the
+            ;; discovering layer derives ids — it has the full entries.
+            all-callsites (ann/assign-callsite-ids all-callsites)
             all-resolution (callsite/resolution-status all-callsites)]
         {:resolved-types all-types
          :dynamic-forms (when (seq all-callsites)
@@ -672,7 +675,7 @@
   and invoked in the RHS). When a rule binds an alias-mapped fact type and uses the binding in its
   RHS, a synthetic var-usage links the rule to the aliased var so the var's call chain is explored
   for boundary calls (see `alias/alias-usage-map`). Callsites discovered through that chain bypass the
-  ctor chain: recorded `:unresolved` with `:fact-type`/`:fact-type-spec` attached, and handed to
+  ctor chain: recorded `:none` (unresolved) with `:fact-type`/`:fact-type-spec` attached, and handed to
   `:callsite-resolver-fn` with the same context.
 
    * `:fact-constructors` — optional vector of `FactConstructorSpec` maps
@@ -914,11 +917,16 @@
         rulebase     (-> session eng/components :rulebase)
         productions  (:productions rulebase)
 
+        pam-annotations
+        (ann/annotations (ann/merge-layers [(ann/props-layer rulebase)
+                                            (ann/layer {:id :enriched
+                                                        :annotations enriched})]))
+
         pam
         (into {}
               (for [p productions]
-                [(:name p)
-                 (ann/resolve-annotations p enriched)]))
+                [(ann/normalize-rule-name (:name p))
+                 (ann/production-annotation pam-annotations p)]))
 
         result
         (reduce-kv (fn [acc p-name resolved-ann]

@@ -1,86 +1,238 @@
-{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
- {:clara-rules/insert-types [AllGivenDocuments]}
-
- "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
- {:clara-rules/insert-types [AllRequiredDocuments]}
-
- "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta"
- {:clara-rules/insert-types [clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta]}
-
-"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
- {:clara-rules/insert-types [DocumentCheck]}
-
- "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs"
- {:clara-rules/no-output-types true}
-
- ;; Resolved via :fact-constructor-match-fn / :fact-constructor-type-resolver-fn
- ;; The analyzer traces through ->document-check-input → helpers/->fact to
- ;; discover the :loan-doc-rules/document-check-input fact type.
- "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
- {:clara-rules/insert-types [:loan-doc-rules/document-check-input]
-  :clara-rules/dynamic-insert-types-detected
-  {:callsites
-   [{:source-str "(h/->fact :loan-doc-rules/document-check-input data)"
-     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
-     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-     :status :resolved
-     :resolved-types [:loan-doc-rules/document-check-input]
-     :constructor-sym clara.server.tools.graph.rules.helpers/->fact
-     :via {:boundary-var-name-sym clara.rules/insert!
-           :callstack [{:var-name-sym clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input}
-                       {:var-name-sym clara.server.tools.graph.rules.loan-doc-rules/->document-check-input}
-                       {:var-name-sym clara.server.tools.graph.rules.helpers/->fact}]}}]
-   :resolution :full}}
-
- ;; ---------------------------------------------------------------------------
- ;; Dynamic rule annotations — consistent with the automatic session-based
- ;; pipeline (see clara.server.tools.graph.analyze / analyze.rhs): direct
- ;; constructor callsites resolve; helper calls defer to the caller.
- ;; ---------------------------------------------------------------------------
-
- ;; Unresolved: helper-call insert (automatic chain reports unresolved; resolve
- ;; via :callsite-resolver-fn or declare insert-types manually)
- "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
- {:clara-rules/dynamic-insert-types-detected
-  {:callsites
-   [{:source-str "(build-compliance-review ?app-id)"
-     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
-     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-     :status :unresolved}]
-   :resolution :none}
-  :clara-rules/notes "Compliance review inserted via helper call — unresolved by automatic analysis"}
-
- ;; Unresolved: helper-call insert (metadata variant)
- "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata"
- {:clara-rules/dynamic-insert-types-detected
-  {:callsites
-   [{:source-str "(build-compliance-via-metadata ?app-id)"
-     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
-     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-     :status :unresolved}]
-   :resolution :none}
-  :clara-rules/notes "Compliance review inserted via metadata helper — unresolved by automatic analysis"}
-
- ;; Resolved: direct Java-constructor retract (the automatic chain resolves this)
- "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
- {:clara-rules/retract-types [StaleDocumentNotice]
-  :clara-rules/dynamic-retract-types-detected
-  {:callsites
-   [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
-     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
-     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-     :status :resolved
-     :resolved-types [StaleDocumentNotice]}]
-   :resolution :full}
-  :clara-rules/notes "Stale document notice retracted via Java constructor — fully resolved"}
-
- ;; Unresolved: opaque builder insert
- "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
- {:clara-rules/dynamic-insert-types-detected
-  {:callsites
-   [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
-     :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules
-     :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-     :status :unresolved}]
-   :resolution :none}
-  :clara-rules/notes "Audit trail insert via opaque builder — unresolved, type unknown"}}
+{:id :generated,
+ :source
+ {:generated-from "clara.server.tools.graph.rules.loan-doc-rules"},
+ :annotations
+ {"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
+  #:clara-rules{:no-output-types true},
+  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+  #:clara-rules{:insert-types
+                [clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome],
+                :dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str
+                   "(map->ApplicationOutcome {:app-id ?app-id, :status :approved, :message \"Application approved\", :passed-checks [{:check-type :document} {:check-type :identity} {:check-type :fraud}]})",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-app-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_app_rules.clj",
+                   :status :full,
+                   :resolved-types
+                   [clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome],
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-app-rules:-:9e76bcc7:0"}],
+                 :resolution :full}},
+  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+  #:clara-rules{:insert-types
+                [clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome],
+                :dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str
+                   "(map->ApplicationOutcome {:app-id ?app-id, :status :denied, :message \"Application denied\", :passed-checks passed-checks, :failed-checks failed-checks})",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-app-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_app_rules.clj",
+                   :status :full,
+                   :resolved-types
+                   [clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome],
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-app-rules:-:97ed1a9a:0"}],
+                 :resolution :full}},
+  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
+  #:clara-rules{:insert-types
+                [clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome],
+                :dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str
+                   "(map->ApplicationOutcome {:app-id ?app-id, :status :pending, :message \"Application pending\", :checks-complete checks-complete, :checks-incomplete checks-incomplete})",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-app-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_app_rules.clj",
+                   :status :full,
+                   :resolved-types
+                   [clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome],
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-app-rules:-:7f31aeea:0"}],
+                 :resolution :full}},
+  "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
+  #:clara-rules{:insert-types
+                [clara.server.tools.graph.rules.loan_app_facts.DocumentCheck],
+                :dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str
+                   "(laf/map->DocumentCheck {:app-id ?app-id, :status status, :message message})",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-doc-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_doc_rules.clj",
+                   :status :full,
+                   :resolved-types
+                   [clara.server.tools.graph.rules.loan_app_facts.DocumentCheck],
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-doc-rules:-:d3aa828c:0"}],
+                 :resolution :full}},
+  "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs"
+  #:clara-rules{:no-output-types true},
+  "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
+  #:clara-rules{:insert-types [:loan-doc-rules/document-check-input],
+                :dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str
+                   "(h/->fact :loan-doc-rules/document-check-input data)",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-doc-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_doc_rules.clj",
+                   :constructor-sym
+                   clara.server.tools.graph.rules.helpers/->fact,
+                   :status :full,
+                   :resolved-types
+                   [:loan-doc-rules/document-check-input],
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :callstack
+                    [{:var-name-sym
+                      clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input}
+                     {:var-name-sym
+                      clara.server.tools.graph.rules.loan-doc-rules/->document-check-input}
+                     {:var-name-sym
+                      clara.server.tools.graph.rules.helpers/->fact}]},
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-doc-rules:->fact:b3f1b222:0"}],
+                 :resolution :full}},
+  "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
+  #:clara-rules{:insert-types
+                [clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments],
+                :dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str
+                   "(laf/map->AllGivenDocuments {:app-id ?app-id, :docs ?docs})",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-doc-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_doc_rules.clj",
+                   :status :full,
+                   :resolved-types
+                   [clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments],
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-doc-rules:-:85a6978c:0"}],
+                 :resolution :full}},
+  "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs"
+  #:clara-rules{:insert-types
+                [clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments],
+                :dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str
+                   "(map->AllIdCardGivenDocuments {:app-id ?app-id, :docs ?docs})",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-doc-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_doc_rules.clj",
+                   :status :full,
+                   :resolved-types
+                   [clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments],
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-doc-rules:-:04abd94f:0"}],
+                 :resolution :full}},
+  "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
+  #:clara-rules{:insert-types
+                [clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments],
+                :dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str
+                   "(laf/map->AllRequiredDocuments {:app-id ?app-id, :docs ?docs})",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-doc-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_doc_rules.clj",
+                   :status :full,
+                   :resolved-types
+                   [clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments],
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-doc-rules:-:75cfc6ad:0"}],
+                 :resolution :full}},
+  "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta"
+  #:clara-rules{:insert-types
+                [clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta],
+                :dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str
+                   "(laf/map->AllGivenDocumentsMeta {:app-id ?app-id, :doc-metas doc-metas})",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-doc-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_doc_rules.clj",
+                   :status :full,
+                   :resolved-types
+                   [clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta],
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-doc-rules:-:f9db60a3:0"}],
+                 :resolution :full}},
+  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
+  #:clara-rules{:dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str
+                   "(build-audit-trail-entry ?app-id :doc-check-passed)",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-doc-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_doc_rules.clj",
+                   :status :none,
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-doc-rules:-:965c8524:0"}],
+                 :resolution :none}},
+  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata"
+  #:clara-rules{:dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str
+                   "(build-compliance-via-metadata ?app-id)",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-doc-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_doc_rules.clj",
+                   :status :none,
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-doc-rules:-:88bcf7ba:0"}],
+                 :resolution :none}},
+  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
+  #:clara-rules{:dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str "(build-compliance-review ?app-id)",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-doc-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_doc_rules.clj",
+                   :status :none,
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-doc-rules:-:c6a16f6e:0"}],
+                 :resolution :none}},
+  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
+  #:clara-rules{:retract-types
+                [clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice],
+                :dynamic-retract-types-detected
+                {:callsites
+                 [{:source-str
+                   "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-doc-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_doc_rules.clj",
+                   :status :full,
+                   :resolved-types
+                   [clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice],
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-doc-rules:-:2197b1a6:0"}],
+                 :resolution :full}},
+  "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule"
+  #:clara-rules{:dynamic-insert-types-detected
+                {:callsites
+                 [{:source-str "resolved__43966__auto__",
+                   :ns-name-sym
+                   clara.server.tools.graph.rules.loan-doc-rules,
+                   :filename
+                   "clara/server/tools/graph/rules/loan_doc_rules.clj",
+                   :status :none,
+                   :callsite-id
+                   "clara.server.tools.graph.rules.loan-doc-rules:-:a3146853:0"}],
+                 :resolution :none}}}}
