@@ -27,7 +27,9 @@
 			<QualifiedName fullName={name} size="lg" class="text-{color}" />
 		</div>
 		<div class="d-flex gap-1 flex-shrink-0 ms-2">
-			<LocateInListButton {name} />
+			{#if !fullView}
+				<LocateInListButton {name} />
+			{/if}
 			{#if !fullView && type !== 'fact'}
 				<a href={resolvedHref} class="btn btn-outline-{color} btn-sm">
 					<i class="bi bi-arrows-fullscreen me-1"></i> Full View
