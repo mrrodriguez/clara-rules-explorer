@@ -661,6 +661,37 @@
       (is (= 1 (count findings)))
       (is (= :noop (:layer (first findings)))))))
 
+(deftest validate-ambiguous-callsite-reference-across-rules
+  "Ambiguity is a property of one rule+dimension.  Two rules in the same
+   namespace sharing a source form each get ordinal 0 within their own rule.
+   The curator references one of them — without the fix the old global-group
+   logic would see a group size of 2 and falsely flag both."
+  (let [src {:source-str "(insert! x)"
+             :ns-name-sym 'acme.pricing
+             :constructor-sym 'acme.facts/make-fact
+             :filename "acme/pricing.clj"
+             :status :none}
+        generated (ann/layer {:id :generated
+                              :annotations
+                              {"rule/a" #:clara-rules{:dynamic-insert-types-detected
+                                                      {:callsites [src]}}
+                               "rule/b" #:clara-rules{:dynamic-insert-types-detected
+                                                      {:callsites [src]}}}})
+        id-a (:callsite-id (first (:callsites (:clara-rules/dynamic-insert-types-detected
+                                               (get (:annotations generated) "rule/a")))))
+        curator (ann/layer {:id :curated
+                            :annotations
+                            {"rule/a" #:clara-rules{:dynamic-insert-types-detected
+                                                    {:callsites
+                                                     [{:callsite-id id-a
+                                                       :status :full
+                                                       :resolved-types [:t]}]}}}})
+        findings (ann.report/validate-layers [generated curator])]
+    (testing "no false positive when two rules share a source form — each has only one callsite"
+      (is (empty? (:ambiguous-callsite-reference (findings-by-type findings)))))
+    (testing "the curated entry is not flagged"
+      (is (empty? (filter #(= :curated (:layer %)) findings))))))
+
 (deftest validate-clean-layers
   (testing "the worked-example stack validates clean (no spurious findings)"
     (is (= [] (ann.report/validate-layers [generated-layer curated-layer])))))

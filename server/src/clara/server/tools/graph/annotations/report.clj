@@ -184,24 +184,29 @@
 
 (defn- lint-ambiguous-references
   "Warns when a layer references a callsite id whose duplicate group has more
-   than one member — the ordinal is positional, so the reference may
-   mis-attribute.  Group sizes are computed from the discovered callsites in
-   the merged output."
+   than one member within the same rule and dimension — the ordinal is
+   positional, so the reference may mis-attribute.  Group sizes are computed
+   per [rule-name dimension prefix] from the discovered callsites in the
+   merged output."
   [layers merged]
   (let [group-sizes (frequencies
                      (into []
                            (comp (filter (fn [[_ _ cs]] (and (:source-str cs)
                                                              (not (:dangling? cs)))))
-                                 (map (fn [[_ _ cs]] (id-group-prefix (:callsite-id cs)))))
+                                 (map (fn [[rule-name dim cs]]
+                                        [(id-group-prefix (:callsite-id cs))
+                                         rule-name dim])))
                            (annotation-callsites (:annotations merged))))
         ambiguous (into #{}
-                        (keep (fn [[prefix n]] (when (> n 1) prefix)))
+                        (keep (fn [[triple n]] (when (> n 1) triple)))
                         group-sizes)]
     (into []
           (mapcat (fn [layer]
                     (keep (fn [[rule-name dim cs]]
                             (when (and (not (discovered-entry? cs))
-                                       (contains? ambiguous (id-group-prefix (:callsite-id cs))))
+                                       (contains? ambiguous
+                                                  [(id-group-prefix (:callsite-id cs))
+                                                   rule-name dim]))
                               (finding :warn :ambiguous-callsite-reference
                                        {:layer (:id layer)
                                         :rule rule-name
