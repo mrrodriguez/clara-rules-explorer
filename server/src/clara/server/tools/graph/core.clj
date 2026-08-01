@@ -109,21 +109,29 @@
         dynamic-retracts (some-> (:dynamic-retract-types-detected ann)
                                  (serialize/serialize-dynamic-detection p-ns-name))
         summary
-        (cond-> {:name               p-name
-                 :ns                 (str p-ns-name)
-                 :doc                (:doc production)
-                 :lhs-types          (mapv serialize-fact-type (extract-lhs-fact-types (:lhs production)))
-                 :props              (-> (or (:props production) {})
-                                         serialize/prune-fns
-                                         serialize/stringify-map-keys)
-                 :lhs                (-> production :lhs
-                                         serialize/prune-fns
-                                         serialize/serialize-lhs)
-                 :notes                    (:notes ann)}
+        (cond-> {:name      p-name
+                 :ns        (str p-ns-name)
+                 :doc       (:doc production)
+                 :lhs-types (mapv serialize-fact-type (extract-lhs-fact-types (:lhs production)))
+                 :props     (-> (or (:props production) {})
+                                serialize/prune-fns
+                                serialize/stringify-map-keys)
+                 :lhs       (-> production :lhs
+                                serialize/prune-fns
+                                serialize/serialize-lhs)
+                 :notes     (:notes ann)}
 
           is-rule?
-          (assoc :insert-types  (->> (:insert-types ann) (mapv serialize-fact-type) (distinct))
-                 :retract-types (->> (:retract-types ann) (mapv serialize-fact-type) (distinct))
+          (assoc :insert-types  (->> ann
+                                     :insert-types
+                                     (into []
+                                           (comp (map serialize-fact-type)
+                                                 (distinct))))
+                 :retract-types (->> ann
+                                     :retract-types
+                                     (into []
+                                           (comp (map serialize-fact-type)
+                                                 (distinct))))
                  :rhs-form      (-> production
                                     :rhs
                                     serialize/prune-fns
