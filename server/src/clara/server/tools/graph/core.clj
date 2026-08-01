@@ -120,7 +120,7 @@
                                 serialize/prune-fns
                                 serialize/serialize-lhs)
                  :lhs-form   (-> production :lhs
-                                serialize/serialize-lhs-form)
+                                 serialize/serialize-lhs-form)
                  :notes     (:notes ann)}
 
           is-rule?
