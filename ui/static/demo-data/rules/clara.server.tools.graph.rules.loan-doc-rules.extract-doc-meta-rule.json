@@ -12,6 +12,7 @@
 		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"]
 	},
 	"source-rule": true,
+	"lhs-form": "",
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
 	"lhs-types": [],

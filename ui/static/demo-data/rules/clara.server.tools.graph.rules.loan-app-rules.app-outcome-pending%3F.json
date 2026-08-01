@@ -29,6 +29,7 @@
 		"resolution": "full"
 	},
 	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[]\n[]\n[:?doc-checks\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n  (= ?app-id app-id)]]\n[:?id-checks\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.IdentityCheck\n  (= ?app-id app-id)]]\n[:?fraud-checks\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.FraudCheck\n  (= ?app-id app-id)]]\n",
 	"ns": "clara.server.tools.graph.rules.loan-app-rules",
 	"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
 	"lhs-types": [

@@ -17,6 +17,7 @@
 		}
 	],
 	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome\n [{:keys [app-id status]}]\n (= ?app-id app-id)\n (= status :approved)]\n",
 	"ns": "clara.server.tools.graph.rules.loan-app-rules",
 	"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo",
 	"lhs-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
@@ -24,11 +25,7 @@
 		{
 			"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 			"constraints": "[\n(= ?app-id app-id)\n\n(= status :approved)\n]",
-			"args": [
-				{
-					"keys": ["app-id", "status"]
-				}
-			]
+			"args": "[\n{:keys [app-id status]}\n]"
 		}
 	],
 	"no-output-types": true,

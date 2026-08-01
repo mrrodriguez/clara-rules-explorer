@@ -119,6 +119,8 @@
                  :lhs       (-> production :lhs
                                 serialize/prune-fns
                                 serialize/serialize-lhs)
+                 :lhs-form   (-> production :lhs
+                                serialize/serialize-lhs-form)
                  :notes     (:notes ann)}
 
           is-rule?

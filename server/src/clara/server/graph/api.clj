@@ -42,9 +42,10 @@
 (s/defschema LhsCondition
   "A serialized LHS condition from the Clara Rete network.
    Known keys mirror the frontend LhsElement type:
-   :type, :constraints, :accumulator, :from, :result-binding, :fact-binding."
+   :type, :constraints, :args, :accumulator, :from, :result-binding, :fact-binding."
   {(s/optional-key :type) s/Any
    (s/optional-key :constraints) s/Str
+   (s/optional-key :args) s/Str
    (s/optional-key :accumulator) s/Any
    (s/optional-key :from) (s/recursive #'LhsCondition)
    (s/optional-key :result-binding) s/Any
@@ -104,6 +105,7 @@
   (merge RuleListItem
          {:props              {s/Str s/Any}
           :lhs                [LhsCondition]
+          :lhs-form           s/Str
           :rhs-form           s/Str
           (s/optional-key :notes) (s/maybe s/Str)}))
 
@@ -122,6 +124,7 @@
   (merge QueryListItem
          {:props              {s/Str s/Any}
           :lhs                [LhsCondition]
+          :lhs-form           s/Str
           (s/optional-key :notes) (s/maybe s/Str)}))
 
 (s/defschema FactTypeListItem

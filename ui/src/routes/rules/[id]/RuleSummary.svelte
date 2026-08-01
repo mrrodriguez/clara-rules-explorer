@@ -27,6 +27,8 @@
 
 	let fullViewHref = $derived(resolve(rulePath(rule.name, true) as Pathname));
 
+	let lhsTab = $state<'expression' | 'conditions'>('expression');
+
 	$effect(() => {
 		if (fullView) {
 			appState.setContextualNav(
@@ -106,10 +108,37 @@
 				<div class="row g-3">
 					<!-- LHS Column -->
 					<div class="col-lg-6 border-end pe-lg-3">
-						<h6 class="text-muted text-uppercase smaller fw-bold border-bottom pb-1 mb-2">
-							LHS Conditions
-						</h6>
-						<LhsList lhs={rule.lhs} />
+						<h6 class="text-muted text-uppercase smaller fw-bold border-bottom pb-1 mb-2">LHS</h6>
+						<!-- Tab navigation -->
+						<ul class="nav nav-underline lhs-tabs mb-2" role="tablist">
+							<li class="nav-item" role="presentation">
+								<button
+									class="nav-link {lhsTab === 'expression' ? 'active' : ''}"
+									role="tab"
+									aria-selected={lhsTab === 'expression'}
+									onclick={() => (lhsTab = 'expression')}
+								>
+									Expression
+								</button>
+							</li>
+							<li class="nav-item" role="presentation">
+								<button
+									class="nav-link {lhsTab === 'conditions' ? 'active' : ''}"
+									role="tab"
+									aria-selected={lhsTab === 'conditions'}
+									onclick={() => (lhsTab = 'conditions')}
+								>
+									Conditions
+								</button>
+							</li>
+						</ul>
+
+						<!-- Tab content -->
+						{#if lhsTab === 'expression'}
+							<CodeBlock code={rule['lhs-form']} language="clojure" expanded={true} />
+						{:else}
+							<LhsList lhs={rule.lhs} />
+						{/if}
 					</div>
 
 					<!-- RHS Column -->
@@ -134,9 +163,20 @@
 					<a href={fullViewHref} class="btn btn-outline-primary btn-sm">
 						<i class="bi bi-arrows-fullscreen me-1"></i> Full View
 					</a>
-					<span class="text-muted small"> See detailed LHS conditions and RHS code. </span>
+					<span class="text-muted small"> See detailed LHS and RHS. </span>
 				</div>
 			{/if}
 		{/key}
 	</div>
 </div>
+
+<style>
+	.lhs-tabs {
+		--bs-nav-underline-link-padding-x: 0.75rem;
+		--bs-nav-underline-link-padding-y: 0.375rem;
+		font-size: 0.8rem;
+	}
+	.lhs-tabs .nav-link {
+		cursor: pointer;
+	}
+</style>

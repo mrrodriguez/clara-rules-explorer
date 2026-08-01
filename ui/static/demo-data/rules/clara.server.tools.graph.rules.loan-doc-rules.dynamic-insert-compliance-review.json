@@ -12,6 +12,7 @@
 		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.FraudCheck"]
 	},
 	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n (= ?app-id app-id)\n (= status :pass)]\n",
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
 	"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],

@@ -35,6 +35,7 @@
 		"fact-instance-derived-types": ["clojure.lang.Symbol"]
 	},
 	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n (= ?app-id app-id)\n (= status :pass)]\n[clara.server.tools.graph.rules.loan_app_facts.IdentityCheck\n (= ?app-id app-id)\n (= status :pass)]\n[clara.server.tools.graph.rules.loan_app_facts.FraudCheck\n (= ?app-id app-id)\n (= status :pass)]\n",
 	"ns": "clara.server.tools.graph.rules.loan-app-rules",
 	"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 	"lhs-types": [

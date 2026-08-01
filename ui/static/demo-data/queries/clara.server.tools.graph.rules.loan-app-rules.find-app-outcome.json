@@ -1,4 +1,5 @@
 {
+	"lhs-form": "[:?outcome\n <-\n clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome\n (= ?app-id app-id)]\n",
 	"ns": "clara.server.tools.graph.rules.loan-app-rules",
 	"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
 	"params": ["?app-id"],

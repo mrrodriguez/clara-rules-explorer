@@ -45,7 +45,7 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 7,
+			"id": 8,
 			"type": "clojure.lang.PersistentVector",
 			"data": [
 				"clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",

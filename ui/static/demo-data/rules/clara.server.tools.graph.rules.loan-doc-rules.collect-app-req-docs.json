@@ -20,6 +20,7 @@
 		"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
 	},
 	"source-rule": true,
+	"lhs-form": "[:?app\n <-\n clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[:?docs\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.RequiredDocument\n  (= ?app-id app-id)]]\n",
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
 	"lhs-types": [

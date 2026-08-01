@@ -13,7 +13,7 @@
 	{#each lhs as condition, i (i)}
 		<LhsCondition {condition} />
 		{#if i < lhs.length - 1}
-			<hr class="my-2 opacity-25" />
+			<hr class="my-1 opacity-50" />
 		{/if}
 	{/each}
 </div>
