@@ -3,8 +3,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
 	webServer: {
 		command: 'bash bin/ci/start-demo-web-server.sh',
-		port: 4173,
-		reuseExistingServer: true
+		port: 4173
 	},
 	testMatch: '**/*.e2e.{ts,js}',
 	use: {

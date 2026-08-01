@@ -198,13 +198,37 @@
                {:callsites callsites
                 :resolution (ann.callsite/aggregate-resolution callsites)})))))
 
+(defn type-str
+  "Normalizes a type value to its canonical string form for deduplication
+   across layers that may represent the same logical type as a Class, Symbol,
+   or String."
+  [t]
+  (cond
+    (nil? t) nil
+    (class? t) (.getName ^Class t)
+    (keyword? t) (str (symbol t))
+    (symbol? t) (str t)
+    (string? t) t
+    :else (str t)))
+
+(defn dedupe-by
+  "Like `distinct` but compares by (f x) rather than x itself."
+  [f coll]
+  (let [seen (volatile! (transient #{}))]
+    (filterv #(let [k (f %)]
+                (if (contains? @seen k)
+                  false
+                  (do (vswap! seen conj! k) true)))
+             coll)))
+
 (defn- merge-type-vec
-  "Type-vector merge: default union, `a` first, distinct; `:replace` takes
-   `b` only."
+  "Type-vector merge: default union, `a` first, deduplicated by normalized
+   string form (so a Class from props and a Symbol from a sidecar file are
+   recognized as the same type).  `:replace` takes `b` only."
   [strategy a b]
   (if (= :replace strategy)
-    (into [] (distinct) b)
-    (into [] (comp cat (distinct)) [a b])))
+    (dedupe-by type-str b)
+    (dedupe-by type-str (into (vec a) b))))
 
 (defn- contributing
   "Adds a layer id to a union/deep-merge origin: keys merged by union record
@@ -385,13 +409,13 @@
   (reduce (fn [ra [_ types-k dm-k]]
             (let [dm (get ra dm-k)
                   a (get ra types-k)
-                  d (into []
-                          (comp (remove :dangling?)
-                                (mapcat :resolved-types)
-                                (distinct))
-                          (:callsites dm))
+                  d (dedupe-by type-str
+                               (into []
+                                     (comp (remove :dangling?)
+                                           (mapcat :resolved-types))
+                                     (:callsites dm)))
                   final (case mode
-                          :additive (into [] (comp cat (distinct)) [a d])
+                          :additive (dedupe-by type-str (into (vec a) d))
                           ;; 'has a detection map' means has callsites — with
                           ;; no callsites there is nothing to derive from and
                           ;; the authored types stand

@@ -941,7 +941,7 @@
                        (if dynamic
                          (if (seq truly-new)
                            (let [raw-inserts (:clara-rules/insert-types raw-entry)
-                                 merged      (into (vec raw-inserts) truly-new)]
+                                 merged      (ann.merge/dedupe-by ann.merge/type-str (into (vec raw-inserts) truly-new))]
                              (-> acc
                                  (assoc-in [p-name :clara-rules/insert-types] merged)
                                  (assoc-in [p-name :clara-rules/dynamic-insert-types-detected

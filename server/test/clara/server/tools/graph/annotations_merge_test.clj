@@ -269,7 +269,27 @@
           overlay (ann/layer {:id :overlay
                               :annotations {"rule/a" #:clara-rules{:insert-types [:y :z]}}})
           rule (get (ann/annotations (ann/merge-layers [base overlay])) "rule/a")]
-      (is (= [:x :y :z] (:clara-rules/insert-types rule))))))
+      (is (= [:x :y :z] (:clara-rules/insert-types rule)))))
+
+  (testing "deduplicates across representations: Class vs Symbol for same logical type"
+    (let [base (ann/layer {:id :base
+                           :annotations {"rule/a" #:clara-rules{:insert-types [java.lang.String]}}})
+          overlay (ann/layer {:id :overlay
+                              :annotations {"rule/a" #:clara-rules{:insert-types ['java.lang.String]}}})
+          rule (get (ann/annotations (ann/merge-layers [base overlay])) "rule/a")]
+      (is (= 1 (count (:clara-rules/insert-types rule)))
+          "Class from props and Symbol from sidecar should merge to one")
+      (is (class? (first (:clara-rules/insert-types rule)))
+          "first layer's representation wins")))
+
+  (testing "deduplicates across representations: String vs Symbol for same logical type"
+    (let [base (ann/layer {:id :base
+                           :annotations {"rule/a" #:clara-rules{:insert-types ["java.lang.String"]}}})
+          overlay (ann/layer {:id :overlay
+                              :annotations {"rule/a" #:clara-rules{:insert-types ['java.lang.String]}}})
+          rule (get (ann/annotations (ann/merge-layers [base overlay])) "rule/a")]
+      (is (= 1 (count (:clara-rules/insert-types rule)))
+          "String from enrichment and Symbol from sidecar should merge to one"))))
 
 (deftest notes-append-strategy
   (let [base (ann/layer {:id :base
@@ -704,7 +724,23 @@
             "a :none callsite supports nothing — authored type is dropped")))
     (testing "props-survival clause: no detection map → authored types stand (§5.5)"
       (let [rules (ann/annotations (ann/merge-layers [layer] {:type-derivation :from-callsites}))]
-        (is (= [:authored/only] (:clara-rules/insert-types (get rules "rule/b"))))))))
+        (is (= [:authored/only] (:clara-rules/insert-types (get rules "rule/b"))))))
+    (testing ":additive deduplicates when authored and derived are the same logical type"
+      (let [layer' (ann/layer {:id :l2
+                               :annotations
+                               {"rule/d"
+                                #:clara-rules{:insert-types ['java.lang.String]
+                                              :dynamic-insert-types-detected
+                                              {:callsites
+                                               [{:callsite-id "id:d"
+                                                 :source-str "(s)"
+                                                 :ns-name-sym 'some.ns
+                                                 :filename "some/ns.clj"
+                                                 :status :full
+                                                 :resolved-types ["java.lang.String"]}]}}}})
+            rules (ann/annotations (ann/merge-layers [layer'] {:type-derivation :additive}))]
+        (is (= 1 (count (:clara-rules/insert-types (get rules "rule/d"))))
+            "Symbol from authored and String from callsite should deduplicate to one")))))
 
 (deftest downgrading-a-wrong-callsite
   (let [generated (ann/layer {:id :generated
