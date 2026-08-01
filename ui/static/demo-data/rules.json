@@ -345,7 +345,6 @@
 			"retract-types": [],
 			"insert-types": [
 				"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-				"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 				"clojure.lang.Symbol"
 			],
 			"doc": null,
@@ -375,10 +374,7 @@
 				"clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
 			],
 			"retract-types": [],
-			"insert-types": [
-				"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-				"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"
-			],
+			"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
 			"doc": null,
 			"sink-rule": false
 		},
@@ -406,10 +402,7 @@
 				"clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
 			],
 			"retract-types": [],
-			"insert-types": [
-				"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-				"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"
-			],
+			"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
 			"doc": null,
 			"sink-rule": false
 		},

@@ -65,7 +65,6 @@
 	"notes": null,
 	"insert-types": [
 		"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-		"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 		"clojure.lang.Symbol"
 	],
 	"rhs-form": "(do\n (r/insert!\n  (map->ApplicationOutcome\n   {:app-id ?app-id,\n    :status :approved,\n    :message \"Application approved\",\n    :passed-checks\n    [{:check-type :document}\n     {:check-type :identity}\n     {:check-type :fraud}]})))\n",

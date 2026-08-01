@@ -65,10 +65,7 @@
 	],
 	"retract-types": [],
 	"notes": null,
-	"insert-types": [
-		"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-		"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"
-	],
+	"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
 	"rhs-form": "(do\n (let\n  [all-checks\n   [{:check-type :document, :status ?doc-check-status}\n    {:check-type :identity, :status ?identity-check-status}\n    {:check-type :fraud, :status ?fraud-check-status}]\n   passed-checks\n   (into\n    []\n    (comp (filter (comp #{:pass} :status)) (map :check-type))\n    all-checks)\n   failed-checks\n   (into\n    []\n    (comp (remove (comp #{:pass} :status)) (map :check-type))\n    all-checks)]\n  (r/insert!\n   (map->ApplicationOutcome\n    {:app-id ?app-id,\n     :status :denied,\n     :message \"Application denied\",\n     :passed-checks passed-checks,\n     :failed-checks failed-checks}))))\n",
 	"upstream": [
 		{

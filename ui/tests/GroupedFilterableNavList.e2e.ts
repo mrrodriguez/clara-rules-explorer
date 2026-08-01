@@ -473,6 +473,11 @@ test.describe('GroupedFilterableNavList — Rulebase filters', () => {
 	}) => {
 		await ui.groupedNav.filterMenuButton(page).click();
 		await ui.groupedNav.filterOption(page, 'Dynamic Inserts (unresolved)').click();
+		// Close the dropdown so it does not block the expand button below
+		await page.locator('body').click({ position: { x: 0, y: 0 } });
+
+		// Expand all groups so items are visible (filter spans multiple namespaces)
+		await ui.groupedNav.expandAllButton(page).click();
 
 		const items = page.locator('a.list-group-item');
 		const count = await items.count();

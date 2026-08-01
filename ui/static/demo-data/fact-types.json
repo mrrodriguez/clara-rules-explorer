@@ -167,10 +167,7 @@
 			"used-by-queries": ["clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"],
 			"inserted-by-rules": [
 				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
-				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
 				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
 				"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
 			],
