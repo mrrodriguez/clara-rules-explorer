@@ -4,8 +4,7 @@
 	import RulebaseComponentSummaryDescription from '$lib/components/rulebase/RulebaseComponentSummaryDescription.svelte';
 	import DependencyRow from '$lib/components/rulebase/DependencyRow.svelte';
 	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
-	import LhsList from '$lib/components/rulebase/LhsList.svelte';
-	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
+	import LhsTabs from '$lib/components/rulebase/LhsTabs.svelte';
 	import SessionProductionActivity from '$lib/components/rulebase/SessionProductionActivity.svelte';
 	import { queryPath } from '$lib/utils';
 	import { appState } from '$lib/state/appState.svelte';
@@ -21,8 +20,6 @@
 	let { query, activity, fullView = false }: Props = $props();
 
 	let fullViewHref = $derived(resolve(queryPath(query.name, true) as Pathname));
-
-	let lhsTab = $state<'expression' | 'conditions'>('expression');
 
 	$effect(() => {
 		if (fullView) {
@@ -73,37 +70,7 @@
 			{/if}
 
 			{#if fullView}
-				<h6 class="text-muted text-uppercase smaller fw-bold border-bottom pb-1 mb-2">LHS</h6>
-				<!-- Tab navigation -->
-				<ul class="nav nav-underline lhs-tabs mb-2" role="tablist">
-					<li class="nav-item" role="presentation">
-						<button
-							class="nav-link {lhsTab === 'expression' ? 'active' : ''}"
-							role="tab"
-							aria-selected={lhsTab === 'expression'}
-							onclick={() => (lhsTab = 'expression')}
-						>
-							Expression
-						</button>
-					</li>
-					<li class="nav-item" role="presentation">
-						<button
-							class="nav-link {lhsTab === 'conditions' ? 'active' : ''}"
-							role="tab"
-							aria-selected={lhsTab === 'conditions'}
-							onclick={() => (lhsTab = 'conditions')}
-						>
-							Conditions
-						</button>
-					</li>
-				</ul>
-
-				<!-- Tab content -->
-				{#if lhsTab === 'expression'}
-					<CodeBlock code={query['lhs-form']} language="clojure" expanded={true} />
-				{:else}
-					<LhsList lhs={query.lhs} />
-				{/if}
+				<LhsTabs lhsForm={query['lhs-form']} lhs={query.lhs} />
 
 				<SessionProductionActivity {activity} />
 			{/if}
@@ -119,14 +86,3 @@
 		{/key}
 	</div>
 </div>
-
-<style>
-	.lhs-tabs {
-		--bs-nav-underline-link-padding-x: 0.75rem;
-		--bs-nav-underline-link-padding-y: 0.375rem;
-		font-size: 0.8rem;
-	}
-	.lhs-tabs .nav-link {
-		cursor: pointer;
-	}
-</style>
