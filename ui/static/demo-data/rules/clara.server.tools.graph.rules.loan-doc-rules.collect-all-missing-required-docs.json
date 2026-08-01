@@ -17,7 +17,6 @@
 	"no-output-types": true,
 	"retract-types": [],
 	"notes": null,
-	"annotation-sources": ["clara-rules/no-output-types"],
 	"insert-types": [],
 	"rhs-form": "(do (swap! count-atom inc))\n",
 	"upstream": [

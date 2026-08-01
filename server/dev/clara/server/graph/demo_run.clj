@@ -14,6 +14,6 @@
                (concat args ["-p" "9001"]))
         ann-path (some-> (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn")
                          .getPath)]
-    (if (some #{"-a" "--annotations"} args)
+    (if (some #{"-l" "--layer"} args)
       (apply main/-main args)
-      (apply main/-main (concat args ["-a" ann-path])))))
+      (apply main/-main (concat args ["-l" ann-path])))))

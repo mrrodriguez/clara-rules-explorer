@@ -10,8 +10,7 @@
 		}
 	],
 	"retract-types": ["clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"],
-	"notes": "Stale document notice retracted via Java constructor — fully resolved",
-	"annotation-sources": ["clara-rules/retract-types", "clara-rules/notes"],
+	"notes": null,
 	"insert-types": [],
 	"dynamic-retract-types-detected": {
 		"callsites": [
@@ -19,7 +18,7 @@
 				"source-str": "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")",
 				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-				"status": "resolved",
+				"status": "full",
 				"resolved-types": ["clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"]
 			}
 		],

@@ -11,7 +11,6 @@
 		}
 	],
 	"notes": null,
-	"annotation-sources": [],
 	"upstream": [
 		{
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",

@@ -122,8 +122,8 @@
                  :notes                    (:notes ann)}
 
           is-rule?
-          (assoc :insert-types  (mapv serialize-fact-type (:insert-types ann))
-                 :retract-types (mapv serialize-fact-type (:retract-types ann))
+          (assoc :insert-types  (->> (:insert-types ann) (mapv serialize-fact-type) (distinct))
+                 :retract-types (->> (:retract-types ann) (mapv serialize-fact-type) (distinct))
                  :rhs-form      (-> production
                                     :rhs
                                     serialize/prune-fns

@@ -1,17 +1,15 @@
 {
 	"matches": [
 		{
-			"id": 1,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"id": 9,
+			"type": "clojure.lang.PersistentVector",
 			"data": {
-				"?app": {
-					"app-id": "app-1"
-				},
+				"?app": ["clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument"],
 				"?app-id": "app-1",
 				"?docs": [
 					{
 						"app-id": "app-1",
-						"doc-type": "id-card"
+						"doc-type": "bank-statement"
 					}
 				]
 			},
@@ -56,17 +54,15 @@
 			]
 		},
 		{
-			"id": 6,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
+			"id": 10,
+			"type": "clojure.lang.PersistentVector",
 			"data": {
-				"?app": {
-					"app-id": "app-1"
-				},
+				"?app": ["clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument"],
 				"?app-id": "app-1",
 				"?docs": [
 					{
 						"app-id": "app-1",
-						"doc-type": "id-card"
+						"doc-type": "bank-statement"
 					}
 				]
 			},
@@ -83,21 +79,18 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 8,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
-			"data": {
-				"app-id": "app-1",
-				"docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					}
-				]
-			},
+			"id": 6,
+			"type": "clojure.lang.PersistentVector",
+			"data": ["clara.server.tools.graph.rules.loan-app-facts/map->DocumentCheck"],
 			"is-root": false,
 			"inserted-from": [
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}
@@ -105,6 +98,11 @@
 			"used-by": [
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}

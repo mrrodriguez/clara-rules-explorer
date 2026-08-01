@@ -1,8 +1,8 @@
 {
 	"matches": [
 		{
-			"id": 1,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"id": 9,
+			"type": "clojure.lang.PersistentVector",
 			"data": {
 				"?app-id": "app-1"
 			},
@@ -47,8 +47,8 @@
 			]
 		},
 		{
-			"id": 10,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"id": 2,
+			"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
 			"data": {
 				"?app-id": "app-1"
 			},
@@ -89,8 +89,8 @@
 			]
 		},
 		{
-			"id": 11,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+			"id": 8,
+			"type": "clojure.lang.PersistentVector",
 			"data": {
 				"?app-id": "app-1"
 			},
@@ -105,8 +105,8 @@
 			]
 		},
 		{
-			"id": 12,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
+			"id": 11,
+			"type": "clojure.lang.Symbol",
 			"data": {
 				"?app-id": "app-1"
 			},
@@ -124,26 +124,8 @@
 	"inserted-facts": [
 		{
 			"id": 13,
-			"type": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-			"data": {
-				"app-id": "app-1",
-				"status": "approved",
-				"message": "Application approved",
-				"passed-checks": [
-					{
-						"check-type": "document"
-					},
-					{
-						"check-type": "identity"
-					},
-					{
-						"check-type": "fraud"
-					}
-				],
-				"failed-checks": null,
-				"checks-complete": null,
-				"checks-incomplete": null
-			},
+			"type": "clojure.lang.Symbol",
+			"data": "clara.server.tools.graph.rules.loan-app-facts/map->IdentityCheck",
 			"is-root": false,
 			"inserted-from": [
 				{

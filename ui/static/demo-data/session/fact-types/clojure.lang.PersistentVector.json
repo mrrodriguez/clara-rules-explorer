@@ -7,7 +7,7 @@
 			"type": "root",
 			"facts": [
 				{
-					"id": 7,
+					"id": 8,
 					"type": "clojure.lang.PersistentVector",
 					"data": [
 						"clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",
@@ -240,7 +240,7 @@
 			"type": "rule",
 			"facts": [
 				{
-					"id": 8,
+					"id": 7,
 					"type": "clojure.lang.PersistentVector",
 					"data": [
 						"clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",
@@ -658,7 +658,7 @@
 			"type": "rule",
 			"facts": [
 				{
-					"id": 7,
+					"id": 8,
 					"type": "clojure.lang.PersistentVector",
 					"data": [
 						"clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",
