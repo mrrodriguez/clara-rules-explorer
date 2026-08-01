@@ -1,16 +1,14 @@
 {
 	"matches": [
 		{
-			"id": 1,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"id": 9,
+			"type": "clojure.lang.PersistentVector",
 			"data": {
 				"?app-id": "app-1",
-				"?docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					}
-				]
+				"?docs": {
+					"app-id": "app-1",
+					"doc-type": "bank-statement"
+				}
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -53,16 +51,14 @@
 			]
 		},
 		{
-			"id": 3,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+			"id": 12,
+			"type": "clojure.lang.Symbol",
 			"data": {
 				"?app-id": "app-1",
-				"?docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					}
-				]
+				"?docs": {
+					"app-id": "app-1",
+					"doc-type": "bank-statement"
+				}
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -87,21 +83,25 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 16,
-			"type": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
-			"data": {
-				"app-id": "app-1",
-				"docs": [
+			"id": 5,
+			"type": "clojure.lang.PersistentVector",
+			"data": [
+				[
 					{
 						"app-id": "app-1",
-						"doc-type": "id-card"
+						"doc-type": "bank-statement"
 					}
 				]
-			},
+			],
 			"is-root": false,
 			"inserted-from": [
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}
