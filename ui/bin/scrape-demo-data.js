@@ -29,6 +29,12 @@ async function scrape() {
 	try {
 		console.log(`Starting scrape from backend at ${API_HOST}...`);
 
+		// Clean out stale files from prior scrapes
+		if (fs.existsSync(OUTPUT_DIR)) {
+			fs.rmSync(OUTPUT_DIR, { recursive: true });
+		}
+		fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+
 		// 1. Save rulebase summary
 		const rulebaseSummary = await fetchJson(`${API_BASE}/rulebase-summary`);
 		writeJson('rulebase-summary.json', rulebaseSummary);

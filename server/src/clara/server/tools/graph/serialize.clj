@@ -56,6 +56,7 @@
                     x)
     (keyword? x) x
     (symbol? x) x
+    (class? x) (.getName ^Class x)
     (ifn? x) (str x)
     :else x))
 
@@ -96,21 +97,22 @@
       (nil? rhs) (assoc :type "query"))))
 
 (defn serialize-condition
-  "Serializes a single condition, including pretty-printing its constraints."
+  "Serializes a single condition, including pretty-printing its constraints and args."
   [condition]
-  (letfn [(serialize-constraint [constraint]
-            (with-out-str (pp/pprint constraint)))
-          (serialize-constraints [constraints]
-            ;; `pp/pprint` adds the newline after the last constraint so do not include it trailing
+  (letfn [(serialize-form [form]
+            (with-out-str (pp/pprint form)))
+          (serialize-forms [forms]
+            ;; `pp/pprint` adds the newline after the last form so do not include it trailing
             ;; in this `format` call.
             (format "[\n%s]"
-                    (->> constraints
-                         (map serialize-constraint)
+                    (->> forms
+                         (map serialize-form)
                          (str/join \newline))))
           (serialize-node [node]
-            (if (and (map? node)
-                     (contains? node :constraints))
-              (update node :constraints serialize-constraints)
+            (if (map? node)
+              (cond-> node
+                (contains? node :constraints) (update :constraints serialize-forms)
+                (contains? node :args) (update :args serialize-forms))
               node))]
     (w/prewalk serialize-node condition)))
 
@@ -118,6 +120,34 @@
   "Serializes the LHS of a rule."
   [lhs]
   (mapv serialize-condition lhs))
+
+(defn- condition->form
+  "Reconstructs a Clojure code form from a condition map.
+   Produces a vector that mirrors the original Clara defrule/defquery syntax."
+  [condition]
+  (if (:accumulator condition)
+    ;; Accumulator: [?result <- (acc-fn ...) :from [nested-form]]
+    (let [acc-form (:accumulator condition)
+          parts (-> []
+                    (cond-> (:result-binding condition) (conj (:result-binding condition) '<-))
+                    (conj acc-form)
+                    (cond-> (:from condition) (conj :from (condition->form (:from condition)))))]
+      (vec parts))
+    ;; Regular condition: [?binding <- Type args... constraints...]
+    (let [parts (-> []
+                    (cond-> (:fact-binding condition) (conj (:fact-binding condition) '<-))
+                    (cond-> (:type condition) (conj (:type condition)))
+                    (cond-> (:args condition) (conj (:args condition)))
+                    (into (or (:constraints condition) [])))]
+      (vec parts))))
+
+(defn serialize-lhs-form
+  "Pretty-prints the full LHS as a single Clojure code string."
+  [lhs]
+  (->> lhs
+       (map condition->form)
+       (map (fn [form] (with-out-str (pp/pprint form))))
+       str/join))
 
 (defn serialize-rhs-form
   [rhs-form]

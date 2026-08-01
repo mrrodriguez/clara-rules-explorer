@@ -2,38 +2,75 @@
 	"rules": [
 		{
 			"dynamic-insert-types-detected": {
-				"fact-instance-derived-types": ["extract-doc-meta"],
-				"resolution": "partial"
+				"callsites": [
+					{
+						"source-str": "resolved__44034__auto__",
+						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+						"status": "none"
+					}
+				],
+				"resolution": "partial",
+				"fact-instance-derived-types": [
+					"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"
+				]
 			},
 			"source-rule": true,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
 			"lhs-types": [],
 			"retract-types": [],
-			"insert-types": ["extract-doc-meta"],
+			"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"],
 			"doc": null,
 			"sink-rule": true
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"dynamic-insert-types-detected": {
+				"callsites": [
+					{
+						"source-str": "(laf/map->AllGivenDocumentsMeta {:app-id ?app-id, :doc-metas doc-metas})",
+						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+						"status": "full",
+						"resolved-types": [
+							"clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta"
+						]
+					}
+				],
+				"resolution": "partial",
+				"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.FraudCheck"]
+			},
+			"source-rule": true,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"doc": null,
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
 				"extract-doc-meta"
 			],
-			"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta"],
 			"retract-types": [],
-			"source-rule": true,
+			"insert-types": [
+				"clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
+				"clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
+			],
+			"doc": null,
 			"sink-rule": true
 		},
 		{
 			"dynamic-insert-types-detected": {
-				"fact-instance-derived-types": [
-					"clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"
+				"callsites": [
+					{
+						"source-str": "(map->AllIdCardGivenDocuments {:app-id ?app-id, :docs ?docs})",
+						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+						"status": "full",
+						"resolved-types": [
+							"clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"
+						]
+					}
 				],
-				"resolution": "partial"
+				"resolution": "partial",
+				"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
 			},
 			"source-rule": true,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
@@ -43,34 +80,71 @@
 				"clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
 			],
 			"retract-types": [],
-			"insert-types": ["clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"],
+			"insert-types": [
+				"clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
+				"clojure.lang.PersistentVector"
+			],
 			"doc": null,
 			"sink-rule": true
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"dynamic-insert-types-detected": {
+				"callsites": [
+					{
+						"source-str": "(laf/map->AllGivenDocuments {:app-id ?app-id, :docs ?docs})",
+						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+						"status": "full",
+						"resolved-types": ["clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"]
+					}
+				],
+				"resolution": "partial",
+				"fact-instance-derived-types": [
+					"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"
+				]
+			},
+			"source-rule": true,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"doc": null,
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
 			],
-			"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"],
 			"retract-types": [],
-			"source-rule": true,
+			"insert-types": [
+				"clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+				"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"
+			],
+			"doc": null,
 			"sink-rule": false
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+			"dynamic-insert-types-detected": {
+				"callsites": [
+					{
+						"source-str": "(laf/map->AllRequiredDocuments {:app-id ?app-id, :docs ?docs})",
+						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+						"status": "full",
+						"resolved-types": ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"]
+					}
+				],
+				"resolution": "partial",
+				"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
+			},
+			"source-rule": true,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"doc": null,
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_facts.RequiredDocument"
 			],
-			"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"],
 			"retract-types": [],
-			"source-rule": true,
+			"insert-types": [
+				"clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+				"clojure.lang.PersistentVector"
+			],
+			"doc": null,
 			"sink-rule": false
 		},
 		{
@@ -95,11 +169,12 @@
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"constructor-sym": "clara.server.tools.graph.rules.helpers/->fact",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-						"status": "resolved",
+						"status": "full",
 						"resolved-types": ["loan-doc-rules/document-check-input"]
 					}
 				],
-				"resolution": "full"
+				"resolution": "partial",
+				"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
 			},
 			"source-rule": false,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
@@ -110,21 +185,39 @@
 				"clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"
 			],
 			"retract-types": [],
-			"insert-types": ["loan-doc-rules/document-check-input"],
+			"insert-types": ["loan-doc-rules/document-check-input", "clojure.lang.PersistentVector"],
 			"doc": null,
 			"sink-rule": false
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"dynamic-insert-types-detected": {
+				"callsites": [
+					{
+						"source-str": "(laf/map->DocumentCheck {:app-id ?app-id, :status status, :message message})",
+						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+						"status": "full",
+						"resolved-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"]
+					}
+				],
+				"resolution": "partial",
+				"fact-instance-derived-types": [
+					"clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
+				]
+			},
+			"source-rule": false,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"doc": null,
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"loan-doc-rules/document-check-input"
 			],
-			"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
 			"retract-types": [],
-			"source-rule": false,
+			"insert-types": [
+				"clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+				"clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
+			],
+			"doc": null,
 			"sink-rule": false
 		},
 		{
@@ -145,20 +238,18 @@
 						"source-str": "(build-compliance-review ?app-id)",
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-						"status": "unresolved"
+						"status": "none"
 					}
 				],
 				"resolution": "partial",
-				"fact-instance-derived-types": [
-					"clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"
-				]
+				"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.FraudCheck"]
 			},
 			"source-rule": false,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
 			"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
 			"retract-types": [],
-			"insert-types": ["clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"],
+			"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.FraudCheck"],
 			"doc": "After document checks pass, trigger a compliance review via Java constructor.\n   The analyzer sees the ComplianceReview. call but cannot statically determine\n   its return type — captured as a dynamic insert callsite.",
 			"sink-rule": true
 		},
@@ -169,18 +260,18 @@
 						"source-str": "(build-compliance-via-metadata ?app-id)",
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-						"status": "unresolved"
+						"status": "none"
 					}
 				],
 				"resolution": "partial",
-				"fact-instance-derived-types": ["compliance-review-result"]
+				"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
 			},
 			"source-rule": false,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
 			"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
 			"retract-types": [],
-			"insert-types": ["compliance-review-result"],
+			"insert-types": ["clojure.lang.PersistentVector"],
 			"doc": "Same compliance review, but built via metadata-map style.\n   The analyzer captures the with-meta form as a dynamic callsite.",
 			"sink-rule": true
 		},
@@ -197,7 +288,7 @@
 						"source-str": "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")",
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-						"status": "resolved",
+						"status": "full",
 						"resolved-types": ["clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"]
 					}
 				],
@@ -213,40 +304,68 @@
 						"source-str": "(build-audit-trail-entry ?app-id :doc-check-passed)",
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-						"status": "unresolved"
+						"status": "none"
 					}
 				],
 				"resolution": "partial",
-				"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"]
+				"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
 			},
 			"source-rule": false,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
 			"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
 			"retract-types": [],
-			"insert-types": ["clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"],
+			"insert-types": ["clojure.lang.PersistentVector"],
 			"doc": "After document checks pass, write an audit trail entry via opaque builder.\n   The analyzer detects an insert but cannot resolve the fact type — the\n   builder is a custom non-record function. This stays unresolved.",
 			"sink-rule": true
 		},
 		{
+			"dynamic-insert-types-detected": {
+				"callsites": [
+					{
+						"source-str": "(map->ApplicationOutcome {:app-id ?app-id, :status :approved, :message \"Application approved\", :passed-checks [{:check-type :document} {:check-type :identity} {:check-type :fraud}]})",
+						"ns": "clara.server.tools.graph.rules.loan-app-rules",
+						"filename": "clara/server/tools/graph/rules/loan_app_rules.clj",
+						"status": "full",
+						"resolved-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"]
+					}
+				],
+				"resolution": "partial",
+				"fact-instance-derived-types": ["clojure.lang.Symbol"]
+			},
+			"source-rule": false,
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
-			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"doc": null,
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
 				"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 				"clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
 			],
-			"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
 			"retract-types": [],
-			"source-rule": false,
+			"insert-types": [
+				"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+				"clojure.lang.Symbol"
+			],
+			"doc": null,
 			"sink-rule": false
 		},
 		{
+			"dynamic-insert-types-detected": {
+				"callsites": [
+					{
+						"source-str": "(map->ApplicationOutcome {:app-id ?app-id, :status :denied, :message \"Application denied\", :passed-checks passed-checks, :failed-checks failed-checks})",
+						"ns": "clara.server.tools.graph.rules.loan-app-rules",
+						"filename": "clara/server/tools/graph/rules/loan_app_rules.clj",
+						"status": "full",
+						"resolved-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"]
+					}
+				],
+				"resolution": "full"
+			},
+			"source-rule": false,
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
-			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"doc": null,
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
@@ -254,15 +373,27 @@
 				"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 				"clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
 			],
-			"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
 			"retract-types": [],
-			"source-rule": false,
+			"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
+			"doc": null,
 			"sink-rule": false
 		},
 		{
+			"dynamic-insert-types-detected": {
+				"callsites": [
+					{
+						"source-str": "(map->ApplicationOutcome {:app-id ?app-id, :status :pending, :message \"Application pending\", :checks-complete checks-complete, :checks-incomplete checks-incomplete})",
+						"ns": "clara.server.tools.graph.rules.loan-app-rules",
+						"filename": "clara/server/tools/graph/rules/loan_app_rules.clj",
+						"status": "full",
+						"resolved-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"]
+					}
+				],
+				"resolution": "full"
+			},
+			"source-rule": false,
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
-			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"doc": null,
 			"lhs-types": [
 				"clara.server.tools.graph.rules.loan_app_facts.Application",
 				"clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
@@ -270,19 +401,20 @@
 				"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
 				"clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
 			],
-			"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
 			"retract-types": [],
-			"source-rule": false,
+			"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
+			"doc": null,
 			"sink-rule": false
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo",
-			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"doc": "Demonstrates LHS args destructuring — approved outcome with destructured fields.",
-			"lhs-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
-			"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
-			"retract-types": [],
 			"source-rule": false,
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo",
+			"lhs-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
+			"no-output-types": true,
+			"retract-types": [],
+			"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
+			"doc": "Demonstrates LHS args destructuring — approved outcome with destructured fields.",
 			"sink-rule": false
 		}
 	]

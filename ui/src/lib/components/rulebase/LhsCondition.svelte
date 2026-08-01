@@ -45,28 +45,28 @@
 </script>
 
 {#snippet property(label: string, valueClass: string = '', content: Snippet)}
-	<div class="row g-0 py-1 align-items-baseline">
+	<div class="row g-0 py-0 align-items-baseline">
 		<div
-			class="col-auto text-muted fw-bold text-uppercase ps-3"
-			style="width: 120px; font-size: 0.7rem;"
+			class="col-auto text-muted fw-bold text-uppercase ps-2"
+			style="width: 100px; font-size: 0.65rem;"
 		>
 			{label}
 		</div>
-		<div class="col pe-3 {valueClass}">
+		<div class="col pe-2 {valueClass}">
 			{@render content()}
 		</div>
 	</div>
 {/snippet}
 
 {#snippet textProperty(label: string, value: string, valueClass: string = '')}
-	<div class="row g-0 py-1 align-items-baseline">
+	<div class="row g-0 py-0 align-items-baseline">
 		<div
-			class="col-auto text-muted fw-bold text-uppercase ps-3"
-			style="width: 120px; font-size: 0.7rem;"
+			class="col-auto text-muted fw-bold text-uppercase ps-2"
+			style="width: 100px; font-size: 0.65rem;"
 		>
 			{label}
 		</div>
-		<div class="col pe-3 font-monospace {valueClass}">
+		<div class="col pe-2 font-monospace {valueClass}">
 			{value}
 		</div>
 	</div>
@@ -89,7 +89,7 @@
 			<LhsCondition condition={subCondition as LhsElement | unknown[]} depth={depth + 1} />
 		{/each}
 	{:else}
-		<div class="card border-light bg-light-subtle mb-2">
+		<div class="card border bg-light-subtle mb-2">
 			<div class="card-body p-0 container-fluid property-container">
 				{#if leaf.type}
 					{@render property('Fact Type', 'text-primary', factType)}
@@ -118,10 +118,10 @@
 				{/each}
 
 				{#if leaf.args}
-					<div class="row g-0 py-1">
+					<div class="row g-0">
 						<div
-							class="col-12 text-muted fw-bold text-uppercase ps-3 pt-2"
-							style="font-size: 0.7rem;"
+							class="col-12 text-muted fw-bold text-uppercase ps-2 pt-1"
+							style="font-size: 0.65rem;"
 						>
 							Args
 						</div>
@@ -132,10 +132,10 @@
 				{/if}
 
 				{#if leaf.constraints}
-					<div class="row g-0 py-1">
+					<div class="row g-0">
 						<div
-							class="col-12 text-muted fw-bold text-uppercase ps-3 pt-2"
-							style="font-size: 0.7rem;"
+							class="col-12 text-muted fw-bold text-uppercase ps-2 pt-1"
+							style="font-size: 0.65rem;"
 						>
 							Constraints
 						</div>
@@ -155,10 +155,10 @@
 	}
 
 	.nested-badge {
-		font-size: 0.65rem;
+		font-size: 0.7rem;
 	}
 
 	.property-container {
-		font-size: 0.8rem;
+		font-size: 0.78rem;
 	}
 </style>

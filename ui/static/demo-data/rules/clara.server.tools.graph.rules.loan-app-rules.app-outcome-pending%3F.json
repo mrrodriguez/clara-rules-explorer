@@ -16,7 +16,20 @@
 			"type": "query"
 		}
 	],
+	"dynamic-insert-types-detected": {
+		"callsites": [
+			{
+				"source-str": "(map->ApplicationOutcome {:app-id ?app-id, :status :pending, :message \"Application pending\", :checks-complete checks-complete, :checks-incomplete checks-incomplete})",
+				"ns": "clara.server.tools.graph.rules.loan-app-rules",
+				"filename": "clara/server/tools/graph/rules/loan_app_rules.clj",
+				"status": "full",
+				"resolved-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"]
+			}
+		],
+		"resolution": "full"
+	},
 	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[]\n[]\n[:?doc-checks\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n  (= ?app-id app-id)]]\n[:?id-checks\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.IdentityCheck\n  (= ?app-id app-id)]]\n[:?fraud-checks\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.FraudCheck\n  (= ?app-id app-id)]]\n",
 	"ns": "clara.server.tools.graph.rules.loan-app-rules",
 	"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
 	"lhs-types": [
@@ -72,7 +85,6 @@
 	],
 	"retract-types": [],
 	"notes": null,
-	"annotation-sources": ["clara-rules/insert-types"],
 	"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
 	"rhs-form": "(do\n (let\n  [all-checks\n   [{:check-type :document, :complete? (boolean (seq ?doc-checks))}\n    {:check-type :identity, :complete? (boolean (seq ?id-checks))}\n    {:check-type :fraud, :complete? (boolean (seq ?fraud-checks))}]\n   checks-complete\n   (into [] (comp (filter :complete?) (map :check-type)) all-checks)\n   checks-incomplete\n   (into [] (comp (remove :complete?) (map :check-type)) all-checks)]\n  (r/insert!\n   (map->ApplicationOutcome\n    {:app-id ?app-id,\n     :status :pending,\n     :message \"Application pending\",\n     :checks-complete checks-complete,\n     :checks-incomplete checks-incomplete}))))\n",
 	"upstream": [

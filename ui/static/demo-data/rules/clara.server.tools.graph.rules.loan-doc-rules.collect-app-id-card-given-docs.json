@@ -1,11 +1,19 @@
 {
 	"dynamic-insert-types-detected": {
-		"fact-instance-derived-types": [
-			"clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"
+		"callsites": [
+			{
+				"source-str": "(map->AllIdCardGivenDocuments {:app-id ?app-id, :docs ?docs})",
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "full",
+				"resolved-types": ["clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"]
+			}
 		],
-		"resolution": "partial"
+		"resolution": "partial",
+		"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
 	},
 	"source-rule": true,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[:?docs\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.GivenDocument\n  (= ?app-id app-id)\n  (= doc-type :id-card)]]\n",
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 	"lhs-types": [
@@ -28,8 +36,10 @@
 	],
 	"retract-types": [],
 	"notes": null,
-	"annotation-sources": ["clara-rules/insert-types"],
-	"insert-types": ["clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"],
+	"insert-types": [
+		"clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
+		"clojure.lang.PersistentVector"
+	],
 	"rhs-form": "(do\n (r/insert!\n  (map->AllIdCardGivenDocuments {:app-id ?app-id, :docs ?docs})))\n",
 	"doc": null,
 	"sink-rule": true,

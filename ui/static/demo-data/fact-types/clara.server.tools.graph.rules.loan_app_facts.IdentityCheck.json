@@ -6,6 +6,9 @@
 		"clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
 	],
 	"used-by-queries": [],
-	"inserted-by-rules": [],
+	"inserted-by-rules": [
+		"clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
+		"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
+	],
 	"retracted-by-rules": []
 }

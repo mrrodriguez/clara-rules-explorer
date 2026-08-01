@@ -1,31 +1,22 @@
 {
 	"matches": [
 		{
-			"id": 1,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"id": 9,
+			"type": "clojure.lang.PersistentVector",
 			"data": {
 				"?app-id": "app-1",
 				"?required-docs": [
 					{
 						"app-id": "app-1",
-						"doc-type": "id-card"
-					}
-				],
-				"?given-docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "paycheck"
-					},
-					{
-						"app-id": "app-1",
 						"doc-type": "bank-statement"
 					}
 				],
-				"?missing-required-docs": []
+				"?given-docs": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": "All required documents found"
+				},
+				"?missing-required-docs": "clara.server.tools.graph.rules.loan-app-facts/map->FraudCheck"
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -68,34 +59,30 @@
 			]
 		},
 		{
-			"id": 9,
-			"type": "loan-doc-rules/document-check-input",
+			"id": 6,
+			"type": "clojure.lang.PersistentVector",
 			"data": {
 				"?app-id": "app-1",
 				"?required-docs": [
 					{
 						"app-id": "app-1",
-						"doc-type": "id-card"
-					}
-				],
-				"?given-docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "paycheck"
-					},
-					{
-						"app-id": "app-1",
 						"doc-type": "bank-statement"
 					}
 				],
-				"?missing-required-docs": []
+				"?given-docs": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": "All required documents found"
+				},
+				"?missing-required-docs": "clara.server.tools.graph.rules.loan-app-facts/map->FraudCheck"
 			},
 			"is-root": false,
 			"inserted-from": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
@@ -103,6 +90,11 @@
 				}
 			],
 			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
@@ -113,12 +105,11 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 10,
-			"type": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"id": 2,
+			"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
 			"data": {
 				"app-id": "app-1",
-				"status": "pass",
-				"message": "All required documents found"
+				"doc-type": "paycheck"
 			},
 			"is-root": false,
 			"inserted-from": [

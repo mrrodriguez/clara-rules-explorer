@@ -78,7 +78,7 @@
 										</span>
 									</a>
 								{/each}
-							{:else if status === 'unresolved'}
+							{:else if status === 'none'}
 								<span class="badge text-bg-secondary">
 									<i class="bi bi-question-circle me-1"></i>
 									unresolved

@@ -81,8 +81,8 @@ export interface BaseRuleOrQuery {
 	doc: string | null;
 	'lhs-types': string[];
 	lhs: LhsElement[];
+	'lhs-form': string;
 	notes: string | null;
-	'annotation-sources': string[];
 	props: Record<string, unknown> | null;
 	upstream?: ProductionReference[];
 	downstream?: ProductionReference[];

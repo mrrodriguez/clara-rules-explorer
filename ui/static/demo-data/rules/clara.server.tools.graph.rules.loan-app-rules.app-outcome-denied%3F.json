@@ -16,7 +16,20 @@
 			"type": "query"
 		}
 	],
+	"dynamic-insert-types-detected": {
+		"callsites": [
+			{
+				"source-str": "(map->ApplicationOutcome {:app-id ?app-id, :status :denied, :message \"Application denied\", :passed-checks passed-checks, :failed-checks failed-checks})",
+				"ns": "clara.server.tools.graph.rules.loan-app-rules",
+				"filename": "clara/server/tools/graph/rules/loan_app_rules.clj",
+				"status": "full",
+				"resolved-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"]
+			}
+		],
+		"resolution": "full"
+	},
 	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[]\n[clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n (= ?app-id app-id)\n (= ?doc-check-status status)]\n[clara.server.tools.graph.rules.loan_app_facts.IdentityCheck\n (= ?app-id app-id)\n (= ?identity-check-status status)]\n[clara.server.tools.graph.rules.loan_app_facts.FraudCheck\n (= ?app-id app-id)\n (= ?fraud-check-status status)]\n",
 	"ns": "clara.server.tools.graph.rules.loan-app-rules",
 	"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
 	"lhs-types": [
@@ -53,7 +66,6 @@
 	],
 	"retract-types": [],
 	"notes": null,
-	"annotation-sources": ["clara-rules/insert-types"],
 	"insert-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
 	"rhs-form": "(do\n (let\n  [all-checks\n   [{:check-type :document, :status ?doc-check-status}\n    {:check-type :identity, :status ?identity-check-status}\n    {:check-type :fraud, :status ?fraud-check-status}]\n   passed-checks\n   (into\n    []\n    (comp (filter (comp #{:pass} :status)) (map :check-type))\n    all-checks)\n   failed-checks\n   (into\n    []\n    (comp (remove (comp #{:pass} :status)) (map :check-type))\n    all-checks)]\n  (r/insert!\n   (map->ApplicationOutcome\n    {:app-id ?app-id,\n     :status :denied,\n     :message \"Application denied\",\n     :passed-checks passed-checks,\n     :failed-checks failed-checks}))))\n",
 	"upstream": [

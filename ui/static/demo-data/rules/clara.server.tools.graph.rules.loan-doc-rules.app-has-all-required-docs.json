@@ -41,7 +41,21 @@
 			"type": "query"
 		}
 	],
+	"dynamic-insert-types-detected": {
+		"callsites": [
+			{
+				"source-str": "(laf/map->DocumentCheck {:app-id ?app-id, :status status, :message message})",
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "full",
+				"resolved-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"]
+			}
+		],
+		"resolution": "partial",
+		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.GivenDocument"]
+	},
 	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[:loan-doc-rules/document-check-input\n [{:keys [app-id required-docs given-docs missing-required-docs]}]\n (= ?app-id app-id)\n (= ?required-docs required-docs)\n (= ?given-docs given-docs)\n (= ?missing-required-docs missing-required-docs)]\n",
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
 	"lhs-types": [
@@ -56,17 +70,15 @@
 		{
 			"type": "loan-doc-rules/document-check-input",
 			"constraints": "[\n(= ?app-id app-id)\n\n(= ?required-docs required-docs)\n\n(= ?given-docs given-docs)\n\n(= ?missing-required-docs missing-required-docs)\n]",
-			"args": [
-				{
-					"keys": ["app-id", "required-docs", "given-docs", "missing-required-docs"]
-				}
-			]
+			"args": "[\n{:keys [app-id required-docs given-docs missing-required-docs]}\n]"
 		}
 	],
 	"retract-types": [],
 	"notes": null,
-	"annotation-sources": ["clara-rules/insert-types"],
-	"insert-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
+	"insert-types": [
+		"clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+		"clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
+	],
 	"rhs-form": "(do\n (let\n  [status\n   (if (seq ?missing-required-docs) :fail :pass)\n   message\n   (case\n    status\n    :fail\n    \"Missing required documents\"\n    \"All required documents found\")]\n  (r/insert!\n   (laf/map->DocumentCheck\n    {:app-id ?app-id, :status status, :message message}))))\n",
 	"upstream": [
 		{

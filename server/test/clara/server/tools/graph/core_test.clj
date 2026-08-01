@@ -1,11 +1,11 @@
 (ns clara.server.tools.graph.core-test
   (:require [clara.rules :as r]
-            [clara.server.tools.graph.annotations :as ann]
+            [clara.server.tools.graph.annotation-fixtures :as fixtures]
+            [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
-            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]])
   (:import [clara.server.tools.graph.rules.loan_app_facts
@@ -18,10 +18,9 @@
                       (reset! ldr/count-atom 0)
                       (f)))
 
-(def ^:private loan-doc-annotations
-  (some-> (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn")
-          .getPath
-          ann/load-sidecar))
+(defn- loan-doc-annotations
+  [session]
+  (fixtures/loan-doc-merged-annotations session))
 
 (defn- ->test-session
   []
@@ -100,7 +99,7 @@
 
 (deftest test-rulebase-analysis-loan-app
   (let [session (->test-session)
-        analysis (core/rulebase-analysis session loan-doc-annotations)]
+        analysis (core/rulebase-analysis session (loan-doc-annotations session))]
 
     (testing "Rules summary"
       (let [rules-map (:rules analysis)]
@@ -161,7 +160,7 @@
 
 (deftest test-dependency-graph-correctness
   (let [session (->test-session)
-        analysis (core/rulebase-analysis session loan-doc-annotations)
+        analysis (core/rulebase-analysis session (loan-doc-annotations session))
         rules (:rules analysis)]
     (testing "Upstream and downstream dependencies are correctly identified"
       (let [collect-given "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
@@ -185,7 +184,7 @@
 
 (deftest test-dep-graph-full
   (let [session (->test-session)
-        analysis (core/rulebase-analysis session loan-doc-annotations)
+        analysis (core/rulebase-analysis session (loan-doc-annotations session))
         graph (:dep-graph analysis)]
     (testing "Full expected dependency graph structure"
       (is (= {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
@@ -306,7 +305,7 @@
 (deftest test-dep-graph-hierarchy
   (testing "Dependency graph edges with type hierarchy (ancestor-fn)"
     (let [session (r/mk-session [car-producer vehicle-consumer])
-          analysis (core/rulebase-analysis session {})
+          analysis (core/rulebase-analysis session (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/props-layer session)])))
           graph (:dep-graph analysis)]
       (is (contains? (get-in graph ["clara.server.tools.graph.core-test/car-producer" :downstream])
                      "clara.server.tools.graph.core-test/vehicle-consumer"))
@@ -315,13 +314,14 @@
 
 (deftest test-fact-type-summary-order
   (let [session (->test-session)
-        analysis (core/rulebase-analysis session loan-doc-annotations)
+        analysis (core/rulebase-analysis session (loan-doc-annotations session))
         fact-types (:fact-types analysis)]
     (testing "Fact type summary maintains insertion order (rules first, then queries)"
       (is (= ["clara.server.tools.graph.rules.loan_app_facts.Application"
               "clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
               "extract-doc-meta"
               "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta"
+              "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"
               "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"
               "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument"
               "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"
@@ -351,9 +351,9 @@
 
 (deftest test-unlinked-rule-detection
   (let [session (->test-session)
-        analysis (core/rulebase-analysis session loan-doc-annotations)
+        analysis (core/rulebase-analysis session (loan-doc-annotations session))
         rules (:rules analysis)
-        unlinked-rule-name "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs"
+        unlinked-rule-name "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule"
         unlinked (get rules unlinked-rule-name)]
 
     (testing "Unlinked rule has :unlinked-rule metadata"
@@ -379,7 +379,7 @@
 (deftest test-no-output-types-annotation-prevents-unlinked
   (testing "Rule with :clara-rules/no-output-types true is not flagged as unlinked"
     (let [session (->test-session)
-          analysis (core/rulebase-analysis session loan-doc-annotations)
+          analysis (core/rulebase-analysis session (loan-doc-annotations session))
           rules (:rules analysis)
           rule (get rules "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs")]
       (is (not (contains? rule :unlinked-rule))
@@ -391,7 +391,7 @@
 
 (deftest test-dynamic-detection-in-rules-list
   (let [session (->test-session)
-        analysis (core/rulebase-analysis session loan-doc-annotations)
+        analysis (core/rulebase-analysis session (loan-doc-annotations session))
         rule-list (core/rules-list analysis)
         rule-by-name #(first (filter (fn [r] (= (:name r) %)) rule-list))]
 
@@ -405,7 +405,7 @@
           (is (= [{:source-str "(build-compliance-review ?app-id)"
                    :ns "clara.server.tools.graph.rules.loan-doc-rules"
                    :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-                   :status :unresolved}]
+                   :status :none}]
                  (:callsites dyn))))))
 
     (testing "Unresolved dynamic-insert rule via metadata helper"
@@ -418,7 +418,7 @@
           (is (= [{:source-str "(build-compliance-via-metadata ?app-id)"
                    :ns "clara.server.tools.graph.rules.loan-doc-rules"
                    :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-                   :status :unresolved}]
+                   :status :none}]
                  (:callsites dyn))))))
 
     (testing "Resolved dynamic-retract rule"
@@ -431,7 +431,7 @@
           (is (= [{:source-str "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
                    :ns "clara.server.tools.graph.rules.loan-doc-rules"
                    :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-                   :status :resolved
+                   :status :full
                    :resolved-types
                    ["clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"]}]
                  (:callsites dyn))))))
@@ -446,5 +446,5 @@
           (is (= [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
                    :ns "clara.server.tools.graph.rules.loan-doc-rules"
                    :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-                   :status :unresolved}]
+                   :status :none}]
                  (:callsites dyn))))))))

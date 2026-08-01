@@ -4,7 +4,7 @@
 	import RulebaseComponentSummaryDescription from '$lib/components/rulebase/RulebaseComponentSummaryDescription.svelte';
 	import DependencyRow from '$lib/components/rulebase/DependencyRow.svelte';
 	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
-	import LhsList from '$lib/components/rulebase/LhsList.svelte';
+	import LhsTabs from '$lib/components/rulebase/LhsTabs.svelte';
 	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
 	import SessionProductionActivity from '$lib/components/rulebase/SessionProductionActivity.svelte';
 	import { rulePath } from '$lib/utils';
@@ -106,10 +106,7 @@
 				<div class="row g-3">
 					<!-- LHS Column -->
 					<div class="col-lg-6 border-end pe-lg-3">
-						<h6 class="text-muted text-uppercase smaller fw-bold border-bottom pb-1 mb-2">
-							LHS Conditions
-						</h6>
-						<LhsList lhs={rule.lhs} />
+						<LhsTabs lhsForm={rule['lhs-form']} lhs={rule.lhs} />
 					</div>
 
 					<!-- RHS Column -->
@@ -134,7 +131,7 @@
 					<a href={fullViewHref} class="btn btn-outline-primary btn-sm">
 						<i class="bi bi-arrows-fullscreen me-1"></i> Full View
 					</a>
-					<span class="text-muted small"> See detailed LHS conditions and RHS code. </span>
+					<span class="text-muted small"> See detailed LHS and RHS. </span>
 				</div>
 			{/if}
 		{/key}

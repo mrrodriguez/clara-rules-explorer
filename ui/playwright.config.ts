@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
 	webServer: {
-		command: 'VITE_DEMO_MODE=true pnpm run build && pnpm run preview',
+		command: 'bash bin/ci/start-demo-web-server.sh',
 		port: 4173
 	},
 	testMatch: '**/*.e2e.{ts,js}',

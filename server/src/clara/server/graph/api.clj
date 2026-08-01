@@ -42,9 +42,10 @@
 (s/defschema LhsCondition
   "A serialized LHS condition from the Clara Rete network.
    Known keys mirror the frontend LhsElement type:
-   :type, :constraints, :accumulator, :from, :result-binding, :fact-binding."
+   :type, :constraints, :args, :accumulator, :from, :result-binding, :fact-binding."
   {(s/optional-key :type) s/Any
    (s/optional-key :constraints) s/Str
+   (s/optional-key :args) s/Str
    (s/optional-key :accumulator) s/Any
    (s/optional-key :from) (s/recursive #'LhsCondition)
    (s/optional-key :result-binding) s/Any
@@ -70,7 +71,7 @@
   {:source-str s/Str
    :ns s/Str
    :filename s/Str
-   (s/optional-key :status) s/Keyword
+   (s/optional-key :status) (s/enum :none :partial :full)
    (s/optional-key :resolved-types) [s/Str]
    (s/optional-key :constructor-sym) s/Str
    (s/optional-key :via) ViaChain})
@@ -104,8 +105,8 @@
   (merge RuleListItem
          {:props              {s/Str s/Any}
           :lhs                [LhsCondition]
+          :lhs-form           s/Str
           :rhs-form           s/Str
-          :annotation-sources [s/Keyword]
           (s/optional-key :notes) (s/maybe s/Str)}))
 
 (s/defschema QueryListItem
@@ -123,7 +124,7 @@
   (merge QueryListItem
          {:props              {s/Str s/Any}
           :lhs                [LhsCondition]
-          :annotation-sources [s/Keyword]
+          :lhs-form           s/Str
           (s/optional-key :notes) (s/maybe s/Str)}))
 
 (s/defschema FactTypeListItem
@@ -168,9 +169,13 @@
    :used-by       [FactTypeRoleGroup]
    :ids           [s/Int]})
 
-;; Internal atoms shape
+;; Internal atoms shape — the annotations atom holds a MergedAnnotations
+;; value (keyword keys; see annotations/merge-layers); bare rule→annotation
+;; maps (string keys) are also accepted for callers that do not care about
+;; provenance.
 (s/defschema AnnotationsMap
-  {s/Str s/Any})
+  (s/cond-pre {s/Keyword s/Any}
+              {s/Str s/Any}))
 
 ;; ---------------------------------------------------------------------------
 ;; Handler helpers
@@ -232,12 +237,23 @@
 
 (defn- enriched-annotations
   "Returns annotations enriched with fact-type provenance from the session's
-   working memory when a live session is available.  Takes already-derefed
-   values (not atoms) to make it clear this is a pure function."
-  [session annotations]
+   working memory when a live session is available.  Takes a bare
+   rule→annotation map (the caller unwraps any MergedAnnotations) and returns
+   a bare map."
+  [session bare-annotations]
   (if (instance? clara.rules.engine.LocalSession session)
-    (analyze/enrich-annotations-from-session session annotations)
-    annotations))
+    (analyze/enrich-annotations-from-session session bare-annotations)
+    bare-annotations))
+
+(defn- ->bare-annotations
+  "Unwraps a MergedAnnotations value to the bare rule→annotation map; bare
+   maps pass through.  (Key membership is tested with `some` — a bare map may
+   be a string-keyed sorted map, where a keyword `contains?` throws
+   ClassCastException.)"
+  [x]
+  (if (and (map? x) (some #{:annotations} (keys x)))
+    (:annotations x)
+    x))
 
 (defn- get-analysis
   "Returns the cached rulebase-analysis, rebuilding only when the session or
@@ -254,7 +270,7 @@
       (:analysis cached)
       (let [analysis (core/rulebase-analysis
                       session
-                      (enriched-annotations session annotations))]
+                      (enriched-annotations session (->bare-annotations annotations)))]
         (reset! analysis-cache {:session session
                                 :annotations annotations
                                 :analysis analysis})
@@ -370,10 +386,6 @@
   {:status 200
    :body @annotations-atom})
 
-(defn- handle-post-annotations-reload
-  [_session-atom _annotations-atom _req]
-  {:status 501 :body {:error "Reload not implemented in api.clj (requires config path)"}})
-
 (defn router
   [session-atom annotations-atom analysis-cache]
   (let [snapshot-cache (atom nil)]
@@ -419,10 +431,7 @@
 
        ["/annotations"
         [""
-         {:get (partial handle-get-annotations session-atom annotations-atom)}]
-
-        ["/reload"
-         {:post (partial handle-post-annotations-reload session-atom annotations-atom)}]]]]
+         {:get (partial handle-get-annotations session-atom annotations-atom)}]]]]
 
      {:data {:muuntaja (m/create
                         (assoc-in m/default-options

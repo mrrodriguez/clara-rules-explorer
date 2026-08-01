@@ -4,7 +4,7 @@
 	import RulebaseComponentSummaryDescription from '$lib/components/rulebase/RulebaseComponentSummaryDescription.svelte';
 	import DependencyRow from '$lib/components/rulebase/DependencyRow.svelte';
 	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
-	import LhsList from '$lib/components/rulebase/LhsList.svelte';
+	import LhsTabs from '$lib/components/rulebase/LhsTabs.svelte';
 	import SessionProductionActivity from '$lib/components/rulebase/SessionProductionActivity.svelte';
 	import { queryPath } from '$lib/utils';
 	import { appState } from '$lib/state/appState.svelte';
@@ -70,10 +70,7 @@
 			{/if}
 
 			{#if fullView}
-				<h6 class="text-muted text-uppercase smaller fw-bold border-bottom pb-1 mb-2">
-					LHS Conditions
-				</h6>
-				<LhsList lhs={query.lhs} />
+				<LhsTabs lhsForm={query['lhs-form']} lhs={query.lhs} />
 
 				<SessionProductionActivity {activity} />
 			{/if}
@@ -83,7 +80,7 @@
 					<a href={fullViewHref} class="btn btn-outline-success btn-sm">
 						<i class="bi bi-arrows-fullscreen me-1"></i> Full View
 					</a>
-					<span class="text-muted small"> See detailed LHS conditions. </span>
+					<span class="text-muted small"> See detailed LHS. </span>
 				</div>
 			{/if}
 		{/key}

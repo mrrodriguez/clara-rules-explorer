@@ -5,13 +5,14 @@
 				"source-str": "(build-compliance-via-metadata ?app-id)",
 				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-				"status": "unresolved"
+				"status": "none"
 			}
 		],
 		"resolution": "partial",
-		"fact-instance-derived-types": ["compliance-review-result"]
+		"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
 	},
 	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n (= ?app-id app-id)\n (= status :pass)]\n",
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
 	"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
@@ -22,9 +23,8 @@
 		}
 	],
 	"retract-types": [],
-	"notes": "Compliance review inserted via metadata helper — unresolved by automatic analysis",
-	"annotation-sources": ["clara-rules/insert-types", "clara-rules/notes"],
-	"insert-types": ["compliance-review-result"],
+	"notes": null,
+	"insert-types": ["clojure.lang.PersistentVector"],
 	"rhs-form": "(do (r/insert! (build-compliance-via-metadata ?app-id)))\n",
 	"upstream": [
 		{

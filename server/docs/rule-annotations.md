@@ -21,9 +21,11 @@ Rule annotations support the following qualified keys:
 
 ## Sources of Annotations
 
-The Explorer resolves annotations by merging metadata from two paths:
+Annotations come in **layers** — one per source — folded together by
+`clara.server.tools.graph.annotations.merge/merge-layers`, lowest precedence
+first.
 
-### Path A — Inline Rule `:props`
+### Rule `:props` — the base layer
 
 Annotations can be declared directly in the Clojure source code within the rule's property map:
 
@@ -37,43 +39,131 @@ Annotations can be declared directly in the Clojure source code within the rule'
   (insert! (->Cold)))
 ```
 
-### Path B — Sidecar EDN File
+`clara.server.tools.graph.annotations.merge/props-layer` reads every production's whole `:props` map off the
+compiled rulebase — nothing is filtered.  Folded first (the convention), it
+is the base that generated and curated layers add to; a higher layer can
+still overrule a props value with `:replace` or a tombstone (below).
 
-Annotations can also be declared externally in a sidecar EDN file, mapped by the rule's fully qualified symbol or string representation:
+### Layer EDN files
+
+Generated and curated annotations live in *layer* files — a map with an
+`:id`, free-form `:source` provenance, and the `:annotations` payload keyed
+by the rule's fully qualified name:
 
 ```edn
-{my.ns/cold-rule
- {:clara-rules/insert-types [my.ns.ColdAlert]
-  :clara-rules/merge-props {:clara-rules/insert-types :merge}}
+{:id :curated
+ :source "curated-annos.edn"
+ :annotations
+ {"my.ns/cold-rule"
+  #:clara-rules{:insert-types [my.ns.ColdAlert]}
 
- my.ns/logging-rule
- {:clara-rules/no-output-types true
-  :clara-rules/notes "Pure side-effect rule"}}
+  "my.ns/logging-rule"
+  #:clara-rules{:no-output-types true
+                :notes "Pure side-effect rule"}}}
 ```
+
+Layers are **sparse**: omitting a key means "no opinion" — the lower layer's
+value survives.  Layers are read with `read-layer` and written
+with `write-layer!`; in-memory layers are first-class (`layer`).
 
 ---
 
 ## Annotation Merging
 
-When both Path A (props) and Path B (sidecar) declare annotations for the same rule, the Explorer merges them in [annotations.clj](file:///Users/mrrodriguez/Projects/clara-rules-explorer/server/src/clara/server/tools/graph/annotations.clj) using the following rules:
+`(annotations/merge-layers layers)` folds an ordered sequence of layers —
+**lowest precedence first**, so the rightmost layer wins a conflict.  Layer
+`:id`s must be distinct.  The merged result carries per-rule, per-key
+`:provenance` (which layer(s) claimed each value, or `:derived`), and each
+callsite entry records `:from-layer`.
 
-### Default Strategy (`:merge`)
-For collection keys (`:clara-rules/insert-types` and `:clara-rules/retract-types`), values from both sources are **unioned** together.
+### Default strategies
+* **`:clara-rules/insert-types` / `:retract-types`** — **union**, lower layer first, deduplicated.
+* **`:clara-rules/notes`** — last declared wins.
+* **`:clara-rules/no-output-types`** — **last declared wins**: a higher layer that
+  declares the key decides the value, so a curator can say "no, this rule
+  *does* produce facts" (`false` wins) as well as the reverse.
+* **`:clara-rules/dynamic-*-types-detected`** — **deep merge by `:callsite-id`**:
+  a sparse callsite conclusion (id, `:status`, `:resolved-types`, optional
+  `:resolution-evidence`) overlays the analyzer's discovery fields without
+  restating them.  `:resolution` is always recomputed from the merged
+  callsites, never taken from a layer.
+* **Unknown keys** — last declared wins, and they are *preserved* through
+  every merge.
 
-### Override Semantics
-* **Notes**: The sidecar note always overrides the inline property note if present.
-* **Pure Side-Effects**: `:clara-rules/no-output-types` evaluates to `true` if declared as `true` in either source.
-
-### Custom Merge Control (`:clara-rules/merge-props`)
-The sidecar file can control the merging strategy per category by specifying a `:clara-rules/merge-props` map containing `:clara-rules/insert-types` and/or `:clara-rules/retract-types` keys mapped to:
-* `:merge` (default) — Union the types together.
-* `:replace` — Discard inline types and use only the sidecar declaration.
+### Deleting and overruling
+An explicit `nil` is a **tombstone** on any key — it erases the value where
+mere absence would not:
 
 ```edn
-{my.ns/override-rule
- {:clara-rules/insert-types [my.ns.NewFactOnly]
-  :clara-rules/merge-props {:clara-rules/insert-types :replace}}}
+{"my.ns/cold-rule"
+ #:clara-rules{:dynamic-insert-types-detected nil}}   ; erase the detection map
 ```
+
+### Custom Merge Control (`:clara-rules/merge-props`)
+A layer can control the strategy per key, either at the layer level (a
+default for every rule it touches) or on an individual rule entry (which
+wins over the layer level).  Keys are the *unqualified* annotation names:
+
+```edn
+{:id :curated
+ :merge-props {:insert-types :replace}          ; layer-wide default
+ :annotations
+ {"my.ns/override-rule"
+  #:clara-rules{:insert-types [my.ns.NewFactOnly]}
+
+  "my.ns/append-note-rule"
+  #:clara-rules{:notes "extra context"
+                :merge-props {:notes :append}}}}  ; per-rule override
+```
+
+Available strategies: `:union` / `:replace` for type vectors, `:replace` /
+`:append` (newline-joined) for notes, `:deep` / `:replace` for detection
+maps.  `merge-props` is a directive consumed by the merge — it is never
+emitted into the merged output.
+
+### Derivation
+After merging, conclusions are derived from the merged evidence (never by
+re-consulting the layers): each dimension's `:resolution` is recomputed, and
+resolved callsite types are promoted into `:clara-rules/insert-types` /
+`:retract-types` — a curated callsite thereby produces a graph edge without
+anyone hand-writing a type.  `:type-derivation :additive` (default) unions
+authored and callsite-derived types; `:from-callsites` makes the callsite
+record authoritative for any dimension that has one.
+
+---
+
+## The Annotations Library
+
+The library is split into a namespace group under
+`clara.server.tools.graph.annotations`:
+
+| Namespace | Contents |
+|---|---|
+| `…graph.annotations` | Rule-name normalization (`normalize-rule-name`, `normalize-annotations`, `get-annotation`) and per-production lookup (`production-annotation`) |
+| `…graph.annotations.callsite` | Callsite format and identity: `callsite-id`, `assign-callsite-ids`, `aggregate-resolution` |
+| `…graph.annotations.merge` | Layers and merging: `layer`, `read-layer`, `write-layer!`, `props-layer`, `merge-layers`, `derive-conclusions`, `annotations`, `provenance` |
+| `…graph.annotations.report` | `unresolved-report` (the curation work list) and `validate-layers` (pure lint) |
+| `…graph.annotations.rebase` | `rebase-layer` — remap a layer across a namespace rename |
+
+Layers produced by `clara.server.graph.main --generate-analysis` (and by the
+fixture generator, `make regen-fixture`) carry the distinguished id
+`:clara.tools.graph.analyze/generated`; nothing in the library privileges
+that id — it is a marker for humans and tooling.
+
+**Dangling references.** Only the analyzer *discovers* callsites; every other
+layer *annotates* ones that already exist.  A merged callsite entry with no
+discovered form (no `:source-str`) is dangling — by default it is
+quarantined (`:dangling? true`, excluded from type derivation and the
+resolution aggregate, and reported by `unresolved-report` /
+`validate-layers`); `:on-dangling :keep` treats it as ordinary and `:drop`
+removes it.  A curating layer should carry `:source-str` as a redundant
+witness — one line, ignored by the merge whenever a discovered entry
+supplies one, and the only context left when the entry dangles.
+
+**Rebasing.** Renaming a namespace dangles every curated callsite in it.
+`rebase-layer` remaps rule names, discovery fields, and type tokens across a
+known old→new namespace mapping and recomputes callsite ids, so a curated
+layer survives the rename without re-confirmation.
 
 ---
 
@@ -101,10 +191,11 @@ Resolved types are **promoted**: a fully-resolved dynamic insert also appears in
 ```edn
 {:clara-rules/dynamic-insert-types-detected
  {:callsites
-  [{:source-str "(h/->fact :my-rules/document-check-input data)"
+  [{:callsite-id "my.rules:->fact:a3f19c2b:0"
+    :source-str "(h/->fact :my-rules/document-check-input data)"
     :ns-name-sym my.rules
     :filename "my/rules.clj"
-    :status :resolved
+    :status :full
     :resolved-types [:my-rules/document-check-input]
     :constructor-sym my.helpers/->fact
     :via {:boundary-var-name-sym clara.rules/insert!
@@ -116,11 +207,17 @@ Resolved types are **promoted**: a fully-resolved dynamic insert also appears in
 
 * **`:source-str`** — the exact source text of the argument form at the boundary callsite (locals are *not* inlined here; the resolver receives the traced form separately). **Note:** on constructor-path callsites (those carrying `:constructor-sym`), `:source-str`/`:ns-name-sym`/`:filename` instead describe the *constructor* call form — which may live in a helper namespace and reference helper-locals (e.g. `(->fact :demo/tagged {:id id})`).
 * **`:ns-name-sym`** / **`:filename`** — where the callsite was found (may be a helper namespace).
-* **`:status`** — `:resolved`, `:resolved-multi` (several types), or `:unresolved`.
+* **`:callsite-id`** — stable identity within the rule+dimension:
+  `ns:ctor:hash:ordinal` over the namespace, constructor, and source text
+  (see [anno-merging-update-plan.md](anno-merging-update-plan.md) §4.4).
+* **`:status`** — `:full` (every type this callsite can produce is known),
+  `:partial` (some known, possibly more), or `:none` (nothing known).  The
+  analyzer emits only `:full` and `:none`; `:partial` is reachable through
+  curation.
 * **`:resolved-types`** — present when resolved; the fact-type tokens.
 * **`:constructor-sym`** — present when resolved via a `:fact-constructors` spec; the fully-qualified constructor symbol. Its presence also discriminates constructor-path callsites from boundary-path ones (see note on `:source-str` below).
 * **`:via`** — present when resolved via a `:fact-constructors` spec; a `ViaChain` tracing how the constructor was reached from the originating `insert!`/`retract!` (see below). On *heuristic* callsites (the record-ctor scan fallback, below), `:via` instead carries `{:source :record-ctor-scan}` with no `:callstack`.
-* **`:resolution`** (aggregate) — `:full` when every callsite resolved, `:partial` when some did, `:none` otherwise. Heuristic scan callsites count as resolved; check `:via :source` to distinguish their confidence.
+* **`:resolution`** (aggregate) — `:full` when every callsite is `:full`, `:none` when every callsite is `:none`, `:partial` otherwise. Heuristic scan callsites count as resolved; check `:via :source` to distinguish their confidence.
 
 ### Heuristic record-ctor scan fallback
 
@@ -231,7 +328,7 @@ mapping via `:fact-type-spec-fn`:
    `v` is invisible to clj-kondo — macro-emitted, unhooked — its chain is empty; that is the caller
    `:config-dir` situation.)
 3. Callsites discovered *through* an alias chain **bypass the constructor chain**: they are recorded
-   `:status :unresolved` with the alias context attached — `:fact-type` (the LHS-bound type) and
+   `:status :none` (unresolved) with the alias context attached — `:fact-type` (the LHS-bound type) and
    `:fact-type-spec` (the spec map) on both the callsite entry and the `:callsite-resolver-fn`
    context — and are never automatically resolved. The resolver decides.
 
@@ -391,7 +488,7 @@ the constructor entry (with `:constructor-sym` and `:via`) is the only entry
 emitted for that insert. Every other boundary argument reaches
 `:callsite-resolver-fn` normally — `with-meta` maps, literals, var-as-fact —
 *including in the same rule* as a constructor insert, and including when it stays
-unresolved. An insert nobody can explain is reported as `:unresolved` rather than
+unresolved. An insert nobody can explain is reported with `:status :none` rather than
 dropped, so `:resolution` stays honest.
 
 ### A constructor is only an insert if an insert reaches it

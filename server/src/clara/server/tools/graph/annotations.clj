@@ -1,7 +1,15 @@
 (ns clara.server.tools.graph.annotations
-  "Logic for loading and merging rule metadata from internal props and sidecar files.
-   Handles arbitrary fact types (classes, keywords, symbols) as supported by Clara's
+  "Rule-name normalization and per-production annotation lookup for the
+   layered annotation library (see docs/rule-annotations.md).  Handles
+   arbitrary fact types (classes, keywords, symbols) as supported by Clara's
    pluggable fact-type-fn.
+
+   The rest of the library lives in sibling namespaces:
+
+     clara.server.tools.graph.annotations.callsite — callsite format, identity
+     clara.server.tools.graph.annotations.merge    — layers, merging, derivation
+     clara.server.tools.graph.annotations.report   — work list and validation
+     clara.server.tools.graph.annotations.rebase   — namespace-rename rebasing
 
    Rule-name normalization:
      Clara rules use strings for `:name` (schema: `s/Str` or `s/Keyword`),
@@ -9,82 +17,34 @@
      All public functions that touch annotation maps normalize top-level
      rule-name keys to strings: `normalize-rule-name` converts a single key,
      `normalize-annotations` transforms an entire map, and `get-annotation`
-     normalizes the lookup key before access."
-  (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
-            [clojure.pprint :as pp]))
+     normalizes the lookup key before access.")
 
-(declare normalize-annotations)
+(defn normalize-rule-name
+  "Normalizes a rule-name key to its canonical string form.
+   Symbols and keywords are converted to strings; strings pass through."
+  [k]
+  (if (or (symbol? k) (keyword? k))
+    (str (symbol k))
+    k))
 
-(defn load-sidecar
-  "Loads annotations from an EDN file path.  Returns a map with
-   rule-name keys normalized to strings."
-  [path]
-  (if (and path (.exists (io/file path)))
-    (with-open [r (io/reader path)]
-      (normalize-annotations (edn/read (java.io.PushbackReader. r))))
-    {}))
+(defn normalize-annotations
+  "Normalizes an annotations map to canonical form: all top-level rule-name
+   keys are converted to strings via `normalize-rule-name`, and the result
+   is a deterministically sorted map."
+  [annotations]
+  (into (sorted-map)
+        (map (fn [[k v]] [(normalize-rule-name k) v]))
+        annotations))
 
-(defn- merge-types
-  "Merges two type vectors per strategy.
-   :merge  (default) — concatenates and dedupes, val1 first.
-   :replace          — uses val2 only."
-  [val1-types val2-types strategy]
-  (if (= :replace strategy)
-    (into [] (distinct) val2-types)
-    (into [] (comp cat (distinct)) [val1-types val2-types])))
+(defn get-annotation
+  "Looks up a rule entry in the annotations map, normalizing the lookup key
+   via `normalize-rule-name` before access."
+  [annotations rule-name]
+  (get annotations (normalize-rule-name rule-name)))
 
-(defn- resolve-no-output-types
-  "Resolves the `:clara-rules/no-output-types` boolean annotation.
-   val2 takes priority over val1 when both declare the key."
-  [val2 val1]
-  (get val2 :clara-rules/no-output-types (get val1 :clara-rules/no-output-types)))
-
-(defn- merge-rule-fields
-  "Merges two per-rule annotation value maps.
-   val2 is layered on top of val1.
-
-   Merge strategies for type vectors are read from val2's
-   `:clara-rules/merge-props` map (default :merge for both insert and retract).
-
-   For `:clara-rules/no-output-types` and `:clara-rules/notes`, val2 takes priority when declared.
-   Dynamic detection flags are controlled by val2:
-   present if val2 declares them, omitted otherwise."
-  [val1 val2]
-  (let [merge-props      (get val2 :clara-rules/merge-props)
-        insert-strategy   (get merge-props :clara-rules/insert-types :merge)
-        retract-strategy  (get merge-props :clara-rules/retract-types :merge)
-
-        final-inserts  (merge-types (:clara-rules/insert-types val1)
-                                    (:clara-rules/insert-types val2)
-                                    insert-strategy)
-        final-retracts (merge-types (:clara-rules/retract-types val1)
-                                    (:clara-rules/retract-types val2)
-                                    retract-strategy)
-
-        no-output      (resolve-no-output-types val2 val1)
-        notes          (or (:clara-rules/notes val2)
-                           (:clara-rules/notes val1))]
-    (cond-> {}
-      (seq final-inserts)
-      (assoc :clara-rules/insert-types final-inserts)
-
-      (seq final-retracts)
-      (assoc :clara-rules/retract-types final-retracts)
-
-      (some? no-output)
-      (assoc :clara-rules/no-output-types no-output)
-
-      (some? notes)
-      (assoc :clara-rules/notes notes)
-
-      (contains? val2 :clara-rules/dynamic-insert-types-detected)
-      (assoc :clara-rules/dynamic-insert-types-detected
-             (:clara-rules/dynamic-insert-types-detected val2))
-
-      (contains? val2 :clara-rules/dynamic-retract-types-detected)
-      (assoc :clara-rules/dynamic-retract-types-detected
-             (:clara-rules/dynamic-retract-types-detected val2)))))
+;; ---------------------------------------------------------------------------
+;; Per-production lookup
+;; ---------------------------------------------------------------------------
 
 (defn- resolve-type-locally
   [production-ns x]
@@ -108,161 +68,41 @@
   (mapv #(resolve-type-locally production-ns %)
         unresolved-types))
 
-(defn- ->resolved-annotation-data
-  "Returns a per-key map of annotation resolution status.
-   Each key maps to :props, :sidecar, :merge, or nil (undeclared)."
-  [{:keys [props-inserts sidecar-inserts insert-strategy
-           props-retracts sidecar-retracts retract-strategy
-           has-props-no-output-types has-sidecar-no-output-types
-           has-props-notes has-sidecar-notes]}]
-  (let [has-pi (seq props-inserts)
-        has-si (seq sidecar-inserts)
-        has-pr (seq props-retracts)
-        has-sr (seq sidecar-retracts)]
-    {:clara-rules/insert-types
-     (cond
-       (and has-pi has-si (= :replace insert-strategy)) :sidecar
-       (and has-pi has-si) :merge
-       has-si :sidecar
-       has-pi :props)
-
-     :clara-rules/retract-types
-     (cond
-       (and has-pr has-sr (= :replace retract-strategy)) :sidecar
-       (and has-pr has-sr) :merge
-       has-sr :sidecar
-       has-pr :props)
-
-     :clara-rules/no-output-types
-     (cond
-       has-sidecar-no-output-types :sidecar
-       has-props-no-output-types :props)
-
-     :clara-rules/notes
-     (cond
-       has-sidecar-notes :sidecar
-       has-props-notes :props)}))
-
-(defn normalize-rule-name
-  "Normalizes a rule-name key to its canonical string form.
-   Symbols are converted to strings; strings and keywords pass through."
-  [k]
-  (if (symbol? k)
-    (str k)
-    k))
-
 (defn- unqualify-keyword
   [kw]
   (if (and (keyword? kw) (namespace kw))
     (keyword (name kw))
     kw))
 
-(defn normalize-annotations
-  "Normalizes an annotations map to canonical form: all top-level rule-name
-   keys are converted to strings via `normalize-rule-name`, and the result
-   is a deterministically sorted map."
-  [annotations]
-  (into (sorted-map)
-        (map (fn [[k v]] [(normalize-rule-name k) v]))
-        annotations))
+(def ^:private production-annotation-keys
+  #{:clara-rules/insert-types
+    :clara-rules/retract-types
+    :clara-rules/no-output-types
+    :clara-rules/notes
+    :clara-rules/dynamic-insert-types-detected
+    :clara-rules/dynamic-retract-types-detected})
 
-(defn get-annotation
-  "Looks up a rule entry in the annotations map, normalizing the lookup key
-   via `normalize-rule-name` before access."
-  [annotations rule-name]
-  (get annotations (normalize-rule-name rule-name)))
-
-(defn merge-annotations
-  "Merges two annotations maps. annos2 is layered on top of annos1.
-
-   For rules present in both maps, per-field merge strategies are read from
-   annos2's `:clara-rules/merge-props` (same contract as `resolve-annotations`).
-   Types use :merge (concatenate) by default, :replace to use annos2 only.
-   `:clara-rules/no-output-types` and `:clara-rules/notes` prefer annos2 when declared.
-
-   Rules only in annos1 are kept unchanged.
-   Rules only in annos2 are added."
-  [annos1 annos2]
-  (let [a1 (normalize-annotations annos1)
-        a2 (normalize-annotations annos2)]
-    (reduce-kv (fn [acc rule-name val2]
-                 (if-let [val1 (get acc rule-name)]
-                   (assoc acc rule-name (merge-rule-fields val1 val2))
-                   (assoc acc rule-name val2)))
-               a1
-               a2)))
-
-(defn write-annotations!
-  "Normalizes annotations and writes them to the specified file path
-   as pretty-printed EDN."
-  [path annotations]
-  (with-open [w (io/writer path)]
-    (binding [*print-meta* true]
-      (pp/pprint (normalize-annotations annotations) w))))
-
-(defn- ensure-unsorted-map
-  [m]
-  (if (and (sorted? m) (map? m))
-    (into {} m)
+(defn- resolve-type-key
+  [m k production-ns]
+  (if (contains? m k)
+    (update m k #(resolve-types production-ns %))
     m))
 
-(defn resolve-annotations
-  "Merges Path A (rule props) and Path B (sidecar) metadata for a production.
-   Returns a map with resolved `:insert-types`, `:retract-types`,
-   `:resolved-annotation-data`, and `:notes`."
-  [production sidecar-annotations]
-  ;; `sidecar-annotations` may be `sorted?` which will problem with heterogenous symbol vs keyword
-  ;; fully-qualified production names. So ensure it is unsorted here.
-  (let [sidecar-map (ensure-unsorted-map sidecar-annotations)
-        fq-name (:name production)
-        props (:props production)
-        sidecar (get sidecar-map fq-name)
-        production-ns (get-production-ns production)
-
-        props-inserts   (resolve-types production-ns
-                                       (get props :clara-rules/insert-types))
-        props-retracts  (resolve-types production-ns
-                                       (get props :clara-rules/retract-types))
-        sidecar-inserts (resolve-types production-ns
-                                       (get sidecar :clara-rules/insert-types))
-        sidecar-retracts (resolve-types production-ns
-                                        (get sidecar :clara-rules/retract-types))
-
-        {merge-props :clara-rules/merge-props} sidecar
-        insert-strategy  (get merge-props :clara-rules/insert-types :merge)
-        retract-strategy (get merge-props :clara-rules/retract-types :merge)
-
-        props-val   (assoc props
-                           :clara-rules/insert-types props-inserts
-                           :clara-rules/retract-types props-retracts)
-        sidecar-val (assoc sidecar
-                           :clara-rules/insert-types sidecar-inserts
-                           :clara-rules/retract-types sidecar-retracts)
-
-        merged (merge-rule-fields props-val sidecar-val)
-
-        annotation-data (->resolved-annotation-data
-                         {:props-inserts props-inserts
-                          :sidecar-inserts sidecar-inserts
-                          :insert-strategy insert-strategy
-                          :props-retracts props-retracts
-                          :sidecar-retracts sidecar-retracts
-                          :retract-strategy retract-strategy
-                          :has-props-no-output-types (some? (get props :clara-rules/no-output-types))
-                          :has-sidecar-no-output-types (some? (get sidecar :clara-rules/no-output-types))
-                          :has-props-notes (some? (get props :clara-rules/notes))
-                          :has-sidecar-notes (some? (get sidecar :clara-rules/notes))})
-        annotation-sources (into []
-                                 (keep (fn [[k v]] (when v k)))
-                                 annotation-data)]
-
-    (-> merged
-        (select-keys #{:clara-rules/insert-types
-                       :clara-rules/retract-types
-                       :clara-rules/no-output-types
-                       :clara-rules/notes
-                       :clara-rules/dynamic-insert-types-detected
-                       :clara-rules/dynamic-retract-types-detected})
-        (update-keys unqualify-keyword)
-        (assoc :annotation-sources annotation-sources
-               :resolved-annotation-data annotation-data))))
+(defn production-annotation
+  "Reads one production's annotation from a merged (or bare) annotations map
+   with unqualified keys (:insert-types, :retract-types, :no-output-types,
+   :notes, :dynamic-insert-types-detected,
+   :dynamic-retract-types-detected).  Symbol type tokens are resolved against
+   the production's namespace (classes, vars) as Clara's pluggable
+   fact-type-fn allows.  The lookup normalizes the map's rule-name keys when
+   they are not already strings."
+  [annotations production]
+  (let [annotations (if (every? (comp string? key) annotations)
+                      annotations
+                      (normalize-annotations annotations))
+        rule-ann (get-annotation annotations (:name production))
+        production-ns (get-production-ns production)]
+    (-> (select-keys rule-ann production-annotation-keys)
+        (resolve-type-key :clara-rules/insert-types production-ns)
+        (resolve-type-key :clara-rules/retract-types production-ns)
+        (update-keys unqualify-keyword))))

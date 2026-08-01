@@ -13,7 +13,7 @@
    3. Local symbol — kondo :local-usages :id → :locals binding → init form
       (read from the source right after the binding symbol) → the chain
       restarts on the traced form (depth-capped).
-   4. Otherwise → the caller's :callsite-resolver-fn, then :unresolved.
+   4. Otherwise → the caller's :callsite-resolver-fn, then :none (unresolved).
 
    The automatic chain resolves only what we know the instance type of —
    constructors. Everything else deliberately defers to the caller's
@@ -34,8 +34,14 @@
 
    Var-alias chains (`:fact-type-spec-fn`, see `analyze.alias`): callsites
    discovered through an alias chain bypass the ctor chain and are recorded
-   :unresolved with :fact-type/:fact-type-spec context attached (then handed
-   to the resolver).
+   :none (unresolved) with `:fact-type`/`:fact-type-spec` context attached (then
+   handed to the resolver).
+
+   Callsite `:status` and dimension `:resolution` use one three-valued
+   vocabulary — `:none` / `:partial` / `:full` (see
+   docs/rule-annotations.md).  The analyzer emits only `:full` and `:none`;
+   `:partial` is reachable through curation and through dimension-level
+   aggregation.
 
    All Clojure syntax understanding comes from clj-kondo; reading forms at
    kondo positions lives in `analyze.kondo`, constructor recognition in
@@ -194,14 +200,17 @@
         usages))
 
 (defn resolution-status
-  "Classifies a sequence of callsite entries: nil (empty), :none (all
-   :unresolved), :partial (some :unresolved), or :full (all resolved)."
+  "Aggregates a callsite vector into a dimension-level resolution: nil (no
+   callsites — the dimension is absent), :full (all :full), :none (all
+   :none), :partial (otherwise).  Shared by the analyzer and by
+   `annotations.callsite/aggregate-resolution`, which additionally excludes
+   quarantined (`:dangling?`) callsites first."
   [callsites]
   (cond
     (empty? callsites) nil
-    (every? #(= :unresolved (:status %)) callsites) :none
-    (some #(= :unresolved (:status %)) callsites) :partial
-    :else :full))
+    (every? #(= :full (:status %)) callsites) :full
+    (every? #(= :none (:status %)) callsites) :none
+    :else :partial))
 
 (defn resolve-boundary-callsites
   "Resolves boundary-call arguments via the ctor chain and the optional
@@ -229,9 +238,7 @@
                                  entry (cond-> {:source-str (pr-str arg)
                                                 :ns-name-sym (:from usage)
                                                 :filename (:filename usage)
-                                                :status (cond (empty? tokens) :unresolved
-                                                              (= 1 (count tokens)) :resolved
-                                                              :else :resolved-multi)}
+                                                :status (if (empty? tokens) :none :full)}
                                          (seq tokens)
                                          (assoc :resolved-types (vec (sort-by str tokens)))
 
@@ -335,9 +342,7 @@
              :ns-name-sym (:from ctor-usage)
              :filename (:filename ctor-usage)
              :constructor-sym ctor-sym
-             :status (cond (empty? tokens) :unresolved
-                           (= 1 (count tokens)) :resolved
-                           :else :resolved-multi)}
+             :status (if (empty? tokens) :none :full)}
       (seq tokens) (assoc :resolved-types (vec (sort-by str tokens)))
       via (assoc :via via))))
 
@@ -437,7 +442,7 @@
                           :call-path path
                           :resolver-fn type-resolver-fn
                           :boundary-usage (:usage owner)))]
-        (when (not= :unresolved (:status entry))
+        (when (not= :none (:status entry))
           [(:idx owner) entry])))))
 
 (defn resolve-constructor-callsites
@@ -572,7 +577,7 @@
   {:source-str s/Str
    :ns-name-sym s/Symbol
    :filename s/Str
-   :status (s/enum :resolved :resolved-multi :unresolved)
+   :status (s/enum :none :partial :full)
    (s/optional-key :resolved-types) [s/Any]
    (s/optional-key :constructor-sym) s/Symbol
    (s/optional-key :via) ViaChain

@@ -1,10 +1,9 @@
 (ns clara.server.graph.api-test
   (:require [clara.rules :as r]
             [clara.server.graph.api :as api]
-            [clara.server.tools.graph.annotations :as ann]
+            [clara.server.tools.graph.annotation-fixtures :as fixtures]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
-            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [jsonista.core :as j]
@@ -16,10 +15,9 @@
 (defn- parse-json [s]
   (j/read-value s (j/object-mapper {:decode-key-fn true})))
 
-(def ^:private loan-doc-annotations
-  (some-> (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn")
-          .getPath
-          ann/load-sidecar))
+(defn- loan-doc-annotations
+  [session]
+  (fixtures/loan-doc-merged-annotations session))
 
 (defn- ->test-session []
   (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
@@ -28,7 +26,7 @@
 (defn- ->handler
   ([] (->handler (->test-session)))
   ([session]
-   (:handler (api/app (atom session) (atom loan-doc-annotations)))))
+   (:handler (api/app (atom session) (atom (loan-doc-annotations session))))))
 
 (deftest test-not-found
   (let [handler (->handler)]

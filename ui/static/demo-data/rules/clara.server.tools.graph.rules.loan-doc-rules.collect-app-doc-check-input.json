@@ -32,13 +32,15 @@
 				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 				"constructor-sym": "clara.server.tools.graph.rules.helpers/->fact",
 				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-				"status": "resolved",
+				"status": "full",
 				"resolved-types": ["loan-doc-rules/document-check-input"]
 			}
 		],
-		"resolution": "full"
+		"resolution": "partial",
+		"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
 	},
 	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments\n (= ?app-id app-id)\n (= ?given-docs docs)]\n[clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments\n (= ?app-id app-id)\n (= ?required-docs docs)]\n",
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
 	"lhs-types": [
@@ -62,8 +64,7 @@
 	],
 	"retract-types": [],
 	"notes": null,
-	"annotation-sources": ["clara-rules/insert-types"],
-	"insert-types": ["loan-doc-rules/document-check-input"],
+	"insert-types": ["loan-doc-rules/document-check-input", "clojure.lang.PersistentVector"],
 	"rhs-form": "(do\n (let\n  [given-doc-types (into #{} (map :doc-type) ?given-docs)]\n  (r/insert!\n   (->document-check-input\n    {:app-id ?app-id,\n     :required-docs ?required-docs,\n     :given-docs ?given-docs,\n     :missing-required-docs\n     (into\n      []\n      (remove (comp given-doc-types :doc-type))\n      ?required-docs)}))))\n",
 	"upstream": [
 		{

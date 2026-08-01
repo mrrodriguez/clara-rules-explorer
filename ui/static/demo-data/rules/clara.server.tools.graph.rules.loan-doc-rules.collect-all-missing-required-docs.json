@@ -1,5 +1,6 @@
 {
 	"source-rule": false,
+	"lhs-form": "[:loan-doc-rules/document-check-input\n [{:keys [app-id missing-required-docs]}]\n (= ?app-id app-id)\n (= ?missing-required-docs missing-required-docs)\n (seq ?missing-required-docs)]\n",
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs",
 	"lhs-types": ["loan-doc-rules/document-check-input"],
@@ -7,17 +8,12 @@
 		{
 			"type": "loan-doc-rules/document-check-input",
 			"constraints": "[\n(= ?app-id app-id)\n\n(= ?missing-required-docs missing-required-docs)\n\n(seq ?missing-required-docs)\n]",
-			"args": [
-				{
-					"keys": ["app-id", "missing-required-docs"]
-				}
-			]
+			"args": "[\n{:keys [app-id missing-required-docs]}\n]"
 		}
 	],
 	"no-output-types": true,
 	"retract-types": [],
 	"notes": null,
-	"annotation-sources": ["clara-rules/no-output-types"],
 	"insert-types": [],
 	"rhs-form": "(do (swap! count-atom inc))\n",
 	"upstream": [
