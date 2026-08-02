@@ -138,10 +138,99 @@ memoization target (see Phase 1a).
   `:produced-types` is `(into insert-types retract-types)` — note it
   includes retracts (see "Edge Cases").
 - `production-summary` **serializes** types to strings via
-  `serialize/serialize-fact-type`.
+  `serialize/serialize-fact-type`, partial'd with **that production's own
+  ns-name** (core.clj: `serialize-fact-type (partial
+  serialize/serialize-fact-type p-ns-name)`).  The ns-name matters for
+  resolving unresolved symbols; queries have no `:ns-name` and use the
+  `get-production-ns-name-sym` derivation.
 - `build-fact-type-summary-map` consumes those serialized summaries — its
   keys and values are strings.  Raw types are no longer available at that
   layer and must be passed in (Phase 1a).
+
+### Heterogeneous type values & determinism (design invariant)
+
+Fact types are **not** always Classes.  They can be keywords (with
+`derive` hierarchies), strings, symbols, vectors ("tuple" types via a
+custom `fact-type-fn`), or arbitrary objects.  Likewise a custom
+`ancestors-fn` may return a mix of kinds (e.g. a keyword type whose
+ancestors include a string).  (`derive` itself only accepts ns-qualified
+keywords/symbols/Classes, so mixed-kind hierarchies arise only through a
+custom `ancestors-fn`.)
+
+**Invariant: all logic on raw values; strings only at the display
+boundary.**
+
+- Matching (`downstream?`, `matching-type-pairs`), dedup (`distinct`),
+  memoization keys, and `known`-set membership all operate on **raw**
+  values, where `=` and set containment are kind-correct: `:foo` ≠
+  `"foo"` ≠ `'foo`.  No false edges and no cross-kind dedup.  This
+  invariant is what makes heterogeneous types safe; every phase below
+  must preserve it.
+- Serialization (`resolve-type`) is the *only* raw→string step, applied
+  at the very end for display and API output.
+- **All ordering is applied post-serialization, on strings.**  Raw kinds
+  do not share a `Comparable` contract (`sort-by` on mixed
+  Class/keyword/vector values throws `ClassCastException`).
+
+### Kind-explicit serialization (the only heterogeneity handling)
+
+Beyond the raw-logic/string-display invariant above, the plan does **no**
+kind-specific handling anywhere.  The single point of sensitivity is the
+serialization function, which is extended so the representation is
+self-describing in JSON — then we stop worrying about kinds entirely.
+
+`serialize/resolve-type` gains kind-explicit branches:
+
+| Raw kind | Serialized form | Example | Change? |
+|---|---|---|---|
+| Class | `.getName` | `my.ns.MarkerRecord` | unchanged |
+| keyword | `(str x)` — colon preserved | `:my.ns/child` | **changed** (colon was stripped) |
+| string | `(pr-str x)` — quotes visible | `"foo"` | **changed** (was bare) |
+| symbol, unresolved | `symbol[<value>]` | `symbol[my.ns/foo]` | **changed** (was bare) |
+| symbol, resolved via ns | resolved class/var name | `my.ns.MarkerRecord` | unchanged |
+| vector / sequential (tuple) | `(pr-str x)` | `[:a 1]` | effectively unchanged |
+| arbitrary object | `(str x)` (`.toString()`) | — | unchanged |
+
+Why this is worth the change:
+
+- **Collisions effectively eliminated.**  A keyword, string, and symbol
+  can never serialize identically, so the `known` check can't conflate
+  kinds and no dedup-accommodating-collisions machinery is needed.  Raw
+  values are already deduped by sets; serialized output inherits that.
+- **Self-explanatory API.**  A consumer reading `"ancestors"` or
+  `"match"` can tell the kind of each type at a glance — keyword types
+  are common in our rulesets, so the visible colon is a net clarity win
+  in the UI as well.
+
+API stability posture: **the API is alpha and shaped at-will** — there
+are no backward-compatibility constraints beyond what this plan already
+states.  The rename of keyword/string fact-type names (colon, quotes) is
+vetted and intentional; the overwhelmingly common case (Classes) is
+unchanged.  The serialization table above must be documented in
+`explorer-graph-api.md`.
+
+**URL-safety of the new spellings.**  Fact-type names appear as URL path
+segments (`/v1/fact-types/:fq-name`), and the new representations are
+not URI-friendly: `:my.ns/child` (colon), `"foo"` (quotes), `[:a 1]`
+(brackets, spaces).  Server side: verify the router percent-decodes
+`:fq-name` path params and that `fq-name-from-param` still resolves the
+decoded spelling (Phase 1 task).  UI side (Phase 3): every fact-type
+link must be built with `encodeURIComponent`; detail pages must handle
+multi-segment-looking names (no `/` in these spellings, but colons and
+spaces are enough to break naive routing).
+
+Remaining accepted limitation (no handling, documentation only):
+**arbitrary objects** without a stable `toString`/`print-method` (default
+includes the identity hash) produce non-deterministic output across runs.
+Custom `fact-type-fn` type values must print stably.  Our types are in
+practice Classes, keywords, and vector tuples of keywords/basic literals
+— all covered above.
+
+Memoization on heterogeneous keys is safe: `memoize` keys on `=`/hash —
+value-equal for keywords, strings, Classes, vectors; identity-equal
+arbitrary objects merely miss the cache (harmless).  Clara's own
+`wrapped-ancestors-fn` calls `(isa? fact-type ISystemFact)`, which
+returns false (no throw) for non-class tags.
 
 ---
 
@@ -157,11 +246,13 @@ the hierarchy, never in a production's LHS/insert/retract).
 cannot be applied at that layer without raw types.  Restructure:
 
 1. **Hoist the type-analysis-map out of `build-dep-graph`.**  Compute
-   `type-analysis-map` (production-name → `{:consumed-types [...]
-   :produced-types [...]}`, raw types) once in `rulebase-analysis` and pass
-   it to `build-dep-graph`.  This is a pure refactor — same data, computed
-   in the caller instead of a `letfn`.  (Phase 2 reuses it to compute
-   `:match` pairs at serialization time.)
+   `type-analysis-map` once in `rulebase-analysis` and pass it to
+   `build-dep-graph`.  Entries gain the production's ns-name:
+   `{:consumed-types [...] :produced-types [...] :ns-name <sym>}`, using
+   the same `get-production-ns-name-sym` derivation `production-summary`
+   uses (queries have no `:ns-name`).  This is a pure refactor — same
+   data, computed in the caller instead of a `letfn`.  (Phase 2 reuses it
+   to compute `:match` pairs at serialization time.)
 2. **Memoize the ancestor *set*, once, in `rulebase-analysis`:**
    ```clojure
    (defn- ->memoized-ancestors
@@ -178,20 +269,27 @@ cannot be applied at that layer without raw types.  Restructure:
    allocation in today's `downstream?`.
 3. **Build a serialized-name → ancestors-strings index** in
    `rulebase-analysis`:
-   - The raw type universe is `(into #{} (mapcat :consumed-types) …)` ∪
-     `(mapcat :produced-types)` over the hoisted type-analysis-map.
-   - Serialize each raw type with the same `serialize-fact-type` used by
-     `production-summary` (pass `nil` ns-name; consumed/produced types are
-     already compiler-resolved Classes or qualified keywords — the ns-arg
-     only matters for unresolved symbols).
-   - Result: `{serialized-name [{:type "ancestor-name" } ...]}` with raw
-     ancestors retained only long enough to serialize them.
-   - Collision note: two distinct raw types serializing to the same string
-     is practically impossible (fully-qualified class names); last-wins is
-     acceptable.
+   - **Per production**, pair each raw type in its `:consumed-types` ∪
+     `:produced-types` with its serialized name, using **that
+     production's own ns-name** — exactly as `production-summary` does.
+     Serializing with `nil` ns-name would diverge for unresolved symbols
+     (index lookups would silently miss → `:ancestors` absent), so the
+     index must be built in per-production ns context.  Merge all
+     productions into one `{serialized-name [serialized-ancestor …]}`
+     map; last-wins on key collision is acceptable.
+   - For each raw type, serialize its raw ancestors (from the memoized
+     set fn) with the same ns context, then **sort lexicographically**.
+     No post-serialization dedup is needed: raw ancestors come from a set
+     and kind-explicit serialization (see System Context) keeps distinct
+     raw values distinct as strings.
+   - The index value is plain serialized ancestor strings; the `known`
+     flag is computed later, in the second pass (step 4), against the
+     completed fact-types map keys.
 4. Pass this index into `build-fact-type-summary-map`, which attaches
    `:ancestors` to each entry in a **second pass** after the usage map is
-   complete (only then is the full set of "known" types known).
+   complete (only then is the full set of "known" types known), setting
+   `known` by membership of each serialized ancestor string in the
+   fact-types map keys.
 
 ### 1b. New field: `:ancestors`
 
@@ -275,16 +373,18 @@ are unchanged; only the detail schema gains the optional key.
 | File | Change |
 |------|--------|
 | `server/src/clara/server/tools/graph/core.clj` | `rulebase-analysis`: extract ancestors-fn (with `analyze.clj`-style fallback), build memoized ancestor-set fn, hoist `type-analysis-map`, build serialized ancestors index. `build-fact-type-summary-map`: accept the index, enrich each entry with `:ancestors` in a second pass. |
-| `server/src/clara/server/tools/graph/serialize.clj` | Helper to serialize one raw ancestor type into `{:type ... :known ...}` shape (known flag applied by caller). `resolve-type` already handles type → string. |
-| `server/src/clara/server/graph/api.clj` | Add `AncestorEntry` schema. Add `(s/optional-key :ancestors)` to the **detail** fact-type schema only (not `FactTypeListItem`). |
+| `server/src/clara/server/tools/graph/serialize.clj` | Extend `resolve-type` to kind-explicit serialization (keyword colon, string quotes, `symbol[...]` marker; see System Context). Helper to serialize one raw ancestor type into `{:type ... :known ...}` shape (known flag applied by caller). |
+| `server/src/clara/server/graph/api.clj` | Add `AncestorEntry` schema. Add `(s/optional-key :ancestors)` to `GetFactTypeResponse` (api.clj, the detail response schema) only — not `FactTypeListItem`. |
 | `server/test/clara/server/tools/graph/core_test.clj` | Tests verifying `:ancestors` shape with `:known` flag, deterministic ordering, default-ancestors noise behavior, and missing-meta case. |
 | `ui/src/lib/types/api.ts` | Add `AncestorEntry` interface. Add `ancestors?: AncestorEntry[]` to the detail fact-type type. |
-| `docs/explorer-graph-api.md` | Document the new `:ancestors` field with `type`/`known` keys on the detail view. |
+| `docs/explorer-graph-api.md` | Document the new `:ancestors` field with `type`/`known` keys on the detail view. Document kind-explicit type serialization (keyword colon, string quotes, `symbol[...]`) as an API-visible clarification. |
 
-### 1f. API backward compatibility
+### 1f. API compatibility
 
-Additive only.  New optional `:ancestors` key on fact-type **detail**
-objects.  Existing keys and the list payload unchanged.
+Alpha API: additive changes need no justification.  New optional
+`:ancestors` key on fact-type **detail** objects.  Existing keys and the
+list payload unchanged (keyword/string *values* in existing fields gain
+the new spellings — vetted, see System Context).
 
 ### 1g. Test cases
 
@@ -316,6 +416,19 @@ objects.  Existing keys and the list payload unchanged.
 7. **nil/throwing ancestors-fn:** a user ancestors-fn returning nil yields
    `[]` for that type (no NPE).  Optionally guard with try/catch as
    `build-fallback-type-filter` does.
+8. **Mixed-kind hierarchy (custom ancestors-fn):** keyword type
+   `::child` with ancestors-fn returning `["string-parent" ::kw-parent]`
+   → serialized kind-explicitly (`"\"string-parent\""`,
+   `":my.ns/kw-parent"`), sorted, `known` flags computed per entry.
+9. **Kind-explicit serialization:** keyword → `:my.ns/child` (colon
+   preserved); string type → `"foo"` (quotes); unresolved symbol →
+   `symbol[my.ns/foo]`; vector type → `[:a 1]`; class unchanged.  A
+   keyword and a same-spelled string type serialize differently (no
+   collision).
+10. **Symbol ns-resolution parity:** a fact type originating from an
+    unresolved symbol still gets `:ancestors` (index built in
+    per-production ns context — guards against the nil-ns serialization
+    divergence).
 
 ---
 
@@ -477,13 +590,13 @@ LHS conditions.
 | `ui/src/lib/types/api.ts` | Extend `ProductionReference` with `match?: TypeBridgeMatch[]`. Add `TypeBridgeMatch` interface. |
 | `docs/explorer-graph-api.md` | Document `:match` field on upstream/downstream entries. |
 
-### 2f. API backward compatibility
+### 2f. API compatibility
 
-Additive only — now at **both** levels: the API gains an optional `:match`
-key, and the internal `:dep-graph` shape (consumed by `analysis.edn`
-tooling) is untouched.  `:match` is always present when the pair links via
-at least one type pair (direct matches included), which normalizes the
-consumer's parsing path.
+Additive at **both** levels: the API gains an optional `:match` key, and
+the internal `:dep-graph` shape (consumed by `analysis.edn` tooling) is
+untouched.  `:match` is always present when the pair links via at least
+one type pair (direct matches included), which normalizes the consumer's
+parsing path.
 
 ### 2g. Test cases
 
@@ -547,6 +660,25 @@ consumer's parsing path.
 - **Queries as consumers:** queries appear only on the `:upstream` side of
   their entries; `matching-type-pairs` handles them identically (they have
   `:consumed-types`, empty `:produced-types`).
+- **Heterogeneous type values:** handled exactly once, by kind-explicit
+  serialization (System Context).  Raw values for all logic; strings
+  only at the display boundary; sorting strictly post-serialization.
+  Unstable `toString` on custom type objects is a documented, accepted
+  limitation.
+- **Kind-explicit serialization renames keyword/string fact types**
+  (colon, quotes) — vetted for the alpha API; update
+  `explorer-graph-api.md` with the serialization table and verify
+  `handle-get-fact-type` / `fq-name-from-param` lookups against
+  percent-decoded path params (see URL-safety in System Context).
+- **Test fixtures:** existing demo rules
+  (`server/test/clara/server/tools/graph/rules/`) are class-centric.
+  Phase 1 tests need new fixture namespaces: keyword-typed facts with a
+  `derive` hierarchy, and vector-tuple types — sessions built via
+  `mk-session` with explicit `:ancestors-fn` / `:fact-type-fn` options
+  where needed.
+- **`resolve-type` totality:** its branches are total over heterogeneous
+  kinds (`pr-str`/`str` never throw for ordinary objects) — a hostile
+  object with a throwing `toString` is pathological and out of scope.
 
 ---
 
@@ -557,6 +689,11 @@ Once the server API is extended, the UI can use the new fields:
 - **Fact-type detail view:** Render the `:ancestors` chain, `known` types
   first.  Types with `known: true` hyperlink to their fact-type detail
   page; ghost types (`known: false`) render as plain text.
+- **URL-safety:** fact-type names now routinely contain `:`, `"`, `[`,
+  `]`, and spaces.  All fact-type links must be built with
+  `encodeURIComponent`, and the router/detail pages must tolerate these
+  characters in path params.  The kind-explicit spellings are also a UI
+  clarity win — a keyword type reads as `:my.ns/child` everywhere.
 - **Rule detail view:** In the upstream/downstream sections, show each dep
   entry with the `:match` details inline (e.g., "Rule X produces
   `MarkerRecord` → satisfies `IScanMarker`").
@@ -568,10 +705,10 @@ This phase is scoped separately and not detailed here.
 
 ## Implementation Order
 
-- [ ] **Phase 1a:** In `rulebase-analysis`: extract ancestors-fn (with fallback), add `->memoized-ancestors`, hoist `type-analysis-map` out of `build-dep-graph`, build serialized ancestors index
+- [ ] **Phase 1a:** In `rulebase-analysis`: extract ancestors-fn (with fallback), add `->memoized-ancestors`, hoist `type-analysis-map` (with `:ns-name`) out of `build-dep-graph`, build serialized ancestors index in per-production ns context (sorted). Extend `resolve-type` to kind-explicit serialization
 - [ ] **Phase 1b:** Add `:ancestors` field (objects with `type`/`known`, lexicographically sorted) to fact-type entries in `build-fact-type-summary-map` (second pass)
-- [ ] **Phase 1c:** Update detail fact-type schema (`AncestorEntry` in `api.clj`); leave `FactTypeListItem` and `fact-types-list` unchanged
-- [ ] **Phase 1d:** Add server tests for `:ancestors` (default-ancestors noise, `known` flag, ordering, missing-meta, nil-returning fn, memoization)
+- [ ] **Phase 1c:** Update detail fact-type schema (`AncestorEntry` in `api.clj`); leave `FactTypeListItem` and `fact-types-list` unchanged. Verify router percent-decoding of `:fq-name` path params and `fq-name-from-param` against kind-explicit spellings (`:my.ns/child`, `"foo"`, `[:a 1]`)
+- [ ] **Phase 1d:** Add server tests for `:ancestors` (default-ancestors noise, `known` flag, ordering, missing-meta, nil-returning fn, memoization, mixed-kind hierarchy, kind-explicit serialization, symbol ns-resolution parity)
 - [ ] **Phase 1e:** Update UI types (`AncestorEntry`, detail `FactTypeSummary` in `api.ts`)
 - [ ] **Phase 1f:** Update API documentation (`explorer-graph-api.md`)
 - [ ] **Phase 2a:** Add `matching-type-pairs` helper; simplify `downstream?` to consume the memoized set fn
