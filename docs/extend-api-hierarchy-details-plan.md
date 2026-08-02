@@ -92,15 +92,26 @@ We need to:
 
 1. Extract `ancestors-fn` in `rulebase-analysis` (it's already available
    from the rulebase passed to `build-dep-graph`).
-2. Pass `ancestors-fn` to `build-fact-type-summary-map`.
-3. For each fact type in the summary map, call `(ancestors-fn type)` and
-   serialize the result into objects with `type` and `known` keys.
-4. Compute `known` by checking whether the ancestor type key exists in the
+2. **Memoize `ancestors-fn` at the `rulebase-analysis` level** so both
+   Phase 1 (`build-fact-type-summary-map`) and Phase 2 (`build-dep-graph`
+   via `matching-type-pairs`) share the same cached evaluations for the
+   duration of the analysis run.  Without this, `build-dep-graph`'s nested
+   loop over produced/consumed types would redundantly call `ancestors-fn`
+   thousands of times.
+3. Pass the memoized `ancestors-fn` to both `build-fact-type-summary-map`
+   and `build-dep-graph`.
+4. For each fact type in the summary map, call the memoized `ancestors-fn`
+   and serialize the result into objects with `type` and `known` keys.
+5. Compute `known` by checking whether the ancestor type key exists in the
    fact-types summary map (i.e., is it used on any production's LHS or
-   inserted/retracted by any rule).
-5. Cache `(ancestors-fn type)` per unique type so it is evaluated at most
-   once per type (relevant for large type sets with expensive custom
-   `ancestors-fn` implementations).
+   inserted/retracted by any rule).  This requires a **two-pass** operation
+   within `build-fact-type-summary-map`:
+   - **Pass 1:** Build the baseline type→usage map by reducing over all
+     rules and queries (same as today).
+   - **Pass 2:** Iterate over the completed map, call `ancestors-fn` for
+     each type, and attach `:ancestors` with fully-resolved `known`
+     booleans.  Only after Pass 1 do we know the complete set of "known"
+     types.
 
 ### 1b. New field: `:ancestors`
 
@@ -242,7 +253,8 @@ needing to detect the direct-match case client-side.
 
 **Implementation approach:** modify the inner loop of `build-dep-graph` to,
 instead of checking `some-type-consumed?` and adding a simple edge, enumerate
-all matching type pairs and build the `:via` structure.
+all matching type pairs and build the `:via` structure.  Uses the memoized
+`ancestors-fn` from Phase 1a (step 2) so no redundant evaluations occur.
 
 ```clojure
 (defn- matching-type-pairs [ancestors-fn produced-types consumed-types]
@@ -266,6 +278,13 @@ all matching type pairs and build the `:via` structure.
 fact type in multiple `insert!` calls, and the downstream rule may match it
 in multiple LHS conditions.  Without `distinct`, the `:via` vector would
 contain duplicate `{:produces Foo :satisfies Foo}` entries.
+
+**Deterministic ordering is deferred to serialization** (Phase 2c).  The
+internal `:via` vectors carry raw types (which may be `java.lang.Class`
+instances or keywords — neither consistently implements `Comparable`).
+`sort-by` on raw types would throw `ClassCastException`.  Deterministic
+sort happens in `get-production-deps-summary` after `resolve-type` converts
+them to strings.
 
 ### 2b. Serialize type-bridge info on `:upstream` / `:downstream`
 
@@ -315,6 +334,11 @@ both are still present.  This avoids client-side special-casing.
 multiple type pairs (e.g., producer inserts types A and C, consumer reads
 B and D where A descends from B and C descends from D).
 
+The `match` array is **deterministically ordered**: sorted lexicographically
+by `producer-type`, then `consumer-type`.  This ordering is applied in
+Phase 2c during serialization (after `resolve-type` converts raw types to
+comparable strings), not at the internal dep-graph level.
+
 ### 2c. Update `get-production-deps-summary`
 
 This function currently serializes dep-graph entries into `ProductionDep`
@@ -326,6 +350,12 @@ The `:via` entries use the internal keys `:produces` / `:satisfies`.
 `producer-type` / `consumer-type`.  This internal/external separation
 keeps the dep-graph's internal names aligned with its own semantics while
 producing the clean symmetric API shape.
+
+**Deterministic ordering is applied here**, after `resolve-type` converts
+raw types to strings.  Strings are safely `Comparable` regardless of whether
+the underlying type was a `java.lang.Class`, keyword, symbol, or string.
+The serialized `:match` array is sorted lexicographically by
+`producer-type`, then `consumer-type`.
 
 ### 2d. Function decomposition
 
