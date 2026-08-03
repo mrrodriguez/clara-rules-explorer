@@ -384,6 +384,7 @@ cannot be applied at that layer without raw types.  Restructure:
    `:ancestors` to each entry in a **second pass** after the usage map is
    complete (only then is the full set of "known" types known), setting
    `known` by membership of each serialized ancestor string in the
+   fact-types map keys, and `id` via the memoized route-id fn.
    fact-types map keys.
 
 ### 1b. New field: `:ancestors`
@@ -729,9 +730,13 @@ rename layer.  `production-summary` passes the two new args through (they
 are available in `rulebase-analysis` scope; thread them through
 `build-production-summary-map` alongside `dep-graph`).
 
-**Deduplication:** `distinct` handles a rule inserting the same type in
-multiple `insert!` calls, or a consumer matching the same type in multiple
-LHS conditions.
+**Deduplication:** the dedup key is the raw `(producer-type,
+consumer-type)` pair — structural, not hierarchy-path-based.  `distinct`
+handles a rule inserting the same type in multiple `insert!` calls, a
+consumer matching the same type in multiple LHS conditions, and
+multi-path ancestry (`A → C` appears once even when `A` also descends
+from an intermediate `Mid`; if the consumer reads both `Mid` and `C`,
+those are two distinct, correct pairs).
 
 ### 2d. Function decomposition
 
@@ -748,7 +753,7 @@ LHS conditions.
 |------|--------|
 | `server/src/clara/server/tools/graph/core.clj` | Hoist `type-analysis-map`. `get-production-deps-summary`: compute and attach `:match`. `production-summary` / `build-production-summary-map`: thread new args. `build-dep-graph`: use memoized ancestor-set fn (behavior unchanged). |
 | `server/src/clara/server/tools/graph/serialize.clj` | `serialize-match` helper: raw pair → sorted `producer-type`/`consumer-type` string maps. |
-| `server/src/clara/server/graph/api.clj` | Extend `ProductionDep` schema with `(s/optional-key :match)` array of `{producer-type, consumer-type}`. |
+| `server/src/clara/server/graph/api.clj` | Extend `ProductionDep` schema with `(s/optional-key :match)` array of `{producer-type, consumer-type}`. Schema docstring states the symmetric semantics: identical shape and meaning on upstream and downstream entries — `producer-type` is what the producing rule inserts, `consumer-type` is what the consuming rule's LHS requires. |
 | `server/test/clara/server/tools/graph/core_test.clj` | Add tests for `:match` on dep links (direct, hierarchy, multi-type, dedup, symmetric both-directions). Existing dep-graph shape tests **stay green unchanged** — this is the proof the simplification works. |
 | `ui/src/lib/types/api.ts` | Extend `ProductionReference` with `match?: TypeBridgeMatch[]`. Add `TypeBridgeMatch` interface. |
 | `docs/explorer-graph-api.md` | Document `:match` field on upstream/downstream entries. |
@@ -825,6 +830,21 @@ parsing path.
 - **Symbol serialization of ancestors:** ancestors are compiler-resolved
   Classes or qualified keywords in practice; symbols are serialized in
   the per-production ns context of the index build (see 1a step 3).
+- **Ancestors precomputation is eager and cheap:** one memoized
+  ancestors-fn call + one O(k²) topological sort (k ≤ ~20) per fact
+  type, at analysis build time — the analysis is cached
+  (`warm-analysis-cache!`), so requests never pay it.  Trivial at 3k+
+  rule scale; lazy loading rejected (the detail endpoint serves from the
+  same analysis map).
+- **Symbol resolution before ancestors:** verify at implementation time
+  that raw types reaching the ancestors index are resolved (LHS types
+  are compiler-resolved; sidecar-annotation symbols may not be — resolve
+  class-backed symbols via the production's ns if found unresolved;
+  `derive`-based symbol hierarchies work on the symbol itself).
+- **`analyze.clj/build-fallback-type-filter`** has its own ancestors-fn
+  extraction — confirm it stays correct after the Phase 1a refactor;
+  prefer sharing the extraction/memoization utility if the refactor
+  produces one.
 - **Payload weight:** `:ancestors` on detail only (1d); `:match` only on
   detail views (list endpoints already omit `:upstream`/`:downstream`).
 - **Queries as consumers:** a query's own summary has `:upstream`
@@ -923,6 +943,26 @@ Once the server API is extended, the UI can use the new fields:
 
 This phase is scoped separately and not detailed here.
 
+### UI Impact Summary (for scoping Phase 3)
+
+Breaking (must land together):
+
+- Fact-type `:name` format changes to kind-explicit forms everywhere it
+  is displayed.
+- Route-id migration: all URL construction uses `:id`;
+  `toRouteId`/`fromRouteId`/`splitQualifiedName` deleted; SvelteKit
+  `load` functions pass `[id]` params through verbatim.
+- Grouping switches to server-provided `:ns` (nullable — needs a
+  fallback group label).
+
+Additive (can trail):
+
+- `:ancestors` section on the fact-type detail view (hierarchy-ordered,
+  `known` entries linked via `id`, ghosts as plain text).
+- `:match` rows on rule/query upstream/downstream entries.
+- `:id` fields on list payloads (needed by the breaking link changes —
+  effectively lands with them).
+
 ---
 
 ## Documentation & Schema Principles (binding at implementation time)
@@ -963,19 +1003,19 @@ This phase is scoped separately and not detailed here.
 
 ## Implementation Order
 
-- [ ] **Phase 1a:** In `rulebase-analysis`: extract ancestors-fn (with fallback), add `->memoized-ancestors`, hoist `type-analysis-map` (with `:ns-name`) out of `build-dep-graph`, build serialized ancestors index in per-production ns context (sorted). Extend `resolve-type` to kind-explicit serialization
+- [ ] **Phase 1a:** In `rulebase-analysis`: extract ancestors-fn (with fallback), add `->memoized-ancestors`, hoist `type-analysis-map` (with `:ns-name`) out of `build-dep-graph`, build serialized ancestors index in per-production ns context (topologically ordered); simplify `downstream?` to consume the memoized set fn (moved from Phase 2a — same edit, avoids double-touching `build-dep-graph`); verify `analyze.clj/build-fallback-type-filter` stays correct (share the extraction/memoization utility if natural); verify raw types reaching the index are resolved. Extend `resolve-type` to kind-explicit serialization
 - [ ] **Phase 1b:** Add `:ancestors` field (objects with `type`/`known`, deterministic topological order with lexicographic tie-break + cycle guard) to fact-type entries in `build-fact-type-summary-map` (second pass)
 - [ ] **Phase 1c:** Add the uniform route-id fn (slug + 8-char base36 SHA-1 suffix, 60-char slug cap) to `serialize.clj`; add `:id` to fact-type entries (`FactTypeListItem` + detail) and to `AncestorEntry`; build fact-type id reverse index in `rulebase-analysis` (uniqueness asserted); `handle-get-fact-type` resolves id-only. Router-level tests for id-based lookups (keyword/tuple/string/class forms)
 - [ ] **Phase 1d:** Add server tests for `:ancestors` (default-ancestors noise, `known` flag, ordering, missing-meta, nil-returning fn, memoization, mixed-kind hierarchy, kind-explicit serialization, symbol ns-resolution parity, route ids)
+- [ ] **Phase 1f:** Rewrite `explorer-graph-api.md` for the new contract — flag: this is a full rewrite, not a targeted edit (serialization table, `:id` scheme + routes, `:ns`, `:ancestors`)
 - [ ] **Phase 1e:** Update UI types (`AncestorEntry` with `type`/`id`/`known`, `id` on `FactTypeListItem`/`RuleListItem`/`QueryListItem`/details/`ProductionReference`, `ancestors?` on detail `FactTypeSummary` in `api.ts`)
-- [ ] **Phase 1g:** Production route ids: `:id` on rule/query list + detail entries and every `ProductionDep`; production id reverse index; all rule/query/session detail handlers resolve id-only; delete `fq-name-from-param` server-side and its tests; update UI `factPath`/rule/query link builders to use `:id` and delete `toRouteId`/`fromRouteId`/`splitQualifiedName` — all grouping/display consumes `:ns` + `:name` from payloads, never parsed (`FactTypeList.svelte`, `SessionNav.svelte` group by server-provided `:ns`)
-- [ ] **Phase 1f:** Update API documentation (`explorer-graph-api.md`)
-- [ ] **Phase 2a:** Add `matching-type-pairs` helper; simplify `downstream?` to consume the memoized set fn
+- [ ] **Phase 1g:** Production route ids: `:id` on rule/query list + detail entries and every `ProductionDep`; production id reverse index; all rule/query/session detail handlers resolve id-only; delete `fq-name-from-param` server-side and its tests **in the same commit as the index implementation** (atomic revert if issues arise); update UI `factPath`/rule/query link builders to use `:id` and delete `toRouteId`/`fromRouteId`/`splitQualifiedName`. **Scope note: this is the largest single work item (~30–40% of the total)** — it touches every endpoint, every link builder, and all URL-constructing test fixtures. Budget accordingly
+- [ ] **Phase 2a:** Add `matching-type-pairs` helper (the `downstream?` simplification already landed in Phase 1a)
 - [ ] **Phase 2b:** Update `get-production-deps-summary` (+ `serialize-match` in `serialize.clj`) to attach `:match` with symmetric `producer-type`/`consumer-type` keys, each serialized in its own production's ns context, sorted post-serialization
 - [ ] **Phase 2c:** Update `ProductionDep` schema in `api.clj` with optional `:match` array
 - [ ] **Phase 2d:** Add server tests for `:match` (direct, hierarchy, multi-type, dedup, symmetry, cross-field consistency incl. sidecar symbol in foreign ns, dep-graph regression)
+- [ ] **Phase 2f:** Update `explorer-graph-api.md` with the `:match` contract (symmetric shape + semantics, citing `ProductionDep` schema)
 - [ ] **Phase 2e:** Update UI types (`ProductionReference`, `TypeBridgeMatch` in `api.ts`)
-- [ ] **Phase 2f:** Update API documentation (`explorer-graph-api.md`)
 - [ ] **Docs hygiene pass:** verify the Documentation & Schema Principles — schemas carry the structural truth; no docstring enumerates shapes, narrates design history, or references this plan; project docs cite code (not vice versa) for impl details
 - [ ] **Phase 3:** UI integration (future, scoped separately)
 
