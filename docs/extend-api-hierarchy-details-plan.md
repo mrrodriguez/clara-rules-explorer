@@ -210,15 +210,108 @@ rulesets, and the visible colon is a clarity win, not a compat risk.
 Class names are unchanged.  The serialization table above must be
 documented in `explorer-graph-api.md`.
 
-**URL-safety of the new spellings.**  Fact-type names appear as URL path
-segments (`/v1/fact-types/:fq-name`), and the new representations are
-not URI-friendly: `:my.ns/child` (colon), `"foo"` (quotes), `[:a 1]`
-(brackets, spaces).  Server side: verify the router percent-decodes
-`:fq-name` path params and that `fq-name-from-param` still resolves the
-decoded spelling (Phase 1 task).  UI side (Phase 3): every fact-type
-link must be built with `encodeURIComponent`; detail pages must handle
-multi-segment-looking names (no `/` in these spellings, but colons and
-spaces are enough to break naive routing).
+### Route IDs (`:id`) — the URL strategy, for fact types AND productions
+
+Kind-explicit names are not URI-friendly (`:my.ns/child`, `"foo"`,
+`[:a 1]`), and production names are worse than they look: Clojure rule
+and query names freely contain `?`, `!`, `*`, `+` and friends
+(`my.ns/verify-docs?` — `?` in URLs is a demonstrated problem in the
+UI today).  Percent-encoding produces unreadable URLs and keeps the
+UI's weak last-dot `toRouteId`/`fromRouteId` heuristic alive.
+
+**Decision: every fact type, rule, and query gains a server-issued,
+deterministic `:id` used for ALL URL linkage — no fallbacks, no legacy
+name-based resolution.**  The UI never encodes, decodes, or parses a
+name again; `fq-name-from-param` (server) and `toRouteId`/
+`fromRouteId` (UI) are deleted outright.
+
+One uniform function, no kind dispatch:
+
+```
+id(s)  = slug(s) + "-" + hash8(s)
+slug(s) = every char outside [A-Za-z0-9.-] replaced by "-",
+          runs of "-" collapsed, leading/trailing "-" trimmed,
+          truncated to 60 chars (deterministic)
+hash8(s) = first 8 base36 chars of SHA-1(s)     ;; ~41 bits
+```
+
+Applied to the canonical serialized name (fact types) or the
+production `:name` string (rules/queries):
+
+| Name | `:id` |
+|---|---|
+| `my.ns.MarkerRecord` (class) | `my.ns.MarkerRecord-a1b2c3d4` |
+| `:my.ns/child` (keyword) | `my.ns.child-x7k9p2m4` |
+| `"foo"` (string) | `foo-z9y8x7q2` |
+| `[:loan/status "verified"]` (tuple) | `loan.status.verified-k4x9p2m8` |
+| `my.ns/verify-docs?` (rule) | `my.ns.verify-docs-q2w8e5r4` |
+| `my.ns/app-by-id` (query) | `my.ns.app-by-id-n3m7b5v9` |
+
+Design rules (review-driven):
+
+- **Uniform — no special cases.**  Classes get the same slug+hash
+  treatment as every other kind.  One code path, one interface, no
+  kind dispatch in the id function.
+- **The slug is the FULL sanitized name, not a short prefix.**
+  `:my.nsed/keyword-name` → `my.nsed.keyword-name-<hash>` keeps full
+  fidelity, so entries don't collapse onto shared namespace prefixes.
+  Sanitization can be aggressively lossy (any char outside
+  `[A-Za-z0-9.-]` → `-`) because readability is the slug's only job —
+  uniqueness is the hash's job.  The 60-char cap only affects
+  pathological names; the hash still distinguishes them.
+- **8 base36 chars (~41 bits) of hash.**  6 chars (~31 bits) was too
+  thin: birthday collisions become plausible around ~46k entries.  At
+  41 bits, a collision needs ~1.5M entries — three orders of magnitude
+  above our 3k-rule scale.  Longer hashes buy nothing and hurt
+  readability.
+- **Stability across analysis runs comes from determinism, not from
+  the index.**  `id = f(name)` depends only on the name, so re-running
+  the analysis with new types added never changes existing ids — old
+  URLs keep working.  The only cross-run risk is a *new* name
+  colliding with an existing id (~10⁻⁹ chance per analysis at our
+  scale); see next bullet for how that surfaces.
+- **Uniqueness is asserted per analysis.**  The reverse index (id →
+  name) is built once per `rulebase-analysis` and cached with it.  If
+  two names ever map to the same id, index construction throws — a
+  loud build-time alarm, never silent link corruption.  Session
+  reloads rebuild the cache and the index; existing ids are
+  regenerated identically.
+- **Two separate indexes:** fact types and productions live in
+  different namespaces of ids (their routes are per-resource:
+  `/v1/rules/:id`, `/v1/queries/:id`, `/v1/fact-types/:id`), so a
+  cross-index collision is meaningless.  Session endpoints
+  (`/v1/session/rules/:id`, `/v1/session/queries/:id`,
+  `/v1/session/fact-types/:id`) resolve through the same indexes
+  (session fact-type ids are computed from their serialized names with
+  the same function).
+- **Resolution is id-only.**  Handlers look up `:id` in the reverse
+  index and 404 otherwise.  No canonical-name fallback, no
+  `fq-name-from-param`, no last-dot heuristic anywhere.
+- **Id generation is memoized** (name → id) for the duration of the
+  analysis build: SHA-1 + slug work repeats per occurrence otherwise —
+  the same production name appears in thousands of `ProductionDep`
+  entries across rule/query summaries.
+- **Ancestor entries carry `id`** (see 1b): `known: true` ancestors
+  are directly linkable without the UI building a name→id map.  Ghost
+  (`known: false`) entries carry an id **for shape uniformity only** —
+  the UI must render them as plain text, never as a (disabled or live)
+  link element.  The ids are not a supported linking surface.
+- **`ProductionDep` entries carry `id`** (upstream/downstream on
+  rule/query details, and `inserted-from`/`used-by` on session facts)
+  so every production hyperlink in the UI is id-based.
+- **`:match` stays display-slim** (strings only, Phase 2).  If linking
+  from match rows is wanted later, the UI can use the fact-types list
+  endpoint (which includes `id`) as a name→id lookup table — or we
+  embed `producer-type-id`/`consumer-type-id` then.  No decision forced.
+
+Verified router facts (empirically, against the project's reitit): an
+unencoded literal `/` splits segments and 404s; the ids above contain
+only `[A-Za-z0-9.-]`, so they always route as plain single segments.
+
+Server test gap: `api_test.clj` currently exercises only plain class
+names through the router.  Add router-level tests for id-based lookups
+across rules, queries, and fact types, and delete tests that exercise
+`fq-name-from-param` (Phase 1).
 
 Remaining accepted limitation (no handling, documentation only):
 **arbitrary objects** without a stable `toString`/`print-method` (default
@@ -279,10 +372,11 @@ cannot be applied at that layer without raw types.  Restructure:
      productions into one `{serialized-name [serialized-ancestor …]}`
      map; last-wins on key collision is acceptable.
    - For each raw type, serialize its raw ancestors (from the memoized
-     set fn) with the same ns context, then **sort lexicographically**.
-     No post-serialization dedup is needed: raw ancestors come from a set
-     and kind-explicit serialization (see System Context) keeps distinct
-     raw values distinct as strings.
+     set fn) with the same ns context, then **hierarchy-order them**
+     (deterministic topological sort, lexicographic tie-break — see
+     1b).  No post-serialization dedup is needed: raw ancestors come
+     from a set and kind-explicit serialization (see System Context)
+     keeps distinct raw values distinct as strings.
    - The index value is plain serialized ancestor strings; the `known`
      flag is computed later, in the second pass (step 4), against the
      completed fact-types map keys.
@@ -310,12 +404,32 @@ Add to each fact-type entry:
 
 Each ancestor entry is an object:
 
-- **`type`** — serialized type string.
+- **`type`** — serialized type string (kind-explicit, e.g.
+  `:my.ns/child`).
+- **`id`** — the deterministic route id (see "Route IDs" in System
+  Context).  Present on all entries for a uniform shape; the UI
+  hyperlinks only `known: true` entries (ghost ids 404 by design).
 - **`known`** — `true` if this ancestor type appears anywhere in the
   `fact-types` map (i.e., some production uses it on its LHS or it is
   inserted/retracted), `false` if it is a "ghost type" — only visible as
   an ancestor of another type.  This lets the UI decide whether to render
   it as a hyperlink or plain text.
+
+The fact-type entry itself also gains:
+
+- **`id`** (route id scheme above), included in both the detail payload
+  and the list payload (`FactTypeListItem` — small and needed by the UI
+  to build links from the list view).
+- **`ns`** (nullable) — best-effort namespace/package for grouping,
+  computed from the **raw type** during the index build, where the kind
+  is known: keyword/symbol → `(namespace x)`, class → `.getPackageName`,
+  string/tuple/other → `null`.  This is grouping metadata, never
+  identity.  It exists so the UI never parses names — today
+  `FactTypeList.svelte` and `SessionNav.svelte` reconstruct a
+  "namespace" with `splitQualifiedName` last-dot/slash heuristics.
+  Rule/query entries and `ProductionDep` already carry `:ns` + `:name`
+  separately, so with this field the no-parsing guarantee covers every
+  payload the UI consumes.
 
 **The `known` flag is the primary noise filter.**  Because Clara's default
 ancestors-fn is `clojure.core/ancestors`, every record type carries a long
@@ -331,12 +445,27 @@ semantics simple and faithful.
 
 Additional rules:
 
-- `ancestors` is **deterministically sorted lexicographically** on the
-  serialized `type` string.  `clojure.core/ancestors` returns an unordered
-  set, and depth-ordering is not recoverable from a transitive set without
-  re-walking the hierarchy — lexicographic sort guarantees stable API
-  responses.  (UI-layer reordering/filtering based on `known` is a
-  Phase 3 concern.)
+- `ancestors` is **hierarchy-ordered via a deterministic topological
+  sort** — more specific (deeper) ancestors first, per the problem
+  statement's "ideally in hierarchy ordering".  A comparator-based sort
+  is **not** usable here: fusing the hierarchy partial order with a
+  string tie-break into one comparator is intransitive (given A≺B by
+  hierarchy and B<C, C<A by strings, the comparator asserts B<C and
+  C<A yet A<B), which TimSort can detect as
+  `IllegalArgumentException: Comparison method violates its general
+  contract!` — and, more insidiously, silently mis-orders when it
+  doesn't throw.  Implementation is Kahn's algorithm restricted to the
+  ancestor set, tie-broken lexicographically:
+  1. Ready = nodes with no remaining descendants in the set (nothing
+     left that must be emitted before them).
+  2. Emit the lexicographically smallest ready node (by serialized
+     string), remove it, repeat.
+  3. **Cycle guard:** if no node is ready but nodes remain (a
+     pathological custom `ancestors-fn` with mutual ancestry), emit the
+     lexicographically smallest remaining node and continue.
+  Cost is O(k²) memoized ancestor-set lookups per type with k ≤ ~20 —
+  negligible.  (UI-layer reordering/filtering based on `known` remains
+  a Phase 3 concern.)
 - The concrete type itself (the `name` key) is NOT included in the
   `ancestors` array.
 - `ancestors` is the direct result of `(ancestors-fn type)` — not a
@@ -358,26 +487,29 @@ insufficient, a follow-up can compute transitive closure.
 ### 1d. List endpoint stays lightweight
 
 The original plan added `:ancestors` to `fact-types-list` (the
-`/v1/fact-types` list payload).  **Revised decision: do not.**  The list
-endpoint is deliberately lightweight (same rationale as `rules-list`
-omitting `:upstream`/`:downstream` — payload weight at 3k+ rules), and
-`:ancestors` is the heaviest field this plan adds (10–20 entries per type
-with the default ancestors-fn).  The **detail** endpoint
+`/v1/fact-types` list payload).  **Revised decision: `:ancestors` stays
+off the list payload** (same rationale as `rules-list` omitting
+`:upstream`/`:downstream` — payload weight at 3k+ rules; `:ancestors`
+is the heaviest field this plan adds at 10–20 entries per type with the
+default ancestors-fn).  **Exception: `:id` IS included in the list
+payload** — it is small and the UI needs it to build fact-type links
+from list views and as a name→id lookup table.  The **detail** endpoint
 (`handle-get-fact-type`) serves the full entry from the analysis map and
 gets `:ancestors` for free once it is in `build-fact-type-summary-map`.
 
-Consequence: `FactTypeListItem` schema and `fact-types-list` select-keys
-are unchanged; only the detail schema gains the optional key.
+Consequence: `FactTypeListItem` gains only `:id` and `:ns`; only the
+detail schema gains `:ancestors`. (Production list entries already carry
+`:ns`.)
 
 ### 1e. Files to modify
 
 | File | Change |
 |------|--------|
-| `server/src/clara/server/tools/graph/core.clj` | `rulebase-analysis`: extract ancestors-fn (with `analyze.clj`-style fallback), build memoized ancestor-set fn, hoist `type-analysis-map`, build serialized ancestors index. `build-fact-type-summary-map`: accept the index, enrich each entry with `:ancestors` in a second pass. |
-| `server/src/clara/server/tools/graph/serialize.clj` | Extend `resolve-type` to kind-explicit serialization (keyword colon, string quotes, `symbol[...]` marker; see System Context). Helper to serialize one raw ancestor type into `{:type ... :known ...}` shape (known flag applied by caller). |
-| `server/src/clara/server/graph/api.clj` | Add `AncestorEntry` schema. Add `(s/optional-key :ancestors)` to `GetFactTypeResponse` (api.clj, the detail response schema) only — not `FactTypeListItem`. |
-| `server/test/clara/server/tools/graph/core_test.clj` | Tests verifying `:ancestors` shape with `:known` flag, deterministic ordering, default-ancestors noise behavior, and missing-meta case. |
-| `ui/src/lib/types/api.ts` | Add `AncestorEntry` interface. Add `ancestors?: AncestorEntry[]` to the detail fact-type type. |
+| `server/src/clara/server/tools/graph/core.clj` | `rulebase-analysis`: extract ancestors-fn (with `analyze.clj`-style fallback), build memoized ancestor-set fn, hoist `type-analysis-map`, build serialized ancestors index, build BOTH id reverse indexes — fact types and productions (uniqueness asserted). `build-fact-type-summary-map`: accept the index, enrich each entry with `:id` + `:ancestors` in a second pass. `fact-types-list`/`rules-list`/`queries-list`: add `:id` to select-keys. `production-summary` + `get-production-deps-summary`: `:id` on productions and `ProductionDep` entries. |
+| `server/src/clara/server/tools/graph/serialize.clj` | Extend `resolve-type` to kind-explicit serialization (keyword colon, string quotes, `symbol[...]` marker; see System Context). Add the uniform `route-id` fn (slug + 8-char base36 SHA-1 suffix, 60-char slug cap — used for fact types AND production names). Helper to serialize one raw ancestor type into `{:type ... :id ... :known ...}` shape (known flag applied by caller). |
+| `server/src/clara/server/graph/api.clj` | Add `AncestorEntry` schema (`type`/`id`/`known`). Add `(s/optional-key :ancestors)` to `GetFactTypeResponse`. Add `:id` and `:ns` (nullable) to `FactTypeListItem` + detail entry; add `:id` to `RuleListItem`, `QueryListItem`, detail entries, and `ProductionDep`. All detail handlers (rules, queries, fact-types, session variants) resolve id-only via the reverse indexes; delete `fq-name-from-param` and any test exercising it. Router-level tests for id-based lookups. |
+| `server/test/clara/server/tools/graph/core_test.clj` | Tests verifying `:ancestors` shape with `:known` flag, hierarchy ordering + determinism, default-ancestors noise behavior, and missing-meta case. |
+| `ui/src/lib/types/api.ts` | Add `AncestorEntry` interface (`type`/`id`/`known`). Add `id: string` and `ns: string \| null` to `FactTypeListItem` + detail type; add `id` to rule/query/`ProductionReference` types. Add `ancestors?: AncestorEntry[]` to the detail fact-type type. |
 | `docs/explorer-graph-api.md` | Document the new `:ancestors` field with `type`/`known` keys on the detail view. Document kind-explicit type serialization (keyword colon, string quotes, `symbol[...]`) as an API-visible clarification. |
 
 ### 1f. API compatibility
@@ -410,8 +542,13 @@ the new spellings — vetted, see System Context).
    a rule has `IScanMarker` on its LHS →
    `{:type "my.ns.IScanMarker" :known true}` present, JDK ghosts
    `known: false`.
-5. **Deterministic ordering:** output stable across calls even though
-   `clojure.core/ancestors` returns an unordered set.
+5. **Hierarchy ordering + determinism:** a descendant appears before
+   its own ancestor (e.g. `::parent` before `::grandparent` for
+   `::child`); incomparable siblings order lexicographically; output
+   stable across calls even though `clojure.core/ancestors` returns an
+   unordered set; an intransitivity fixture (A≺B by hierarchy, B<C<A
+   by strings) orders A,B,C without throwing; a mutually-ancestral
+   custom `ancestors-fn` fixture terminates via the cycle guard.
 6. **Memoization:** ancestors-fn invoked at most once per unique raw type
    across the whole analysis (fact-type enrichment + dep-graph build).
 7. **nil/throwing ancestors-fn:** a user ancestors-fn returning nil yields
@@ -430,6 +567,16 @@ the new spellings — vetted, see System Context).
     unresolved symbol still gets `:ancestors` (index built in
     per-production ns context — guards against the nil-ns serialization
     divergence).
+11. **Route ids:** the id function is deterministic per name (stable
+    across calls and analysis runs); all kinds — classes included — get
+    the uniform slug + 8-char hash suffix; slugs survive names with
+    `?`, spaces, quotes, brackets; 60-char truncation still
+    distinguishes ids via the hash; each reverse index resolves every
+    id back to its name and asserts uniqueness (colliding fixture
+    throws).
+12. **Fact-type `:ns`:** keyword type → its namespace string; class →
+    package name; string/tuple → `null`; list + detail payloads both
+    carry it.
 
 ---
 
@@ -554,12 +701,27 @@ and serializes the name sets.  Revised signature: it also receives the
 `type-analysis-map` and the memoized ancestor-set fn.  For each adjacent
 production name in `:upstream` / `:downstream`:
 
-1. Look up both ends' `:produced-types` / `:consumed-types` in
-   `type-analysis-map` (upstream name is the producer, current production
-   is the consumer — and vice versa for `:downstream`).
+1. Look up both ends' `:produced-types` / `:consumed-types` **and
+   `:ns-name`** in `type-analysis-map` (upstream name is the producer,
+   current production is the consumer — and vice versa for
+   `:downstream`).
 2. Compute `matching-type-pairs`, serialize each pair's raw types with
-   `resolve-type`, sort lexicographically, attach as `:match` on the
-   serialized `ProductionDep`.
+   `resolve-type` — **each end in its own ns context**:
+   `(resolve-type producer-ns pt)` and `(resolve-type consumer-ns ct)`.
+   Symbols reach `:produced-types` via EDN sidecar annotations, so
+   serializing both ends with the current production's ns would
+   misresolve the far end's symbols (e.g. producer's `foo` rendered
+   `symbol[ns.b/foo]` instead of `symbol[ns.a/foo]`) and diverge from
+   the `:insert-types` string on the producer's own summary.  Sort
+   lexicographically, attach as `:match` on the serialized
+   `ProductionDep`.
+
+**Cross-field consistency invariant:** `:match`'s `producer-type` must
+string-equal the corresponding entry in the producer's own
+`:insert-types`/`:retract-types`, and `consumer-type` must string-equal
+the corresponding entry in the consumer's `:lhs-types` — guaranteed by
+using each end's own `:ns-name` (the same context `production-summary`
+uses) and worth pinning in a test.
 
 The internal keys `:producer-type` / `:consumer-type` are already
 kebab-case, so serialization is just `resolve-type` on the values — no
@@ -623,7 +785,12 @@ parsing path.
 6. **Symmetry:** the `match` array on Y's upstream entry for X is identical
    to the one on X's downstream entry for Y.
 
-7. **Regression:** `test-dep-graph-full`, `test-dep-graph-hierarchy`,
+7. **Cross-field consistency:** `:match` `producer-type` equals the
+   string in the producer's own `:insert-types`; `consumer-type` equals
+   the string in the consumer's own `:lhs-types` — including a case
+   where a symbol insert-type comes from a sidecar annotation in a
+   different ns than the consumer.
+8. **Regression:** `test-dep-graph-full`, `test-dep-graph-hierarchy`,
    `rule-is-source?`/`rule-is-sink?` behavior all unchanged (dep-graph shape
    untouched).
 
@@ -650,17 +817,25 @@ parsing path.
   and reads the same type gets no edge and no `:match` — pre-existing,
   unchanged.
 - **Keyword hierarchies:** `derive`-based ancestors are transitive;
-  keywords without `derive` have none.  Lexicographic sort loses depth
-  order — accepted (documented in 1b).
+  keywords without `derive` have none.  Hierarchy ordering puts deeper
+  ancestors first, lexicographic tie-break via deterministic
+  topological sort (see 1b).
 - **Sorting raw types throws:** ordering only ever applied post-
   serialization, on strings.
 - **Symbol serialization of ancestors:** ancestors are compiler-resolved
-  Classes or qualified keywords in practice; serialize with `nil` ns-name.
+  Classes or qualified keywords in practice; symbols are serialized in
+  the per-production ns context of the index build (see 1a step 3).
 - **Payload weight:** `:ancestors` on detail only (1d); `:match` only on
   detail views (list endpoints already omit `:upstream`/`:downstream`).
-- **Queries as consumers:** queries appear only on the `:upstream` side of
-  their entries; `matching-type-pairs` handles them identically (they have
+- **Queries as consumers:** a query's own summary has `:upstream`
+  entries (its producers) and never `:downstream`; from a producing
+  rule's view, the query appears in that rule's `:downstream`.
+  `matching-type-pairs` handles queries identically (they have
   `:consumed-types`, empty `:produced-types`).
+- **Default ancestors-fn on non-hierarchical types:**
+  `(clojure.core/ancestors "foo")` → nil (verified; same for vectors and
+  underived keywords) — no throw, and `(set nil)` → `#{}`, so
+  `->memoized-ancestors` is safe for every kind.
 - **Heterogeneous type values:** handled exactly once, by kind-explicit
   serialization (System Context).  Raw values for all logic; strings
   only at the display boundary; sorting strictly post-serialization.
@@ -668,9 +843,23 @@ parsing path.
   limitation.
 - **Kind-explicit serialization renames keyword/string fact types**
   (colon, quotes) — vetted for the alpha API; update
-  `explorer-graph-api.md` with the serialization table and verify
-  `handle-get-fact-type` / `fq-name-from-param` lookups against
-  percent-decoded path params (see URL-safety in System Context).
+  `explorer-graph-api.md` with the serialization table and the `:id`
+  scheme.  URLs never carry canonical names (see "Fact-type route IDs"),
+  so the spellings' URI-unfriendliness is display-only.
+- **Route-id collisions:** ~41 bits of hash (8 base36 chars) —
+  birthday-safe to ~1.5M entries, ~10⁻⁹ per analysis at our scale —
+  and asserted unique at reverse-index build time (throws loudly, in
+  tests and on analysis build, never silently mislinks).
+- **Id stability across runs:** ids are a pure function of the name
+  alone, so adding new types/productions and re-running the analysis
+  never changes existing ids; safe to bookmark.
+- **Uniform id scheme:** no kind dispatch — classes, keywords, strings,
+  tuples, and production names all get slug + hash suffix.  No
+  canonical-name fallbacks; `fq-name-from-param` and
+  `toRouteId`/`fromRouteId` are deleted, not deprecated.
+- **Production names with special chars** (`?`, `!`, `*`): never reach
+  a URL — rules, queries, and all `ProductionDep` entries link by
+  `:id`.
 - **Test fixtures:** existing demo rules
   (`server/test/clara/server/tools/graph/rules/`) are class-centric —
   but the realistic type universe for our rulesets is, in priority
@@ -709,14 +898,24 @@ parsing path.
 
 Once the server API is extended, the UI can use the new fields:
 
-- **Fact-type detail view:** Render the `:ancestors` chain, `known` types
-  first.  Types with `known: true` hyperlink to their fact-type detail
-  page; ghost types (`known: false`) render as plain text.
-- **URL-safety:** fact-type names now routinely contain `:`, `"`, `[`,
-  `]`, and spaces.  All fact-type links must be built with
-  `encodeURIComponent`, and the router/detail pages must tolerate these
-  characters in path params.  The kind-explicit spellings are also a UI
-  clarity win — a keyword type reads as `:my.ns/child` everywhere.
+- **Fact-type detail view:** Render the `:ancestors` chain (already
+  hierarchy-ordered by the server).  Types with `known: true` hyperlink
+  via their `id`; ghost types (`known: false`) render as plain text —
+  no link element at all.
+- **Grouping with nullable `:ns`:** list views group by server-provided
+  `:ns`, which is `null` for string/tuple types — use an explicit
+  fallback group label (e.g. "(no namespace)") rather than letting
+  `null` keys scatter through grouping/sorting logic.
+- **SvelteKit `load` functions** pass the `[id]` route param through
+  verbatim — no `decodeURIComponent`, no `fromRouteId`, no
+  manipulation; the param is already the exact API id.
+- **URL-safety is solved by `:id`:** all fact-type, rule, and query
+  links use the server-issued id directly — no `encodeURIComponent`, no
+  `toRouteId`/`fromRouteId` (deleted), no last-dot heuristic anywhere.
+  Ancestor entries with `known: true` hyperlink via their embedded
+  `id`; upstream/downstream entries via theirs.  Kind-explicit
+  spellings remain a display clarity win — a keyword type reads as
+  `:my.ns/child` everywhere it is *shown*, while URLs stay clean.
 - **Rule detail view:** In the upstream/downstream sections, show each dep
   entry with the `:match` details inline (e.g., "Rule X produces
   `MarkerRecord` → satisfies `IScanMarker`").
@@ -726,20 +925,58 @@ This phase is scoped separately and not detailed here.
 
 ---
 
+## Documentation & Schema Principles (binding at implementation time)
+
+- **Schemas are the structural source of truth, not docstrings.**
+  Response shapes (`AncestorEntry`, `:match`, `:id`, `:ns`, kind-explicit
+  serialization forms) are expressed in the Prismatic schemas in
+  `api.clj` with concise field-level docstrings.  Do NOT write large
+  docstrings that enumerate data structures field-by-field — they go
+  stale immediately and duplicate the schema.  A docstring states
+  purpose and non-obvious semantics (e.g. "`known` distinguishes types
+  linkable in this rulebase from hierarchy ghosts"); the schema states
+  shape.
+- **Docstrings describe the present, never the design process.**  No
+  "previously", "used to", "now", "revised", or comparisons to
+  replaced behavior.  Write what the code does and why, as if it had
+  always worked that way.  (Rationale history lives in this plan and in
+  git, not in code.)
+- **Code never references this plan.**  This document is ephemeral
+  design-phase material; no docstring or comment may cite it, its
+  section numbers, or its bullet points.  `docs/explorer-graph-api.md`
+  and `server/docs/internal-analysis-models.md` are maintained project
+  docs and MAY be referenced — sparingly, and only from other docs or
+  from code whose behavior the doc genuinely tracks.
+- **Linking direction: docs → code, not code → docs.**  Implementation
+  details are owned by the executable code (and its schemas); project
+  docs cite namespaces/functions when they need precision.  A docstring
+  should not point at a doc for its own contract — the contract is the
+  code.  When updating `explorer-graph-api.md`, link/cite the
+  implementing vars (e.g. `serialize/resolve-type`, `serialize/route-id`)
+  rather than restating their logic.
+- **Project docs are updated, not appended-as-history.**
+  `explorer-graph-api.md` and `internal-analysis-models.md` describe
+  the new state directly (serialization table, id scheme, `:ancestors`,
+  `:match`), not a changelog of this refactor.
+
+---
+
 ## Implementation Order
 
 - [ ] **Phase 1a:** In `rulebase-analysis`: extract ancestors-fn (with fallback), add `->memoized-ancestors`, hoist `type-analysis-map` (with `:ns-name`) out of `build-dep-graph`, build serialized ancestors index in per-production ns context (sorted). Extend `resolve-type` to kind-explicit serialization
-- [ ] **Phase 1b:** Add `:ancestors` field (objects with `type`/`known`, lexicographically sorted) to fact-type entries in `build-fact-type-summary-map` (second pass)
-- [ ] **Phase 1c:** Update detail fact-type schema (`AncestorEntry` in `api.clj`); leave `FactTypeListItem` and `fact-types-list` unchanged. Verify router percent-decoding of `:fq-name` path params and `fq-name-from-param` against kind-explicit spellings (`:my.ns/child`, `"foo"`, `[:a 1]`)
-- [ ] **Phase 1d:** Add server tests for `:ancestors` (default-ancestors noise, `known` flag, ordering, missing-meta, nil-returning fn, memoization, mixed-kind hierarchy, kind-explicit serialization, symbol ns-resolution parity)
-- [ ] **Phase 1e:** Update UI types (`AncestorEntry`, detail `FactTypeSummary` in `api.ts`)
+- [ ] **Phase 1b:** Add `:ancestors` field (objects with `type`/`known`, deterministic topological order with lexicographic tie-break + cycle guard) to fact-type entries in `build-fact-type-summary-map` (second pass)
+- [ ] **Phase 1c:** Add the uniform route-id fn (slug + 8-char base36 SHA-1 suffix, 60-char slug cap) to `serialize.clj`; add `:id` to fact-type entries (`FactTypeListItem` + detail) and to `AncestorEntry`; build fact-type id reverse index in `rulebase-analysis` (uniqueness asserted); `handle-get-fact-type` resolves id-only. Router-level tests for id-based lookups (keyword/tuple/string/class forms)
+- [ ] **Phase 1d:** Add server tests for `:ancestors` (default-ancestors noise, `known` flag, ordering, missing-meta, nil-returning fn, memoization, mixed-kind hierarchy, kind-explicit serialization, symbol ns-resolution parity, route ids)
+- [ ] **Phase 1e:** Update UI types (`AncestorEntry` with `type`/`id`/`known`, `id` on `FactTypeListItem`/`RuleListItem`/`QueryListItem`/details/`ProductionReference`, `ancestors?` on detail `FactTypeSummary` in `api.ts`)
+- [ ] **Phase 1g:** Production route ids: `:id` on rule/query list + detail entries and every `ProductionDep`; production id reverse index; all rule/query/session detail handlers resolve id-only; delete `fq-name-from-param` server-side and its tests; update UI `factPath`/rule/query link builders to use `:id` and delete `toRouteId`/`fromRouteId`/`splitQualifiedName` — all grouping/display consumes `:ns` + `:name` from payloads, never parsed (`FactTypeList.svelte`, `SessionNav.svelte` group by server-provided `:ns`)
 - [ ] **Phase 1f:** Update API documentation (`explorer-graph-api.md`)
 - [ ] **Phase 2a:** Add `matching-type-pairs` helper; simplify `downstream?` to consume the memoized set fn
-- [ ] **Phase 2b:** Update `get-production-deps-summary` (+ `serialize-match` in `serialize.clj`) to attach `:match` with symmetric `producer-type`/`consumer-type` keys, sorted post-serialization
+- [ ] **Phase 2b:** Update `get-production-deps-summary` (+ `serialize-match` in `serialize.clj`) to attach `:match` with symmetric `producer-type`/`consumer-type` keys, each serialized in its own production's ns context, sorted post-serialization
 - [ ] **Phase 2c:** Update `ProductionDep` schema in `api.clj` with optional `:match` array
-- [ ] **Phase 2d:** Add server tests for `:match` (direct, hierarchy, multi-type, dedup, symmetry, dep-graph regression)
+- [ ] **Phase 2d:** Add server tests for `:match` (direct, hierarchy, multi-type, dedup, symmetry, cross-field consistency incl. sidecar symbol in foreign ns, dep-graph regression)
 - [ ] **Phase 2e:** Update UI types (`ProductionReference`, `TypeBridgeMatch` in `api.ts`)
 - [ ] **Phase 2f:** Update API documentation (`explorer-graph-api.md`)
+- [ ] **Docs hygiene pass:** verify the Documentation & Schema Principles — schemas carry the structural truth; no docstring enumerates shapes, narrates design history, or references this plan; project docs cite code (not vice versa) for impl details
 - [ ] **Phase 3:** UI integration (future, scoped separately)
 
 *(Deleted: old Phase 2.5 — no longer needed since the dep-graph shape is
