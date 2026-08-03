@@ -6,46 +6,6 @@ self-explanatory without requiring the user to cross-reference fact-type views.
 
 ---
 
-## Key Corrections from Critical Review
-
-This revision fixes four findings from reviewing the original plan against the
-actual server and clara-rules sources:
-
-1. **`ancestors-fn` is never nil in a real session.** Clara's
-   `create-ancestors-fn` (compiler.clj) defaults to `clojure.core/ancestors`
-   when the user configures neither `:ancestors-fn` nor `:hierarchy`.  The
-   original plan assumed "no hierarchy configured ⇒ `ancestors` is `[]`".
-   In reality every Java class fact type has ancestors — for a `defrecord`
-   that is ~10–20 entries (`java.lang.Object`, `clojure.lang.IPersistentMap`,
-   `java.io.Serializable`, …).  The noise problem and the `known` flag are
-   therefore central, not incidental.  (See "System Context" and Phase 1.)
-
-2. **`build-fact-type-summary-map` operates on serialized strings, not raw
-   types.**  Its input is the rule/query *summaries*, whose `:lhs-types` /
-   `:insert-types` / `:retract-types` are already strings produced by
-   `serialize/serialize-fact-type`.  You cannot call `ancestors-fn` on those
-   map keys.  Raw types must be threaded through from `rulebase-analysis`.
-   (See Phase 1a.)
-
-3. **Phase 2 no longer changes the internal dep-graph shape.**  The original
-   plan changed edges from name→set to name→map, which would have silently
-   broken `rule-is-sink?` (it filters `:downstream` entries as bare names —
-   an internal consumer the plan missed), in addition to the acknowledged
-   breakage of tests, `annotations_report.bb`, and `analysis.edn` tooling.
-   The `:match` info is fully derivable at serialization time from data that
-   already exists, so the shape change is unnecessary.  The revised design
-   computes type-bridge pairs in `get-production-deps-summary` and deletes
-   old Phase 2.5 entirely.  (See Phase 2.)
-
-4. **Internal naming stays consistent with `internal-analysis-models.md`.**
-   The internal model already uses `:consumed-types` / `:produced-types`.
-   The original plan introduced a third convention (`:produces` /
-   `:satisfies`) plus an internal→external rename layer.  The revised design
-   has no internal `:via` structure at all; the serialization helper emits
-   `producer-type` / `consumer-type` directly.
-
----
-
 ## Problem Statement
 
 The analysis graph (`build-dep-graph`) already respects Clara's `ancestors-fn`
@@ -81,17 +41,18 @@ without cross-referencing.
 ```
 
 `get-alphas-fn` is a component of the compiled rulebase.  Its metadata carries
-`:ancestors-fn` and `:fact-type-fn`.  **Important** (verified against
-`clara.rules.compiler/create-ancestors-fn` and `create-get-alphas-fn`):
+`:ancestors-fn` and `:fact-type-fn`:
 
 - The meta `:ancestors-fn` is a *wrapped* fn that returns an empty set for
   internal system facts (`ISystemFact`) and otherwise delegates to the
   session's ancestors-fn.
 - The session's ancestors-fn **defaults to `clojure.core/ancestors`** — it is
-  non-nil for every real session.  For Java classes, `clojure.core/ancestors`
-  returns the *transitive closure* of all superclasses **and all interfaces**.
-  For a `defrecord` fact type that is ~10–20 entries, almost all of them
-  ghosts (`java.lang.Object`, `clojure.lang.*` interfaces, `Serializable`).
+  non-nil for every real session (`clara.rules.compiler/create-ancestors-fn`).
+  For Java classes, `clojure.core/ancestors` returns the *transitive closure*
+  of all superclasses **and all interfaces**.  For a `defrecord` fact type
+  that is ~10–20 entries, almost all of them ghosts (`java.lang.Object`,
+  `clojure.lang.*` interfaces, `Serializable`).  This noise is why the
+  `known` flag (Phase 1) is central to the design.
 - A hand-built rulebase (unit tests) may lack the meta entirely; only then is
   `ancestors-fn` actually nil.  Precedent for the defensive fallback exists in
   `analyze.clj/build-fallback-type-filter`:
@@ -108,9 +69,9 @@ without cross-referencing.
 
 Two cases: (a) direct type match, or (b) the inserter's type has the reader's
 type among its ancestors.  This boolean check is used to build the dep-graph
-but the *specific pair* that caused a match is not retained.  Note it rebuilds
+but the *specific pair* that caused a match is not retained.  It also rebuilds
 `(set (ancestors-fn ...))` on every call inside an O(rules² × types²) loop —
-memoization target (see Phase 1a).
+a memoization target (Phase 1a).
 
 ### Current data structures
 
@@ -144,8 +105,8 @@ memoization target (see Phase 1a).
   resolving unresolved symbols; queries have no `:ns-name` and use the
   `get-production-ns-name-sym` derivation.
 - `build-fact-type-summary-map` consumes those serialized summaries — its
-  keys and values are strings.  Raw types are no longer available at that
-  layer and must be passed in (Phase 1a).
+  keys and values are strings.  Raw types are not available at that layer
+  and must be passed in (Phase 1a).
 
 ### Heterogeneous type values & determinism (design invariant)
 
@@ -174,10 +135,10 @@ boundary.**
 
 ### Kind-explicit serialization (the only heterogeneity handling)
 
-Beyond the raw-logic/string-display invariant above, the plan does **no**
+Beyond the raw-logic/string-display invariant above, the design has **no**
 kind-specific handling anywhere.  The single point of sensitivity is the
 serialization function, which is extended so the representation is
-self-describing in JSON — then we stop worrying about kinds entirely.
+self-describing in JSON — then kinds need no further attention.
 
 `serialize/resolve-type` gains kind-explicit branches:
 
@@ -195,20 +156,18 @@ Why this is worth the change:
 
 - **Collisions effectively eliminated.**  A keyword, string, and symbol
   can never serialize identically, so the `known` check can't conflate
-  kinds and no dedup-accommodating-collisions machinery is needed.  Raw
-  values are already deduped by sets; serialized output inherits that.
+  kinds and no collision-handling machinery is needed anywhere else.
+  Raw values are already deduped by sets; serialized output inherits that.
 - **Self-explanatory API.**  A consumer reading `"ancestors"` or
   `"match"` can tell the kind of each type at a glance — keyword types
-  are common in our rulesets, so the visible colon is a net clarity win
-  in the UI as well.
+  are the common case in our rulesets, so the visible colon is a clarity
+  win in the UI as well.
 
-API stability posture: **the API is alpha and shaped at-will** — there
-are no backward-compatibility constraints beyond what this plan already
-states.  The rename of keyword/string fact-type names (colon, quotes) is
-vetted and intentional — keyword types are the common case in our
-rulesets, and the visible colon is a clarity win, not a compat risk.
-Class names are unchanged.  The serialization table above must be
-documented in `explorer-graph-api.md`.
+API stability posture: **the API is alpha and shaped at-will** — there are
+no backward-compatibility constraints.  The rename of keyword/string
+fact-type names (colon, quotes) is intentional; class names are unchanged.
+The serialization table above must be documented in
+`explorer-graph-api.md`.
 
 ### Route IDs (`:id`) — the URL strategy, for fact types AND productions
 
@@ -216,8 +175,8 @@ Kind-explicit names are not URI-friendly (`:my.ns/child`, `"foo"`,
 `[:a 1]`), and production names are worse than they look: Clojure rule
 and query names freely contain `?`, `!`, `*`, `+` and friends
 (`my.ns/verify-docs?` — `?` in URLs is a demonstrated problem in the
-UI today).  Percent-encoding produces unreadable URLs and keeps the
-UI's weak last-dot `toRouteId`/`fromRouteId` heuristic alive.
+UI today).  Percent-encoding produces unreadable URLs and depends on
+the UI's fragile last-dot `toRouteId`/`fromRouteId` heuristic.
 
 **Decision: every fact type, rule, and query gains a server-issued,
 deterministic `:id` used for ALL URL linkage — no fallbacks, no legacy
@@ -247,7 +206,7 @@ production `:name` string (rules/queries):
 | `my.ns/verify-docs?` (rule) | `my.ns.verify-docs-q2w8e5r4` |
 | `my.ns/app-by-id` (query) | `my.ns.app-by-id-n3m7b5v9` |
 
-Design rules (review-driven):
+Design rules:
 
 - **Uniform — no special cases.**  Classes get the same slug+hash
   treatment as every other kind.  One code path, one interface, no
@@ -259,17 +218,15 @@ Design rules (review-driven):
   `[A-Za-z0-9.-]` → `-`) because readability is the slug's only job —
   uniqueness is the hash's job.  The 60-char cap only affects
   pathological names; the hash still distinguishes them.
-- **8 base36 chars (~41 bits) of hash.**  6 chars (~31 bits) was too
-  thin: birthday collisions become plausible around ~46k entries.  At
-  41 bits, a collision needs ~1.5M entries — three orders of magnitude
-  above our 3k-rule scale.  Longer hashes buy nothing and hurt
+- **8 base36 chars (~41 bits) of hash** — birthday-safe to ~1.5M
+  entries, three orders of magnitude above our 3k-rule scale (~10⁻⁹
+  collision chance per analysis).  Longer hashes buy nothing and hurt
   readability.
 - **Stability across analysis runs comes from determinism, not from
   the index.**  `id = f(name)` depends only on the name, so re-running
   the analysis with new types added never changes existing ids — old
   URLs keep working.  The only cross-run risk is a *new* name
-  colliding with an existing id (~10⁻⁹ chance per analysis at our
-  scale); see next bullet for how that surfaces.
+  colliding with an existing id; see the next rule for how that surfaces.
 - **Uniqueness is asserted per analysis.**  The reverse index (id →
   name) is built once per `rulebase-analysis` and cached with it.  If
   two names ever map to the same id, index construction throws — a
@@ -288,9 +245,9 @@ Design rules (review-driven):
   index and 404 otherwise.  No canonical-name fallback, no
   `fq-name-from-param`, no last-dot heuristic anywhere.
 - **Id generation is memoized** (name → id) for the duration of the
-  analysis build: SHA-1 + slug work repeats per occurrence otherwise —
-  the same production name appears in thousands of `ProductionDep`
-  entries across rule/query summaries.
+  analysis build: SHA-1 + slug work would otherwise repeat per
+  occurrence — the same production name appears in thousands of
+  `ProductionDep` entries across rule/query summaries.
 - **Ancestor entries carry `id`** (see 1b): `known: true` ancestors
   are directly linkable without the UI building a name→id map.  Ghost
   (`known: false`) entries carry an id **for shape uniformity only** —
@@ -304,14 +261,14 @@ Design rules (review-driven):
   endpoint (which includes `id`) as a name→id lookup table — or we
   embed `producer-type-id`/`consumer-type-id` then.  No decision forced.
 
-Verified router facts (empirically, against the project's reitit): an
-unencoded literal `/` splits segments and 404s; the ids above contain
-only `[A-Za-z0-9.-]`, so they always route as plain single segments.
+Router behavior (verified against the project's reitit): an unencoded
+literal `/` splits segments and 404s; the ids above contain only
+`[A-Za-z0-9.-]`, so they always route as plain single segments.
 
-Server test gap: `api_test.clj` currently exercises only plain class
-names through the router.  Add router-level tests for id-based lookups
-across rules, queries, and fact types, and delete tests that exercise
-`fq-name-from-param` (Phase 1).
+`api_test.clj` currently exercises only plain class names through the
+router — Phase 1 adds router-level tests for id-based lookups across
+rules, queries, and fact types, and removes tests that exercise
+`fq-name-from-param`.
 
 Remaining accepted limitation (no handling, documentation only):
 **arbitrary objects** without a stable `toString`/`print-method` (default
@@ -337,7 +294,8 @@ the hierarchy, never in a production's LHS/insert/retract).
 ### 1a. Thread raw types and a memoized ancestors-fn through the analysis
 
 `build-fact-type-summary-map` works on serialized strings, so `ancestors-fn`
-cannot be applied at that layer without raw types.  Restructure:
+cannot be applied at that layer.  Raw types are threaded through from
+`rulebase-analysis`:
 
 1. **Hoist the type-analysis-map out of `build-dep-graph`.**  Compute
    `type-analysis-map` once in `rulebase-analysis` and pass it to
@@ -357,10 +315,11 @@ cannot be applied at that layer without raw types.  Restructure:
    ```
    Clara's own memoization lives inside `fact-type->roots`, **not** on the
    meta-carried fn, so this memoization is not redundant.  One memoized fn
-   serves all three consumers: `downstream?` inside `build-dep-graph`,
-   Phase 1's `:ancestors` enrichment, and Phase 2's `matching-type-pairs`.
-   Memoizing the *set* (not the seq) also fixes the per-call `(set …)`
-   allocation in today's `downstream?`.
+   serves all three consumers: `downstream?` inside `build-dep-graph`
+   (simplified to `(contains? (ancestors-set-fn t) reader-type)` in the
+   same change), Phase 1's `:ancestors` enrichment, and Phase 2's
+   `matching-type-pairs`.  Memoizing the *set* (not the seq) also removes
+   the per-call `(set …)` allocation in today's `downstream?`.
 3. **Build a serialized-name → ancestors-strings index** in
    `rulebase-analysis`:
    - **Per production**, pair each raw type in its `:consumed-types` ∪
@@ -385,7 +344,6 @@ cannot be applied at that layer without raw types.  Restructure:
    complete (only then is the full set of "known" types known), setting
    `known` by membership of each serialized ancestor string in the
    fact-types map keys, and `id` via the memoized route-id fn.
-   fact-types map keys.
 
 ### 1b. New field: `:ancestors`
 
@@ -395,8 +353,8 @@ Add to each fact-type entry:
 {
   "name": "my.ns.MarkerRecord",
   "ancestors": [
-    {"type": "my.ns.IScanMarker", "known": true},
-    {"type": "java.lang.Object", "known": false}
+    {"type": "my.ns.IScanMarker", "id": "my.ns.IScanMarker-b2c4d6e8", "known": true},
+    {"type": "java.lang.Object", "id": "java.lang.Object-f4g6h8j1", "known": false}
   ],
   "used-by-rules": [...],
   ...
@@ -434,15 +392,13 @@ The fact-type entry itself also gains:
 
 **The `known` flag is the primary noise filter.**  Because Clara's default
 ancestors-fn is `clojure.core/ancestors`, every record type carries a long
-tail of ghost JDK/CLJ interfaces.  This is expected and accepted for
-Phase 1 (faithful to the requirement "show what ancestors-fn returns"):
-`known: false` entries are exactly the entries that can never bridge a
-dependency edge (a type only creates an edge if some production consumes
-it, which makes it `known`).  The UI should render `known` ancestors
-first/prominently.  If payload or noise proves problematic in practice, a
-follow-up can add server-side suppression of `java.lang.Object` /
-`clojure.lang.*` ghosts — deliberately **not** in Phase 1 to keep the
-semantics simple and faithful.
+tail of ghost JDK/CLJ interfaces.  This is expected: `known: false`
+entries are exactly the entries that can never bridge a dependency edge
+(a type only creates an edge if some production consumes it, which makes
+it `known`).  The UI renders `known` ancestors first/prominently.  If
+payload or noise proves problematic in practice, a follow-up can add
+server-side suppression of `java.lang.Object` / `clojure.lang.*` ghosts —
+deliberately out of Phase 1 to keep the semantics simple and faithful.
 
 Additional rules:
 
@@ -478,29 +434,28 @@ Additional rules:
 
 ### 1c. Fact types with no recorded usage ("ghost types")
 
-Fact types that appear ONLY as ancestors of other types need not appear in
-the fact-types map.  **Decision for Phase 1 (unchanged):** do NOT add such
-"ghost" types to the `fact-types` map.  They appear only in `ancestors`
-arrays with `"known": false`.  This gives the UI enough information to
-render them as plain text rather than broken links.  If this proves
-insufficient, a follow-up can compute transitive closure.
+Fact types that appear ONLY as ancestors of other types are NOT added to
+the `fact-types` map.  They appear only in `ancestors` arrays with
+`"known": false`.  This gives the UI enough information to render them
+as plain text rather than broken links.  If this proves insufficient, a
+follow-up can compute transitive closure.
 
 ### 1d. List endpoint stays lightweight
 
-The original plan added `:ancestors` to `fact-types-list` (the
-`/v1/fact-types` list payload).  **Revised decision: `:ancestors` stays
-off the list payload** (same rationale as `rules-list` omitting
-`:upstream`/`:downstream` — payload weight at 3k+ rules; `:ancestors`
-is the heaviest field this plan adds at 10–20 entries per type with the
-default ancestors-fn).  **Exception: `:id` IS included in the list
-payload** — it is small and the UI needs it to build fact-type links
-from list views and as a name→id lookup table.  The **detail** endpoint
-(`handle-get-fact-type`) serves the full entry from the analysis map and
-gets `:ancestors` for free once it is in `build-fact-type-summary-map`.
+`:ancestors` is **detail-only** — it is the heaviest field this plan
+adds (10–20 entries per type with the default ancestors-fn), and the
+list endpoint stays lightweight for the same reason `rules-list` omits
+`:upstream`/`:downstream` (payload weight at 3k+ rules).  **`:id` and
+`:ns` ARE included in the list payload** — they are small, and the UI
+needs them to build fact-type links from list views, to use the list as
+a name→id lookup table, and to group by namespace.  The **detail**
+endpoint (`handle-get-fact-type`) serves the full entry from the
+analysis map and gets `:ancestors` for free once it is in
+`build-fact-type-summary-map`.
 
 Consequence: `FactTypeListItem` gains only `:id` and `:ns`; only the
-detail schema gains `:ancestors`. (Production list entries already carry
-`:ns`.)
+detail schema gains `:ancestors`.  (Production list entries already
+carry `:ns`.)
 
 ### 1e. Files to modify
 
@@ -511,27 +466,24 @@ detail schema gains `:ancestors`. (Production list entries already carry
 | `server/src/clara/server/graph/api.clj` | Add `AncestorEntry` schema (`type`/`id`/`known`). Add `(s/optional-key :ancestors)` to `GetFactTypeResponse`. Add `:id` and `:ns` (nullable) to `FactTypeListItem` + detail entry; add `:id` to `RuleListItem`, `QueryListItem`, detail entries, and `ProductionDep`. All detail handlers (rules, queries, fact-types, session variants) resolve id-only via the reverse indexes; delete `fq-name-from-param` and any test exercising it. Router-level tests for id-based lookups. |
 | `server/test/clara/server/tools/graph/core_test.clj` | Tests verifying `:ancestors` shape with `:known` flag, hierarchy ordering + determinism, default-ancestors noise behavior, and missing-meta case. |
 | `ui/src/lib/types/api.ts` | Add `AncestorEntry` interface (`type`/`id`/`known`). Add `id: string` and `ns: string \| null` to `FactTypeListItem` + detail type; add `id` to rule/query/`ProductionReference` types. Add `ancestors?: AncestorEntry[]` to the detail fact-type type. |
-| `docs/explorer-graph-api.md` | Document the new `:ancestors` field with `type`/`known` keys on the detail view. Document kind-explicit type serialization (keyword colon, string quotes, `symbol[...]`) as an API-visible clarification. |
+| `docs/explorer-graph-api.md` | Document the `:ancestors` field with `type`/`id`/`known` keys on the detail view, the kind-explicit serialization table, and the `:id` scheme. |
 
 ### 1f. API compatibility
 
 Alpha API: additive changes need no justification.  New optional
 `:ancestors` key on fact-type **detail** objects.  Existing keys and the
-list payload unchanged (keyword/string *values* in existing fields gain
-the new spellings — vetted, see System Context).
+list payload otherwise unchanged (keyword/string *values* in existing
+fields gain the new spellings — see System Context).
 
 ### 1g. Test cases
 
 1. **Default ancestors-fn (no user hierarchy):** a `defrecord` fact type
    yields a non-empty `:ancestors` containing `java.lang.Object` and
    `clojure.lang.*` interfaces, all `known: false`; an ancestor that some
-   rule has on its LHS is `known: true`.  *(Replaces the original plan's
-   invalid "no hierarchy ⇒ `[]`" case — Clara always supplies
-   `clojure.core/ancestors`.)*
+   rule has on its LHS is `known: true`.
 2. **Missing meta (hand-built rulebase):** no `:ancestors-fn` in
-   `get-alphas-fn` meta → fallback yields `[]` (or the
-   `clojure.core/ancestors` fallback — pick one behavior and pin it in the
-   test; recommend matching `analyze.clj`'s fallback for consistency).
+   `get-alphas-fn` meta → falls back to `clojure.core/ancestors`,
+   matching `analyze.clj`'s fallback convention.
 3. **Clojure `derive` hierarchy:**
    ```clojure
    (derive ::child ::parent)
@@ -558,7 +510,7 @@ the new spellings — vetted, see System Context).
 8. **Mixed-kind hierarchy (custom ancestors-fn):** keyword type
    `::child` with ancestors-fn returning `["string-parent" ::kw-parent]`
    → serialized kind-explicitly (`"\"string-parent\""`,
-   `":my.ns/kw-parent"`), sorted, `known` flags computed per entry.
+   `":my.ns/kw-parent"`), ordered, `known` flags computed per entry.
 9. **Kind-explicit serialization:** keyword → `:my.ns/child` (colon
    preserved); string type → `"foo"` (quotes); unresolved symbol →
    `symbol[my.ns/foo]`; vector type → `[:a 1]`; class unchanged.  A
@@ -587,22 +539,21 @@ the new spellings — vetted, see System Context).
 carries enough information to show *which* produced type satisfies *which*
 required type, and whether the match is direct or through hierarchy.
 
-### 2a. Do NOT change the internal dep-graph shape — compute pairs at serialization time
+### 2a. Dep-graph shape is unchanged — pairs are computed at serialization time
 
-The original plan changed dep-graph edges from name→set to name→map with a
-`:via` vector.  That change is **unnecessary and harmful**:
+The internal dep-graph keeps its current shape (name → `{:upstream #{…}
+:downstream #{…}}` sets of names).  Changing it is unnecessary and
+harmful:
 
-- It silently breaks `rule-is-sink?` (core.clj), which filters
-  `:downstream` entries as bare production names — with map values it
-  would call `(get production-map [name {:via …}])`, get nil, and mark
-  every rule a sink.  The original plan's consumer audit missed this.
-- It breaks `test-dep-graph-full`, `test-dep-graph-hierarchy`,
-  `annotations_report.bb`, and any `analysis.edn` consumer (old
-  Phase 2.5).
+- `rule-is-sink?` (core.clj) filters `:downstream` entries as bare
+  production names; a richer edge value would break it.
+- `test-dep-graph-full`, `test-dep-graph-hierarchy`,
+  `annotations_report.bb`, and any `analysis.edn` consumer read the
+  current shape.
 
 The `:match` info is a pure function of data that already exists:
 `(matching-type-pairs ancestors-set-fn produced-types consumed-types)`
-for an adjacent (producer, consumer) pair.  Compute it where it is
+for an adjacent (producer, consumer) pair.  It is computed where it is
 serialized — in `get-production-deps-summary` — using the hoisted
 `type-analysis-map` and the memoized ancestor-set fn from Phase 1a.
 
@@ -617,29 +568,27 @@ serialized — in `get-production-deps-summary` — using the hoisted
          {:producer-type pt :consumer-type ct})
        (distinct)))
 
-;; `downstream?` simplifies — the memoized fn already returns a set:
+;; `downstream?` — the memoized fn already returns a set:
 (defn- downstream? [ancestors-set-fn inserter-type reader-type]
   (or (= inserter-type reader-type)
       (contains? (ancestors-set-fn inserter-type) reader-type)))
 ```
 
-Benefits over the shape change:
+Properties of this approach:
 
 - **Zero breakage.**  `:dep-graph`, `rule-is-source?`, `rule-is-sink?`,
   tests, `analysis.edn`, and external tooling are all untouched.
-  Old Phase 2.5 is deleted.
 - **Cheaper.**  Pairs are computed only for actual edges, not for every
   candidate pair in the O(n²) loop.  (`build-dep-graph` keeps its current
-  boolean `some-type-consumed?` check, now backed by the memoized set fn.)
-- **No internal/external naming divergence.**  No `:via`/`:produces`/
-  `:satisfies` layer; the serialized keys are produced directly.
-  Internal naming stays aligned with `internal-analysis-models.md`
-  (`:produced-types` / `:consumed-types`).
+  boolean `some-type-consumed?` check, backed by the memoized set fn.)
+- **No internal/external naming divergence.**  The serialized keys are
+  produced directly; internal naming stays aligned with
+  `internal-analysis-models.md` (`:produced-types` / `:consumed-types`).
 
-**Trade-off (accepted):** the `analysis.edn` dump's `:dep-graph` will not
-carry type-pair info.  If external tooling later wants it, add a separate
+Consequence: the `analysis.edn` dump's `:dep-graph` does not carry
+type-pair info.  If external tooling later wants it, add a separate
 top-level `:dep-bridges` key to the analysis output — additive, no shape
-change.  Not in scope now.
+change.  Out of scope here.
 
 ### 2b. Serialize type-bridge info on `:upstream` / `:downstream`
 
@@ -648,7 +597,7 @@ change.  Not in scope now.
 {"name": "my.ns/producer-rule", "ns": "my.ns", "type": "rule"}
 ```
 
-**Proposed enrichment — symmetric model (unchanged from original plan):**
+**Enrichment — symmetric model:**
 
 Both upstream and downstream entries use the same two keys with consistent
 semantics.  Whether you see an upstream or downstream entry is determined by
@@ -698,9 +647,9 @@ would throw `ClassCastException`).
 ### 2c. Update `get-production-deps-summary`
 
 This function currently takes `[dep-graph production-name production-map]`
-and serializes the name sets.  Revised signature: it also receives the
-`type-analysis-map` and the memoized ancestor-set fn.  For each adjacent
-production name in `:upstream` / `:downstream`:
+and serializes the name sets.  It also receives the `type-analysis-map`
+and the memoized ancestor-set fn.  For each adjacent production name in
+`:upstream` / `:downstream`:
 
 1. Look up both ends' `:produced-types` / `:consumed-types` **and
    `:ns-name`** in `type-analysis-map` (upstream name is the producer,
@@ -722,7 +671,7 @@ string-equal the corresponding entry in the producer's own
 `:insert-types`/`:retract-types`, and `consumer-type` must string-equal
 the corresponding entry in the consumer's `:lhs-types` — guaranteed by
 using each end's own `:ns-name` (the same context `production-summary`
-uses) and worth pinning in a test.
+uses) and pinned in a test.
 
 The internal keys `:producer-type` / `:consumer-type` are already
 kebab-case, so serialization is just `resolve-type` on the values — no
@@ -741,7 +690,7 @@ those are two distinct, correct pairs).
 ### 2d. Function decomposition
 
 1. Hoist `type-analysis` / `type-analysis-map` from `build-dep-graph` into
-   `rulebase-analysis` (pure refactor).
+   `rulebase-analysis` (pure refactor, Phase 1a).
 2. `->memoized-ancestors` helper (Phase 1a).
 3. `matching-type-pairs` helper (with `distinct`).
 4. `get-production-deps-summary` gains the two args and a
@@ -754,7 +703,7 @@ those are two distinct, correct pairs).
 | `server/src/clara/server/tools/graph/core.clj` | Hoist `type-analysis-map`. `get-production-deps-summary`: compute and attach `:match`. `production-summary` / `build-production-summary-map`: thread new args. `build-dep-graph`: use memoized ancestor-set fn (behavior unchanged). |
 | `server/src/clara/server/tools/graph/serialize.clj` | `serialize-match` helper: raw pair → sorted `producer-type`/`consumer-type` string maps. |
 | `server/src/clara/server/graph/api.clj` | Extend `ProductionDep` schema with `(s/optional-key :match)` array of `{producer-type, consumer-type}`. Schema docstring states the symmetric semantics: identical shape and meaning on upstream and downstream entries — `producer-type` is what the producing rule inserts, `consumer-type` is what the consuming rule's LHS requires. |
-| `server/test/clara/server/tools/graph/core_test.clj` | Add tests for `:match` on dep links (direct, hierarchy, multi-type, dedup, symmetric both-directions). Existing dep-graph shape tests **stay green unchanged** — this is the proof the simplification works. |
+| `server/test/clara/server/tools/graph/core_test.clj` | Add tests for `:match` on dep links (direct, hierarchy, multi-type, dedup, symmetric both-directions). Existing dep-graph shape tests stay green unchanged — confirming zero internal breakage. |
 | `ui/src/lib/types/api.ts` | Extend `ProductionReference` with `match?: TypeBridgeMatch[]`. Add `TypeBridgeMatch` interface. |
 | `docs/explorer-graph-api.md` | Document `:match` field on upstream/downstream entries. |
 
@@ -804,8 +753,8 @@ parsing path.
 ## Edge Cases Checklist (both phases)
 
 - **Default-ancestors noise:** every record type has 10–20 ghost ancestors.
-  Accepted for Phase 1; `known` flag is the filter signal; possible
-  follow-up suppression of `java.lang.Object` / `clojure.lang.*`.
+  Expected; the `known` flag is the filter signal; possible follow-up
+  suppression of `java.lang.Object` / `clojure.lang.*`.
 - **`ancestors-fn` never nil in real sessions;** nil only for hand-built
   rulebases.  Use the `analyze.clj`-style fallback
   `(or meta-ancestors-fn ancestors)` for consistency.
@@ -813,9 +762,9 @@ parsing path.
   (precedent: `build-fallback-type-filter` wraps in try/catch).
 - **Retract types are in `:produced-types`** (pre-existing:
   `(into insert-types retract-types)`).  A dep edge created by a *retract*
-  will carry a `:match` whose `producer-type` is the retracted type —
+  carries a `:match` whose `producer-type` is the retracted type —
   "producer" wording is imperfect there, but the coupling is real (a
-  retraction can invalidate downstream joins) and matches today's edge
+  retraction can invalidate downstream joins) and matches the existing edge
   semantics.  Documented as a known limitation; a future `:match` entry
   flag (e.g. `via: "retract"`) is out of scope.
 - **Self-edges excluded** (`(not= p-name1 p-name2)`): a rule that inserts
@@ -834,8 +783,8 @@ parsing path.
   ancestors-fn call + one O(k²) topological sort (k ≤ ~20) per fact
   type, at analysis build time — the analysis is cached
   (`warm-analysis-cache!`), so requests never pay it.  Trivial at 3k+
-  rule scale; lazy loading rejected (the detail endpoint serves from the
-  same analysis map).
+  rule scale.  Computed eagerly because the detail endpoint serves from
+  the same analysis map.
 - **Symbol resolution before ancestors:** verify at implementation time
   that raw types reaching the ancestors index are resolved (LHS types
   are compiler-resolved; sidecar-annotation symbols may not be — resolve
@@ -853,19 +802,19 @@ parsing path.
   `matching-type-pairs` handles queries identically (they have
   `:consumed-types`, empty `:produced-types`).
 - **Default ancestors-fn on non-hierarchical types:**
-  `(clojure.core/ancestors "foo")` → nil (verified; same for vectors and
+  `(clojure.core/ancestors "foo")` → nil (same for vectors and
   underived keywords) — no throw, and `(set nil)` → `#{}`, so
   `->memoized-ancestors` is safe for every kind.
 - **Heterogeneous type values:** handled exactly once, by kind-explicit
   serialization (System Context).  Raw values for all logic; strings
-  only at the display boundary; sorting strictly post-serialization.
+  only at the display boundary; ordering strictly post-serialization.
   Unstable `toString` on custom type objects is a documented, accepted
   limitation.
 - **Kind-explicit serialization renames keyword/string fact types**
-  (colon, quotes) — vetted for the alpha API; update
-  `explorer-graph-api.md` with the serialization table and the `:id`
-  scheme.  URLs never carry canonical names (see "Fact-type route IDs"),
-  so the spellings' URI-unfriendliness is display-only.
+  (colon, quotes) — update `explorer-graph-api.md` with the
+  serialization table and the `:id` scheme.  URLs never carry canonical
+  names (see "Route IDs"), so the spellings' URI-unfriendliness is
+  display-only.
 - **Route-id collisions:** ~41 bits of hash (8 base36 chars) —
   birthday-safe to ~1.5M entries, ~10⁻⁹ per analysis at our scale —
   and asserted unique at reverse-index build time (throws loudly, in
@@ -886,8 +835,8 @@ parsing path.
   order: **plain keywords (majority case)**, vector tuples of
   keyword-led forms like `[:thing "value"]` (minor secondary), and
   class/record facts (minor, but must be supported — and they are
-  arguably the most straightforward path anyway).  The new fixture must
-  reflect that emphasis.  Keep it in the **same loan-application
+  arguably the most straightforward path anyway).  The new fixture
+  reflects that emphasis and stays in the **same loan-application
   domain** as `loan_app_rules.clj` / `loan_doc_rules.clj` (a coherent
   theme makes the rules' relationships self-explanatory), with a
   distinct ns name to avoid collisions, e.g.
@@ -1003,14 +952,14 @@ Additive (can trail):
 
 ## Implementation Order
 
-- [ ] **Phase 1a:** In `rulebase-analysis`: extract ancestors-fn (with fallback), add `->memoized-ancestors`, hoist `type-analysis-map` (with `:ns-name`) out of `build-dep-graph`, build serialized ancestors index in per-production ns context (topologically ordered); simplify `downstream?` to consume the memoized set fn (moved from Phase 2a — same edit, avoids double-touching `build-dep-graph`); verify `analyze.clj/build-fallback-type-filter` stays correct (share the extraction/memoization utility if natural); verify raw types reaching the index are resolved. Extend `resolve-type` to kind-explicit serialization
-- [ ] **Phase 1b:** Add `:ancestors` field (objects with `type`/`known`, deterministic topological order with lexicographic tie-break + cycle guard) to fact-type entries in `build-fact-type-summary-map` (second pass)
+- [ ] **Phase 1a:** In `rulebase-analysis`: extract ancestors-fn (with fallback), add `->memoized-ancestors`, hoist `type-analysis-map` (with `:ns-name`) out of `build-dep-graph`, build serialized ancestors index in per-production ns context (topologically ordered); simplify `downstream?` to consume the memoized set fn in the same change; verify `analyze.clj/build-fallback-type-filter` stays correct (share the extraction/memoization utility if natural); verify raw types reaching the index are resolved. Extend `resolve-type` to kind-explicit serialization
+- [ ] **Phase 1b:** Add `:ancestors` field (objects with `type`/`id`/`known`, deterministic topological order with lexicographic tie-break + cycle guard) to fact-type entries in `build-fact-type-summary-map` (second pass)
 - [ ] **Phase 1c:** Add the uniform route-id fn (slug + 8-char base36 SHA-1 suffix, 60-char slug cap) to `serialize.clj`; add `:id` to fact-type entries (`FactTypeListItem` + detail) and to `AncestorEntry`; build fact-type id reverse index in `rulebase-analysis` (uniqueness asserted); `handle-get-fact-type` resolves id-only. Router-level tests for id-based lookups (keyword/tuple/string/class forms)
 - [ ] **Phase 1d:** Add server tests for `:ancestors` (default-ancestors noise, `known` flag, ordering, missing-meta, nil-returning fn, memoization, mixed-kind hierarchy, kind-explicit serialization, symbol ns-resolution parity, route ids)
 - [ ] **Phase 1f:** Rewrite `explorer-graph-api.md` for the new contract — flag: this is a full rewrite, not a targeted edit (serialization table, `:id` scheme + routes, `:ns`, `:ancestors`)
 - [ ] **Phase 1e:** Update UI types (`AncestorEntry` with `type`/`id`/`known`, `id` on `FactTypeListItem`/`RuleListItem`/`QueryListItem`/details/`ProductionReference`, `ancestors?` on detail `FactTypeSummary` in `api.ts`)
 - [ ] **Phase 1g:** Production route ids: `:id` on rule/query list + detail entries and every `ProductionDep`; production id reverse index; all rule/query/session detail handlers resolve id-only; delete `fq-name-from-param` server-side and its tests **in the same commit as the index implementation** (atomic revert if issues arise); update UI `factPath`/rule/query link builders to use `:id` and delete `toRouteId`/`fromRouteId`/`splitQualifiedName`. **Scope note: this is the largest single work item (~30–40% of the total)** — it touches every endpoint, every link builder, and all URL-constructing test fixtures. Budget accordingly
-- [ ] **Phase 2a:** Add `matching-type-pairs` helper (the `downstream?` simplification already landed in Phase 1a)
+- [ ] **Phase 2a:** Add `matching-type-pairs` helper
 - [ ] **Phase 2b:** Update `get-production-deps-summary` (+ `serialize-match` in `serialize.clj`) to attach `:match` with symmetric `producer-type`/`consumer-type` keys, each serialized in its own production's ns context, sorted post-serialization
 - [ ] **Phase 2c:** Update `ProductionDep` schema in `api.clj` with optional `:match` array
 - [ ] **Phase 2d:** Add server tests for `:match` (direct, hierarchy, multi-type, dedup, symmetry, cross-field consistency incl. sidecar symbol in foreign ns, dep-graph regression)
@@ -1018,7 +967,3 @@ Additive (can trail):
 - [ ] **Phase 2e:** Update UI types (`ProductionReference`, `TypeBridgeMatch` in `api.ts`)
 - [ ] **Docs hygiene pass:** verify the Documentation & Schema Principles — schemas carry the structural truth; no docstring enumerates shapes, narrates design history, or references this plan; project docs cite code (not vice versa) for impl details
 - [ ] **Phase 3:** UI integration (future, scoped separately)
-
-*(Deleted: old Phase 2.5 — no longer needed since the dep-graph shape is
-unchanged.  If `analysis.edn` consumers later need type-pair info, add an
-additive `:dep-bridges` top-level key as separate work.)*
