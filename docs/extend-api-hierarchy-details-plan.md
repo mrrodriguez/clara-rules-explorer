@@ -205,9 +205,10 @@ Why this is worth the change:
 API stability posture: **the API is alpha and shaped at-will** — there
 are no backward-compatibility constraints beyond what this plan already
 states.  The rename of keyword/string fact-type names (colon, quotes) is
-vetted and intentional; the overwhelmingly common case (Classes) is
-unchanged.  The serialization table above must be documented in
-`explorer-graph-api.md`.
+vetted and intentional — keyword types are the common case in our
+rulesets, and the visible colon is a clarity win, not a compat risk.
+Class names are unchanged.  The serialization table above must be
+documented in `explorer-graph-api.md`.
 
 **URL-safety of the new spellings.**  Fact-type names appear as URL path
 segments (`/v1/fact-types/:fq-name`), and the new representations are
@@ -671,11 +672,33 @@ parsing path.
   `handle-get-fact-type` / `fq-name-from-param` lookups against
   percent-decoded path params (see URL-safety in System Context).
 - **Test fixtures:** existing demo rules
-  (`server/test/clara/server/tools/graph/rules/`) are class-centric.
-  Phase 1 tests need new fixture namespaces: keyword-typed facts with a
-  `derive` hierarchy, and vector-tuple types — sessions built via
-  `mk-session` with explicit `:ancestors-fn` / `:fact-type-fn` options
-  where needed.
+  (`server/test/clara/server/tools/graph/rules/`) are class-centric —
+  but the realistic type universe for our rulesets is, in priority
+  order: **plain keywords (majority case)**, vector tuples of
+  keyword-led forms like `[:thing "value"]` (minor secondary), and
+  class/record facts (minor, but must be supported — and they are
+  arguably the most straightforward path anyway).  The new fixture must
+  reflect that emphasis.  Keep it in the **same loan-application
+  domain** as `loan_app_rules.clj` / `loan_doc_rules.clj` (a coherent
+  theme makes the rules' relationships self-explanatory), with a
+  distinct ns name to avoid collisions, e.g.
+  `loan_hierarchy_rules.clj`:
+  - **Primary: keyword-typed loan facts** with a `derive` hierarchy
+    (e.g. `::income-document` → `::supporting-document` →
+    `::loan-document`) — a rule inserting a derived keyword type, and a
+    rule/query whose LHS reads the ancestor keyword type (mirrors the
+    problem statement's Rule X / Rule Y scenario directly);
+  - **Secondary: vector-tuple fact types** in `[:keyword "value"]` form
+    (e.g. `[:loan/status "verified"]`, `[:document/flag
+    "income-mismatch"]`) exercising insertion, LHS matching, and
+    kind-explicit serialization;
+  - **Minor mix-in: one class/record fact type** (e.g. a
+    `LoanApplication` record) so a single session also covers the class
+    path (default `clojure.core/ancestors`, interface ancestors,
+    `known` ghosts) — deliberately a minor case, unlike the prior
+    loan-app fixtures;
+  - sessions built via `mk-session` with explicit `:ancestors-fn` /
+    `:fact-type-fn` options as needed for keyword/tuple fact typing.
 - **`resolve-type` totality:** its branches are total over heterogeneous
   kinds (`pr-str`/`str` never throw for ordinary objects) — a hostile
   object with a throwing `toString` is pathological and out of scope.
