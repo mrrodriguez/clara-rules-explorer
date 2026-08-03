@@ -149,8 +149,20 @@ self-describing in JSON — then kinds need no further attention.
 | string | `(pr-str x)` — quotes visible | `"foo"` | **changed** (was bare) |
 | symbol, unresolved | `symbol[<value>]` | `symbol[my.ns/foo]` | **changed** (was bare) |
 | symbol, resolved via ns | resolved class/var name | `my.ns.MarkerRecord` | unchanged |
-| vector / sequential (tuple) | `(pr-str x)` | `[:a 1]` | effectively unchanged |
+| vector / sequential (tuple) | `(pr-str x)` | `[:a 1]` | **changed** (was `(str x)`) |
 | arbitrary object | `(str x)` (`.toString()`) | — | unchanged |
+
+Correction on the tuple row: tuples are serialized today by the
+catch-all `:else (str x)` branch, NOT `pr-str`.  For tuples whose
+elements are all non-strings (`[:a 1]`) the two agree, but for
+string-bearing tuples `(str [:loan/status "verified"])` yields
+`[:loan/status verified]` (element quotes dropped) while `(pr-str …)`
+yields `[:loan/status "verified"]`.  The move to `pr-str` is therefore
+a visible rename for exactly the tuple form our fixtures use — and a
+consistency win, since `pr-str` is recursively kind-explicit (keyword
+elements keep their colons, string elements keep their quotes).
+Implementation must split the current `:else` branch into `string?` /
+`sequential?` / catch-all.
 
 Why this is worth the change:
 
@@ -168,6 +180,24 @@ no backward-compatibility constraints.  The rename of keyword/string
 fact-type names (colon, quotes) is intentional; class names are unchanged.
 The serialization table above must be documented in
 `explorer-graph-api.md`.
+
+### LHS condition `:type` values bypass `resolve-type` today
+
+`serialize-condition` only rewrites `:constraints` / `:args`; the `:type`
+value passes to the JSON encoder raw.  Classes happen to encode as their
+`.getName` string (consistent with the table above), but a keyword `:type`
+encodes colon-stripped and a tuple `:type` encodes as a JSON array — not a
+string at all.  Nothing breaks today because every other field is equally
+colon-stripped; after the kind-explicit rename, raw-encoded condition
+types would diverge in spelling from every other type surface
+(`:name` / `:lhs-types` / `:ancestors` / `:match`).
+
+Fix (lands with Phase 1a/1e): `serialize-lhs` gains the production's
+ns-name and each condition's `:type` becomes a `TypeReference`
+(kind-explicit `name` + `id` + `known`).  This changes the
+`LhsCondition` payload shape for `:type` (schema value tightens from
+`s/Any` to `TypeReference`); add a test pinning condition-`:type`
+`:name` == the corresponding `:lhs-types` entry `:name` for every kind.
 
 ### Route IDs (`:id`) — the URL strategy, for fact types AND productions
 
@@ -219,9 +249,12 @@ Design rules:
   uniqueness is the hash's job.  The 60-char cap only affects
   pathological names; the hash still distinguishes them.
 - **8 base36 chars (~41 bits) of hash** — birthday-safe to ~1.5M
-  entries, three orders of magnitude above our 3k-rule scale (~10⁻⁹
-  collision chance per analysis).  Longer hashes buy nothing and hurt
-  readability.
+  entries.  Honest math at our scale: with n ≈ 4k names the collision
+  probability per analysis is ≈ n²/2⁴² ≈ 3×10⁻⁶ — small, and a
+  collision surfaces as a loud build-time failure (uniqueness is
+  asserted, below), never silent corruption.  10 base36 chars (~52
+  bits) would push it to ≈2×10⁻⁸ for two more characters; 8 is the
+  readability/safety trade-off chosen here.
 - **Stability across analysis runs comes from determinism, not from
   the index.**  `id = f(name)` depends only on the name, so re-running
   the analysis with new types added never changes existing ids — old
@@ -233,6 +266,12 @@ Design rules:
   loud build-time alarm, never silent link corruption.  Session
   reloads rebuild the cache and the index; existing ids are
   regenerated identically.
+- **Reverse indexes are internal.**  Handlers need them, API consumers
+  do not: keep them out of the public `/v1/analysis` payload (store
+  them alongside the analysis in the cache atom, or under a
+  clearly-internal key).  `main.clj --generate-analysis` ppprints the
+  full analysis map to `analysis.edn` — decide deliberately whether
+  the indexes are dumped (harmless, small) or excluded.
 - **Two separate indexes:** fact types and productions live in
   different namespaces of ids (their routes are per-resource:
   `/v1/rules/:id`, `/v1/queries/:id`, `/v1/fact-types/:id`), so a
@@ -262,12 +301,59 @@ Design rules:
   (`java.lang.Object`, `clojure.lang.*` interfaces) are few and shared
   across all fact types — dozens of hashes total, not thousands.
 - **`ProductionDep` entries carry `id`** (upstream/downstream on
-  rule/query details, and `inserted-from`/`used-by` on session facts)
-  so every production hyperlink in the UI is id-based.
-- **`:match` stays display-slim** (strings only, Phase 2).  If linking
-  from match rows is wanted later, the UI can use the fact-types list
-  endpoint (which includes `id`) as a name→id lookup table — or we
-  embed `producer-type-id`/`consumer-type-id` then.  No decision forced.
+  rule/query details, fact-type `:used-by-rules` / `:used-by-queries` /
+  `:inserted-by-rules` / `:retracted-by-rules` lists, and
+  `inserted-from`/`used-by` on session facts) so every production
+  hyperlink in the UI is id-based.
+
+### `TypeReference` — one shape for every linkable type reference
+
+Breaking-contract decision (alpha — all callers get fixed; no
+backward-compatibility shims, no client-side name→id lookup tables):
+anywhere the API emits a fact type that the UI may hyperlink, the value
+is a `TypeReference` object, never a bare string:
+
+```json
+{"name": ":my.ns/child", "id": "my.ns.child-x7k9p2m4", "known": true}
+```
+
+- **`name`** — kind-explicit serialized type string (display).
+- **`id`** — deterministic route id (linkage).
+- **`known`** — `true` iff the type appears in the analysis
+  `fact-types` map.  `known: false` entries render as plain text,
+  never a link (ghost ids 404 by design — ids on ghosts exist for
+  shape uniformity only and are not a supported linking surface).
+
+`TypeReference` replaces bare type-name strings in: fact-type
+`:ancestors` entries, rule/query `:lhs-types` / `:insert-types` /
+`:retract-types`, LHS condition `:type`, dynamic-callsite
+`:resolved-types` / `:fact-type`, and the `:match` pairs (Phase 2).
+`known` is always `true` for `:lhs-types` / `:insert-types` /
+`:retract-types` and `:match` entries (such types are in the map by
+construction); it distinguishes ghosts only in `:ancestors` and
+callsite `:resolved-types`.  Uniform shape beats per-field minimalism:
+one schema, one UI prop type, no kind dispatch.
+
+Likewise, production references are ALWAYS `ProductionDep`
+(`{name, ns, type, id}`), never bare strings: fact-type
+`:used-by-rules` / `:used-by-queries` / `:inserted-by-rules` /
+`:retracted-by-rules` upgrade from `[s/Str]` to `[ProductionDep]` (the
+UI currently reconstructs refs client-side from bare names via `toRef`
+— deleted).  There is no client-side name→id lookup table anywhere:
+every linkable value carries its own id.  List payloads carry the same
+reference shapes as detail payloads — the added weight (id + known
+per entry) is accepted for a localhost explorer at 3k-rule scale;
+slimming list payloads is a possible follow-up if profiling shows it
+matters.
+
+Implementation note — the `known` set is computed UPFRONT, not from the
+finished fact-types map: it is the serialized union of all
+`:consumed-types` ∪ `:produced-types` across the hoisted
+`type-analysis-map`, which equals the future `fact-types` map keys by
+construction.  Computing it once in `rulebase-analysis` before any
+summaries are built lets `production-summary`, `serialize-match`, and
+the ancestors enrichment all attach honest `known` flags without a
+second pass.
 
 Router behavior (verified against the project's reitit): an unencoded
 literal `/` splits segments and 404s; the ids above contain only
@@ -358,13 +444,15 @@ cannot be applied at that layer.  Raw types are threaded through from
      from a set and kind-explicit serialization (see System Context)
      keeps distinct raw values distinct as strings.
    - The index value is plain serialized ancestor strings; the `known`
-     flag is computed later, in the second pass (step 4), against the
-     completed fact-types map keys.
-4. Pass this index into `build-fact-type-summary-map`, which attaches
-   `:ancestors` to each entry in a **second pass** after the usage map is
-   complete (only then is the full set of "known" types known), setting
-   `known` by membership of each serialized ancestor string in the
-   fact-types map keys, and `id` via the memoized route-id fn.
+     flag is computed against the upfront known set (serialized
+     `:consumed-types` ∪ `:produced-types` union — equals the future
+     fact-types map keys by construction; see "TypeReference" in
+     System Context).
+4. Pass this index and the known set into
+   `build-fact-type-summary-map`, which attaches `:ancestors` entries
+   (`{:name ... :id ... :known ...}`) in the SAME pass that builds the
+   usage map — no second pass needed once the known set is computed
+   upfront.
 
 ### 1b. New field: `:ancestors`
 
@@ -374,17 +462,17 @@ Add to each fact-type entry:
 {
   "name": "my.ns.MarkerRecord",
   "ancestors": [
-    {"type": "my.ns.IScanMarker", "id": "my.ns.IScanMarker-b2c4d6e8", "known": true},
-    {"type": "java.lang.Object", "id": "java.lang.Object-f4g6h8j1", "known": false}
+    {"name": "my.ns.IScanMarker", "id": "my.ns.IScanMarker-b2c4d6e8", "known": true},
+    {"name": "java.lang.Object", "id": "java.lang.Object-f4g6h8j1", "known": false}
   ],
   "used-by-rules": [...],
   ...
 }
 ```
 
-Each ancestor entry is an object:
+Each ancestor entry is a `TypeReference` (see System Context):
 
-- **`type`** — serialized type string (kind-explicit, e.g.
+- **`name`** — serialized type string (kind-explicit, e.g.
   `:my.ns/child`).
 - **`id`** — the deterministic route id (see "Route IDs" in System
   Context).  Present on all entries for a uniform shape; the UI
@@ -416,9 +504,11 @@ The fact-type entry itself also gains:
 **The `known` flag is the primary noise filter.**  Because Clara's default
 ancestors-fn is `clojure.core/ancestors`, every record type carries a long
 tail of ghost JDK/CLJ interfaces.  This is expected: `known: false`
-entries are exactly the entries that can never bridge a dependency edge
-(a type only creates an edge if some production consumes it, which makes
-it `known`).  The UI renders `known` ancestors first/prominently.  If
+entries can never bridge a dependency edge (a type only creates an
+edge if some production consumes it, which makes it `known`).  The
+converse does not hold: a type that is only ever inserted/retracted —
+never on an LHS — is `known: true` yet bridges nothing.  The UI
+renders `known` ancestors first/prominently.  If
 payload or noise proves problematic in practice, a follow-up can add
 server-side suppression of `java.lang.Object` / `clojure.lang.*` ghosts —
 deliberately out of Phase 1 to keep the semantics simple and faithful.
@@ -470,33 +560,45 @@ adds (10–20 entries per type with the default ancestors-fn), and the
 list endpoint stays lightweight for the same reason `rules-list` omits
 `:upstream`/`:downstream` (payload weight at 3k+ rules).  **`:id` and
 `:ns` ARE included in the list payload** — they are small, and the UI
-needs them to build fact-type links from list views, to use the list as
-a name→id lookup table, and to group by namespace.  The **detail**
+needs them to build fact-type links from list views and to group by
+namespace.  The **detail**
 endpoint (`handle-get-fact-type`) serves the full entry from the
 analysis map and gets `:ancestors` for free once it is in
 `build-fact-type-summary-map`.
 
 Consequence: `FactTypeListItem` gains only `:id` and `:ns`; only the
 detail schema gains `:ancestors`.  (Production list entries already
-carry `:ns`.)
+carry `:ns`.)  Note the usage lists (`:used-by-rules` etc.) upgrade to
+`[ProductionDep]` in BOTH list and detail payloads — see
+"TypeReference" in System Context for the uniform-reference contract
+and the accepted list-payload weight trade-off.
 
 ### 1e. Files to modify
 
 | File | Change |
 |------|--------|
-| `server/src/clara/server/tools/graph/core.clj` | `rulebase-analysis`: extract ancestors-fn (with `analyze.clj`-style fallback), build memoized ancestor-set fn, hoist `type-analysis-map`, build serialized ancestors index, build BOTH id reverse indexes — fact types and productions (uniqueness asserted). `build-fact-type-summary-map`: accept the index, enrich each entry with `:id` + `:ancestors` in a second pass. `fact-types-list`/`rules-list`/`queries-list`: add `:id` to select-keys. `production-summary` + `get-production-deps-summary`: `:id` on productions and `ProductionDep` entries. |
-| `server/src/clara/server/tools/graph/serialize.clj` | Extend `resolve-type` to kind-explicit serialization (keyword colon, string quotes, `symbol[...]` marker; see System Context). Add the uniform `route-id` fn (slug + 8-char base36 SHA-1 suffix, 60-char slug cap — used for fact types AND production names). Helper to serialize one raw ancestor type into `{:type ... :id ... :known ...}` shape (known flag applied by caller). |
-| `server/src/clara/server/graph/api.clj` | Add `AncestorEntry` schema (`type`/`id`/`known`). Add `(s/optional-key :ancestors)` to `GetFactTypeResponse`. Add `:id` and `:ns` (nullable) to `FactTypeListItem` + detail entry; add `:id` to `RuleListItem`, `QueryListItem`, detail entries, and `ProductionDep`. All detail handlers (rules, queries, fact-types, session variants) resolve id-only via the reverse indexes; delete `fq-name-from-param` and any test exercising it. Router-level tests for id-based lookups. |
+| `server/src/clara/server/tools/graph/core.clj` | `rulebase-analysis`: extract ancestors-fn (with `analyze.clj`-style fallback), build memoized ancestor-set fn, hoist `type-analysis-map`, compute the upfront known set (serialized `:consumed-types` ∪ `:produced-types` union), build serialized ancestors index, build BOTH id reverse indexes — fact types and productions (uniqueness asserted). `production-summary`: `:lhs-types` / `:insert-types` / `:retract-types` become `[TypeReference]` (name + id + known, honest membership check against the known set); `:id` on productions. `build-fact-type-summary-map`: accept the index + known set, enrich each entry with `:id` + `:ancestors` (single pass); extract type `:name`s from refs when aggregating; usage lists (`:used-by-rules` etc.) become `[ProductionDep]`. `fact-types-list`/`rules-list`/`queries-list`: add `:id` to select-keys. `get-production-deps-summary`: `:id` on `ProductionDep` entries. |
+| `server/src/clara/server/tools/graph/serialize.clj` | Extend `resolve-type` to kind-explicit serialization (keyword colon, string quotes, `symbol[...]` marker, tuples via `pr-str` — split the catch-all `:else` into `string?`/`sequential?`/catch-all; see System Context). `serialize-lhs`/`serialize-condition` gain the production ns-name and serialize condition `:type` as a `TypeReference`. Add the uniform `route-id` fn (slug + 8-char base36 SHA-1 suffix, 60-char slug cap — used for fact types AND production names). Add `serialize-type-ref` (raw type + ns-name + known set → `{:name ... :id ... :known ...}`) — the single helper behind `:ancestors` entries, `:lhs-types` / `:insert-types` / `:retract-types`, condition `:type`, callsite `:resolved-types`, and Phase 2 `serialize-match`. |
+| `server/src/clara/server/graph/api.clj` | Add `TypeReference` schema (`name`/`id`/`known`). Introduce a `FactTypeDetail` schema (list item + `(s/optional-key :ancestors)`) — `GetFactTypeResponse` currently reuses `FactTypeListItem` as its body, so a distinct detail shape does not exist yet. Add `:id` and `:ns` (nullable) to `FactTypeListItem` + `FactTypeDetail`; add `:id` to `RuleListItem`, `QueryListItem`, detail entries, `ProductionDep`, `SessionFactTypeItem`, `SessionFactTypeDetail`, and `FactTypeRoleGroup`; add `:ns` (nullable) to `SessionFactTypeItem`/`SessionFactTypeDetail` (SessionNav groups session fact types by namespace today via `splitQualifiedName`). Type-reference fields upgrade: `:lhs-types` / `:insert-types` / `:retract-types` → `[TypeReference]` on `RuleListItem`/`QueryListItem`; `LhsCondition` `:type` → `TypeReference`; `DynamicCallsiteEntry` `:resolved-types` → `[TypeReference]`, `:fact-type` → `TypeReference`; fact-type usage lists → `[ProductionDep]`; `SessionFact` `:type` → `TypeReference`. All detail handlers (rules, queries, fact-types, session variants) resolve id-only via the reverse indexes; delete `fq-name-from-param` and any test exercising it. Router-level tests for id-based lookups, including session variants (`session_api_test.clj`). |
+| `server/src/clara/server/tools/graph/memory.clj` | Session-side production refs are built here, NOT via `serialize/serialize-production-dep`: `build-origin-map` / `build-used-by-index` (`inserted-from`/`used-by` on session facts) and `group-instances-by-role` (`FactTypeRoleGroup`) gain `:id`. Session fact `:type` and the fact-type index keys switch to kind-explicit serialization (currently `(serialize-fact-type nil …)` — nil ns context; unresolved-symbol divergence vs. the analysis side is the accepted limitation flagged in "Two separate indexes"). Build the per-snapshot id→name indexes (rules, queries, fact-types) in `session-snapshot` for the session handlers. |
 | `server/test/clara/server/tools/graph/core_test.clj` | Tests verifying `:ancestors` shape with `:known` flag, hierarchy ordering + determinism, default-ancestors noise behavior, and missing-meta case. |
-| `ui/src/lib/types/api.ts` | Add `AncestorEntry` interface (`type`/`id`/`known`). Add `id: string` and `ns: string \| null` to `FactTypeListItem` + detail type; add `id` to rule/query/`ProductionReference` types. Add `ancestors?: AncestorEntry[]` to the detail fact-type type. |
-| `docs/explorer-graph-api.md` | Document the `:ancestors` field with `type`/`id`/`known` keys on the detail view, the kind-explicit serialization table, and the `:id` scheme. |
+| `ui/src/lib/types/api.ts` | Add `TypeReference` interface (`name`/`id`/`known`). Add `id: string` and `ns: string \| null` to `FactTypeListItem` + detail type; add `id` to rule/query/`ProductionReference` and session fact-type/role-group types. Type-reference fields become `TypeReference` (`lhs-types`/`insert-types`/`retract-types`, condition `type`, callsite `resolved-types`/`fact-type`, session fact `type`); fact-type usage lists become `ProductionReference[]`. Add `ancestors?: TypeReference[]` to the detail fact-type type. |
+| `ui/src/lib/utils.ts`, `ui/src/lib/api.ts` | Link builders and API fetchers pass server-issued ids verbatim (no `encodeURIComponent`/`toRouteId`); `toRouteId`/`fromRouteId`/`splitQualifiedName` deleted (Phase 1h). |
+| `ui/bin/scrape-demo-data.js` + `ui/static/demo-data/**` | The UI is fully prerendered from demo data. The scrape script's own `toUrlId` and name-based detail-fetch URLs switch to the server-issued `:id` from list payloads; regenerate demo data with `pnpm scrape:demo` after the server change. |
+| `ui/src/routes/**/+page.server.ts` | `entries()` generators (rules, queries, fact-types, session) emit the payload's `id` field verbatim — ids are URL-safe by construction. Rename `session/fact-types/[typeName]` → `[id]` for consistency. |
+| `docs/explorer-graph-api.md` | Document the `TypeReference` shape (`name`/`id`/`known`) and every field that adopts it, the `[ProductionDep]` usage lists, the kind-explicit serialization table, and the `:id` scheme. |
 
 ### 1f. API compatibility
 
-Alpha API: additive changes need no justification.  New optional
-`:ancestors` key on fact-type **detail** objects.  Existing keys and the
-list payload otherwise unchanged (keyword/string *values* in existing
-fields gain the new spellings — see System Context).
+Alpha API: breaking reshapes need no migration shims — all callers get
+fixed in the same change.  New optional `:ancestors` key on fact-type
+**detail** objects; `:id` / `:ns` added broadly.  Breaking reshapes:
+type-reference fields (`:lhs-types`, `:insert-types`, `:retract-types`,
+condition `:type`, callsite `:resolved-types` / `:fact-type`, session
+fact `:type`) go from bare strings to `TypeReference` objects;
+fact-type usage lists go from `[s/Str]` to `[ProductionDep]`;
+keyword/string/tuple type *names* gain kind-explicit spellings (see
+System Context).
 
 ### 1g. Test cases
 
@@ -536,9 +638,13 @@ fields gain the new spellings — see System Context).
    `":my.ns/kw-parent"`), ordered, `known` flags computed per entry.
 9. **Kind-explicit serialization:** keyword → `:my.ns/child` (colon
    preserved); string type → `"foo"` (quotes); unresolved symbol →
-   `symbol[my.ns/foo]`; vector type → `[:a 1]`; class unchanged.  A
-   keyword and a same-spelled string type serialize differently (no
-   collision).
+   `symbol[my.ns/foo]`; vector type → `[:a 1]`; string-bearing tuple
+   → `[:loan/status "verified"]` (element quotes preserved by
+   `pr-str`); class unchanged.  A keyword and a same-spelled string
+   type serialize differently (no collision).  An LHS condition
+   `:type` `:name` string-equals the corresponding `:lhs-types` entry
+   `:name` for every kind (classes included — regression guard for the
+   `serialize-lhs` change).
 10. **Symbol ns-resolution parity:** a fact type originating from an
     unresolved symbol still gets `:ancestors` (index built in
     per-production ns context — guards against the nil-ns serialization
@@ -643,7 +749,10 @@ Upstream entry (on consumer Rule Y):
   "ns": "my.ns",
   "type": "rule",
   "match": [
-    {"producer-type": "my.ns.MarkerRecord", "consumer-type": "my.ns.IScanMarker"}
+    {
+      "producer-type": {"name": "my.ns.MarkerRecord", "id": "my.ns.MarkerRecord-a1b2c3d4", "known": true},
+      "consumer-type": {"name": "my.ns.IScanMarker", "id": "my.ns.IScanMarker-b2c4d6e8", "known": true}
+    }
   ]
 }
 ```
@@ -655,23 +764,30 @@ Downstream entry (on producer Rule X):
   "ns": "my.ns",
   "type": "query",
   "match": [
-    {"producer-type": "my.ns.MarkerRecord", "consumer-type": "my.ns.IScanMarker"}
+    {
+      "producer-type": {"name": "my.ns.MarkerRecord", "id": "my.ns.MarkerRecord-a1b2c3d4", "known": true},
+      "consumer-type": {"name": "my.ns.IScanMarker", "id": "my.ns.IScanMarker-b2c4d6e8", "known": true}
+    }
   ]
 }
 ```
 
-When `producer-type` equals `consumer-type` (direct match, no hierarchy),
-both are still present.  This avoids client-side special-casing.
+Each match value is a `TypeReference` (see System Context) — always
+`known: true` here, since a bridged type is produced/consumed by
+construction — so match rows are directly linkable with no lookup.
+When `producer-type` and `consumer-type` name the same type (direct
+match, no hierarchy), both are still present.  This avoids client-side
+special-casing.
 
 `match` is an array because a single pair of productions may be linked by
 multiple type pairs (e.g., producer inserts types A and C, consumer reads
 B and D where A descends from B and C descends from D).
 
-The `match` array is **deterministically ordered**: sorted lexicographically
-by `producer-type`, then `consumer-type`, applied after `resolve-type`
-converts raw types to comparable strings (raw types may be Classes or
-keywords — neither consistently implements `Comparable`; `sort-by` on them
-would throw `ClassCastException`).
+The `match` array is **deterministically ordered**: sorted by
+`producer-type` `:name`, then `consumer-type` `:name` — the
+kind-explicit serialized strings inside each `TypeReference` (raw types
+may be Classes or keywords — neither consistently implements
+`Comparable`; `sort-by` on them would throw `ClassCastException`).
 
 ### 2c. Update `get-production-deps-summary`
 
@@ -685,20 +801,21 @@ and the memoized ancestor-set fn.  For each adjacent production name in
    current production is the consumer — and vice versa for
    `:downstream`).
 2. Compute `matching-type-pairs`, serialize each pair's raw types with
-   `resolve-type` — **each end in its own ns context**:
-   `(resolve-type producer-ns pt)` and `(resolve-type consumer-ns ct)`.
+   `serialize-type-ref` — **each end in its own ns context**:
+   `(serialize-type-ref known-set producer-ns pt)` and
+   `(serialize-type-ref known-set consumer-ns ct)`.
    Symbols reach `:produced-types` via EDN sidecar annotations, so
    serializing both ends with the current production's ns would
    misresolve the far end's symbols (e.g. producer's `foo` rendered
    `symbol[ns.b/foo]` instead of `symbol[ns.a/foo]`) and diverge from
-   the `:insert-types` string on the producer's own summary.  Sort
-   lexicographically, attach as `:match` on the serialized
-   `ProductionDep`.
+   the `:insert-types` entry on the producer's own summary.  Sort by
+   `:name`, attach as `:match` on the serialized `ProductionDep`.
 
-**Cross-field consistency invariant:** `:match`'s `producer-type` must
-string-equal the corresponding entry in the producer's own
-`:insert-types`/`:retract-types`, and `consumer-type` must string-equal
-the corresponding entry in the consumer's `:lhs-types` — guaranteed by
+**Cross-field consistency invariant:** `:match`'s `producer-type`
+`:name` must string-equal the `:name` of the corresponding entry in
+the producer's own `:insert-types`/`:retract-types`, and
+`consumer-type` `:name` must string-equal the `:name` of the
+corresponding entry in the consumer's `:lhs-types` — guaranteed by
 using each end's own `:ns-name` (the same context `production-summary`
 uses) and pinned in a test.
 
@@ -725,19 +842,21 @@ those are two distinct, correct pairs).
    `rulebase-analysis` (pure refactor, Phase 1a).
 2. `->memoized-ancestors` helper (Phase 1a).
 3. `matching-type-pairs` helper (with `distinct`).
-4. `get-production-deps-summary` gains the two args and a
+4. `get-production-deps-summary` gains the new args (type-analysis-map,
+   ancestors-set fn, known set) and a
    `serialize-match` sub-helper in `serialize.clj`:
    ```clojure
    (defn serialize-match
      "Serializes raw {:producer-type ... :consumer-type ...} pairs
-     (matching-type-pairs output), each end in its own ns context,
-     sorted lexicographically."
-     [raw-pairs producer-ns consumer-ns]
+     (matching-type-pairs output) into TypeReference pairs, each end
+     in its own ns context, sorted by producer then consumer name."
+     [raw-pairs known-set producer-ns consumer-ns]
      (->> raw-pairs
           (map (fn [{:keys [producer-type consumer-type]}]
-                 {:producer-type (resolve-type producer-ns producer-type)
-                  :consumer-type (resolve-type consumer-ns consumer-type)}))
-          (sort-by (juxt :producer-type :consumer-type))
+                 {:producer-type (serialize-type-ref known-set producer-ns producer-type)
+                  :consumer-type (serialize-type-ref known-set consumer-ns consumer-type)}))
+          (sort-by (juxt (comp :name :producer-type)
+                         (comp :name :consumer-type)))
           (vec)))
    ```
 
@@ -746,10 +865,10 @@ those are two distinct, correct pairs).
 | File | Change |
 |------|--------|
 | `server/src/clara/server/tools/graph/core.clj` | Hoist `type-analysis-map`. `get-production-deps-summary`: compute and attach `:match`. `production-summary` / `build-production-summary-map`: thread new args. `build-dep-graph`: use memoized ancestor-set fn (behavior unchanged). |
-| `server/src/clara/server/tools/graph/serialize.clj` | `serialize-match` helper: raw pair → sorted `producer-type`/`consumer-type` string maps. |
-| `server/src/clara/server/graph/api.clj` | Extend `ProductionDep` schema with `(s/optional-key :match)` array of `{producer-type, consumer-type}`. Schema docstring states the symmetric semantics: identical shape and meaning on upstream and downstream entries — `producer-type` is what the producing rule inserts, `consumer-type` is what the consuming rule's LHS requires. |
+| `server/src/clara/server/tools/graph/serialize.clj` | `serialize-match` helper: raw pair → sorted `producer-type`/`consumer-type` `TypeReference` pairs. |
+| `server/src/clara/server/graph/api.clj` | Extend `ProductionDep` schema with `(s/optional-key :match)` array of `{producer-type, consumer-type}` `TypeReference` pairs. Schema docstring states the symmetric semantics: identical shape and meaning on upstream and downstream entries — `producer-type` is what the producing rule inserts, `consumer-type` is what the consuming rule's LHS requires. |
 | `server/test/clara/server/tools/graph/core_test.clj` | Add tests for `:match` on dep links (direct, hierarchy, multi-type, dedup, symmetric both-directions). Existing dep-graph shape tests stay green unchanged — confirming zero internal breakage. |
-| `ui/src/lib/types/api.ts` | Extend `ProductionReference` with `match?: TypeBridgeMatch[]`. Add `TypeBridgeMatch` interface. |
+| `ui/src/lib/types/api.ts` | Extend `ProductionReference` with `match?: TypeBridgeMatch[]`. Add `TypeBridgeMatch` interface (`producer-type`/`consumer-type`: `TypeReference`). |
 | `docs/explorer-graph-api.md` | Document `:match` field on upstream/downstream entries. |
 
 ### 2f. API compatibility
@@ -761,6 +880,10 @@ one type pair (direct matches included), which normalizes the consumer's
 parsing path.
 
 ### 2g. Test cases
+
+In the examples below, match values are shown as bare strings for
+readability — each actually stands for a `TypeReference` whose `:name`
+is that string (`:id` and `known: true` elided).
 
 1. **Direct match (no hierarchy):**
    Rule A inserts `Foo`, Rule B requires `Foo` →
@@ -784,10 +907,11 @@ parsing path.
 6. **Symmetry:** the `match` array on Y's upstream entry for X is identical
    to the one on X's downstream entry for Y.
 
-7. **Cross-field consistency:** `:match` `producer-type` equals the
-   string in the producer's own `:insert-types`; `consumer-type` equals
-   the string in the consumer's own `:lhs-types` — including a case
-   where a symbol insert-type comes from a sidecar annotation in a
+7. **Cross-field consistency:** `:match` `producer-type` `:name` equals
+   the `:name` of the corresponding entry in the producer's own
+   `:insert-types`; `consumer-type` `:name` equals the `:name` of the
+   corresponding entry in the consumer's own `:lhs-types` — including a
+   case where a symbol insert-type comes from a sidecar annotation in a
    different ns than the consumer.
 8. **Regression:** `test-dep-graph-full`, `test-dep-graph-hierarchy`,
    `rule-is-source?`/`rule-is-sink?` behavior all unchanged (dep-graph shape
@@ -864,9 +988,9 @@ parsing path.
   names (see "Route IDs"), so the spellings' URI-unfriendliness is
   display-only.
 - **Route-id collisions:** ~41 bits of hash (8 base36 chars) —
-  birthday-safe to ~1.5M entries, ~10⁻⁹ per analysis at our scale —
-  and asserted unique at reverse-index build time (throws loudly, in
-  tests and on analysis build, never silently mislinks).
+  ≈3×10⁻⁶ collision probability per analysis at our scale (n ≈ 4k
+  names) — and asserted unique at reverse-index build time (throws
+  loudly, in tests and on analysis build, never silently mislinks).
 - **Id stability across runs:** ids are a pure function of the name
   alone, so adding new types/productions and re-running the analysis
   never changes existing ids; safe to bookmark.
@@ -905,9 +1029,13 @@ parsing path.
     loan-app fixtures;
   - sessions built via `mk-session` with explicit `:ancestors-fn` /
     `:fact-type-fn` options as needed for keyword/tuple fact typing.
-- **`resolve-type` totality:** its branches are total over heterogeneous
-  kinds (`pr-str`/`str` never throw for ordinary objects) — a hostile
-  object with a throwing `toString` is pathological and out of scope.
+- **`resolve-type` totality:** its kind branches are total over
+  heterogeneous kinds for a valid, loaded `ns-name` (`pr-str`/`str`
+  never throw for ordinary objects) — a hostile object with a throwing
+  `toString` is pathological and out of scope.  Note the symbol
+  branch's `(the-ns ns-name)` throws if `ns-name` names a
+  non-existent namespace; every ns context used here is derived from a
+  compiled production, so the namespace always exists.
 
 ---
 
@@ -933,6 +1061,14 @@ Once the server API is extended, the UI can use the new fields:
   `id`; upstream/downstream entries via theirs.  Kind-explicit
   spellings remain a display clarity win — a keyword type reads as
   `:my.ns/child` everywhere it is *shown*, while URLs stay clean.
+- **Every type link consumes `TypeReference` directly.**  Today
+  `FactTypeReferenceLink`, `ConditionFactType`, and
+  `DynamicCallsiteList` hyperlink bare type-name strings via
+  `factPath(name)`; after the contract change they receive
+  `{name, id, known}` and link `known: true` entries via the embedded
+  `id` — no lookup table, no name parsing.  `FactTypeSummary`'s
+  client-side `toRef` mapping of `used-by-rules` name strings is
+  deleted; usage lists arrive as `ProductionDep`.
 - **Rule detail view:** In the upstream/downstream sections, show each dep
   entry with the `:match` details inline (e.g., "Rule X produces
   `MarkerRecord` → satisfies `IScanMarker`").
@@ -945,10 +1081,17 @@ This phase is scoped separately and not detailed here.
 Breaking (must land together):
 
 - Fact-type `:name` format changes to kind-explicit forms everywhere it
-  is displayed.
+  is displayed, and every linkable type reference becomes a structured
+  `TypeReference` object (`:lhs-types`/`:insert-types`/`:retract-types`,
+  condition `:type`, callsite `:resolved-types`/`:fact-type`, session
+  fact `:type`); fact-type usage lists become `[ProductionDep]`.
 - Route-id migration: all URL construction uses `:id`;
   `toRouteId`/`fromRouteId`/`splitQualifiedName` deleted; SvelteKit
-  `load` functions pass `[id]` params through verbatim.
+  `load` functions pass `[id]` params through verbatim; `entries()`
+  generators and `bin/scrape-demo-data.js` use server-issued ids;
+  demo data regenerated (`pnpm scrape:demo`); all type-link components
+  consume `TypeReference`/`ProductionDep` shapes directly (no
+  name→id lookup table anywhere).
 - Grouping switches to server-provided `:ns` (nullable — needs a
   fallback group label).
 
@@ -965,7 +1108,7 @@ Additive (can trail):
 ## Documentation & Schema Principles (binding at implementation time)
 
 - **Schemas are the structural source of truth, not docstrings.**
-  Response shapes (`AncestorEntry`, `:match`, `:id`, `:ns`, kind-explicit
+  Response shapes (`TypeReference`, `:match`, `:id`, `:ns`, kind-explicit
   serialization forms) are expressed in the Prismatic schemas in
   `api.clj` with concise field-level docstrings.  Do NOT write large
   docstrings that enumerate data structures field-by-field — they go
@@ -1000,19 +1143,20 @@ Additive (can trail):
 
 ## Implementation Order
 
-- [ ] **Phase 1a:** In `rulebase-analysis`: extract ancestors-fn via a single shared accessor used by both `core.clj` and `analyze.clj` (meta extraction + `clojure.core/ancestors` fallback); add `->memoized-ancestors`; hoist `type-analysis-map` (with `:ns-name`) out of `build-dep-graph`; build serialized ancestors index in per-production ns context (topologically ordered, divergence asserted, serialization memoized by raw-type × ns-name); simplify `downstream?` to consume the memoized set fn in the same change; verify raw types reaching the index are resolved. Extend `resolve-type` to kind-explicit serialization
-- [ ] **Phase 1b:** Add `:ancestors` field (objects with `type`/`id`/`known`, deterministic topological order with lexicographic tie-break + cycle guard) to fact-type entries in `build-fact-type-summary-map` (second pass)
-- [ ] **Phase 1c:** Add the uniform route-id fn (slug + 8-char base36 SHA-1 suffix, 60-char slug cap) to `serialize.clj`; add `:id` to fact-type entries (`FactTypeListItem` + detail) and to `AncestorEntry`; build fact-type id reverse index in `rulebase-analysis` (uniqueness asserted); `handle-get-fact-type` resolves id-only. Router-level tests for id-based lookups (keyword/tuple/string/class forms)
-- [ ] **Phase 1d:** Add server tests for `:ancestors` (default-ancestors noise, `known` flag, ordering, missing-meta, nil-returning fn, memoization, mixed-kind hierarchy, kind-explicit serialization, symbol ns-resolution parity, route ids)
+- [ ] **Phase 1a:** In `rulebase-analysis`: extract ancestors-fn via a single shared accessor used by both `core.clj` and `analyze.clj` (meta extraction + `clojure.core/ancestors` fallback); add `->memoized-ancestors`; hoist `type-analysis-map` (with `:ns-name`) out of `build-dep-graph`; build serialized ancestors index in per-production ns context (topologically ordered, divergence asserted, serialization memoized by raw-type × ns-name); compute the upfront known set (serialized `:consumed-types` ∪ `:produced-types` union — equals the future fact-types map keys by construction); simplify `downstream?` to consume the memoized set fn in the same change; verify raw types reaching the index are resolved. Extend `resolve-type` to kind-explicit serialization (splitting the catch-all `:else` into `string?`/`sequential?`/catch-all — see the serialization table); add `serialize-type-ref` (raw type + ns-name + known set → `TypeReference`); thread the production ns-name into `serialize-lhs` so LHS condition `:type` values serialize as `TypeReference`s too
+- [ ] **Phase 1b:** Add `:ancestors` field (`TypeReference` entries, deterministic topological order with lexicographic tie-break + cycle guard) to fact-type entries in `build-fact-type-summary-map` (single pass, upfront known set); convert `:lhs-types`/`:insert-types`/`:retract-types` and LHS condition `:type` to `[TypeReference]`; convert fact-type usage lists (`:used-by-rules` etc.) to `[ProductionDep]`
+- [ ] **Phase 1c:** Add the uniform route-id fn (slug + 8-char base36 SHA-1 suffix, 60-char slug cap) to `serialize.clj`; add `:id` to fact-type entries (`FactTypeListItem` + new `FactTypeDetail`) and to `TypeReference`; build fact-type id reverse index (uniqueness asserted, internal — not in the `/v1/analysis` payload); `handle-get-fact-type` resolves id-only. Router-level tests for id-based lookups (keyword/tuple/string/class forms)
+- [ ] **Phase 1d:** Add server tests for `:ancestors` (default-ancestors noise, `known` flag, ordering, missing-meta, nil-returning fn, memoization, mixed-kind hierarchy, kind-explicit serialization incl. string-bearing tuples, condition-`:type`/`:lhs-types` consistency, symbol ns-resolution parity, route ids)
+- [ ] **Phase 1e:** Update UI types (`TypeReference` with `name`/`id`/`known`, `id` on `FactTypeListItem`/`RuleListItem`/`QueryListItem`/details/`ProductionReference`/session types, type-reference fields → `TypeReference`, usage lists → `ProductionReference[]`, `ancestors?` on detail `FactTypeSummary` in `api.ts`)
 - [ ] **Phase 1f:** Rewrite `explorer-graph-api.md` for the new contract — flag: this is a full rewrite, not a targeted edit (serialization table, `:id` scheme + routes, `:ns`, `:ancestors`)
-- [ ] **Phase 1e:** Update UI types (`AncestorEntry` with `type`/`id`/`known`, `id` on `FactTypeListItem`/`RuleListItem`/`QueryListItem`/details/`ProductionReference`, `ancestors?` on detail `FactTypeSummary` in `api.ts`)
-- [ ] **Phase 1g:** Production route ids: `:id` on rule/query list + detail entries and every `ProductionDep`; production id reverse index; all rule/query/session detail handlers resolve id-only (session handlers via a per-snapshot id→name index built at snapshot-cache time — no analysis-cache dependency); delete `fq-name-from-param` server-side and its tests **in the same commit as the index implementation** (atomic revert if issues arise); update UI `factPath`/rule/query link builders to use `:id` and delete `toRouteId`/`fromRouteId`/`splitQualifiedName`. **Scope note: this is the largest single work item (~30–40% of the total)** — it touches every endpoint, every link builder, and all URL-constructing test fixtures. Budget accordingly
+- [ ] **Phase 1g:** Server-side production route ids: `:id` on rule/query list + detail entries and every production ref (`ProductionDep` on rule/query details; `inserted-from`/`used-by` refs and `FactTypeRoleGroup` entries in `memory.clj`); production id reverse index; per-snapshot id→name indexes built in `session-snapshot` (no analysis-cache dependency); all rule/query/session detail handlers resolve id-only; delete `fq-name-from-param` server-side and its tests **in the same commit as the index implementation** (atomic revert if issues arise); update `session_api_test.clj` to id-based lookups
+- [ ] **Phase 1h:** UI route-id migration: `utils.ts` link builders + `api.ts` fetchers use `:id` verbatim; delete `toRouteId`/`fromRouteId`/`splitQualifiedName`; `entries()` generators and `bin/scrape-demo-data.js` use server-issued ids; regenerate demo data (`pnpm scrape:demo`); rename `session/fact-types/[typeName]` → `[id]`; update all type-link callers (`FactTypeReferenceLink`/`ConditionFactType`/`DynamicCallsiteList`/`ProductionReferenceCategory`/`GlobalSidebarFlyout`/appState contextual nav) to consume `TypeReference`/`ProductionDep` directly; delete `FactTypeSummary`'s `toRef` mapping; update e2e URL fixtures. **Scope note: 1g+1h together are the largest work item (~30–40% of the total)** — every endpoint, every link builder, the prerender pipeline, and all URL-constructing test fixtures. Budget accordingly
 - [ ] **Phase 2a:** Add `matching-type-pairs` helper
-- [ ] **Phase 2b:** Update `get-production-deps-summary` (+ `serialize-match` in `serialize.clj`) to attach `:match` with symmetric `producer-type`/`consumer-type` keys, each serialized in its own production's ns context, sorted post-serialization
+- [ ] **Phase 2b:** Update `get-production-deps-summary` (+ `serialize-match` in `serialize.clj`) to attach `:match` with symmetric `producer-type`/`consumer-type` `TypeReference` pairs, each serialized in its own production's ns context, sorted by `:name` post-serialization
 - [ ] **Phase 2c:** Update `ProductionDep` schema in `api.clj` with optional `:match` array
 - [ ] **Phase 2d:** Add server tests for `:match` (direct, hierarchy, multi-type, dedup, symmetry, cross-field consistency incl. sidecar symbol in foreign ns, dep-graph regression)
-- [ ] **Phase 2f:** Update `explorer-graph-api.md` with the `:match` contract (symmetric shape + semantics, citing `ProductionDep` schema)
 - [ ] **Phase 2e:** Update UI types (`ProductionReference`, `TypeBridgeMatch` in `api.ts`)
+- [ ] **Phase 2f:** Update `explorer-graph-api.md` with the `:match` contract (symmetric shape + semantics, citing `ProductionDep` schema)
 - [ ] **Docs hygiene pass:** verify the Documentation & Schema Principles — schemas carry the structural truth; no docstring enumerates shapes, narrates design history, or references this plan; project docs cite code (not vice versa) for impl details
 - [ ] **Fast-follow (post-Phase 2, small):** `"via": "retract"` flag on `:match` entries whose bridge comes from a retract type, so the UI can distinguish retraction coupling from production
 - [ ] **Phase 3:** UI integration (future, scoped separately)
