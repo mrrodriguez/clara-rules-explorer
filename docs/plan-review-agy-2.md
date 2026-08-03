@@ -1,6 +1,6 @@
 # API Hierarchy Details Plan - Design Review
 
-This document captures the accepted review feedback and gaps identified in the `extend-api-hierarchy-details-plan.md` design plan.
+This document captures the accepted review feedback and gaps identified in the design plan (`docs/extend-api-hierarchy-details/`).
 
 ### 1. Caching Scope for `ancestors-fn` is Too Narrow
 - **The Gap:** Phase 1a notes that `ancestors-fn` should be cached per unique type when building the fact-types summary map. However, Phase 2a introduces `matching-type-pairs` inside `build-dep-graph`, which does a nested loop over produced and consumed types and calls `downstream?` (which in turn calls `ancestors-fn`).

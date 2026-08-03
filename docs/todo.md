@@ -48,5 +48,5 @@ You must now make a design plan to work through this in stages. The fact type hi
 respresentation being the first step. The goal will be to extend the server API to account for these
 details in a way that is concise but provides these crucial details.
 
-Do not implement this yet, make the plan. I want the plan written to a file in this repo @docs/extend-api-hierarchy-details-plan.md
+Do not implement this yet, make the plan. I want the plan written to a file in this repo @docs/extend-api-hierarchy-details/README.md
 It needs a phased roadmap that you will check off as we go through implementation.

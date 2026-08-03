@@ -1,6 +1,6 @@
 # Plan Review: Extend API with Fact Type Hierarchy Details
 
-This document outlines the review of the initial design plan (`docs/extend-api-hierarchy-details-plan.md`) for surfacing type-hierarchy information in the API, incorporating design decisions and necessary adjustments to the roadmap.
+This document outlines the review of the initial design plan (`docs/extend-api-hierarchy-details/`) for surfacing type-hierarchy information in the API, incorporating design decisions and necessary adjustments to the roadmap.
 
 ## 1. Data Model Asymmetry in Phase 2 - RESOLVED
 
