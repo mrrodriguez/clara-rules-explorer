@@ -373,3 +373,26 @@ The plan is **ready for implementation with the following adjustments**:
 The architecture is sound, the heterogeneity handling is correct, and the
 implementation phases are well-sequenced. These adjustments are minor
 relative to the plan's overall quality.
+
+---
+
+## Post-Update Verification
+
+After the plan was updated, all substantive concerns were addressed:
+
+| Concern | Resolution |
+|---------|------------|
+| #1: Ancestors-index "last-wins" key collision | **Resolved.** Divergence now asserted (throws) rather than silently merged. Serialization memoized by `(raw-type × ns-name)`. |
+| #4: Session endpoint id-resolution path | **Resolved.** Per-snapshot id→name index built at snapshot-cache time; session handlers have no analysis-cache dependency. |
+| #5: `via: "retract"` UX confusion | **Resolved.** Named fast-follow task in the implementation order. |
+| #8: Performance at scale | **Resolved.** Memoization by raw-type × ns-name added, reducing redundant serialization. |
+| #9: `build-fallback-type-filter` divergence | **Resolved.** Single shared accessor for ancestors-fn extraction used by both `core.clj` and `analyze.clj`. |
+| #10: `analysis.edn` shape impact | **Resolved.** Explicit note added — additive-only, EDN consumers reading specific keys are unaffected. |
+
+Three minor observations were intentionally rejected by the plan author:
+
+- **Ghost ancestor `:id`** — kept for shape uniformity. My cost concern was wrong post-memoization: unique ghost names are few and shared (~dozens of hashes total, not thousands). The plan now states this explicitly.
+- **Separate test fixtures per kind** — rejected; contradicts the coherent-theme instruction already in the plan, and fixture "cascade" isn't a real failure mode.
+- **`serialize-match` / threading `type-analysis-map`** — both are straightforward mechanical changes; the plan's detail level is sufficient.
+
+**No remaining concerns. The plan is ready for implementation.**
