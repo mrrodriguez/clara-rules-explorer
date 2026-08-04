@@ -131,6 +131,7 @@
                                  (serialize/serialize-dynamic-detection p-ns-name known-set))
         summary
         (cond-> {:name      p-name
+                 :id        (serialize/route-id (str p-name))
                  :ns        (str p-ns-name)
                  :doc       (:doc production)
                  :lhs-types (mapv serialize-type-ref (extract-lhs-fact-types (:lhs production)))
@@ -249,7 +250,7 @@
           (recur (disj remaining pick)
                  (conj ordered (serialized pick))))))))
 
-(defn- raw-type-ns
+(defn raw-type-ns
   "Best-effort namespace/package of a raw fact type for grouping: keyword or
    symbol → `(namespace x)`, class → package name, other kinds → nil."
   [x]
@@ -294,6 +295,22 @@
                  (assoc idx serialized {:ancestors ancestors :ns ns}))
                {}
                per-raw-type)))
+
+(defn build-production-id-index
+  "Reverse index {id → name} for every rule and query in the analysis,
+   asserting id uniqueness (a route-id collision throws loudly at
+   analysis-build time rather than silently mislinking).  Internal — never
+   part of the /v1/analysis payload."
+  [analysis]
+  (reduce (fn [idx {:keys [id name]}]
+            (if-let [existing (get idx id)]
+              (throw (ex-info (format "Production route-id collision: %s and %s both map to %s"
+                                      existing name id)
+                              {:id id :names [existing name]}))
+              (assoc idx id name)))
+          {}
+          (concat (vals (:rules analysis))
+                  (vals (:queries analysis)))))
 
 (defn build-dep-graph
   "Builds the production dependency graph: {production-name {:upstream #{...}
@@ -410,6 +427,7 @@
             (let [is-rule? (contains? rules p-name)
                   used-key (if is-rule? :used-by-rules :used-by-queries)
                   production-ref {:name p-name
+                                  :id (serialize/route-id (str p-name))
                                   :ns (:ns summary)
                                   :type (if is-rule? "rule" "query")}
                   updates (concat (for [t lhs-types] [(:name t) used-key])
@@ -521,7 +539,7 @@
    Omits :upstream and :downstream — they are only needed in the detail view
    and add significant payload weight at scale (3k+ rules)."
   [analysis]
-  (mapv #(select-keys % [:name :ns :doc :lhs-types :insert-types :retract-types
+  (mapv #(select-keys % [:name :id :ns :doc :lhs-types :insert-types :retract-types
                          :source-rule :sink-rule :unlinked-rule
                          :no-output-types
                          :dynamic-insert-types-detected
@@ -532,7 +550,7 @@
   "Returns a sequence of lightweight query summaries, preserving load order.
    Omits :upstream and :downstream — they are only needed in the detail view."
   [analysis]
-  (mapv #(select-keys % [:name :ns :doc :lhs-types :params])
+  (mapv #(select-keys % [:name :id :ns :doc :lhs-types :params])
         (vals (:queries analysis))))
 
 (defn fact-types-list
@@ -549,6 +567,6 @@
   [snapshot]
   {:types (->> (:fact-types snapshot)
                vals
-               (mapv #(select-keys % [:name :count])))
+               (mapv #(select-keys % [:name :id :ns :count])))
    :total-count (count (:facts snapshot))})
 

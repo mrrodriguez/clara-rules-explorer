@@ -7,21 +7,12 @@
             [schema.core :as s]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.memory :as memory]
-            [clara.server.tools.graph.analyze :as analyze]
-            [clojure.string :as str]))
+            [clara.server.tools.graph.analyze :as analyze]))
 
 (defn- json-mapper []
   (j/object-mapper
    {:encode-key-fn true
     :decode-key-fn true}))
-
-(defn- fq-name-from-param [p]
-  (let [parts (str/split p #"\.")]
-    (if (> (count parts) 1)
-      (format "%s/%s"
-              (str/join "." (butlast parts))
-              (last parts))
-      p)))
 
 ;; ---------------------------------------------------------------------------
 ;; Schema definitions for API response bodies
@@ -34,8 +25,10 @@
    :fact-type-count s/Int})
 
 (s/defschema ProductionDep
-  "A reference to another production (rule or query) in the dependency graph."
+  "A reference to another production (rule or query) in the dependency graph.
+   `id` is the deterministic route id for linkage."
   {:name s/Str
+   :id s/Str
    :ns s/Str
    :type s/Str})
 
@@ -96,6 +89,7 @@
 (s/defschema RuleListItem
   "Lightweight rule summary (list endpoint)."
   {:name          s/Str
+   :id            s/Str
    :ns            s/Str
    :doc           (s/maybe s/Str)
    :lhs-types     [TypeReference]
@@ -123,6 +117,7 @@
 (s/defschema QueryListItem
   "Lightweight query summary (list endpoint)."
   {:name      s/Str
+   :id        s/Str
    :ns        s/Str
    :doc       (s/maybe s/Str)
    :lhs-types [TypeReference]
@@ -159,12 +154,15 @@
 (s/defschema SessionFactTypeItem
   "A fact-type entry in the session fact-types summary."
   {:name  s/Str
+   :id    s/Str
+   :ns    (s/maybe s/Str)
    :count s/Int})
 
 (s/defschema SessionFact
   "A single fact instance in working memory."
   {:id            s/Int
-   :type          s/Str
+   :type          TypeReference
+   :ns            (s/maybe s/Str)
    :data          s/Any
    :is-root       s/Bool
    :inserted-from [ProductionDep]
@@ -178,6 +176,7 @@
 (s/defschema FactTypeRoleGroup
   "A grouping of fact instances by a production (rule/query) or root origin."
   {:name  s/Str
+   :id    s/Str
    :type  s/Str
    :facts [SessionFact]
    (s/optional-key :ns) s/Str})
@@ -185,6 +184,8 @@
 (s/defschema SessionFactTypeDetail
   "Full detail for a single fact type in the session, including role groupings."
   {:name          s/Str
+   :id            s/Str
+   :ns            (s/maybe s/Str)
    :count         s/Int
    :inserted-from [FactTypeRoleGroup]
    :used-by       [FactTypeRoleGroup]
@@ -298,7 +299,8 @@
                 {:session session
                  :annotations annotations
                  :analysis analysis
-                 :fact-type-id-index (core/build-fact-type-id-index analysis)})
+                 :fact-type-id-index (core/build-fact-type-id-index analysis)
+                 :production-id-index (core/build-production-id-index analysis)})
         @analysis-cache))))
 
 (defn- get-analysis
@@ -323,8 +325,10 @@
 
 (s/defn handle-get-rule :- GetRuleResponse
   [session-atom annotations-atom analysis-cache req]
-  (let [fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
-        rule (get-in (get-analysis session-atom annotations-atom analysis-cache) [:rules fq-name])]
+  (let [id (get-in req [:path-params :id])
+        state (get-analysis-state session-atom annotations-atom analysis-cache)
+        name (get (:production-id-index state) id)
+        rule (get-in state [:analysis :rules name])]
     (if rule
       {:status 200 :body rule}
       {:status 404 :body {:error "Rule not found"}})))
@@ -336,8 +340,10 @@
 
 (s/defn handle-get-query :- GetQueryResponse
   [session-atom annotations-atom analysis-cache req]
-  (let [fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
-        query (get-in (get-analysis session-atom annotations-atom analysis-cache) [:queries fq-name])]
+  (let [id (get-in req [:path-params :id])
+        state (get-analysis-state session-atom annotations-atom analysis-cache)
+        name (get (:production-id-index state) id)
+        query (get-in state [:analysis :queries name])]
     (if query
       {:status 200 :body query}
       {:status 404 :body {:error "Query not found"}})))
@@ -367,11 +373,10 @@
 (s/defn handle-get-session-fact-type
   :- GetSessionFactTypeResponse
   [session-atom snapshot-cache req]
-  (let [p (get-in req [:path-params :fq-name])
+  (let [id (get-in req [:path-params :id])
         snapshot (get-snapshot session-atom snapshot-cache)
-        fact-types (:fact-types snapshot)
-        type-info (or (get fact-types p)
-                      (get fact-types (fq-name-from-param p)))]
+        name (get (:fact-type-id-index snapshot) id)
+        type-info (get (:fact-types snapshot) name)]
     (if type-info
       {:status 200 :body type-info}
       {:status 404 :body {:error "Fact type not found in session"}})))
@@ -389,9 +394,10 @@
 (s/defn handle-get-session-rule
   :- GetSessionRuleResponse
   [session-atom snapshot-cache req]
-  (let [fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
+  (let [id (get-in req [:path-params :id])
         snapshot (get-snapshot session-atom snapshot-cache)
-        rule-activity (memory/get-session-rule-activity snapshot fq-name)]
+        name (get (:rule-id-index snapshot) id)
+        rule-activity (memory/get-session-rule-activity snapshot name)]
     (if rule-activity
       {:status 200 :body rule-activity}
       {:status 404 :body {:error "Rule matches not found"}})))
@@ -399,9 +405,10 @@
 (s/defn handle-get-session-query
   :- GetSessionQueryResponse
   [session-atom snapshot-cache req]
-  (let [fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
+  (let [id (get-in req [:path-params :id])
         snapshot (get-snapshot session-atom snapshot-cache)
-        query-activity (memory/get-session-query-activity snapshot fq-name)]
+        name (get (:query-id-index snapshot) id)
+        query-activity (memory/get-session-query-activity snapshot name)]
     (if query-activity
       {:status 200 :body query-activity}
       {:status 404 :body {:error "Query matches not found"}})))
@@ -430,13 +437,13 @@
        ["/rules"
         [""
          {:get (partial handle-get-rules session-atom annotations-atom analysis-cache)}]
-        ["/:fq-name"
+        ["/:id"
          {:get (partial handle-get-rule session-atom annotations-atom analysis-cache)}]]
 
        ["/queries"
         [""
          {:get (partial handle-get-queries session-atom annotations-atom analysis-cache)}]
-        ["/:fq-name"
+        ["/:id"
          {:get (partial handle-get-query session-atom annotations-atom analysis-cache)}]]
 
        ["/fact-types"
@@ -448,12 +455,12 @@
        ["/session"
         ["/fact-types"
          ["" {:get (partial handle-get-session-fact-types session-atom snapshot-cache)}]
-         ["/:fq-name" {:get (partial handle-get-session-fact-type session-atom snapshot-cache)}]]
+         ["/:id" {:get (partial handle-get-session-fact-type session-atom snapshot-cache)}]]
         ["/facts/:id"
          {:get (partial handle-get-session-fact session-atom snapshot-cache)}]
-        ["/rules/:fq-name"
+        ["/rules/:id"
          {:get (partial handle-get-session-rule session-atom snapshot-cache)}]
-        ["/queries/:fq-name"
+        ["/queries/:id"
          {:get (partial handle-get-session-query session-atom snapshot-cache)}]]
 
        ["/session-snapshot"

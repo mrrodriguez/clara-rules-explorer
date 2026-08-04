@@ -86,6 +86,26 @@ without cross-referencing.
 >   back to its name, colliding fixture throws).  **136 tests / 827
 >   assertions green, lint/format/reflection clean.**
 >
+> - **M4 — Phase 1g complete (2026-08-04):** server-side production route ids.
+>   `:id` on rule/query list + detail entries (route-id of the production
+>   name), on every `ProductionDep` (upstream/downstream via
+>   `serialize-production-dep`, fact-type usage lists), and on session refs
+>   (`inserted-from`/`used-by` and `FactTypeRoleGroup` in memory.clj);
+>   `core/build-production-id-index` (uniqueness asserted, cached in
+>   `get-analysis-state`, never in the `/v1/analysis` payload); per-snapshot
+>   id→name indexes (`:rule-id-index`/`:query-id-index`/`:fact-type-id-index`)
+>   built in `session-snapshot` (no analysis-cache dependency); all rule /
+>   query / session detail handlers resolve **id-only**; **`fq-name-from-param`
+>   deleted** (same change); routes renamed `/:id`; session `SessionFact`
+>   `:type` → `TypeReference`, fact-type `:ns` on session types + facts
+>   (raw-type-aware via `core/raw-type-ns`); `:fact-instance-derived-types`
+>   stays `[s/Str]` (extracts `:name` from session TypeReferences); tests
+>   updated: api/session/smoke → id-based lookups, memory_test →
+>   TypeReference shapes, new `build-production-id-index` tests.  **137 tests /
+>   855 assertions green, lint/format/reflection clean.**  Server-side
+>   id-addressing is now complete for fact types, rules, queries, and session
+>   resources; nothing name-based remains in the API contract.
+>
 > **State after M3:** fact types are fully id-addressed server-side.  The UI
 > (1e/1h) and rules/queries/session production ids (1g) remain.
 
@@ -95,7 +115,7 @@ without cross-referencing.
 - [x] **Phase 1d:** Add server tests for `:ancestors` (default-ancestors noise, `known` flag, ordering, missing-meta, nil-returning fn, memoization, mixed-kind hierarchy, kind-explicit serialization incl. string-bearing tuples, condition-`:type`/`:lhs-types` consistency, symbol ns-resolution parity, route ids)
 - [ ] **Phase 1e:** Update UI types (`TypeReference` with `name`/`id`/`known`, `id` on `FactTypeListItem`/`RuleListItem`/`QueryListItem`/details/`ProductionReference`/session types, type-reference fields → `TypeReference`, usage lists → `ProductionReference[]`, `ancestors?` on detail `FactTypeSummary` in `api.ts`)
 - [ ] **Phase 1f:** Rewrite `explorer-graph-api.md` for the new contract — flag: this is a full rewrite, not a targeted edit (serialization table, `:id` scheme + routes, `:ns`, `:ancestors`)
-- [ ] **Phase 1g:** Server-side production route ids: `:id` on rule/query list + detail entries and every production ref (`ProductionDep` on rule/query details; `inserted-from`/`used-by` refs and `FactTypeRoleGroup` entries in `memory.clj`); production id reverse index; per-snapshot id→name indexes built in `session-snapshot` (no analysis-cache dependency); all rule/query/session detail handlers resolve id-only; delete `fq-name-from-param` server-side and its tests **in the same commit as the index implementation** (atomic revert if issues arise); update `session_api_test.clj` to id-based lookups
+- [x] **Phase 1g:** Server-side production route ids: `:id` on rule/query list + detail entries and every production ref (`ProductionDep` on rule/query details; `inserted-from`/`used-by` refs and `FactTypeRoleGroup` entries in `memory.clj`); production id reverse index; per-snapshot id→name indexes built in `session-snapshot` (no analysis-cache dependency); all rule/query/session detail handlers resolve id-only; delete `fq-name-from-param` server-side and its tests **in the same commit as the index implementation** (atomic revert if issues arise); update `session_api_test.clj` to id-based lookups
 - [ ] **Phase 1h:** UI route-id migration: `utils.ts` link builders + `api.ts` fetchers use `:id` verbatim; delete `toRouteId`/`fromRouteId`/`splitQualifiedName`; `entries()` generators and `bin/scrape-demo-data.js` use server-issued ids; regenerate demo data (`pnpm scrape:demo`); rename `session/fact-types/[typeName]` → `[id]`; update all type-link callers (`FactTypeReferenceLink`/`ConditionFactType`/`DynamicCallsiteList`/`ProductionReferenceCategory`/`GlobalSidebarFlyout`/appState contextual nav) to consume `TypeReference`/`ProductionDep` directly; delete `FactTypeSummary`'s `toRef` mapping; update e2e URL fixtures. **Scope note: 1g+1h together are the largest work item (~30–40% of the total)** — every endpoint, every link builder, the prerender pipeline, and all URL-constructing test fixtures. Budget accordingly
 - [ ] **Phase 2a:** Add `matching-type-pairs` helper
 - [ ] **Phase 2b:** Update `get-production-deps-summary` (+ `serialize-match` in `serialize.clj`) to attach `:match` with symmetric `producer-type`/`consumer-type` `TypeReference` pairs, each serialized in its own production's ns context, sorted by `:name` post-serialization

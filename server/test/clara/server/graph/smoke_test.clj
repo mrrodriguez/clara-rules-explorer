@@ -77,20 +77,26 @@
       :body
       json/read-value))
 
-(defn get-rule [fq-name]
-  (-> (client/get (->url (str "/rules/" fq-name)) {:accept :json})
-      :body
-      json/read-value))
+(defn get-rule [name]
+  (let [rules (get (get-rules) "rules")
+        entry (first (filter #(= name (get % "name")) rules))
+        id (get entry "id")]
+    (-> (client/get (->url (str "/rules/" id)) {:accept :json})
+        :body
+        json/read-value)))
 
 (defn get-queries []
   (-> (client/get (->url "/queries") {:accept :json})
       :body
       json/read-value))
 
-(defn get-query [fq-name]
-  (-> (client/get (->url (str "/queries/" fq-name)) {:accept :json})
-      :body
-      json/read-value))
+(defn get-query [name]
+  (let [queries (get (get-queries) "queries")
+        entry (first (filter #(= name (get % "name")) queries))
+        id (get entry "id")]
+    (-> (client/get (->url (str "/queries/" id)) {:accept :json})
+        :body
+        json/read-value)))
 
 (defn get-fact-type [name]
   (let [fact-types (get (get-fact-types) "fact-types")
@@ -100,25 +106,31 @@
         :body
         json/read-value)))
 
-(defn get-session-fact-type [fq-name]
-  (-> (client/get (->url (str "/session/fact-types/" fq-name)) {:accept :json})
-      :body
-      json/read-value))
+(defn get-session-fact-type [name]
+  (let [snapshot (get-session-snapshot)
+        id (some (fn [[id n]] (when (= n name) id)) (get snapshot "fact-type-id-index"))]
+    (-> (client/get (->url (str "/session/fact-types/" id)) {:accept :json})
+        :body
+        json/read-value)))
 
 (defn get-session-fact [id]
   (-> (client/get (->url (str "/session/facts/" id)) {:accept :json})
       :body
       json/read-value))
 
-(defn get-session-rule [fq-name]
-  (-> (client/get (->url (str "/session/rules/" fq-name)) {:accept :json})
-      :body
-      json/read-value))
+(defn get-session-rule [name]
+  (let [snapshot (get-session-snapshot)
+        id (some (fn [[id n]] (when (= n name) id)) (get snapshot "rule-id-index"))]
+    (-> (client/get (->url (str "/session/rules/" id)) {:accept :json})
+        :body
+        json/read-value)))
 
-(defn get-session-query [fq-name]
-  (-> (client/get (->url (str "/session/queries/" fq-name)) {:accept :json})
-      :body
-      json/read-value))
+(defn get-session-query [name]
+  (let [snapshot (get-session-snapshot)
+        id (some (fn [[id n]] (when (= n name) id)) (get snapshot "query-id-index"))]
+    (-> (client/get (->url (str "/session/queries/" id)) {:accept :json})
+        :body
+        json/read-value)))
 
 (defn get-annotations []
   (-> (client/get (->url "/annotations") {:accept :json})
@@ -151,13 +163,13 @@
 
   (testing "Rules endpoints"
     (let [rules (get-rules)
-          rule (get-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved%3F")]
+          rule (get-rule "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?")]
       (is (seq rules))
       (is (= "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?" (get rule "name")))))
 
   (testing "Queries endpoints"
     (let [queries (get-queries)
-          query (get-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome")]
+          query (get-query "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome")]
       (is (seq queries))
       (is (= "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome" (get query "name")))))
 
@@ -183,8 +195,8 @@
           (is (= (str fact-id) (str (get fact "id"))))))))
 
   (testing "Session rules and queries"
-    (let [session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved%3F")
-          session-query (get-session-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome")]
+    (let [session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?")
+          session-query (get-session-query "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome")]
       (is (some? session-rule))
       (is (some? session-query)))))
 
@@ -209,12 +221,12 @@
   (def analysis (get-analysis))
 
   (def rules (get-rules))
-  (def rule (get-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved%3F"))
+  (def rule (get-rule "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"))
   (def rule (get-rule "clara.server.tools.graph.rules.loan-doc-rules.dynamic-insert-audit-trail"))
   (def rule (get-rule "clara.server.tools.graph.rules.loan-doc-rules.dynamic-insert-compliance-review"))
 
   (def queries (get-queries))
-  (def query (get-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome"))
+  (def query (get-query "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"))
 
   (def fact-types (get-fact-types))
   (def fact-type (get-fact-type "clara.server.tools.graph.rules.loan-app-facts.Application"))
@@ -229,8 +241,8 @@
   ;; Pick a fact id from the snapshot, e.g.:
   (def fact (get-session-fact (ffirst (get ss "facts"))))
 
-  (def session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules.app-outcome-approved%3F"))
-  (def session-query (get-session-query "clara.server.tools.graph.rules.loan-app-rules.find-app-outcome"))
+  (def session-rule (get-session-rule "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"))
+  (def session-query (get-session-query "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"))
 
   ;; --- Annotations ---
 

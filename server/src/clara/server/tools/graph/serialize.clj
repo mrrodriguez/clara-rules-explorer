@@ -130,6 +130,7 @@
     (into (empty coll) (map name) coll)))
 
 (defn serialize-production-dep
+  "Serializes a production reference (ProductionDep): {name, ns, type, id}."
   [production-map fq-dep-name]
   (let [{p-ns-name :ns-name :keys [rhs]} (get production-map fq-dep-name)
         base
@@ -138,10 +139,11 @@
           (let [fq-sym (-> fq-dep-name symbol)
                 ns-part (namespace fq-sym)]
             {:ns ns-part
-             ;; NOTE: It should stay fully-qualified since the caller expects this for now.
-             :name (str fq-dep-name)})
+             :name (str fq-dep-name)
+             :id (route-id (str fq-dep-name))})
           {:ns (str p-ns-name)
-           :name fq-dep-name})]
+           :name fq-dep-name
+           :id (route-id (str fq-dep-name))})]
     (cond-> base
       (seq rhs) (assoc :type "rule")
       (nil? rhs) (assoc :type "query"))))

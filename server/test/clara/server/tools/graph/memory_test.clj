@@ -131,7 +131,9 @@
       ;; Matches are flattened SessionFact entries (one per fact-id)
       (when-let [match (first (:matches rule-info))]
         (is (int? (:id match)) "Match entry should have integer :id")
-        (is (string? (:type match)) "Match entry should have :type")
+        (is (map? (:type match)) "Match entry :type is a TypeReference")
+        (is (string? (get-in match [:type :name])))
+        (is (true? (get-in match [:type :known])) "session facts are always known")
         (is (map? (:data match)) "Match entry should have :data (bindings)")
         (is (contains? match :is-root) "Match entry should have :is-root")
         (is (vector? (:inserted-from match)) "Match entry should have :inserted-from")
@@ -145,7 +147,8 @@
         ;; Query matches are also SessionFact entries
         (when-let [qmatch (first (:matches query-info))]
           (is (int? (:id qmatch)) "Query match entry should have integer :id")
-          (is (string? (:type qmatch)) "Query match entry should have :type")
+          (is (map? (:type qmatch)) "Query match entry :type is a TypeReference")
+          (is (string? (get-in qmatch [:type :name])))
           (is (map? (:data qmatch)) "Query match entry should have :data (bindings)"))))))
 
 (deftest test-multi-fact-match-flattening
@@ -172,7 +175,7 @@
       (is (every? #(contains? % :inserted-from) matches) "Every match entry should have :inserted-from")
       (is (every? #(contains? % :used-by) matches) "Every match entry should have :used-by")
       ;; Verify types match the actual facts
-      (let [types (set (map :type matches))]
+      (let [types (set (map (comp :name :type) matches))]
         (is (contains? types "clara.server.tools.graph.rules.loan_app_facts.Application")
             "Should include Application fact")
         (is (contains? types ":loan-doc-rules/document-check-input")

@@ -864,7 +864,7 @@
         rule->session-types
         (reduce-kv (fn [acc _id {:keys [type inserted-from]}]
                      (reduce (fn [acc' {:keys [name]}]
-                               (update acc' name (fnil conj #{}) type))
+                               (update acc' name (fnil conj #{}) (:name type)))
                              acc
                              inserted-from))
                    {}

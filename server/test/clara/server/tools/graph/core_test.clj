@@ -749,3 +749,19 @@
                  (core/build-fact-type-id-index
                   {:fact-types {"a" {:id "same-id" :name "a"}
                                 "b" {:id "same-id" :name "b"}}})))))
+
+(deftest test-production-id-index
+  (testing "The reverse index resolves every rule and query id back to its name"
+    (let [session (->test-session)
+          analysis (core/rulebase-analysis session (loan-doc-annotations session))
+          index (core/build-production-id-index analysis)]
+      (doseq [{prod-name :name prod-id :id} (concat (vals (:rules analysis))
+                                                    (vals (:queries analysis)))]
+        (is (= prod-name (get index prod-id))
+            (str "index resolves " prod-id " back to " prod-name)))))
+
+  (testing "A production route-id collision throws at index build time"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (core/build-production-id-index
+                  {:rules {"a" {:id "same-id" :name "a"}}
+                   :queries {"b" {:id "same-id" :name "b"}}})))))

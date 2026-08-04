@@ -81,6 +81,7 @@
               fact (extract-match-facts match)
               :when fact]
           [(get-id fact) {:name (:name rule)
+                          :id (serialize/route-id (str (:name rule)))
                           :ns (str (:ns-name rule))
                           :type "rule"}])
 
@@ -91,6 +92,7 @@
               fact (extract-match-facts match)
               :when fact]
           [(get-id fact) {:name (:name query)
+                          :id (serialize/route-id (str (:name query)))
                           :ns (str (:ns-name query))
                           :type "query"}])
 
@@ -115,6 +117,7 @@
                  (map :rule)
                  (map (fn [{p-name :name p-ns-name :ns-name}]
                         {:name p-name
+                         :id (serialize/route-id (str p-name))
                          :ns (str p-ns-name)
                          :type "rule"}))
                  distinct
@@ -135,9 +138,14 @@
   (into {}
         (map (fn [wrapped]
                (let [fact (platform/fact-id-unwrap wrapped)
-                     id (get-fact-id fact)]
+                     id (get-fact-id fact)
+                     raw-type (fact-type-fn fact)
+                     type-name (serialize/serialize-fact-type nil raw-type)]
                  [id {:id id
-                      :type (serialize/serialize-fact-type nil (fact-type-fn fact))
+                      :type {:name type-name
+                             :id (serialize/route-id type-name)
+                             :known true}
+                      :ns (core/raw-type-ns raw-type)
                       :data (serialize/prune-fns fact)
                       :is-root (boolean (some #(identical? fact %) root-facts))
                       :inserted-from (get origin-map id [])
@@ -159,6 +167,7 @@
        (map (fn [[[name type] items]]
               (let [first-item (first items)]
                 (cond-> {:name name
+                         :id (serialize/route-id (str name))
                          :type type
                          :facts (mapv :fact (sort-by (comp :id :fact) items))}
                   (:ns first-item) (assoc :ns (:ns first-item))))))
@@ -170,9 +179,11 @@
 
 (defn- build-fact-type-index
   [fact-table production-order-key-fn]
-  (letfn [(add-fact-type-instance-data [m fact-type instances]
-            (assoc m fact-type
-                   {:name fact-type
+  (letfn [(add-fact-type-instance-data [m fact-type-name instances]
+            (assoc m fact-type-name
+                   {:name fact-type-name
+                    :id (serialize/route-id fact-type-name)
+                    :ns (:ns (first instances))
                     :count (count instances)
                     :inserted-from (group-instances-by-role instances
                                                             :inserted-from
@@ -182,8 +193,15 @@
                                                       production-order-key-fn)
                     :ids (mapv :id instances)}))]
     (->> (vals fact-table)
-         (group-by :type)
+         (group-by (comp :name :type))
          (reduce-kv add-fact-type-instance-data {}))))
+
+(defn- build-id-name-index
+  "Reverse index {route-id(name) → name} for a collection of serialized names."
+  [names]
+  (into {}
+        (map (fn [n] [(serialize/route-id (str n)) n]))
+        names))
 
 (defn- explanations->fact-match-data
   [explanations fact-table get-fact-id]
@@ -278,22 +296,28 @@
         query-match-index (build-query-match-index query-matches
                                                    fact-table
                                                    get-fact-id)]
-    {:fact-types    fact-type-index
-     :facts         fact-table
-     :used-by       used-by-index
-     :origin        origin-map
-     :rule-matches  rule-match-index
-     :query-matches query-match-index}))
+    {:fact-types        fact-type-index
+     :facts             fact-table
+     :used-by           used-by-index
+     :origin            origin-map
+     :rule-matches      rule-match-index
+     :query-matches     query-match-index
+     ;; Per-snapshot id→name indexes for the session detail handlers — built
+     ;; here (no analysis-cache dependency) with the same id function over the
+     ;; snapshot's serialized names, so session ids align with analysis ids.
+     :fact-type-id-index (build-id-name-index (keys fact-type-index))
+     :rule-id-index      (build-id-name-index (keys rule-match-index))
+     :query-id-index     (build-id-name-index (keys query-match-index))}))
 
 (defn get-session-rule-activity
   "Returns a unified activity map for a rule: {:matches [...] :inserted-facts [...]}"
-  [snapshot fq-name]
-  (get-in snapshot [:rule-matches fq-name]))
+  [snapshot p-name]
+  (get-in snapshot [:rule-matches p-name]))
 
 (defn get-session-query-activity
   "Returns a unified activity map for a query: {:matches [...]}"
-  [snapshot fq-name]
-  (get-in snapshot [:query-matches fq-name]))
+  [snapshot p-name]
+  (get-in snapshot [:query-matches p-name]))
 
 (defn get-node-elements
   "Returns all elements (facts) currently in the memory for the given node ID."

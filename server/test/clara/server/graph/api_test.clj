@@ -73,14 +73,21 @@
           (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"))
           (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?")))))))
 
-(deftest test-v1-rules-fq-name
-  (let [handler (->handler)]
-    (testing "GET /v1/rules/:fq-name"
-      (let [response (handler (mock/request :get "/v1/rules/clara.server.tools.graph.rules.loan-doc-rules.collect-app-given-docs"))]
+(deftest test-v1-rules-id
+  (let [handler (->handler)
+        rule-name "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
+        rules (:rules (parse-json (:body (handler (mock/request :get "/v1/rules")))))
+        rule-id (:id (first (filter #(= rule-name (:name %)) rules)))]
+    (testing "GET /v1/rules/:id"
+      (let [response (handler (mock/request :get (str "/v1/rules/" rule-id)))]
         (is (= 200 (:status response)))
         (let [body (parse-json (:body response))]
-          (is (= "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs" (:name body)))
-          (is (seq (:downstream body))))))))
+          (is (= rule-name (:name body)))
+          (is (seq (:downstream body))))))
+
+    (testing "Name-based rule lookup 404s (id-only resolution)"
+      (is (= 404 (:status (handler (mock/request :get
+                                                 "/v1/rules/clara.server.tools.graph.rules.loan-doc-rules.collect-app-given-docs"))))))))
 
 (deftest test-v1-queries
   (let [handler (->handler)]
@@ -95,17 +102,21 @@
           (let [names (set (map :name queries))]
             (is (contains? names "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"))
             (is (contains? names "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome")))
-          ;; Verify :ns is populated for every query (derived from :name)
+          ;; Verify :id is present and :ns populated for every query
           (doseq [q queries]
+            (is (string? (:id q)))
             (is (string? (:ns q)))
             (is (not (str/blank? (:ns q)))
                 (str "Expected non-blank :ns for query " (:name q)))))))
 
-    (testing "GET /v1/queries/:fq-name — detail with :ns populated"
-      (let [response (handler (mock/request :get "/v1/queries/clara.server.tools.graph.rules.loan-doc-rules.find-document-check"))]
+    (testing "GET /v1/queries/:id — detail"
+      (let [query-name "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"
+            query-id (:id (first (filter #(= query-name (:name %))
+                                         (:queries (parse-json (:body (handler (mock/request :get "/v1/queries"))))))))
+            response (handler (mock/request :get (str "/v1/queries/" query-id)))]
         (is (= 200 (:status response)))
         (let [body (parse-json (:body response))]
-          (is (= "clara.server.tools.graph.rules.loan-doc-rules/find-document-check" (:name body)))
+          (is (= query-name (:name body)))
           (is (= "clara.server.tools.graph.rules.loan-doc-rules" (:ns body)))
           (is (seq (:lhs-types body)))
           (is (contains? (set (:params body)) "?app-id"))
