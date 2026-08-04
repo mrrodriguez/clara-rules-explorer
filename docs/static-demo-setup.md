@@ -16,7 +16,7 @@ Since the explorer is a visualization tool, visitors don't need to compile new r
 
 ## 2. Dynamic Route Resolution (handleUnseenRoutes)
 
-SvelteKit's prerender crawler starts at `/` and follows links. However, it cannot statically discover dynamic parameters like specific rule FQNs or fact IDs during compilation. 
+SvelteKit's prerender crawler starts at `/` and follows links. However, it cannot statically discover dynamic parameters like specific rule FQNs or fact IDs during compilation.
 
 We set `prerender.handleUnseenRoutes: 'ignore'` in `svelte.config.js` to prevent build failures. When a visitor navigates directly to a dynamic route, GitHub Pages serves the fallback `404.html` shell. SvelteKit's router then mounts, reads the URL, and fetches the static data JSON file dynamically.
 
@@ -25,21 +25,28 @@ We set `prerender.handleUnseenRoutes: 'ignore'` in `svelte.config.js` to prevent
 ## 3. Step-by-Step Implementation
 
 ### Step 1: Bootstrap the Demo Data
+
 First, generate the demo data artifacts (e.g., `session.bin` and annotations) required to run the demo server. From the `server` directory, run:
+
 ```bash
 cd server
 clojure -M:demo-setup
 ```
 
 ### Step 2: Start the Demo Server
+
 Next, start the server using the generated demo data artifacts. The scraper script requires the backend to be running locally (default: port `9001`). From the `server` directory, run:
+
 ```bash
 clojure -M:demo-run -s demo-data/session.bin -l demo-data/loan-doc-rules-annotations.edn
 ```
+
 Keep this server running in your terminal while you perform the next steps.
 
 ### Step 3: Scrape Demo Data
+
 Open a new terminal window. Run the scraper script in the `ui` directory to fetch the current API responses and save them as static JSON files:
+
 ```bash
 cd ui
 pnpm install
@@ -47,45 +54,50 @@ pnpm run scrape:demo
 ```
 
 ### Step 4: Build the Demo Files
+
 Compile the static build files:
+
 ```bash
 pnpm run build:demo
 ```
+
 This script (configured in `ui/package.json`) runs the build with `VITE_DEMO_MODE=true` and sets the repository subdirectory base path (`BASE_PATH="/clara-rules-explorer"`).
 
 ### Step 5: Preview Locally
+
 You can preview the compiled static build locally before deploying:
+
 ```bash
 pnpm preview
 ```
+
 Open the local URL in your browser to inspect the visualizer running 100% statically.
 
 ---
 
 ## 4. Hosting on GitHub Pages
 
-The demo is configured to be hosted as a subdirectory of your main domain, `metasimple.org`, which is already connected to your `<username>.github.io` blog repository. 
+The live demo for this project is configured to be hosted as a subdirectory of the domain `metasimple.org`, which is connected to the `mrrodriguez.github.io` GitHub Pages repository.
 
 Once deployed, the explorer demo is served at:
 👉 **[https://www.metasimple.org/clara-rules-explorer/](https://www.metasimple.org/clara-rules-explorer/)**
 
-* **DNS Configuration**: None required.
-* **Build Path**: Compiled using `BASE_PATH="/clara-rules-explorer"` (handled automatically by `pnpm build:demo`).
+- **DNS Configuration**: None required.
+- **Build Path**: Compiled using `BASE_PATH="/clara-rules-explorer"` (handled automatically by `pnpm build:demo`).
 
-> [!IMPORTANT]
-> **If you see a 404 page at the URL above:**
+> [!IMPORTANT] > **If you see a 404 page at the URL above:**
+>
 > 1. Go to your repository settings on GitHub: **Settings > Pages**.
 > 2. Under **Build and deployment > Source**, ensure **Deploy from a branch** is selected.
 > 3. Under **Branch**, select `gh-pages` and root folder (`/`), then click **Save**.
 > 4. Wait a couple of minutes for GitHub to build and deploy the Page.
 
-
 ---
 
 ## 5. Automating Deployment with GitHub Actions
 
-You can automate building and deploying the static demo to the `gh-pages` branch on every push to the `main` branch. 
+You can automate building and deploying the static demo to the `gh-pages` branch on every push to the `main` branch.
 
-The build and deploy pipeline is configured in [.github/workflows/deploy-demo.yml](../.github/workflows/deploy-demo.yml). 
+The build and deploy pipeline is configured in [.github/workflows/deploy-demo.yml](../.github/workflows/deploy-demo.yml).
 
 Once pushed, GitHub Actions will build your UI statically and deploy the static artifacts to the `gh-pages` branch, which GitHub Pages will serve automatically.
