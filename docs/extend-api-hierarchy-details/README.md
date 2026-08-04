@@ -81,7 +81,7 @@ without cross-referencing.
 >   `api/get-analysis-state` and kept in the cache atom — never in the
 >   `/v1/analysis` payload); `handle-get-fact-type` resolves **id-only** via
 >   the index (name-based URLs now 404); route param renamed `:id`; api_test
->   + smoke_test switched to id-based lookups; new router tests (class /
+>   + integration_test switched to id-based lookups; new router tests (class /
 >   keyword / tuple ids round-trip, name lookups 404, index resolves every id
 >   back to its name, colliding fixture throws).  **136 tests / 827
 >   assertions green, lint/format/reflection clean.**
@@ -100,7 +100,7 @@ without cross-referencing.
 >   `:type` → `TypeReference`, fact-type `:ns` on session types + facts
 >   (raw-type-aware via `core/raw-type-ns`); `:fact-instance-derived-types`
 >   stays `[s/Str]` (extracts `:name` from session TypeReferences); tests
->   updated: api/session/smoke → id-based lookups, memory_test →
+>   updated: api/session/integration → id-based lookups, memory_test →
 >   TypeReference shapes, new `build-production-id-index` tests.  **137 tests /
 >   855 assertions green, lint/format/reflection clean.**  Server-side
 >   id-addressing is now complete for fact types, rules, queries, and session

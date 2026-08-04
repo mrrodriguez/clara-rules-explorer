@@ -977,7 +977,7 @@ breaking-change phase for pre-existing tests and fixtures.**
   the freshly generated layer; generated layer is written with ids and the new format.
 - [x] 6.6 Regenerate `test-resources/clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn`
   as a `Layer` (`{:id :generated :source … :annotations …}`) with `:callsite-id`s, new
-  statuses, and derived conclusions; update `core_test.clj`, `api_test.clj`, `smoke_test.clj`,
+  statuses, and derived conclusions; update `core_test.clj`, `api_test.clj`, `integration_test.clj`,
   `source_sink_test.clj` to load it via `read-layer`.
 - [x] 6.7 Docs: rewrote `docs/rule-annotations.md` "Sources of Annotations" and "Annotation
   Merging" against §4–§5, including the **F5** correction (last-declared-wins for
