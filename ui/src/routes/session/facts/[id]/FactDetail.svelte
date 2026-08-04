@@ -1,14 +1,19 @@
 <script lang="ts">
 	import type { SessionFact } from '$lib/types/api';
-	import QualifiedName from '$lib/components/ui/QualifiedName.svelte';
+	import CopyableTitle from '$lib/components/ui/CopyableTitle.svelte';
 	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
 	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
+	import { factPath } from '$lib/utils';
+	import { resolve } from '$app/paths';
+	import type { Pathname } from '$app/types';
 
 	interface Props {
 		fact: SessionFact;
 	}
 
 	let { fact }: Props = $props();
+
+	const typeHref = $derived(resolve(factPath(fact.type.id) as Pathname));
 </script>
 
 <div class="fact-detail">
@@ -26,8 +31,16 @@
 					<div class="fs-7 text-muted">Reference ID</div>
 				</div>
 			</div>
-			<div class="text-end">
-				<QualifiedName fullName={fact.type.name} size="md" />
+			<div class="text-end d-flex align-items-start gap-2">
+				<CopyableTitle fullName={fact.type.name} size="md" />
+				<a
+					href={typeHref}
+					class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 d-flex align-items-center"
+					title="View fact type: {fact.type.name}"
+					aria-label="View fact type"
+				>
+					<i class="bi bi-box-arrow-up-right"></i>
+				</a>
 			</div>
 		</div>
 		<div class="card-body p-0">

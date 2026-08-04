@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { SessionFactGroup } from '$lib/types/api';
-	import QualifiedName from '$lib/components/ui/QualifiedName.svelte';
+	import CopyableTitle from '$lib/components/ui/CopyableTitle.svelte';
 	import LocateInListButton from '$lib/components/ui/LocateInListButton.svelte';
 	import FactGroup from './FactGroup.svelte';
 	import SessionSectionHeader from './SessionSectionHeader.svelte';
@@ -50,7 +50,7 @@
 			</div>
 			<h3 class="mb-0 fw-bold">
 				{#if detail}
-					<QualifiedName fullName={detail.name} size="lg" />
+					<CopyableTitle fullName={detail.name} size="lg" />
 				{/if}
 			</h3>
 		</div>
