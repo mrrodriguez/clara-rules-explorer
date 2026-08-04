@@ -388,6 +388,7 @@
   (letfn [(init-summary [type-name]
             (let [{idx-ancestors :ancestors :keys [ns]} (get ancestors-index type-name)]
               {:name type-name
+               :id (serialize/route-id type-name)
                :used-by-rules []
                :used-by-queries []
                :inserted-by-rules []
@@ -500,6 +501,21 @@
    :query-count (count (:queries analysis))
    :fact-type-count (count (:fact-types analysis))})
 
+(defn build-fact-type-id-index
+  "Reverse index {id → name} for every fact type in the analysis, asserting
+   id uniqueness (a route-id collision throws loudly at analysis-build time
+   rather than silently mislinking).  Internal — never part of the
+   /v1/analysis payload."
+  [analysis]
+  (reduce (fn [idx {:keys [id name]}]
+            (if-let [existing (get idx id)]
+              (throw (ex-info (format "Fact-type route-id collision: %s and %s both map to %s"
+                                      existing name id)
+                              {:id id :names [existing name]}))
+              (assoc idx id name)))
+          {}
+          (vals (:fact-types analysis))))
+
 (defn rules-list
   "Returns a sequence of lightweight rule summaries, preserving load order.
    Omits :upstream and :downstream — they are only needed in the detail view
@@ -521,9 +537,10 @@
 
 (defn fact-types-list
   "Returns a sequence of lightweight fact type summaries, preserving order.
-   Omits :ancestors (detail-only) but keeps :ns for grouping."
+   Omits :ancestors (detail-only) but keeps :ns for grouping and :id for
+   links."
   [analysis]
-  (mapv #(select-keys % [:name :ns :used-by-rules :used-by-queries
+  (mapv #(select-keys % [:name :id :ns :used-by-rules :used-by-queries
                          :inserted-by-rules :retracted-by-rules])
         (vals (:fact-types analysis))))
 

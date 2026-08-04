@@ -92,10 +92,13 @@
       :body
       json/read-value))
 
-(defn get-fact-type [fq-name]
-  (-> (client/get (->url (str "/fact-types/" fq-name)) {:accept :json})
-      :body
-      json/read-value))
+(defn get-fact-type [name]
+  (let [fact-types (get (get-fact-types) "fact-types")
+        entry (first (filter #(= name (get % "name")) fact-types))
+        id (get entry "id")]
+    (-> (client/get (->url (str "/fact-types/" id)) {:accept :json})
+        :body
+        json/read-value)))
 
 (defn get-session-fact-type [fq-name]
   (-> (client/get (->url (str "/session/fact-types/" fq-name)) {:accept :json})

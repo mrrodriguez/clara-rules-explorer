@@ -69,17 +69,30 @@ without cross-referencing.
 >   `known: true`, missing-meta fallback, nil-returning fn, exact-count
 >   memoization, mixed-kind hierarchy, intransitive + cyclic ordering,
 >   condition-`:type`/`:lhs-types` consistency, symbol ns-resolution parity,
->   fact-type `:ns`.  **134 tests / 788 assertions green, lint/format/reflection
->   clean.**  Notable finding: `mk-session` parses a trailing options *map* as a
->   rule source (silently dropped) — options must be keyword args; also
->   `clojure.core/type` already honors `with-meta :type`, so the default
->   fact-type-fn types keyword/tuple facts.  Remaining from 1d: item 11 (route
->   ids) lands with M3.
+>   fact-type `:ns`.  Notable finding: `mk-session` parses a trailing options
+>   *map* as a rule source (silently dropped) — options must be keyword args;
+>   also `clojure.core/type` already honors `with-meta :type`, so the default
+>   fact-type-fn types keyword/tuple facts.
+> - **M3 — Phase 1c + 1d item 11 complete (2026-08-04):** `:id` on fact-type
+>   entries (route-id of the serialized name) + list payload;
+>   `FactTypeDetail` schema split (list item + required `:ancestors`;
+>   `FactTypeListItem` no longer carries the optional `:ancestors`);
+>   `core/build-fact-type-id-index` (id→name, uniqueness asserted, built in
+>   `api/get-analysis-state` and kept in the cache atom — never in the
+>   `/v1/analysis` payload); `handle-get-fact-type` resolves **id-only** via
+>   the index (name-based URLs now 404); route param renamed `:id`; api_test
+>   + smoke_test switched to id-based lookups; new router tests (class /
+>   keyword / tuple ids round-trip, name lookups 404, index resolves every id
+>   back to its name, colliding fixture throws).  **136 tests / 827
+>   assertions green, lint/format/reflection clean.**
+>
+> **State after M3:** fact types are fully id-addressed server-side.  The UI
+> (1e/1h) and rules/queries/session production ids (1g) remain.
 
 - [x] **Phase 1a:** In `rulebase-analysis`: extract ancestors-fn via a single shared accessor used by both `core.clj` and `analyze.clj` (meta extraction + `clojure.core/ancestors` fallback); add `->memoized-ancestors`; hoist `type-analysis-map` (with `:ns-name`) out of `build-dep-graph`; build serialized ancestors index in per-production ns context (topologically ordered, divergence asserted, serialization memoized by raw-type × ns-name); compute the upfront known set (serialized `:consumed-types` ∪ `:produced-types` union — equals the future fact-types map keys by construction); simplify `downstream?` to consume the memoized set fn in the same change; verify raw types reaching the index are resolved. Extend `resolve-type` to kind-explicit serialization (splitting the catch-all `:else` into `string?`/`sequential?`/catch-all — see the serialization table); add `serialize-type-ref` (raw type + ns-name + known set → `TypeReference`); thread the production ns-name into `serialize-lhs` so LHS condition `:type` values serialize as `TypeReference`s too
 - [x] **Phase 1b:** Add `:ancestors` field (`TypeReference` entries, deterministic topological order with lexicographic tie-break + cycle guard) to fact-type entries in `build-fact-type-summary-map` (single pass, upfront known set); convert `:lhs-types`/`:insert-types`/`:retract-types` and LHS condition `:type` to `[TypeReference]`; convert fact-type usage lists (`:used-by-rules` etc.) to `[ProductionDep]`
-- [ ] **Phase 1c:** Add the uniform route-id fn (slug + 8-char base36 SHA-1 suffix, 60-char slug cap) to `serialize.clj`; add `:id` to fact-type entries (`FactTypeListItem` + new `FactTypeDetail`) and to `TypeReference`; build fact-type id reverse index (uniqueness asserted, internal — not in the `/v1/analysis` payload); `handle-get-fact-type` resolves id-only. Router-level tests for id-based lookups (keyword/tuple/string/class forms)
-- [~] **Phase 1d:** Add server tests for `:ancestors` (default-ancestors noise, `known` flag, ordering, missing-meta, nil-returning fn, memoization, mixed-kind hierarchy, kind-explicit serialization incl. string-bearing tuples, condition-`:type`/`:lhs-types` consistency, symbol ns-resolution parity, route ids) — items 1–10 and 12 done (M2); item 11 (route ids) lands with 1c/1g
+- [x] **Phase 1c:** Add the uniform route-id fn (slug + 8-char base36 SHA-1 suffix, 60-char slug cap) to `serialize.clj`; add `:id` to fact-type entries (`FactTypeListItem` + new `FactTypeDetail`) and to `TypeReference`; build fact-type id reverse index (uniqueness asserted, internal — not in the `/v1/analysis` payload); `handle-get-fact-type` resolves id-only. Router-level tests for id-based lookups (keyword/tuple/string/class forms)
+- [x] **Phase 1d:** Add server tests for `:ancestors` (default-ancestors noise, `known` flag, ordering, missing-meta, nil-returning fn, memoization, mixed-kind hierarchy, kind-explicit serialization incl. string-bearing tuples, condition-`:type`/`:lhs-types` consistency, symbol ns-resolution parity, route ids)
 - [ ] **Phase 1e:** Update UI types (`TypeReference` with `name`/`id`/`known`, `id` on `FactTypeListItem`/`RuleListItem`/`QueryListItem`/details/`ProductionReference`/session types, type-reference fields → `TypeReference`, usage lists → `ProductionReference[]`, `ancestors?` on detail `FactTypeSummary` in `api.ts`)
 - [ ] **Phase 1f:** Rewrite `explorer-graph-api.md` for the new contract — flag: this is a full rewrite, not a targeted edit (serialization table, `:id` scheme + routes, `:ns`, `:ancestors`)
 - [ ] **Phase 1g:** Server-side production route ids: `:id` on rule/query list + detail entries and every production ref (`ProductionDep` on rule/query details; `inserted-from`/`used-by` refs and `FactTypeRoleGroup` entries in `memory.clj`); production id reverse index; per-snapshot id→name indexes built in `session-snapshot` (no analysis-cache dependency); all rule/query/session detail handlers resolve id-only; delete `fq-name-from-param` server-side and its tests **in the same commit as the index implementation** (atomic revert if issues arise); update `session_api_test.clj` to id-based lookups

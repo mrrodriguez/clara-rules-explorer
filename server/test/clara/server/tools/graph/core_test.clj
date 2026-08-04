@@ -734,3 +734,18 @@
           "keyword → its namespace")
       (is (nil? (:ns (fact-type-by-name analysis "[:loan/status \"verified\"]")))
           "tuple → nil"))))
+
+(deftest test-fact-type-id-index
+  (testing "The reverse index resolves every fact-type id back to its name"
+    (let [session (->hierarchy-session)
+          analysis (core/rulebase-analysis session (hierarchy-annotations session))
+          index (core/build-fact-type-id-index analysis)]
+      (doseq [{type-name :name type-id :id} (vals (:fact-types analysis))]
+        (is (= type-name (get index type-id))
+            (str "index resolves " type-id " back to " type-name)))))
+
+  (testing "A route-id collision throws at index build time"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (core/build-fact-type-id-index
+                  {:fact-types {"a" {:id "same-id" :name "a"}
+                                "b" {:id "same-id" :name "b"}}})))))

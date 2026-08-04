@@ -140,14 +140,21 @@
 
 (s/defschema FactTypeListItem
   "Lightweight fact-type summary (list endpoint).  `:ancestors` is
-   detail-only: the list endpoint omits it (see `core/fact-types-list`)."
+   detail-only."
   {:name               s/Str
+   :id                 s/Str
    :ns                 (s/maybe s/Str)
    :used-by-rules      [ProductionDep]
    :used-by-queries    [ProductionDep]
    :inserted-by-rules  [ProductionDep]
-   :retracted-by-rules [ProductionDep]
-   (s/optional-key :ancestors) [TypeReference]})
+   :retracted-by-rules [ProductionDep]})
+
+(s/defschema FactTypeDetail
+  "Full fact-type summary (detail endpoint) — the list shape plus the
+   hierarchy-ordered `:ancestors` (TypeReferences; `known: false` ghosts
+   render as plain text, never links)."
+  (merge FactTypeListItem
+         {:ancestors [TypeReference]}))
 
 (s/defschema SessionFactTypeItem
   "A fact-type entry in the session fact-types summary."
@@ -221,7 +228,7 @@
                  status-404? {:status (s/eq 404) :body ring-error-body}))
 
 (s/defschema GetFactTypeResponse
-  (s/conditional status-200? {:status (s/eq 200) :body FactTypeListItem}
+  (s/conditional status-200? {:status (s/eq 200) :body FactTypeDetail}
                  status-404? {:status (s/eq 404) :body ring-error-body}))
 
 (s/defschema GetSessionFactTypeResponse
@@ -269,11 +276,13 @@
     (:annotations x)
     x))
 
-(defn- get-analysis
-  "Returns the cached rulebase-analysis, rebuilding only when the session or
-   annotations have changed.  Each detail handler was previously calling
-   core/rulebase-analysis on every request, which builds all rules, queries,
-   fact-types, the dep graph, and nodes — even to serve a single rule lookup."
+(defn- get-analysis-state
+  "Returns the cached analysis state (the analysis map plus derived internal
+   indexes), rebuilding when the session or annotations have changed.  Each
+   detail handler was previously calling core/rulebase-analysis on every
+   request, which builds all rules, queries, fact-types, the dep graph, and
+   nodes — even to serve a single rule lookup.  The fact-type id reverse
+   index is internal: it is never part of the /v1/analysis payload."
   [session-atom annotations-atom analysis-cache]
   (let [session @session-atom
         annotations @annotations-atom
@@ -281,14 +290,21 @@
     (if (and cached
              (identical? (:session cached) session)
              (identical? (:annotations cached) annotations))
-      (:analysis cached)
+      cached
       (let [analysis (core/rulebase-analysis
                       session
                       (enriched-annotations session (->bare-annotations annotations)))]
-        (reset! analysis-cache {:session session
-                                :annotations annotations
-                                :analysis analysis})
-        analysis))))
+        (reset! analysis-cache
+                {:session session
+                 :annotations annotations
+                 :analysis analysis
+                 :fact-type-id-index (core/build-fact-type-id-index analysis)})
+        @analysis-cache))))
+
+(defn- get-analysis
+  "The cached analysis map (see `get-analysis-state`)."
+  [session-atom annotations-atom analysis-cache]
+  (:analysis (get-analysis-state session-atom annotations-atom analysis-cache)))
 
 (s/defn handle-get-rulebase-summary :- {:status (s/eq 200) :body RulebaseSummary}
   [session-atom annotations-atom analysis-cache _req]
@@ -333,10 +349,10 @@
 
 (s/defn handle-get-fact-type :- GetFactTypeResponse
   [session-atom annotations-atom analysis-cache req]
-  (let [p (get-in req [:path-params :fq-name])
-        fact-types (:fact-types (get-analysis session-atom annotations-atom analysis-cache))
-        fact-type (or (get fact-types p)
-                      (get fact-types (fq-name-from-param p)))]
+  (let [id (get-in req [:path-params :id])
+        state (get-analysis-state session-atom annotations-atom analysis-cache)
+        name (get (:fact-type-id-index state) id)
+        fact-type (get-in state [:analysis :fact-types name])]
     (if fact-type
       {:status 200 :body fact-type}
       {:status 404 :body {:error "Fact type not found"}})))
@@ -426,7 +442,7 @@
        ["/fact-types"
         [""
          {:get (partial handle-get-fact-types session-atom annotations-atom analysis-cache)}]
-        ["/:fq-name"
+        ["/:id"
          {:get (partial handle-get-fact-type session-atom annotations-atom analysis-cache)}]]
 
        ["/session"
