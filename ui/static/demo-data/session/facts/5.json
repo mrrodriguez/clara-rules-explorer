@@ -1,27 +1,33 @@
 {
 	"id": 5,
 	"type": {
-		"name": ":extract-doc-meta",
-		"id": "extract-doc-meta-is5qkiib",
+		"name": "clojure.lang.PersistentVector",
+		"id": "clojure.lang.PersistentVector-8g4ux02t",
 		"known": true
 	},
-	"ns": null,
-	"data": "#'clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta",
+	"ns": "clojure.lang",
+	"data": [
+		[
+			{
+				"app-id": "app-1",
+				"doc-type": "bank-statement"
+			}
+		]
+	],
 	"is-root": false,
 	"inserted-from": [
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-extract-doc-me-k8p61ty2",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-id-fhyj46dq",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-ma1dm3n7",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}
 	],
-	"used-by": [
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		}
-	]
+	"used-by": []
 }

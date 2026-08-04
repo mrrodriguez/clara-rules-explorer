@@ -1,21 +1,7 @@
 {
 	"dynamic-insert-types-detected": {
-		"callsites": [
-			{
-				"source-str": "(map->AllIdCardGivenDocuments {:app-id ?app-id, :docs ?docs})",
-				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-				"status": "full",
-				"resolved-types": [
-					{
-						"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
-						"id": "clara.server.tools.graph.rules.loan-doc-rules.AllIdCardGiven-4xiyfnsl",
-						"known": true
-					}
-				]
-			}
-		],
-		"resolution": "full"
+		"fact-instance-derived-types": ["clojure.lang.PersistentVector"],
+		"resolution": "partial"
 	},
 	"source-rule": true,
 	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[:?docs\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.GivenDocument\n  (= ?app-id app-id)\n  (= doc-type :id-card)]]\n",
@@ -60,8 +46,8 @@
 	"notes": null,
 	"insert-types": [
 		{
-			"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules.AllIdCardGiven-4xiyfnsl",
+			"name": "\"clojure.lang.PersistentVector\"",
+			"id": "clojure.lang.PersistentVector-rijubkki",
 			"known": true
 		}
 	],

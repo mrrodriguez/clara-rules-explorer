@@ -1,80 +1,9 @@
 {
-	"downstream": [
-		{
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
-			"type": "rule",
-			"match": [
-				{
-					"producer-type": {
-						"name": ":loan-doc-rules/document-check-input",
-						"id": "loan-doc-rules-document-check-input-bsfqrt8a",
-						"known": true
-					},
-					"consumer-type": {
-						"name": ":loan-doc-rules/document-check-input",
-						"id": "loan-doc-rules-document-check-input-bsfqrt8a",
-						"known": true
-					}
-				}
-			]
-		},
-		{
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-all-mi-j2j2xsfb",
-			"type": "rule",
-			"match": [
-				{
-					"producer-type": {
-						"name": ":loan-doc-rules/document-check-input",
-						"id": "loan-doc-rules-document-check-input-bsfqrt8a",
-						"known": true
-					},
-					"consumer-type": {
-						"name": ":loan-doc-rules/document-check-input",
-						"id": "loan-doc-rules-document-check-input-bsfqrt8a",
-						"known": true
-					}
-				}
-			]
-		}
-	],
 	"dynamic-insert-types-detected": {
-		"callsites": [
-			{
-				"source-str": "(h/->fact :loan-doc-rules/document-check-input data)",
-				"via": {
-					"boundary-var-name-sym": "clara.rules/insert!",
-					"callstack": [
-						{
-							"var-name-sym": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
-						},
-						{
-							"var-name-sym": "clara.server.tools.graph.rules.loan-doc-rules/->document-check-input"
-						},
-						{
-							"var-name-sym": "clara.server.tools.graph.rules.helpers/->fact"
-						}
-					]
-				},
-				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-				"constructor-sym": "clara.server.tools.graph.rules.helpers/->fact",
-				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-				"status": "full",
-				"resolved-types": [
-					{
-						"name": ":loan-doc-rules/document-check-input",
-						"id": "loan-doc-rules-document-check-input-bsfqrt8a",
-						"known": true
-					}
-				]
-			}
-		],
-		"resolution": "full"
+		"fact-instance-derived-types": ["clojure.lang.PersistentVector"],
+		"resolution": "partial"
 	},
-	"source-rule": false,
+	"source-rule": true,
 	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments\n (= ?app-id app-id)\n (= ?given-docs docs)]\n[clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments\n (= ?app-id app-id)\n (= ?required-docs docs)]\n",
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
@@ -126,55 +55,13 @@
 	"notes": null,
 	"insert-types": [
 		{
-			"name": ":loan-doc-rules/document-check-input",
-			"id": "loan-doc-rules-document-check-input-bsfqrt8a",
+			"name": "\"clojure.lang.PersistentVector\"",
+			"id": "clojure.lang.PersistentVector-rijubkki",
 			"known": true
 		}
 	],
 	"rhs-form": "(do\n (let\n  [given-doc-types (into #{} (map :doc-type) ?given-docs)]\n  (r/insert!\n   (->document-check-input\n    {:app-id ?app-id,\n     :required-docs ?required-docs,\n     :given-docs ?given-docs,\n     :missing-required-docs\n     (into\n      []\n      (remove (comp given-doc-types :doc-type))\n      ?required-docs)}))))\n",
-	"upstream": [
-		{
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
-			"type": "rule",
-			"match": [
-				{
-					"producer-type": {
-						"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
-						"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
-						"known": true
-					},
-					"consumer-type": {
-						"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
-						"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
-						"known": true
-					}
-				}
-			]
-		},
-		{
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-re-q9oiwl3n",
-			"type": "rule",
-			"match": [
-				{
-					"producer-type": {
-						"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
-						"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
-						"known": true
-					},
-					"consumer-type": {
-						"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
-						"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
-						"known": true
-					}
-				}
-			]
-		}
-	],
 	"doc": null,
-	"sink-rule": false,
+	"sink-rule": true,
 	"props": {}
 }

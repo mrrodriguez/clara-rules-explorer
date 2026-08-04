@@ -1,36 +1,27 @@
 {
 	"matches": [
 		{
-			"id": 1,
+			"id": 9,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
-				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
+				"name": "clojure.lang.PersistentVector",
+				"id": "clojure.lang.PersistentVector-8g4ux02t",
 				"known": true
 			},
-			"ns": "clara.server.tools.graph.rules.loan_app_facts",
+			"ns": "clojure.lang",
 			"data": {
 				"?app-id": "app-1",
 				"?required-docs": [
 					{
 						"app-id": "app-1",
-						"doc-type": "id-card"
-					}
-				],
-				"?given-docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "paycheck"
-					},
-					{
-						"app-id": "app-1",
 						"doc-type": "bank-statement"
 					}
 				],
-				"?missing-required-docs": []
+				"?given-docs": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": "All required documents found"
+				},
+				"?missing-required-docs": "clara.server.tools.graph.rules.loan-app-facts/map->FraudCheck"
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -80,39 +71,36 @@
 			]
 		},
 		{
-			"id": 9,
+			"id": 6,
 			"type": {
-				"name": ":loan-doc-rules/document-check-input",
-				"id": "loan-doc-rules-document-check-input-bsfqrt8a",
+				"name": "clojure.lang.PersistentVector",
+				"id": "clojure.lang.PersistentVector-8g4ux02t",
 				"known": true
 			},
-			"ns": "loan-doc-rules",
+			"ns": "clojure.lang",
 			"data": {
 				"?app-id": "app-1",
 				"?required-docs": [
 					{
 						"app-id": "app-1",
-						"doc-type": "id-card"
-					}
-				],
-				"?given-docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					},
-					{
-						"app-id": "app-1",
-						"doc-type": "paycheck"
-					},
-					{
-						"app-id": "app-1",
 						"doc-type": "bank-statement"
 					}
 				],
-				"?missing-required-docs": []
+				"?given-docs": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": "All required documents found"
+				},
+				"?missing-required-docs": "clara.server.tools.graph.rules.loan-app-facts/map->FraudCheck"
 			},
 			"is-root": false,
 			"inserted-from": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-re-q9oiwl3n",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
@@ -121,6 +109,12 @@
 				}
 			],
 			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
@@ -132,17 +126,16 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 10,
+			"id": 2,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
-				"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
 				"known": true
 			},
 			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"app-id": "app-1",
-				"status": "pass",
-				"message": "All required documents found"
+				"doc-type": "paycheck"
 			},
 			"is-root": false,
 			"inserted-from": [

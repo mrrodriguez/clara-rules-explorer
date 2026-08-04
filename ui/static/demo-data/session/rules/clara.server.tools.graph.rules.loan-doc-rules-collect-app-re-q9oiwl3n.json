@@ -1,22 +1,20 @@
 {
 	"matches": [
 		{
-			"id": 1,
+			"id": 9,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
-				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
+				"name": "clojure.lang.PersistentVector",
+				"id": "clojure.lang.PersistentVector-8g4ux02t",
 				"known": true
 			},
-			"ns": "clara.server.tools.graph.rules.loan_app_facts",
+			"ns": "clojure.lang",
 			"data": {
-				"?app": {
-					"app-id": "app-1"
-				},
+				"?app": ["clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument"],
 				"?app-id": "app-1",
 				"?docs": [
 					{
 						"app-id": "app-1",
-						"doc-type": "id-card"
+						"doc-type": "bank-statement"
 					}
 				]
 			},
@@ -68,22 +66,20 @@
 			]
 		},
 		{
-			"id": 6,
+			"id": 10,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
-				"id": "clara.server.tools.graph.rules.loan-app-facts.RequiredDocume-7rfb9pky",
+				"name": "clojure.lang.PersistentVector",
+				"id": "clojure.lang.PersistentVector-8g4ux02t",
 				"known": true
 			},
-			"ns": "clara.server.tools.graph.rules.loan_app_facts",
+			"ns": "clojure.lang",
 			"data": {
-				"?app": {
-					"app-id": "app-1"
-				},
+				"?app": ["clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument"],
 				"?app-id": "app-1",
 				"?docs": [
 					{
 						"app-id": "app-1",
-						"doc-type": "id-card"
+						"doc-type": "bank-statement"
 					}
 				]
 			},
@@ -101,27 +97,25 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 8,
+			"id": 6,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
-				"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
+				"name": "clojure.lang.PersistentVector",
+				"id": "clojure.lang.PersistentVector-8g4ux02t",
 				"known": true
 			},
-			"ns": "clara.server.tools.graph.rules.loan_app_facts",
-			"data": {
-				"app-id": "app-1",
-				"docs": [
-					{
-						"app-id": "app-1",
-						"doc-type": "id-card"
-					}
-				]
-			},
+			"ns": "clojure.lang",
+			"data": ["clara.server.tools.graph.rules.loan-app-facts/map->DocumentCheck"],
 			"is-root": false,
 			"inserted-from": [
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-re-q9oiwl3n",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}
@@ -130,6 +124,12 @@
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}

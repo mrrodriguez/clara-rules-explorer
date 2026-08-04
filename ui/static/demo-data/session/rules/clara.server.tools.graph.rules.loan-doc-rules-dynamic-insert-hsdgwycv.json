@@ -1,10 +1,10 @@
 {
 	"matches": [
 		{
-			"id": 10,
+			"id": 2,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
-				"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
 				"known": true
 			},
 			"ns": "clara.server.tools.graph.rules.loan_app_facts",
@@ -56,20 +56,26 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 18,
+			"id": 4,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview",
-				"id": "clara.server.tools.graph.rules.loan-doc-rules.ComplianceRevi-nx3kfyoz",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-9sjv10vl",
 				"known": true
 			},
-			"ns": "clara.server.tools.graph.rules.loan_doc_rules",
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"app-id": "app-1",
 				"status": "pass",
-				"reviewer": "automated-review"
+				"message": null
 			},
 			"is-root": false,
 			"inserted-from": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-hsdgwycv",

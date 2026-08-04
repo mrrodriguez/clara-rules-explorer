@@ -61,24 +61,6 @@
 			]
 		}
 	],
-	"dynamic-insert-types-detected": {
-		"callsites": [
-			{
-				"source-str": "(map->ApplicationOutcome {:app-id ?app-id, :status :pending, :message \"Application pending\", :checks-complete checks-complete, :checks-incomplete checks-incomplete})",
-				"ns": "clara.server.tools.graph.rules.loan-app-rules",
-				"filename": "clara/server/tools/graph/rules/loan_app_rules.clj",
-				"status": "full",
-				"resolved-types": [
-					{
-						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
-						"known": true
-					}
-				]
-			}
-		],
-		"resolution": "full"
-	},
 	"source-rule": false,
 	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[]\n[]\n[:?doc-checks\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n  (= ?app-id app-id)]]\n[:?id-checks\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.IdentityCheck\n  (= ?app-id app-id)]]\n[:?fraud-checks\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.FraudCheck\n  (= ?app-id app-id)]]\n",
 	"ns": "clara.server.tools.graph.rules.loan-app-rules",
@@ -225,26 +207,6 @@
 					"consumer-type": {
 						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
-						"known": true
-					}
-				}
-			]
-		},
-		{
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
-			"type": "rule",
-			"match": [
-				{
-					"producer-type": {
-						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
-						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
-						"known": true
-					},
-					"consumer-type": {
-						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
-						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
 						"known": true
 					}
 				}

@@ -1,6 +1,10 @@
 {
 	"source-rule": false,
 	"lhs-form": "[clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome\n [{:keys [app-id status]}]\n (= ?app-id app-id)\n (= status :approved)]\n",
+	"unlinked-rule": {
+		"downstream": "unknown",
+		"reason": "no declared insert-types or retract-types"
+	},
 	"ns": "clara.server.tools.graph.rules.loan-app-rules",
 	"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo",
 	"lhs-types": [
@@ -22,7 +26,6 @@
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-rhgclp5w",
-	"no-output-types": true,
 	"retract-types": [],
 	"notes": null,
 	"insert-types": [],

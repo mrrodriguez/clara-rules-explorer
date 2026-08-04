@@ -23,28 +23,6 @@
 	],
 	"id": "clara.server.tools.graph.rules.loan-doc-rules-find-document--czo18bjs",
 	"notes": null,
-	"upstream": [
-		{
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
-			"type": "rule",
-			"match": [
-				{
-					"producer-type": {
-						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
-						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
-						"known": true
-					},
-					"consumer-type": {
-						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
-						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
-						"known": true
-					}
-				}
-			]
-		}
-	],
 	"doc": null,
 	"props": {}
 }

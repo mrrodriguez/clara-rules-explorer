@@ -24,22 +24,36 @@ We set `prerender.handleUnseenRoutes: 'ignore'` in `svelte.config.js` to prevent
 
 ## 3. Step-by-Step Implementation
 
-### Step 1: Scrape Demo Data
-Before building, make sure the backend is running locally (default: port `9001` per `ui/bin/scrape-demo-data.js`). Then run the scraper script in the `ui` directory to fetch the current API responses and save them as static JSON files:
+### Step 1: Bootstrap the Demo Data
+First, generate the demo data artifacts (e.g., `session.bin` and annotations) required to run the demo server. From the `server` directory, run:
+```bash
+cd server
+clojure -M:demo-setup
+```
+
+### Step 2: Start the Demo Server
+Next, start the server using the generated demo data artifacts. The scraper script requires the backend to be running locally (default: port `9001`). From the `server` directory, run:
+```bash
+clojure -M:demo-run -s demo-data/session.bin -l demo-data/loan-doc-rules-annotations.edn
+```
+Keep this server running in your terminal while you perform the next steps.
+
+### Step 3: Scrape Demo Data
+Open a new terminal window. Run the scraper script in the `ui` directory to fetch the current API responses and save them as static JSON files:
 ```bash
 cd ui
 pnpm install
 pnpm run scrape:demo
 ```
 
-### Step 2: Build the Demo Files
+### Step 4: Build the Demo Files
 Compile the static build files:
 ```bash
 pnpm run build:demo
 ```
 This script (configured in `ui/package.json`) runs the build with `VITE_DEMO_MODE=true` and sets the repository subdirectory base path (`BASE_PATH="/clara-rules-explorer"`).
 
-### Step 3: Preview Locally
+### Step 5: Preview Locally
 You can preview the compiled static build locally before deploying:
 ```bash
 pnpm preview

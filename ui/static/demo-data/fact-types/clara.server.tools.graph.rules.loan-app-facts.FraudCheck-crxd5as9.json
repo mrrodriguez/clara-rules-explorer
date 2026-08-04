@@ -1,9 +1,15 @@
 {
-	"name": "\"clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview\"",
-	"id": "clara.server.tools.graph.rules.loan-doc-rules.ComplianceRevi-iqfkxzzo",
+	"name": "\"clara.server.tools.graph.rules.loan_app_facts.FraudCheck\"",
+	"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-crxd5as9",
 	"used-by-rules": [],
 	"used-by-queries": [],
 	"inserted-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		},
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
 			"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-hsdgwycv",

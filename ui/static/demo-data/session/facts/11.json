@@ -1,16 +1,12 @@
 {
 	"id": 11,
 	"type": {
-		"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
-		"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
+		"name": "clojure.lang.Symbol",
+		"id": "clojure.lang.Symbol-lmnfptrf",
 		"known": true
 	},
-	"ns": "clara.server.tools.graph.rules.loan_app_facts",
-	"data": {
-		"app-id": "app-1",
-		"status": "pass",
-		"message": null
-	},
+	"ns": "clojure.lang",
+	"data": "clara.server.tools.graph.rules.loan-app-facts/map->DocumentCheck",
 	"is-root": true,
 	"inserted-from": [],
 	"used-by": [

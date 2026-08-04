@@ -1,18 +1,18 @@
 {
 	"id": 4,
 	"type": {
-		"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
-		"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
+		"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
+		"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-9sjv10vl",
 		"known": true
 	},
 	"ns": "clara.server.tools.graph.rules.loan_app_facts",
 	"data": {
 		"app-id": "app-1",
-		"doc-type": "paycheck"
+		"status": "pass",
+		"message": null
 	},
-	"is-root": true,
-	"inserted-from": [],
-	"used-by": [
+	"is-root": false,
+	"inserted-from": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
 			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
@@ -20,10 +20,11 @@
 			"type": "rule"
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-hsdgwycv",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}
-	]
+	],
+	"used-by": []
 }

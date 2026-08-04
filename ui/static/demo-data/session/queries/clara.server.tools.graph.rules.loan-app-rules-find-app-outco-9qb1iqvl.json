@@ -3,31 +3,13 @@
 		{
 			"id": 13,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-				"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+				"name": "clojure.lang.Symbol",
+				"id": "clojure.lang.Symbol-lmnfptrf",
 				"known": true
 			},
-			"ns": "clara.server.tools.graph.rules.loan_app_rules",
+			"ns": "clojure.lang",
 			"data": {
-				"?outcome": {
-					"app-id": "app-1",
-					"status": "approved",
-					"message": "Application approved",
-					"passed-checks": [
-						{
-							"check-type": "document"
-						},
-						{
-							"check-type": "identity"
-						},
-						{
-							"check-type": "fraud"
-						}
-					],
-					"failed-checks": null,
-					"checks-complete": null,
-					"checks-incomplete": null
-				},
+				"?outcome": "clara.server.tools.graph.rules.loan-app-facts/map->IdentityCheck",
 				"?app-id": "app-1"
 			},
 			"is-root": false,
