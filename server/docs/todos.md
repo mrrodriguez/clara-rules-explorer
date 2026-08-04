@@ -546,3 +546,133 @@ assumption that layering has since outgrown.
 No coverage of a detection map arriving from a *second* layer. Worth both routes
 above as tests: callsites must survive an incoming derived-types map, and an
 incoming derived-types map must survive alongside callsites.
+
+---
+
+## 6. `condition->form` drops boolean groups, so `:lhs-form` hides `:not` / `:or` / `:exists`
+
+**Where:** `clara.server.tools.graph.serialize/condition->form` (`serialize.clj:124-142`),
+reached from `serialize-lhs-form` (`serialize.clj:144-150`).
+
+**Severity:** high — no exception, just a wrong answer, and a dangerous one. A
+rule with a negated condition renders as though it had none. `:lhs-form` reaches
+every rule and query in `production-summary` (`core.clj:122-123`), so it is wrong
+in `GET /v1/rules`, `/v1/rules/:fq-name`, `/v1/queries`, `/v1/queries/:fq-name`
+and `/v1/analysis` alike.
+
+### What happens
+
+`condition->form` tests `(:accumulator condition)` and otherwise treats the
+condition as a leaf map, reading `:fact-binding` / `:type` / `:args` /
+`:constraints` off it.
+
+But an LHS element is not always a map. `clara.rules.schema/condition-type` types
+it as one of
+
+```clojure
+(s/enum :or :not :and :exists :fact :accumulator :test)
+```
+
+and the four boolean operators arrive as **sequentials** — `[:not {…}]`,
+`[:or {…} {…}]` — whose first element is the operator. Keyword lookup on a vector
+returns `nil`, so every `cond->` test fails and the final
+`(into [] (or (:constraints condition) []))` yields `[]`. The whole group
+collapses to an empty vector, taking its nested conditions with it.
+
+`serialize-lhs` is unaffected: it walks with `clojure.walk/prewalk`
+(`serialize.clj:99-117`), so it descends into those vectors without having to
+enumerate shapes. That is why `:lhs` and `:lhs-form` disagree for the same rule.
+
+### Minimal repro
+
+```clojure
+(require '[clara.rules :refer [defrule mk-session]]
+         '[clara.rules.engine :as eng]
+         '[clara.server.tools.graph.serialize :as serialize])
+
+(defrule order-without-shipment
+  [:customer/order [{:keys [order-id]}] (= order-id ?order-id)]
+  [:not [:shipping/shipment [{:keys [order-id]}] (= order-id ?order-id)]]
+  => (println :flagged ?order-id))
+
+(defrule either-channel
+  [:or [:customer/web-order   [{:keys [id]}] (= id ?id)]
+       [:customer/phone-order [{:keys [id]}] (= id ?id)]]
+  => (println :got ?id))
+
+(def prods (:productions (:rulebase (eng/components
+             (mk-session [#'order-without-shipment #'either-channel])))))
+
+(serialize/serialize-lhs-form (:lhs (first (filter #(= "user/order-without-shipment" (:name %)) prods))))
+;; => "[:customer/order [{:keys [order-id]}] (= order-id ?order-id)]\n[]\n"
+;;                                                                  ^^ the [:not …] is gone
+
+(serialize/serialize-lhs-form (:lhs (first (filter #(= "user/either-channel" (:name %)) prods))))
+;; => "[]\n"
+;;    the entire rule, whose LHS is one :or group, renders as nothing at all
+```
+
+`serialize-lhs` on the same two rules returns the groups intact, nested
+conditions and all.
+
+### Why it matters
+
+`:lhs-form` exists to be *read* — it is the copy of a rule's LHS a human or an
+LLM agent looks at to answer "what does this rule match, and what must be
+absent?". Silently deleting `:not` inverts that answer. A tool summarizing rules
+from `:lhs-form` will state that a rule fires whenever some fact exists, when it
+in fact fires only when that fact is missing.
+
+The failure is worst where it is least visible: a rule whose LHS is a single
+boolean group renders as `[]`, which reads as "no conditions" rather than as an
+error.
+
+### Why it has gone unnoticed
+
+Rules without boolean operators — the common case — render correctly, and the
+output is a pretty-printed string that nothing validates. There is also a correct
+implementation of exactly this walk two files over:
+`extract-lhs-fact-types` (`core.clj:16-29`) dispatches on
+`schema/condition-type` and recurses through `(:and :or :not :exists)`.
+`condition->form` predates or simply missed that pattern.
+
+### Suggested fix
+
+Dispatch on `schema/condition-type`, matching `extract-lhs-fact-types`. Requires
+`[clara.rules.schema :as schema]` in the `serialize` ns:
+
+```clojure
+(defn- condition->form
+  "Reconstructs a Clojure code form from a condition, mirroring defrule syntax."
+  [condition]
+  (case (schema/condition-type condition)
+    :accumulator
+    (-> []
+        (cond-> (:result-binding condition) (conj (:result-binding condition) '<-))
+        (conj (:accumulator condition))
+        (cond-> (:from condition) (conj :from (condition->form (:from condition)))))
+
+    (:and :or :not :exists)
+    (into [(first condition)] (map condition->form) (rest condition))
+
+    ;; :fact and :test are both leaf maps
+    (-> []
+        (cond-> (:fact-binding condition) (conj (:fact-binding condition) '<-))
+        (cond-> (:type condition) (conj (:type condition)))
+        (cond-> (:args condition) (conj (:args condition)))
+        (into (or (:constraints condition) [])))))
+```
+
+Verified against the repro above: the `:not` and `:or` groups round-trip to
+`[:not [:shipping/shipment [{:keys [order-id]}] (= order-id ?order-id)]]` and
+`[:or [:customer/web-order …] [:customer/phone-order …]]`, and accumulator and
+`:test` conditions render byte-identically to the current implementation.
+
+### Test gap
+
+No coverage of `serialize-lhs-form` for any boolean operator. Worth one test per
+`condition-type` branch — `:not`, `:or`, `:and`, `:exists`, a group nested inside
+an accumulator's `:from`, and a rule whose entire LHS is one group — asserting
+that each operator keyword survives into the rendered string. A cheap invariant
+that would have caught this: every fact type in `extract-lhs-fact-types` should
+appear somewhere in `serialize-lhs-form`'s output for the same LHS.
