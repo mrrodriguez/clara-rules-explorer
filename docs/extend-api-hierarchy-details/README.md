@@ -106,8 +106,30 @@ without cross-referencing.
 >   id-addressing is now complete for fact types, rules, queries, and session
 >   resources; nothing name-based remains in the API contract.
 >
-> **State after M3:** fact types are fully id-addressed server-side.  The UI
-> (1e/1h) and rules/queries/session production ids (1g) remain.
+> - **M5 — Phase 2 complete (2026-08-04):** `:match` type-bridge info on
+>   `:upstream`/`:downstream` deps.  `matching-type-pairs` (raw
+>   (produced, consumed) pairs for actual edges only — `:dep-graph` shape
+>   untouched); `serialize-match` (each end serialized in its own production's
+>   ns context, sorted by producer then consumer `:name`); threaded
+>   `type-analysis-map` + `ancestors-set-fn` through
+>   `rulebase-analysis` → summary builders → `production-summary` →
+>   `get-production-deps-summary`; `TypeBridgeMatch` + `ProductionDep`
+>   `(s/optional-key :match)` schemas (symmetric semantics documented);
+>   tests: direct, single hierarchy jump, multi-type (2 sorted entries),
+>   direct+hierarchy coexistence, dedup (duplicate declarations collapse),
+>   symmetry (upstream ≡ downstream), and a cross-field consistency sweep
+>   over loan-doc + hierarchy + match fixtures (producer-type :name ∈
+>   producer's insert/retract types, consumer-type :name ∈ consumer's
+>   lhs-types, queries included); dep-graph regression pinned by existing
+>   tests.  **143 tests / 1010 assertions green, lint/format/reflection
+>   clean.**  Server-side contract for the hierarchy plan is now complete.
+>   Remaining: docs (M6), fast-follow `"via": "retract"`, UI (deferred).
+>
+> **State after M5:** the server API fully implements the plan's contract
+> (kind-explicit types, `TypeReference` everywhere, id-based routes, `:id` /
+> `:ns` / `:ancestors` / `:match`).  Remaining server work: `explorer-graph-api.md`
+> rewrite (M6) and the `"via": "retract"` fast-follow; the UI (1e/1h/2e/3) is
+> deferred until the svelte-engineering skill is loaded.
 
 - [x] **Phase 1a:** In `rulebase-analysis`: extract ancestors-fn via a single shared accessor used by both `core.clj` and `analyze.clj` (meta extraction + `clojure.core/ancestors` fallback); add `->memoized-ancestors`; hoist `type-analysis-map` (with `:ns-name`) out of `build-dep-graph`; build serialized ancestors index in per-production ns context (topologically ordered, divergence asserted, serialization memoized by raw-type × ns-name); compute the upfront known set (serialized `:consumed-types` ∪ `:produced-types` union — equals the future fact-types map keys by construction); simplify `downstream?` to consume the memoized set fn in the same change; verify raw types reaching the index are resolved. Extend `resolve-type` to kind-explicit serialization (splitting the catch-all `:else` into `string?`/`sequential?`/catch-all — see the serialization table); add `serialize-type-ref` (raw type + ns-name + known set → `TypeReference`); thread the production ns-name into `serialize-lhs` so LHS condition `:type` values serialize as `TypeReference`s too
 - [x] **Phase 1b:** Add `:ancestors` field (`TypeReference` entries, deterministic topological order with lexicographic tie-break + cycle guard) to fact-type entries in `build-fact-type-summary-map` (single pass, upfront known set); convert `:lhs-types`/`:insert-types`/`:retract-types` and LHS condition `:type` to `[TypeReference]`; convert fact-type usage lists (`:used-by-rules` etc.) to `[ProductionDep]`
@@ -117,10 +139,10 @@ without cross-referencing.
 - [ ] **Phase 1f:** Rewrite `explorer-graph-api.md` for the new contract — flag: this is a full rewrite, not a targeted edit (serialization table, `:id` scheme + routes, `:ns`, `:ancestors`)
 - [x] **Phase 1g:** Server-side production route ids: `:id` on rule/query list + detail entries and every production ref (`ProductionDep` on rule/query details; `inserted-from`/`used-by` refs and `FactTypeRoleGroup` entries in `memory.clj`); production id reverse index; per-snapshot id→name indexes built in `session-snapshot` (no analysis-cache dependency); all rule/query/session detail handlers resolve id-only; delete `fq-name-from-param` server-side and its tests **in the same commit as the index implementation** (atomic revert if issues arise); update `session_api_test.clj` to id-based lookups
 - [ ] **Phase 1h:** UI route-id migration: `utils.ts` link builders + `api.ts` fetchers use `:id` verbatim; delete `toRouteId`/`fromRouteId`/`splitQualifiedName`; `entries()` generators and `bin/scrape-demo-data.js` use server-issued ids; regenerate demo data (`pnpm scrape:demo`); rename `session/fact-types/[typeName]` → `[id]`; update all type-link callers (`FactTypeReferenceLink`/`ConditionFactType`/`DynamicCallsiteList`/`ProductionReferenceCategory`/`GlobalSidebarFlyout`/appState contextual nav) to consume `TypeReference`/`ProductionDep` directly; delete `FactTypeSummary`'s `toRef` mapping; update e2e URL fixtures. **Scope note: 1g+1h together are the largest work item (~30–40% of the total)** — every endpoint, every link builder, the prerender pipeline, and all URL-constructing test fixtures. Budget accordingly
-- [ ] **Phase 2a:** Add `matching-type-pairs` helper
-- [ ] **Phase 2b:** Update `get-production-deps-summary` (+ `serialize-match` in `serialize.clj`) to attach `:match` with symmetric `producer-type`/`consumer-type` `TypeReference` pairs, each serialized in its own production's ns context, sorted by `:name` post-serialization
-- [ ] **Phase 2c:** Update `ProductionDep` schema in `api.clj` with optional `:match` array
-- [ ] **Phase 2d:** Add server tests for `:match` (direct, hierarchy, multi-type, dedup, symmetry, cross-field consistency incl. sidecar symbol in foreign ns, dep-graph regression)
+- [x] **Phase 2a:** Add `matching-type-pairs` helper
+- [x] **Phase 2b:** Update `get-production-deps-summary` (+ `serialize-match` in `serialize.clj`) to attach `:match` with symmetric `producer-type`/`consumer-type` `TypeReference` pairs, each serialized in its own production's ns context, sorted by `:name` post-serialization
+- [x] **Phase 2c:** Update `ProductionDep` schema in `api.clj` with optional `:match` array
+- [x] **Phase 2d:** Add server tests for `:match` (direct, hierarchy, multi-type, dedup, symmetry, cross-field consistency incl. sidecar symbol in foreign ns, dep-graph regression)
 - [ ] **Phase 2e:** Update UI types (`ProductionReference`, `TypeBridgeMatch` in `api.ts`)
 - [ ] **Phase 2f:** Update `explorer-graph-api.md` with the `:match` contract (symmetric shape + semantics, citing `ProductionDep` schema)
 - [ ] **Docs hygiene pass:** verify the Documentation & Schema Principles — schemas carry the structural truth; no docstring enumerates shapes, narrates design history, or references this plan; project docs cite code (not vice versa) for impl details

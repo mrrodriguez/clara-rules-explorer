@@ -765,3 +765,158 @@
                  (core/build-production-id-index
                   {:rules {"a" {:id "same-id" :name "a"}}
                    :queries {"b" {:id "same-id" :name "b"}}})))))
+
+;; ---------------------------------------------------------------------------
+;; Phase 2 — :match on upstream/downstream deps (type-bridge info)
+;; ---------------------------------------------------------------------------
+
+(derive ::match-child-a ::match-parent-a)
+(derive ::match-child-b ::match-parent-b)
+
+;; Multi-type bridge: producer inserts both children, consumer reads both parents.
+(r/defrule match-multi-producer
+  {:clara-rules/insert-types [::match-child-a ::match-child-b]}
+  [String]
+  =>
+  (r/insert! (with-meta {:a 1} {:type ::match-child-a}))
+  (r/insert! (with-meta {:b 1} {:type ::match-child-b})))
+
+(r/defrule match-multi-consumer
+  [?a <- ::match-parent-a]
+  [?b <- ::match-parent-b]
+  =>
+  (r/insert! (with-meta {:done true} {:type ::match-done})))
+
+;; Direct AND hierarchy matches in one pair.
+(r/defrule match-direct-producer
+  {:clara-rules/insert-types [::match-foo ::match-child-a]}
+  [Long]
+  =>
+  (r/insert! (with-meta {:foo 1} {:type ::match-foo}))
+  (r/insert! (with-meta {:a 1} {:type ::match-child-a})))
+
+(r/defrule match-direct-consumer
+  [?f <- ::match-foo]
+  [?a <- ::match-parent-a]
+  =>
+  (r/insert! (with-meta {:done true} {:type ::match-done-2})))
+
+;; Duplicate declarations on both ends collapse to one match entry.
+(r/defrule match-dedup-producer
+  {:clara-rules/insert-types [::match-child-a ::match-child-a]}
+  [Boolean]
+  =>
+  (r/insert! (with-meta {:a 1} {:type ::match-child-a}))
+  (r/insert! (with-meta {:a 2} {:type ::match-child-a})))
+
+(r/defrule match-dedup-consumer
+  [?x <- ::match-parent-a]
+  [?y <- ::match-parent-a]
+  =>
+  (r/insert! (with-meta {:done true} {:type ::match-done-3})))
+
+(defn- match-session-analysis
+  [rules]
+  (let [session (r/mk-session rules)]
+    (core/rulebase-analysis session
+                            (ann.merge/merge-layers [(ann.merge/props-layer session)]))))
+
+(defn- dep-by-name [deps name]
+  (first (filter #(= name (:name %)) deps)))
+
+(defn- match-pairs
+  "[[producer-name consumer-name] ...] for a dep's :match array."
+  [dep]
+  (mapv (fn [m] [(:name (:producer-type m)) (:name (:consumer-type m))])
+        (:match dep)))
+
+(defn- production-summary-by-name [analysis name]
+  (or (get-in analysis [:rules name])
+      (get-in analysis [:queries name])))
+
+(deftest test-match-direct
+  (testing "Direct match (no hierarchy) on both directions"
+    (let [session (->test-session)
+          analysis (core/rulebase-analysis session (loan-doc-annotations session))
+          producer (get-in analysis [:rules "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"])
+          consumer (get-in analysis [:rules "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"])
+          down (dep-by-name (:downstream producer) (:name consumer))
+          up (dep-by-name (:upstream consumer) (:name producer))]
+      (is (= [["clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"
+               "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"]]
+             (match-pairs down)))
+      (is (= (match-pairs down) (match-pairs up))
+          "match is symmetric across both directions"))))
+
+(deftest test-match-hierarchy-jump
+  (testing "Single hierarchy jump (produced descendant satisfies consumed ancestor)"
+    (let [session (->hierarchy-session)
+          analysis (core/rulebase-analysis session (hierarchy-annotations session))
+          producer (get-in analysis [:rules "clara.server.tools.graph.rules.loan-hierarchy-rules/insert-income-document"])
+          consumer (get-in analysis [:rules "clara.server.tools.graph.rules.loan-hierarchy-rules/review-supporting-document"])
+          down (dep-by-name (:downstream producer) (:name consumer))
+          up (dep-by-name (:upstream consumer) (:name producer))]
+      (is (= [[":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document"
+               ":clara.server.tools.graph.rules.loan-hierarchy-rules/supporting-document"]]
+             (match-pairs down)))
+      (is (= (match-pairs down) (match-pairs up)) "symmetric"))))
+
+(deftest test-match-multi-type
+  (testing "A single production pair linked by multiple type pairs"
+    (let [analysis (match-session-analysis [match-multi-producer match-multi-consumer])
+          producer (get-in analysis [:rules "clara.server.tools.graph.core-test/match-multi-producer"])]
+      (is (= [[":clara.server.tools.graph.core-test/match-child-a"
+               ":clara.server.tools.graph.core-test/match-parent-a"]
+              [":clara.server.tools.graph.core-test/match-child-b"
+               ":clara.server.tools.graph.core-test/match-parent-b"]]
+             (match-pairs (dep-by-name (:downstream producer)
+                                       "clara.server.tools.graph.core-test/match-multi-consumer")))
+          "two matches, sorted by producer then consumer :name"))))
+
+(deftest test-match-direct-and-hierarchy
+  (testing "Direct and hierarchy matches coexist in one pair"
+    (let [analysis (match-session-analysis [match-direct-producer match-direct-consumer])
+          producer (get-in analysis [:rules "clara.server.tools.graph.core-test/match-direct-producer"])]
+      (is (= [[":clara.server.tools.graph.core-test/match-child-a"
+               ":clara.server.tools.graph.core-test/match-parent-a"]
+              [":clara.server.tools.graph.core-test/match-foo"
+               ":clara.server.tools.graph.core-test/match-foo"]]
+             (match-pairs (dep-by-name (:downstream producer)
+                                       "clara.server.tools.graph.core-test/match-direct-consumer")))))))
+
+(deftest test-match-dedup
+  (testing "Duplicate insert declarations and LHS conditions collapse to one match entry"
+    (let [analysis (match-session-analysis [match-dedup-producer match-dedup-consumer])
+          producer (get-in analysis [:rules "clara.server.tools.graph.core-test/match-dedup-producer"])]
+      (is (= [[":clara.server.tools.graph.core-test/match-child-a"
+               ":clara.server.tools.graph.core-test/match-parent-a"]]
+             (match-pairs (dep-by-name (:downstream producer)
+                                       "clara.server.tools.graph.core-test/match-dedup-consumer")))))))
+
+(deftest test-match-cross-field-consistency
+  (testing "producer-type :name matches the producer's own insert/retract types; consumer-type :name the consumer's lhs-types"
+    (let [sessions [[(->test-session) loan-doc-annotations]
+                    [(->hierarchy-session) hierarchy-annotations]
+                    [(r/mk-session [match-multi-producer match-multi-consumer
+                                    match-direct-producer match-direct-consumer
+                                    match-dedup-producer match-dedup-consumer])
+                     (fn [s] (ann.merge/merge-layers [(ann.merge/props-layer s)]))]]]
+      (doseq [[session annotations-fn] sessions
+              :let [analysis (core/rulebase-analysis session (annotations-fn session))]]
+        (doseq [[p-name summary] (:rules analysis)]
+          (doseq [dir [:upstream :downstream]]
+            (doseq [dep (get summary dir)]
+              (doseq [m (:match dep)]
+                (let [[producer-name consumer-name]
+                      (if (= dir :upstream)
+                        [(:name dep) p-name]
+                        [p-name (:name dep)])
+                      producer (production-summary-by-name analysis producer-name)
+                      consumer (production-summary-by-name analysis consumer-name)]
+                  (is (contains? (type-ref-names (concat (:insert-types producer)
+                                                         (:retract-types producer)))
+                                 (get-in m [:producer-type :name]))
+                      (str producer-name " :match producer-type must be in its own insert/retract types"))
+                  (is (contains? (type-ref-names (:lhs-types consumer))
+                                 (get-in m [:consumer-type :name]))
+                      (str consumer-name " :match consumer-type must be in its own lhs-types")))))))))))

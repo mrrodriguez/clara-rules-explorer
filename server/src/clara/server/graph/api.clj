@@ -24,14 +24,6 @@
    :query-count s/Int
    :fact-type-count s/Int})
 
-(s/defschema ProductionDep
-  "A reference to another production (rule or query) in the dependency graph.
-   `id` is the deterministic route id for linkage."
-  {:name s/Str
-   :id s/Str
-   :ns s/Str
-   :type s/Str})
-
 (s/defschema TypeReference
   "A linkable fact-type reference: `name` is the kind-explicit serialized
    type string (display), `id` the deterministic route id (linkage), and
@@ -40,6 +32,25 @@
   {:name s/Str
    :id s/Str
    :known s/Bool})
+
+(s/defschema TypeBridgeMatch
+  "A single type pair linking two productions: `producer-type` is what the
+   producing rule inserts (or retracts), `consumer-type` is what the
+   consuming rule's LHS requires.  Identical shape and meaning on upstream
+   and downstream entries — direct matches (same type both ends) are
+   included."
+  {:producer-type TypeReference
+   :consumer-type TypeReference})
+
+(s/defschema ProductionDep
+  "A reference to another production (rule or query) in the dependency graph.
+   `id` is the deterministic route id for linkage.  `match` (when present)
+   lists the type pairs that link the two productions."
+  {:name s/Str
+   :id s/Str
+   :ns s/Str
+   :type s/Str
+   (s/optional-key :match) [TypeBridgeMatch]})
 
 (s/defschema LhsCondition
   "A serialized LHS condition from the Clara Rete network.

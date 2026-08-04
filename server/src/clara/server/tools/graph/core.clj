@@ -52,17 +52,51 @@
   (or (= inserter-type reader-type)
       (contains? (ancestors-set-fn inserter-type) reader-type)))
 
+(defn- matching-type-pairs
+  "All (produced, consumed) raw-type pairs linking a producer to a consumer.
+   Direct matches included (producer-type = consumer-type).  The dep-graph
+   edge already exists, so this is computed only for actual edges — never in
+   the O(n²) candidate loop."
+  [ancestors-set-fn produced-types consumed-types]
+  (->> (for [pt produced-types
+             ct consumed-types
+             :when (downstream? ancestors-set-fn pt ct)]
+         {:producer-type pt :consumer-type ct})
+       (distinct)))
+
 (defn- get-production-deps-summary
-  [dep-graph production-name production-map]
-  (letfn [(serialize-deps [deps]
+  "Serializes the :upstream / :downstream production refs of `production-name`
+   and attaches `:match` — the raw type pairs that link each adjacent
+   production (each end serialized in its own production's ns context)."
+  [dep-graph production-name production-map type-analysis-map ancestors-set-fn known-set]
+  (letfn [(->match [direction adjacent-name]
+            ;; For an :upstream entry the adjacent production is the producer
+            ;; and this production is the consumer; :downstream is the reverse.
+            (let [[producer-name consumer-name] (if (= direction :upstream)
+                                                  [adjacent-name production-name]
+                                                  [production-name adjacent-name])
+                  {:keys [produced-types] :as producer} (get type-analysis-map producer-name)
+                  {:keys [consumed-types] :as consumer} (get type-analysis-map consumer-name)
+                  producer-ns (:ns-name producer)
+                  consumer-ns (:ns-name consumer)]
+              (some-> (matching-type-pairs ancestors-set-fn produced-types consumed-types)
+                      not-empty
+                      (serialize/serialize-match known-set producer-ns consumer-ns))))
+
+          (serialize-deps [deps direction]
             (some->> deps
                      not-empty
                      sort
-                     (mapv (partial serialize/serialize-production-dep production-map))))]
+                     (mapv (fn [adjacent-name]
+                             (let [dep (serialize/serialize-production-dep production-map
+                                                                           adjacent-name)]
+                               (if-let [match (->match direction adjacent-name)]
+                                 (assoc dep :match match)
+                                 dep))))))]
     (let [deps (get dep-graph production-name)]
       (-> deps
-          (update :upstream serialize-deps)
-          (update :downstream serialize-deps)
+          (update :upstream #(serialize-deps % :upstream))
+          (update :downstream #(serialize-deps % :downstream))
           (select-keys [:upstream :downstream])
           serialize/remove-nil-vals))))
 
@@ -107,6 +141,8 @@
    annotations
    dep-graph
    production-map
+   type-analysis-map
+   ancestors-set-fn
    known-set]
   (let [ann (ann/production-annotation annotations production)
         ;; Queries in clara.rules.schema/Query have no :ns-name — derive it.
@@ -115,7 +151,10 @@
 
         {:keys [upstream downstream]} (get-production-deps-summary dep-graph
                                                                    p-name
-                                                                   production-map)
+                                                                   production-map
+                                                                   type-analysis-map
+                                                                   ancestors-set-fn
+                                                                   known-set)
         is-rule? (some? (:rhs production))
         unlinked? (and is-rule?
                        (not (:no-output-types ann))
@@ -361,6 +400,8 @@
            annotations
            dep-graph
            production-map
+           type-analysis-map
+           ancestors-set-fn
            known-set]}]
   (let [filter-xf (case production-type
                     :rule (filter :rhs)
@@ -373,25 +414,31 @@
                                                          annotations
                                                          dep-graph
                                                          production-map
+                                                         type-analysis-map
+                                                         ancestors-set-fn
                                                          known-set)))))
          (apply array-map))))
 
 (defn- build-rule-summary-map
-  [productions annotations dep-graph production-map known-set]
+  [productions annotations dep-graph production-map type-analysis-map ancestors-set-fn known-set]
   (build-production-summary-map {:production-type :rule
                                  :productions productions
                                  :annotations annotations
                                  :dep-graph dep-graph
                                  :production-map production-map
+                                 :type-analysis-map type-analysis-map
+                                 :ancestors-set-fn ancestors-set-fn
                                  :known-set known-set}))
 
 (defn- build-query-summary-map
-  [productions annotations dep-graph production-map known-set]
+  [productions annotations dep-graph production-map type-analysis-map ancestors-set-fn known-set]
   (build-production-summary-map {:production-type :query
                                  :productions productions
                                  :annotations annotations
                                  :dep-graph dep-graph
                                  :production-map production-map
+                                 :type-analysis-map type-analysis-map
+                                 :ancestors-set-fn ancestors-set-fn
                                  :known-set known-set}))
 
 (defn- build-fact-type-summary-map
@@ -488,12 +535,16 @@
                                       annotations
                                       dep-graph
                                       production-map
+                                      type-analysis-map
+                                      ancestors-set-fn
                                       known-set)
 
         queries (build-query-summary-map productions
                                          annotations
                                          dep-graph
                                          production-map
+                                         type-analysis-map
+                                         ancestors-set-fn
                                          known-set)
 
         fact-types (build-fact-type-summary-map rules queries ancestors-index known-set)

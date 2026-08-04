@@ -74,6 +74,22 @@
      :id (route-id name)
      :known (contains? known-set name)}))
 
+(defn serialize-match
+  "Serializes raw {:producer-type ... :consumer-type ...} pairs (the
+   `matching-type-pairs` output) into TypeReference pairs, each end
+   serialized in its own production's ns context, sorted by producer then
+   consumer :name.  Symmetric shape and meaning on upstream and downstream
+   entries: producer-type is what the producing rule inserts, consumer-type
+   is what the consuming rule's LHS requires."
+  [raw-pairs known-set producer-ns consumer-ns]
+  (->> raw-pairs
+       (map (fn [{:keys [producer-type consumer-type]}]
+              {:producer-type (serialize-type-ref known-set producer-ns producer-type)
+               :consumer-type (serialize-type-ref known-set consumer-ns consumer-type)}))
+       (sort-by (juxt (comp :name :producer-type)
+                      (comp :name :consumer-type)))
+       (vec)))
+
 (defn serialize-fact-type
   [production-ns-name x]
   (resolve-type production-ns-name x))
