@@ -198,3 +198,228 @@ or return `callsites` unchanged at the top when it is empty.
 
 `(assign-callsite-ids [])` returning `[]` is a one-line test worth having next to
 the existing single/duplicate/collision cases.
+
+---
+
+## 3. Support a rulebase-only server, with working-memory routes disabled
+
+**Where:** `clara.server.graph.server/start!`, `clara.server.graph.api/get-snapshot`
+and the six `/session*` handlers.
+
+**Severity:** medium — the server accepts a rulebase, starts clean, serves most of
+its routes, and then 500s on the rest. The failure is deferred to request time and
+the error names a protocol, not a configuration mistake.
+
+### What happens
+
+Most of the API is a function of the rulebase alone. `core/get-rulebase` already
+codifies this — it accepts a session *or* a rulebase and reduces the former to the
+latter — so `/v1/rulebase-summary`, `/v1/rules`, `/v1/queries`, `/v1/fact-types`,
+`/v1/analysis` and `/v1/annotations` all work perfectly well with no session.
+
+`start!` accepts whatever it is handed and stores it in `session-atom`. Nothing
+checks it. The working-memory routes then fail at request time:
+
+```
+IllegalArgumentException: No implementation of method: :components of protocol:
+  #'clara.rules.engine/ISession found for class: clara.rules.compiler.Rulebase
+  at clara.server.tools.graph.memory/session-snapshot (memory.clj:244)
+  from clara.server.graph.api/get-snapshot (api.clj:234)
+```
+
+`get-snapshot` calls `memory/session-snapshot` unconditionally, and that calls
+`eng/components`, which `Rulebase` does not implement.
+
+### Minimal repro
+
+```clojure
+(require '[clara.rules :as r]
+         '[clara.rules.engine :as eng]
+         '[clara.server.tools.graph.core :as core]
+         '[clara.server.tools.graph.memory :as memory])
+
+(defrecord Temp [v])
+(r/defrule hot [Temp (> v 100)] => (println "hot"))
+
+(def sess (r/mk-session 'user))
+(def rb   (-> sess eng/components :rulebase))
+(class rb)                                     ;; => clara.rules.compiler.Rulebase
+
+;; rulebase-only analysis: fine
+(some? (core/rulebase-summary (core/rulebase-analysis rb {})))   ;; => true
+
+;; rulebase-only working memory: not fine
+(memory/session-snapshot rb)
+;; => IllegalArgumentException: No implementation of method: :components ...
+
+;; the distinguishing predicate
+(satisfies? eng/ISession rb)     ;; => false
+(satisfies? eng/ISession sess)   ;; => true
+```
+
+Same shape through the server: `(server/start! {:session rb :port 9001})` succeeds,
+`GET /v1/rulebase-summary` returns 200, `GET /v1/session/fact-types` returns 500.
+
+### Why support it rather than reject it
+
+A rulebase without a session is a normal thing to have:
+
+- rules loaded from a project purely for static analysis, with no facts to insert;
+- a rulebase deserialized on its own from a `clara.rules.durability` artifact
+  (durability lets the rulebase blob be restored independently of session state);
+- any caller that wants the dependency graph and annotations and has no interest in
+  runtime facts.
+
+For all of those, six routes out of a couple of dozen are inapplicable. Refusing to
+start would be a worse answer than serving the rest.
+
+The codebase already leans this way in two places, so this is consistency work rather
+than a new concept: `core/get-rulebase` accepts either, and
+`api/enriched-annotations` degrades gracefully — it checks the session type and skips
+enrichment rather than failing when working memory is unavailable.
+
+### Suggested approach
+
+1. **One predicate, one place.** Something like
+
+   ```clojure
+   (defn working-memory-available?
+     "True when `session-or-rulebase` is a live session and can be snapshotted."
+     [session-or-rulebase]
+     (satisfies? eng/ISession session-or-rulebase))
+   ```
+
+   `satisfies? ISession` rather than `instance? LocalSession`: it is the capability
+   actually required, and it does not exclude other session implementations.
+
+2. **Fail the inapplicable routes uniformly and early**, in `get-snapshot`, so all
+   six handlers plus `/v1/session-snapshot` inherit the behaviour from one guard.
+   A distinct status with a machine-readable reason beats a 500 and is
+   distinguishable from a genuine miss (the handlers already use 404 for "fact not
+   found in session"):
+
+   ```clojure
+   {:status 409
+    :body {:error "No working memory: the server was started with a rulebase, not a session"
+           :reason :no-working-memory}}
+   ```
+
+   An alternative is to omit the `/session*` routes entirely when there is no
+   session, letting reitit 404 them. That is less code but conflates "unsupported in
+   this configuration" with "not found", which is the ambiguity worth avoiding.
+
+3. **Say so at startup.** `start!` should log once that working-memory routes are
+   disabled, rather than leaving it to be discovered by a 500 later.
+
+4. **Advertise the capability** so a client can branch without probing — e.g. a
+   `:working-memory?` flag on an existing summary or meta response.
+
+5. **Update the `start!` docstring**, which currently reads `:session - The Clara
+   session to analyze.` It should state that a rulebase is accepted and what is lost.
+
+### Test gap
+
+Worth a small suite that starts the server with a rulebase and asserts: the
+rulebase-backed routes return 200, and each working-memory route returns the chosen
+status rather than 500.
+
+---
+
+## 4. `deterministic-fact-str` cannot canonicalize a set of maps
+
+**Where:** `clara.server.tools.graph.memory/deterministic-fact-str`
+
+**Severity:** high for anyone snapshotting working memory — it takes down every
+memory-backed route at once, for the whole session, because one fact in it has a
+set-valued field.
+
+### What happens
+
+`deterministic-fact-str` builds a stable sort key by recursively canonicalizing a
+fact into sorted collections:
+
+```clojure
+(map? x) (into (sorted-map) (map (fn [[k v]] [(canonicalize k) (canonicalize v)])) x)
+(set? x) (into (sorted-set) (map canonicalize) x)
+```
+
+Both rely on Clojure's default comparator, which requires every map **key** and
+every set **element** to be mutually `Comparable`. Clojure maps are not
+`Comparable`, so a fact holding a set of maps throws:
+
+```
+ClassCastException: Default comparator requires nil, Number, or Comparable:
+  {:name :some-output, :pass false, :data {}, ...}
+```
+
+Three distinct shapes hit the same two lines:
+
+| fact shape | result |
+|---|---|
+| `{:results #{{...}}}` — set of maps | `Default comparator requires ...` |
+| `{:by {{...} 1}}` — map keyed by a map | `Default comparator requires ...` |
+| `{:a 1 "b" 2}` — mixed key types | `ClassCastException: Keyword cannot be cast to String` |
+| `{:results [{...}]}` — vector of maps | fine |
+
+The vector row is why this can go unnoticed for a long time: flat facts, and facts
+whose nesting is all vectors, never reach the failing branch.
+
+### Minimal repro
+
+```clojure
+(require '[clara.server.tools.graph.memory :as memory])
+
+(#'memory/deterministic-fact-str {:fact/type :t :results #{{:a 1}}})
+;; => ClassCastException: Default comparator requires nil, Number, or Comparable: {:a 1}
+
+(#'memory/deterministic-fact-str {:fact/type :t :by {{:a 1} 1}})
+;; => same
+
+(#'memory/deterministic-fact-str {:fact/type :t :results [{:a 1}]})
+;; => fine
+```
+
+### Why it is hard to diagnose
+
+Called from `session-snapshot` → `sort-facts`, it is several frames below any API
+handler, and when triggered through an nREPL eval the exception arrives wrapped in
+a `CompilerException` tagged `:clojure.error/phase :execution`. It reads as a
+syntax/macroexpansion error at the REPL form's own line number, with no frames
+pointing at `memory.clj` at all. The message names the offending fact, which is the
+only real clue.
+
+### Suggested fix
+
+The return value is used solely as a stable sort key (`sort-facts`), so the
+canonical form does not have to be the same data type as the input — it only has to
+be deterministic and injective enough to distinguish distinct facts. Ordering by
+`pr-str` of the already-canonicalized element is total, and needs no comparator:
+
+```clojure
+(defn- deterministic-fact-str [fact]
+  (letfn [(canon [x]
+            (cond
+              (map? x) (into [::map] (sort-by pr-str (map (fn [[k v]] [(canon k) (canon v)]) x)))
+              (set? x) (into [::set] (sort-by pr-str (map canon x)))
+              (sequential? x) (mapv canon x)
+              :else x))]
+    (pr-str (canon (serialize/prune-fns fact)))))
+```
+
+The `::map` / `::set` markers keep `#{1 2}`, `[1 2]` and `{1 2}` from canonicalizing
+to the same string, which matters because collisions here would merge distinct facts
+in the sort. Verified: all four shapes above succeed, key order in the input does not
+affect the output, set element order does not affect the output, and sets stay
+distinct from vectors.
+
+Cost: `pr-str` is called on nested values rather than compared structurally, so this
+is slower on deep facts. If that matters, the alternative is a total comparator
+(compare by type name, then by value for comparables, then by `pr-str`) — more code
+for the same guarantee.
+
+### Test gap
+
+Fixture facts appear to be flat enough to miss this entirely. Worth a table test over
+the four shapes above, plus two determinism assertions: the same map built in
+different key orders, and the same set built in different element orders, must
+produce identical strings.
