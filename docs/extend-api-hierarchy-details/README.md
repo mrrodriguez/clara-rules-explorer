@@ -151,26 +151,50 @@ without cross-referencing.
 >   (insert match unflagged, retract match flagged).  **145 tests / 1015
 >   assertions green, lint/format/reflection clean.**
 >
-> **State after M5:** the server API fully implements the plan's contract
-> (kind-explicit types, `TypeReference` everywhere, id-based routes, `:id` /
-> `:ns` / `:ancestors` / `:match`).  Remaining server work: `explorer-graph-api.md`
-> rewrite (M6) and the `"via": "retract"` fast-follow; the UI (1e/1h/2e/3) is
-> deferred until the svelte-engineering skill is loaded.
+> - **M7 — UI integration complete (2026-08-04):** Phases 1e/1h/2e/3 landed
+>   together.  `api.ts` types updated (`TypeReference` `{name,id,known}`,
+>   `TypeBridgeMatch`, `ProductionReference` gains `id` + `match?`;
+>   type-reference fields → `TypeReference`, usage lists →
+>   `ProductionReference[]`, `id` on list/detail/session types, `ns` nullable,
+>   `ancestors?` on detail `FactTypeSummary`).  Route-id migration:
+>   `utils.ts` link builders (`rulePath`/`queryPath`/`factPath`) and `api.ts`
+>   fetchers consume `:id` verbatim; `toRouteId`/`fromRouteId`/
+>   `splitQualifiedName` deleted; `entries()` generators + `scrape-demo-data.js`
+>   use server-issued ids; demo data regenerated (`pnpm scrape:demo`);
+>   `session/fact-types/[typeName]` → `[id]`; every type-link caller
+>   (`FactTypeReferenceLink`/`ConditionFactType`/`DynamicCallsiteList`/
+>   `ProductionReferenceCategory`/`GlobalSidebarFlyout`/appState contextual nav)
+>   consumes `TypeReference`/`ProductionReference` directly; `FactTypeSummary`'s
+>   `toRef` mapping deleted; `GroupedFilterableNavList` id-based (item `id` for
+>   active/locate/route matching, item-`id` `hrefPrefix`).  Phase 3 features:
+>   `:ancestors` hierarchy section on fact-type detail (`known` entries link via
+>   id, ghosts render as plain italic text), `:match` type-bridge rows on
+>   upstream/downstream dep entries (producer-type → satisfies consumer-type,
+>   `retract` badge for `:via :retract`), grouping falls back to
+>   "(no namespace)" for nullable `:ns`.  `QualifiedName`/`ConditionFactType`
+>   display-split kind-explicit names locally (display only — no URL parsing).
+>   `ui/docs/app-arch.md` updated for the id-based contract.  **`pnpm run
+>   format`/`check`/`lint` clean, 10 unit tests + 48 e2e tests green.**
+>
+> **State after M7:** the hierarchy plan is fully implemented — server
+> contract (kind-explicit types, `TypeReference` everywhere, id-based routes,
+> `:id` / `:ns` / `:ancestors` / `:match`) and UI integration (id-verbatim
+> routing, TypeReference-consuming links, ancestors + match displays).
 
 - [x] **Phase 1a:** In `rulebase-analysis`: extract ancestors-fn via a single shared accessor used by both `core.clj` and `analyze.clj` (meta extraction + `clojure.core/ancestors` fallback); add `->memoized-ancestors`; hoist `type-analysis-map` (with `:ns-name`) out of `build-dep-graph`; build serialized ancestors index in per-production ns context (topologically ordered, divergence asserted, serialization memoized by raw-type × ns-name); compute the upfront known set (serialized `:consumed-types` ∪ `:produced-types` union — equals the future fact-types map keys by construction); simplify `downstream?` to consume the memoized set fn in the same change; verify raw types reaching the index are resolved. Extend `resolve-type` to kind-explicit serialization (splitting the catch-all `:else` into `string?`/`sequential?`/catch-all — see the serialization table); add `serialize-type-ref` (raw type + ns-name + known set → `TypeReference`); thread the production ns-name into `serialize-lhs` so LHS condition `:type` values serialize as `TypeReference`s too
 - [x] **Phase 1b:** Add `:ancestors` field (`TypeReference` entries, deterministic topological order with lexicographic tie-break + cycle guard) to fact-type entries in `build-fact-type-summary-map` (single pass, upfront known set); convert `:lhs-types`/`:insert-types`/`:retract-types` and LHS condition `:type` to `[TypeReference]`; convert fact-type usage lists (`:used-by-rules` etc.) to `[ProductionDep]`
 - [x] **Phase 1c:** Add the uniform route-id fn (slug + 8-char base36 SHA-1 suffix, 60-char slug cap) to `serialize.clj`; add `:id` to fact-type entries (`FactTypeListItem` + new `FactTypeDetail`) and to `TypeReference`; build fact-type id reverse index (uniqueness asserted, internal — not in the `/v1/analysis` payload); `handle-get-fact-type` resolves id-only. Router-level tests for id-based lookups (keyword/tuple/string/class forms)
 - [x] **Phase 1d:** Add server tests for `:ancestors` (default-ancestors noise, `known` flag, ordering, missing-meta, nil-returning fn, memoization, mixed-kind hierarchy, kind-explicit serialization incl. string-bearing tuples, condition-`:type`/`:lhs-types` consistency, symbol ns-resolution parity, route ids)
-- [ ] **Phase 1e:** Update UI types (`TypeReference` with `name`/`id`/`known`, `id` on `FactTypeListItem`/`RuleListItem`/`QueryListItem`/details/`ProductionReference`/session types, type-reference fields → `TypeReference`, usage lists → `ProductionReference[]`, `ancestors?` on detail `FactTypeSummary` in `api.ts`)
+- [x] **Phase 1e:** Update UI types (`TypeReference` with `name`/`id`/`known`, `id` on `FactTypeListItem`/`RuleListItem`/`QueryListItem`/details/`ProductionReference`/session types, type-reference fields → `TypeReference`, usage lists → `ProductionReference[]`, `ancestors?` on detail `FactTypeSummary` in `api.ts`)
 - [x] **Phase 1f:** Rewrite `explorer-graph-api.md` for the new contract — flag: this is a full rewrite, not a targeted edit (serialization table, `:id` scheme + routes, `:ns`, `:ancestors`)
 - [x] **Phase 1g:** Server-side production route ids: `:id` on rule/query list + detail entries and every production ref (`ProductionDep` on rule/query details; `inserted-from`/`used-by` refs and `FactTypeRoleGroup` entries in `memory.clj`); production id reverse index; per-snapshot id→name indexes built in `session-snapshot` (no analysis-cache dependency); all rule/query/session detail handlers resolve id-only; delete `fq-name-from-param` server-side and its tests **in the same commit as the index implementation** (atomic revert if issues arise); update `session_api_test.clj` to id-based lookups
-- [ ] **Phase 1h:** UI route-id migration: `utils.ts` link builders + `api.ts` fetchers use `:id` verbatim; delete `toRouteId`/`fromRouteId`/`splitQualifiedName`; `entries()` generators and `bin/scrape-demo-data.js` use server-issued ids; regenerate demo data (`pnpm scrape:demo`); rename `session/fact-types/[typeName]` → `[id]`; update all type-link callers (`FactTypeReferenceLink`/`ConditionFactType`/`DynamicCallsiteList`/`ProductionReferenceCategory`/`GlobalSidebarFlyout`/appState contextual nav) to consume `TypeReference`/`ProductionDep` directly; delete `FactTypeSummary`'s `toRef` mapping; update e2e URL fixtures. **Scope note: 1g+1h together are the largest work item (~30–40% of the total)** — every endpoint, every link builder, the prerender pipeline, and all URL-constructing test fixtures. Budget accordingly
+- [x] **Phase 1h:** UI route-id migration: `utils.ts` link builders + `api.ts` fetchers use `:id` verbatim; delete `toRouteId`/`fromRouteId`/`splitQualifiedName`; `entries()` generators and `bin/scrape-demo-data.js` use server-issued ids; regenerate demo data (`pnpm scrape:demo`); rename `session/fact-types/[typeName]` → `[id]`; update all type-link callers (`FactTypeReferenceLink`/`ConditionFactType`/`DynamicCallsiteList`/`ProductionReferenceCategory`/`GlobalSidebarFlyout`/appState contextual nav) to consume `TypeReference`/`ProductionDep` directly; delete `FactTypeSummary`'s `toRef` mapping; update e2e URL fixtures. **Scope note: 1g+1h together are the largest work item (~30–40% of the total)** — every endpoint, every link builder, the prerender pipeline, and all URL-constructing test fixtures. Budget accordingly
 - [x] **Phase 2a:** Add `matching-type-pairs` helper
 - [x] **Phase 2b:** Update `get-production-deps-summary` (+ `serialize-match` in `serialize.clj`) to attach `:match` with symmetric `producer-type`/`consumer-type` `TypeReference` pairs, each serialized in its own production's ns context, sorted by `:name` post-serialization
 - [x] **Phase 2c:** Update `ProductionDep` schema in `api.clj` with optional `:match` array
 - [x] **Phase 2d:** Add server tests for `:match` (direct, hierarchy, multi-type, dedup, symmetry, cross-field consistency incl. sidecar symbol in foreign ns, dep-graph regression)
-- [ ] **Phase 2e:** Update UI types (`ProductionReference`, `TypeBridgeMatch` in `api.ts`) — deferred with the UI phases (1e/1h); the server contract is complete
+- [x] **Phase 2e:** Update UI types (`ProductionReference`, `TypeBridgeMatch` in `api.ts`) — deferred with the UI phases (1e/1h); the server contract is complete
 - [x] **Phase 2f:** Update `explorer-graph-api.md` with the `:match` contract (symmetric shape + semantics, citing `ProductionDep` schema) — landed in the M6 rewrite
 - [x] **Docs hygiene pass:** verify the Documentation & Schema Principles — schemas carry the structural truth; no docstring enumerates shapes, narrates design history, or references this plan; project docs cite code (not vice versa) for impl details
 - [x] **Fast-follow (post-Phase 2, small):** `"via": "retract"` flag on `:match` entries whose bridge comes from a retract type, so the UI can distinguish retraction coupling from production
-- [ ] **Phase 3:** UI integration (future, scoped separately)
+- [x] **Phase 3:** UI integration — `:ancestors` hierarchy section on fact-type detail (`known` entries link via id, ghosts as plain text), `:match` type-bridge rows on upstream/downstream entries, grouping by server `:ns` with "(no namespace)" fallback, `load` functions pass `[id]` params verbatim

@@ -1,0 +1,17 @@
+{
+	"name": "\"clara.server.tools.graph.rules.loan_app_facts.GivenDocument\"",
+	"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-4vz3t7i4",
+	"used-by-rules": [],
+	"used-by-queries": [],
+	"inserted-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	],
+	"retracted-by-rules": [],
+	"ns": null,
+	"ancestors": []
+}

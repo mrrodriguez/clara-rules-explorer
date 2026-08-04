@@ -1,12 +1,18 @@
 {
 	"id": 11,
-	"type": "clojure.lang.Symbol",
+	"type": {
+		"name": "clojure.lang.Symbol",
+		"id": "clojure.lang.Symbol-lmnfptrf",
+		"known": true
+	},
+	"ns": "clojure.lang",
 	"data": "clara.server.tools.graph.rules.loan-app-facts/map->DocumentCheck",
 	"is-root": true,
 	"inserted-from": [],
 	"used-by": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+			"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"type": "rule"
 		}

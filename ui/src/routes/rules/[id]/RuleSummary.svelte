@@ -25,7 +25,7 @@
 
 	let { rule, activity, fullView = false }: Props = $props();
 
-	let fullViewHref = $derived(resolve(rulePath(rule.name, true) as Pathname));
+	let fullViewHref = $derived(resolve(rulePath(rule.id, true) as Pathname));
 
 	$effect(() => {
 		if (fullView) {
@@ -48,8 +48,9 @@
 	<RulebaseComponentSummaryHeader
 		type="rule"
 		name={rule.name}
+		id={rule.id}
 		{fullView}
-		href={rulePath(rule.name, true)}
+		href={rulePath(rule.id, true)}
 	>
 		<SourceSinkIndicators
 			isSource={rule['source-rule']}

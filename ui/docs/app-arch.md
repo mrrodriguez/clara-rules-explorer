@@ -85,7 +85,7 @@ Routes follow SvelteKit's file-system based routing. The general pattern for lis
     ├── +layout.svelte      Split-pane: SessionNav (left) + outlet (right)
     ├── +page.svelte        Default: "Select a fact type" hint
     ├── SessionNav.svelte   Left column — fact types grouped as "Memory"
-    ├── fact-types/[typeName]/
+    ├── fact-types/[id]/
     │   ├── +page.svelte    Instances of a fact type
     │   ├── FactGroup.svelte
     │   └── SessionSectionHeader.svelte
@@ -153,13 +153,13 @@ These endpoints analyze the compiled Rete network and do not require a running s
 |--------------|-------------------|-------------|
 | `GET /v1/rulebase-summary` | `fetchRulebaseSummary()` | Dashboard (`+page.svelte`) — renders `RulebaseSummary` (rule/query/fact-type counts) |
 | `GET /v1/rules` | `fetchRulesList()` | `rules/+layout.ts` → `RuleList.svelte` — renders lightweight `RuleListItem[]` |
-| `GET /v1/rules/:fq-name` | `fetchRule()` | `rules/[id]/+layout.ts` → `RuleSummary.svelte` — full rule detail (LHS, RHS, props, deps) |
+| `GET /v1/rules/:id` | `fetchRule()` | `rules/[id]/+layout.ts` → `RuleSummary.svelte` — full rule detail (LHS, RHS, props, deps) |
 | `GET /v1/queries` | `fetchQueriesList()` | `queries/+layout.ts` → `QueryList.svelte` — renders lightweight `QueryListItem[]` |
-| `GET /v1/queries/:fq-name` | `fetchQuery()` | `queries/[id]/+layout.ts` → `QuerySummary.svelte` — full query detail (LHS, params, deps) |
+| `GET /v1/queries/:id` | `fetchQuery()` | `queries/[id]/+layout.ts` → `QuerySummary.svelte` — full query detail (LHS, params, deps) |
 | `GET /v1/fact-types` | `fetchFactTypesList()` | `fact-types/+layout.ts` → `FactTypeList.svelte` — renders `FactTypeSummary[]` |
-| `GET /v1/fact-types/:fq-name` | `fetchFactType()` | `fact-types/[id]/+page.ts` → `FactTypeSummary.svelte` — per-type usage (used-by, inserted-by rules/queries) |
+| `GET /v1/fact-types/:id` | `fetchFactType()` | `fact-types/[id]/+page.ts` → `FactTypeSummary.svelte` — per-type usage (used-by, inserted-by rules/queries) |
 
-**FQ-name encoding:** The `toUrlId()` utility in `$lib/utils.ts` converts `ns/name` to `ns.name` for URL segments. The backend accepts dot-separated FQ names and resolves the final dot as the `/` separator.
+**Route ids:** Every fact type, rule, and query carries a server-issued, deterministic `id` used for **all** URL linkage. Link builders (`rulePath`/`queryPath`/`factPath` in `$lib/utils.ts`) and API fetchers pass the id through **verbatim** — no encoding, no decoding, no name parsing. Ids contain only `[A-Za-z0-9.-]`, so they always route as plain single path segments.
 
 ### Phase 2 — Session State (Working Memory)
 
@@ -168,10 +168,10 @@ These endpoints require a running session with inserted facts and return point-i
 | API Endpoint | API Client Function | Consumer(s) |
 |--------------|-------------------|-------------|
 | `GET /v1/session/fact-types` | `fetchSessionFactTypes()` | `SessionNav.svelte` — renders memory navigation with instance counts |
-| `GET /v1/session/fact-types/:fq-name` | `fetchSessionFactTypeInstances()` | `session/fact-types/[typeName]/+page.svelte` — fact instances grouped by origin |
+| `GET /v1/session/fact-types/:id` | `fetchSessionFactTypeInstances()` | `session/fact-types/[id]/+page.svelte` — fact instances grouped by origin |
 | `GET /v1/session/facts/:id` | `fetchSessionFactDetail()` | `session/facts/[id]/+page.svelte` → `FactDetail.svelte` — raw data, origin, impact |
-| `GET /v1/session/rules/:fq-name` | `fetchSessionRuleActivity()` | `rules/[id]/full/` — matches + inserted facts for a rule |
-| `GET /v1/session/queries/:fq-name` | `fetchSessionQueryActivity()` | `queries/[id]/full/` — current query matches |
+| `GET /v1/session/rules/:id` | `fetchSessionRuleActivity()` | `rules/[id]/full/` — matches + inserted facts for a rule |
+| `GET /v1/session/queries/:id` | `fetchSessionQueryActivity()` | `queries/[id]/full/` — current query matches |
 
 ### Cross-Domain Linking
 
@@ -187,7 +187,7 @@ The Phase 1 (static) and Phase 2 (session) views are cross-linked:
 
 API response shapes are defined in `$lib/types/api.ts`. Key interfaces:
 
-- **Phase 1:** `RulebaseSummary`, `RuleListItem`, `QueryListItem`, `RuleSummary`, `QuerySummary`, `FactTypeSummary`, `ProductionReference`
+- **Phase 1:** `RulebaseSummary`, `TypeReference` (`{name, id, known}`), `TypeBridgeMatch`, `ProductionReference` (`{name, id, ns, type, match?}`), `RuleListItem`, `QueryListItem`, `RuleSummary`, `QuerySummary`, `FactTypeSummary` (with `:ancestors` on detail)
 - **Phase 2:** `SessionFactTypesResponse`, `SessionFactTypeInfo`, `SessionFact`, `SessionFactGroup`, `SessionFactTypeInstancesResponse`, `SessionProductionActivityResponse`
 
 UI-specific types are in `$lib/types/ui.ts` (e.g., `ContextualMenuType`).

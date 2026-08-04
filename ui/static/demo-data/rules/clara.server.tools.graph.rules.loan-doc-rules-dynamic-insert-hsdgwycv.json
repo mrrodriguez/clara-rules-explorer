@@ -1,0 +1,71 @@
+{
+	"dynamic-insert-types-detected": {
+		"callsites": [
+			{
+				"source-str": "(build-compliance-review ?app-id)",
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "none"
+			}
+		],
+		"resolution": "partial",
+		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.FraudCheck"]
+	},
+	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n (= ?app-id app-id)\n (= status :pass)]\n",
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
+	"lhs-types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+			"known": true
+		}
+	],
+	"lhs": [
+		{
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+				"known": true
+			},
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+		}
+	],
+	"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-hsdgwycv",
+	"retract-types": [],
+	"notes": null,
+	"insert-types": [
+		{
+			"name": "\"clara.server.tools.graph.rules.loan_app_facts.FraudCheck\"",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-crxd5as9",
+			"known": true
+		}
+	],
+	"rhs-form": "(do (r/insert! (build-compliance-review ?app-id)))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+						"known": true
+					}
+				}
+			]
+		}
+	],
+	"doc": "After document checks pass, trigger a compliance review via Java constructor.\n   The analyzer sees the ComplianceReview. call but cannot statically determine\n   its return type — captured as a dynamic insert callsite.",
+	"sink-rule": true,
+	"props": {}
+}

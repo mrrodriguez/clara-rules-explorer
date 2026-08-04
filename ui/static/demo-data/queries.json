@@ -2,16 +2,30 @@
 	"queries": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/find-document-check",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-find-document--czo18bjs",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"doc": null,
-			"lhs-types": ["clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"],
+			"lhs-types": [
+				{
+					"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+					"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+					"known": true
+				}
+			],
 			"params": ["?app-id"]
 		},
 		{
 			"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
+			"id": "clara.server.tools.graph.rules.loan-app-rules-find-app-outco-9qb1iqvl",
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"doc": null,
-			"lhs-types": ["clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"],
+			"lhs-types": [
+				{
+					"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+					"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+					"known": true
+				}
+			],
 			"params": ["?app-id"]
 		}
 	]

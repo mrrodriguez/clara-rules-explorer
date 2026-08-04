@@ -19,7 +19,7 @@
 
 	let { query, activity, fullView = false }: Props = $props();
 
-	let fullViewHref = $derived(resolve(queryPath(query.name, true) as Pathname));
+	let fullViewHref = $derived(resolve(queryPath(query.id, true) as Pathname));
 
 	$effect(() => {
 		if (fullView) {
@@ -35,8 +35,9 @@
 	<RulebaseComponentSummaryHeader
 		type="query"
 		name={query.name}
+		id={query.id}
 		{fullView}
-		href={queryPath(query.name, true)}
+		href={queryPath(query.id, true)}
 	>
 		{#if query.params.length > 0}
 			<div class="ms-4 d-flex align-items-center gap-1">

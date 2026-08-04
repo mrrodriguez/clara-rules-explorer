@@ -1,0 +1,34 @@
+{
+	"matches": [
+		{
+			"id": 13,
+			"type": {
+				"name": "clojure.lang.Symbol",
+				"id": "clojure.lang.Symbol-lmnfptrf",
+				"known": true
+			},
+			"ns": "clojure.lang",
+			"data": {
+				"?outcome": "clara.server.tools.graph.rules.loan-app-facts/map->IdentityCheck",
+				"?app-id": "app-1"
+			},
+			"is-root": false,
+			"inserted-from": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+					"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
+					"ns": "clara.server.tools.graph.rules.loan-app-rules",
+					"type": "rule"
+				}
+			],
+			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
+					"id": "clara.server.tools.graph.rules.loan-app-rules-find-app-outco-9qb1iqvl",
+					"ns": "",
+					"type": "query"
+				}
+			]
+		}
+	]
+}

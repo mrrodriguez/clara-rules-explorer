@@ -1,13 +1,15 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import type { ProductionReference } from '$lib/types/api';
+	import type { ProductionReference, TypeReference } from '$lib/types/api';
 	import ProductionReferenceLink from '$lib/components/rulebase/ProductionReferenceLink.svelte';
 	import FactTypeReferenceLink from '$lib/components/rulebase/FactTypeReferenceLink.svelte';
+
+	type ReferenceItem = ProductionReference | TypeReference;
 
 	interface Props {
 		title: string;
 		icon?: string;
-		items?: (ProductionReference | string)[];
+		items?: ReferenceItem[];
 		fullView?: boolean;
 		class?: string;
 		maxVisibleItems?: number;
@@ -25,6 +27,10 @@
 	}: Props = $props();
 
 	const scrollable = $derived(items.length >= maxVisibleItems);
+
+	function isProduction(item: ReferenceItem): item is ProductionReference {
+		return 'type' in item && item.type !== undefined;
+	}
 
 	// Per-item height: py-2 (1rem vertical) + QualifiedName two-line text (~2rem) = ~3rem.
 	// Add 0.25rem buffer so the last visible item renders nearly fully.
@@ -49,11 +55,11 @@
 			class="list-group list-group-flush border rounded shadow-sm"
 			style={scrollable ? `max-height: ${scrollMaxHeight}; overflow-y: auto;` : ''}
 		>
-			{#each items as item (typeof item === 'string' ? item : item.name)}
-				{#if typeof item === 'string'}
-					<FactTypeReferenceLink type={item} />
-				{:else}
+			{#each items as item (item.id)}
+				{#if isProduction(item)}
 					<ProductionReferenceLink ref={item} {fullView} />
+				{:else}
+					<FactTypeReferenceLink type={item} />
 				{/if}
 			{/each}
 		</div>

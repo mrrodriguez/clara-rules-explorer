@@ -1,6 +1,11 @@
 {
 	"id": 10,
-	"type": "clojure.lang.PersistentVector",
+	"type": {
+		"name": "clojure.lang.PersistentVector",
+		"id": "clojure.lang.PersistentVector-8g4ux02t",
+		"known": true
+	},
+	"ns": "clojure.lang",
 	"data": [
 		{
 			"app-id": "app-1",
@@ -12,6 +17,7 @@
 	"used-by": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-re-q9oiwl3n",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}

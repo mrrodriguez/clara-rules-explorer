@@ -1,0 +1,101 @@
+{
+	"downstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
+						"known": true
+					}
+				}
+			]
+		}
+	],
+	"dynamic-insert-types-detected": {
+		"callsites": [
+			{
+				"source-str": "(laf/map->AllRequiredDocuments {:app-id ?app-id, :docs ?docs})",
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "full",
+				"resolved-types": [
+					{
+						"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
+						"known": true
+					}
+				]
+			}
+		],
+		"resolution": "partial",
+		"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
+	},
+	"source-rule": true,
+	"lhs-form": "[:?app\n <-\n clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[:?docs\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.RequiredDocument\n  (= ?app-id app-id)]]\n",
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+	"lhs-types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.RequiredDocume-7rfb9pky",
+			"known": true
+		}
+	],
+	"lhs": [
+		{
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
+				"known": true
+			},
+			"constraints": "[\n(= ?app-id app-id)\n]",
+			"fact-binding": "?app"
+		},
+		{
+			"accumulator": ["clara.rules.accumulators/all"],
+			"from": {
+				"type": {
+					"name": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
+					"id": "clara.server.tools.graph.rules.loan-app-facts.RequiredDocume-7rfb9pky",
+					"known": true
+				},
+				"constraints": "[\n(= ?app-id app-id)\n]"
+			},
+			"result-binding": "?docs"
+		}
+	],
+	"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-re-q9oiwl3n",
+	"retract-types": [],
+	"notes": null,
+	"insert-types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
+			"known": true
+		},
+		{
+			"name": "\"clojure.lang.PersistentVector\"",
+			"id": "clojure.lang.PersistentVector-rijubkki",
+			"known": true
+		}
+	],
+	"rhs-form": "(do\n (r/insert!\n  (laf/map->AllRequiredDocuments {:app-id ?app-id, :docs ?docs})))\n",
+	"doc": null,
+	"sink-rule": false,
+	"props": {}
+}

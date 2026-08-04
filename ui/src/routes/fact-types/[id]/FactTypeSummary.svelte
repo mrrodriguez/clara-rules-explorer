@@ -2,7 +2,7 @@
 	import type { FactTypeSummary } from '$lib/types/api';
 	import RulebaseComponentSummaryHeader from '$lib/components/rulebase/RulebaseComponentSummaryHeader.svelte';
 	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
-	import { factPath, splitQualifiedName } from '$lib/utils';
+	import { factPath } from '$lib/utils';
 
 	interface Props {
 		factType: FactTypeSummary;
@@ -10,23 +10,15 @@
 	}
 
 	let { factType, fullView = false }: Props = $props();
-
-	function toRef(fqName: string, type: 'rule' | 'query') {
-		const { namespace } = splitQualifiedName(fqName);
-		return {
-			name: fqName,
-			ns: namespace,
-			type
-		};
-	}
 </script>
 
 <div class="card shadow-sm">
 	<RulebaseComponentSummaryHeader
 		type="fact"
 		name={factType.name}
+		id={factType.id}
 		{fullView}
-		href={factPath(factType.name)}
+		href={factPath(factType.id)}
 	/>
 
 	<div class="card-body p-2 p-md-3">
@@ -35,14 +27,14 @@
 				<ProductionReferenceCategory
 					title="Used by Rules"
 					icon="bi-list-check"
-					items={factType['used-by-rules'].map((n) => toRef(n, 'rule'))}
+					items={factType['used-by-rules']}
 					{fullView}
 				/>
 
 				<ProductionReferenceCategory
 					title="Used by Queries"
 					icon="bi-search"
-					items={factType['used-by-queries'].map((n) => toRef(n, 'query'))}
+					items={factType['used-by-queries']}
 					{fullView}
 					class="mt-4"
 				/>
@@ -52,18 +44,39 @@
 				<ProductionReferenceCategory
 					title="Inserted by Rules"
 					icon="bi-box-arrow-right"
-					items={factType['inserted-by-rules'].map((n) => toRef(n, 'rule'))}
+					items={factType['inserted-by-rules']}
 					{fullView}
 				/>
 
 				<ProductionReferenceCategory
 					title="Retracted by Rules"
 					icon="bi-dash-circle"
-					items={factType['retracted-by-rules'].map((n) => toRef(n, 'rule'))}
+					items={factType['retracted-by-rules']}
 					{fullView}
 					class="mt-4"
 				/>
 			</div>
 		</div>
+
+		{#if factType.ancestors && factType.ancestors.length > 0}
+			<div class="mt-4">
+				<ProductionReferenceCategory
+					title="Hierarchy (Ancestors)"
+					icon="bi-diagram-3"
+					items={factType.ancestors}
+				>
+					<div
+						class="p-3 text-muted text-center fs-7 bg-light rounded fst-italic border border-dashed"
+					>
+						No ancestors — this type sits at the root of its hierarchy.
+					</div>
+				</ProductionReferenceCategory>
+				<p class="text-muted small ps-2 mt-1 mb-0">
+					Ancestors are listed in hierarchy order (descendants before their own ancestors).
+					Italicized entries are hierarchy-only types with no rulebase usage — they are not
+					linkable.
+				</p>
+			</div>
+		{/if}
 	</div>
 </div>

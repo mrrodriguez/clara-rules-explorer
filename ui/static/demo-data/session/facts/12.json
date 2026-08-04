@@ -1,22 +1,30 @@
 {
 	"id": 12,
-	"type": "clojure.lang.Symbol",
+	"type": {
+		"name": "clojure.lang.Symbol",
+		"id": "clojure.lang.Symbol-lmnfptrf",
+		"known": true
+	},
+	"ns": "clojure.lang",
 	"data": "clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",
 	"is-root": true,
 	"inserted-from": [],
 	"used-by": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		},
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-id-fhyj46dq",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		},
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}

@@ -1,14 +1,13 @@
 import fs from 'fs';
 import path from 'path';
-import { toRouteId } from '$lib/utils';
 import type { EntryGenerator } from './$types';
 
 export const entries: EntryGenerator = () => {
 	const filePath = path.resolve('static/demo-data/queries.json');
 	if (fs.existsSync(filePath)) {
 		const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-		return (data.queries || []).map((query: { name: string }) => ({
-			id: encodeURIComponent(toRouteId(query.name))
+		return (data.queries || []).map((query: { id: string }) => ({
+			id: query.id
 		}));
 	}
 	return [];

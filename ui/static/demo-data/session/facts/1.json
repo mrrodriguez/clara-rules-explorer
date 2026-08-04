@@ -1,6 +1,11 @@
 {
 	"id": 1,
-	"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+	"type": {
+		"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+		"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
+		"known": true
+	},
+	"ns": "clara.server.tools.graph.rules.loan_app_facts",
 	"data": {
 		"app-id": "app-1",
 		"doc-type": "id-card"
@@ -10,11 +15,13 @@
 	"used-by": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		},
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}

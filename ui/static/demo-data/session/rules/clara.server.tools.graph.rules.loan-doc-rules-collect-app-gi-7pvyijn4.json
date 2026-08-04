@@ -1,0 +1,217 @@
+{
+	"matches": [
+		{
+			"id": 9,
+			"type": {
+				"name": "clojure.lang.PersistentVector",
+				"id": "clojure.lang.PersistentVector-8g4ux02t",
+				"known": true
+			},
+			"ns": "clojure.lang",
+			"data": {
+				"?app-id": "app-1",
+				"?docs": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": "All required documents found"
+				}
+			},
+			"is-root": true,
+			"inserted-from": [],
+			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-id-fhyj46dq",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-re-q9oiwl3n",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+					"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
+					"ns": "clara.server.tools.graph.rules.loan-app-rules",
+					"type": "rule"
+				}
+			]
+		},
+		{
+			"id": 12,
+			"type": {
+				"name": "clojure.lang.Symbol",
+				"id": "clojure.lang.Symbol-lmnfptrf",
+				"known": true
+			},
+			"ns": "clojure.lang",
+			"data": {
+				"?app-id": "app-1",
+				"?docs": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": "All required documents found"
+				}
+			},
+			"is-root": true,
+			"inserted-from": [],
+			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-id-fhyj46dq",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			]
+		},
+		{
+			"id": 1,
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
+				"known": true
+			},
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
+			"data": {
+				"?app-id": "app-1",
+				"?docs": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": "All required documents found"
+				}
+			},
+			"is-root": true,
+			"inserted-from": [],
+			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			]
+		},
+		{
+			"id": 1,
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
+				"known": true
+			},
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
+			"data": {
+				"?app-id": "app-1",
+				"?docs": {
+					"app-id": "app-1",
+					"status": "pass",
+					"message": "All required documents found"
+				}
+			},
+			"is-root": true,
+			"inserted-from": [],
+			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			]
+		}
+	],
+	"inserted-facts": [
+		{
+			"id": 3,
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
+				"known": true
+			},
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
+			"data": {
+				"app-id": "app-1",
+				"status": "pass",
+				"message": null
+			},
+			"is-root": false,
+			"inserted-from": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-extract-doc-me-k8p61ty2",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			]
+		}
+	]
+}

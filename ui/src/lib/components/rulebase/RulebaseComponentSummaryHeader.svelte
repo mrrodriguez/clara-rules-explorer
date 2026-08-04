@@ -9,12 +9,14 @@
 	interface Props {
 		type: 'rule' | 'query' | 'fact';
 		name: string;
+		/** Server-issued route id — passed to the locate-in-list button. */
+		id: string;
 		fullView?: boolean;
 		href: string;
 		children?: Snippet;
 	}
 
-	let { type, name, fullView = false, href, children }: Props = $props();
+	let { type, name, id, fullView = false, href, children }: Props = $props();
 	let color = $derived(type === 'rule' ? 'primary' : type === 'query' ? 'success' : 'info');
 
 	const resolvedHref = $derived(resolve(href as Pathname));
@@ -28,7 +30,7 @@
 		</div>
 		<div class="d-flex gap-1 flex-shrink-0 ms-2">
 			{#if !fullView}
-				<LocateInListButton {name} />
+				<LocateInListButton {id} />
 			{/if}
 			{#if !fullView && type !== 'fact'}
 				<a href={resolvedHref} class="btn btn-outline-{color} btn-sm">

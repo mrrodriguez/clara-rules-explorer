@@ -27,7 +27,7 @@
 				</div>
 			</div>
 			<div class="text-end">
-				<QualifiedName fullName={fact.type} size="md" />
+				<QualifiedName fullName={fact.type.name} size="md" />
 			</div>
 		</div>
 		<div class="card-body p-0">

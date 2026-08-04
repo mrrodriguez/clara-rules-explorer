@@ -1,6 +1,11 @@
 {
 	"id": 7,
-	"type": "clojure.lang.PersistentVector",
+	"type": {
+		"name": "clojure.lang.PersistentVector",
+		"id": "clojure.lang.PersistentVector-8g4ux02t",
+		"known": true
+	},
+	"ns": "clojure.lang",
 	"data": [
 		"clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",
 		{
@@ -12,13 +17,14 @@
 			"doc-type": "id-card"
 		}
 	],
-	"is-root": true,
-	"inserted-from": [],
-	"used-by": [
+	"is-root": false,
+	"inserted-from": [
 		{
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
-			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-3snojfsz",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}
-	]
+	],
+	"used-by": []
 }

@@ -1,0 +1,71 @@
+{
+	"dynamic-insert-types-detected": {
+		"callsites": [
+			{
+				"source-str": "(build-audit-trail-entry ?app-id :doc-check-passed)",
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "none"
+			}
+		],
+		"resolution": "partial",
+		"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
+	},
+	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n (= ?app-id app-id)\n (= status :pass)]\n",
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
+	"lhs-types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+			"known": true
+		}
+	],
+	"lhs": [
+		{
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+				"known": true
+			},
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+		}
+	],
+	"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-3snojfsz",
+	"retract-types": [],
+	"notes": null,
+	"insert-types": [
+		{
+			"name": "\"clojure.lang.PersistentVector\"",
+			"id": "clojure.lang.PersistentVector-rijubkki",
+			"known": true
+		}
+	],
+	"rhs-form": "(do (r/insert! (build-audit-trail-entry ?app-id :doc-check-passed)))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+						"known": true
+					}
+				}
+			]
+		}
+	],
+	"doc": "After document checks pass, write an audit trail entry via opaque builder.\n   The analyzer detects an insert but cannot resolve the fact type — the\n   builder is a custom non-record function. This stays unresolved.",
+	"sink-rule": true,
+	"props": {}
+}

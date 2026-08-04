@@ -1,4 +1,4 @@
-<script lang="ts" generics="T extends { name: string }">
+<script lang="ts" generics="T extends { name: string; id: string }">
 	import { tick } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import FilterDropdown from '$lib/components/rulebase/nav/FilterDropdown.svelte';
@@ -8,7 +8,6 @@
 	import type { GroupedFilterableNavListProps } from '$lib/components/rulebase/nav/GroupedFilterableNavListProps';
 	import { NamespaceFilter } from '$lib/components/rulebase/nav/namespaceFilter.svelte';
 	import { RulebaseFilter } from '$lib/components/rulebase/nav/rulebaseFilter.svelte';
-	import { toRouteId } from '$lib/utils';
 	import { appState } from '$lib/state/appState.svelte';
 
 	let {
@@ -55,7 +54,6 @@
 
 		for (const item of items) {
 			const ns = groupKey(item) || '(no namespace)';
-			const routeId = toRouteId(item.name);
 
 			if (!seenNs.has(ns)) {
 				seenNs.add(ns);
@@ -67,7 +65,7 @@
 			} else {
 				byNs.set(ns, [item]);
 			}
-			routeIdToNs.set(routeId, ns);
+			routeIdToNs.set(item.id, ns);
 		}
 
 		return { nsOrder, byNs, routeIdToNs };
@@ -258,8 +256,8 @@
 
 	// ── Route helpers ────────────────────────────────────────────────────────
 
-	function isActive(name: string) {
-		return activeId !== undefined && activeId === toRouteId(name);
+	function isActive(item: T) {
+		return activeId !== undefined && activeId === item.id;
 	}
 
 	// ── Scroll container ref ─────────────────────────────────────────────────
@@ -271,7 +269,7 @@
 	const isActiveItemFilteredOut = $derived.by(() => {
 		if (!activeId) return false;
 
-		const item = items.find((i) => toRouteId(i.name) === activeId);
+		const item = items.find((i) => i.id === activeId);
 		if (!item) return false;
 
 		// Check search
@@ -309,7 +307,7 @@
 	$effect(() => {
 		const req = appState.locateRequest;
 		if (!req || !activeId || handlingLocate) return;
-		if (toRouteId(req.name) !== activeId) return;
+		if (req.id !== activeId) return;
 
 		handlingLocate = true;
 
@@ -473,8 +471,8 @@
 				{/snippet}
 
 				<ReferenceListItem
-					href={hrefPrefix(item.name)}
-					active={isActive(item.name)}
+					href={hrefPrefix(item)}
+					active={isActive(item)}
 					title={item.name}
 					fullName={item.name}
 					{activeColor}
@@ -503,8 +501,8 @@
 						{/snippet}
 
 						<ReferenceListItem
-							href={hrefPrefix(item.name)}
-							active={isActive(item.name)}
+							href={hrefPrefix(item)}
+							active={isActive(item)}
 							title={item.name}
 							fullName={item.name}
 							{activeColor}

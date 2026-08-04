@@ -3,17 +3,17 @@
 	import { getListFilterState } from '$lib/state/listFilterContext.svelte';
 
 	interface Props {
-		/** Fully-qualified name of the item to locate in the list. */
-		name: string;
+		/** Route id of the item to locate in the list (server-issued). */
+		id: string;
 	}
 
-	let { name }: Props = $props();
+	let { id }: Props = $props();
 
 	const filterState = getListFilterState();
 	const disabled = $derived(filterState?.activeItemFilteredOut ?? false);
 
 	function handleClick() {
-		appState.requestLocate(name);
+		appState.requestLocate(id);
 	}
 </script>
 

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { ProductionReference } from '$lib/types/api';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import { splitQualifiedName } from '$lib/utils';
+	import { getShortName } from '$lib/utils';
 
 	interface Props {
 		origins: ProductionReference[];
@@ -14,8 +14,7 @@
 	const tooltip = $derived(
 		isRoot
 			? ''
-			: 'Inserted by: ' +
-					origins.map((o) => `${splitQualifiedName(o.name).name} (${o.type})`).join(', ')
+			: 'Inserted by: ' + origins.map((o) => `${getShortName(o.name)} (${o.type})`).join(', ')
 	);
 
 	const label = $derived(isRoot ? 'root' : `${origins.length} origins`);
