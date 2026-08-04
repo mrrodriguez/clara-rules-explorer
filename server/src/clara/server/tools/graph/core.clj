@@ -322,7 +322,7 @@
   [raw-type existing-serialized new-serialized warned-types]
   (when (and (not= existing-serialized new-serialized)
              (not (contains? @warned-types raw-type)))
-    (vswap! warned-types conj! raw-type)
+    (swap! warned-types conj raw-type)
     (println (format "WARN: type serialization divergence — %s serializes as both %s and %s across production ns contexts; keeping %s"
                      raw-type existing-serialized new-serialized existing-serialized))))
 
@@ -376,7 +376,7 @@
    per-production rule summaries and the known-set)."
   [type-analysis-map ancestors-set-fn productions]
   (let [resolve-memo (memoize (fn [ns-name t] (serialize/resolve-type ns-name t)))
-        warned-types (volatile! (transient #{}))
+        warned-types (atom #{})
         per-raw-type
         (reduce (fn [acc production]
                   (register-production-types acc
