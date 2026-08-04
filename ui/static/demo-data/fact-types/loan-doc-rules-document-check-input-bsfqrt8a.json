@@ -16,7 +16,14 @@
 		}
 	],
 	"used-by-queries": [],
-	"inserted-by-rules": [],
+	"inserted-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	],
 	"retracted-by-rules": [],
 	"ns": "loan-doc-rules",
 	"ancestors": []

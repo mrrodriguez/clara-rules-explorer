@@ -1,10 +1,6 @@
 {
-	"source-rule": true,
+	"source-rule": false,
 	"lhs-form": "[:loan-doc-rules/document-check-input\n [{:keys [app-id missing-required-docs]}]\n (= ?app-id app-id)\n (= ?missing-required-docs missing-required-docs)\n (seq ?missing-required-docs)]\n",
-	"unlinked-rule": {
-		"downstream": "unknown",
-		"reason": "no declared insert-types or retract-types"
-	},
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs",
 	"lhs-types": [
@@ -26,10 +22,33 @@
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-all-mi-j2j2xsfb",
+	"no-output-types": true,
 	"retract-types": [],
 	"notes": null,
 	"insert-types": [],
 	"rhs-form": "(do (swap! count-atom inc))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": ":loan-doc-rules/document-check-input",
+						"id": "loan-doc-rules-document-check-input-bsfqrt8a",
+						"known": true
+					},
+					"consumer-type": {
+						"name": ":loan-doc-rules/document-check-input",
+						"id": "loan-doc-rules-document-check-input-bsfqrt8a",
+						"known": true
+					}
+				}
+			]
+		}
+	],
 	"doc": null,
 	"sink-rule": false,
 	"props": {}

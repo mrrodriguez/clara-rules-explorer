@@ -38,7 +38,7 @@ clojure -M:demo-setup
 Next, start the server using the generated demo data artifacts. The scraper script requires the backend to be running locally (default: port `9001`). From the `server` directory, run:
 
 ```bash
-clojure -M:demo-run -s demo-data/session.bin -l demo-data/loan-doc-rules-annotations.edn
+clojure -M:demo-run -s demo-data/session.bin -l test-resources/clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn
 ```
 
 Keep this server running in your terminal while you perform the next steps.

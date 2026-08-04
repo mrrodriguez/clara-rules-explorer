@@ -1,25 +1,18 @@
 {
-	"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
-	"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
-	"used-by-rules": [
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		}
-	],
+	"name": "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice",
+	"id": "clara.server.tools.graph.rules.loan-doc-rules.StaleDocumentN-ruqre9or",
+	"used-by-rules": [],
 	"used-by-queries": [],
-	"inserted-by-rules": [
+	"inserted-by-rules": [],
+	"retracted-by-rules": [
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-re-q9oiwl3n",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-retrac-seb0d3qq",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}
 	],
-	"retracted-by-rules": [],
-	"ns": "clara.server.tools.graph.rules.loan_app_facts",
+	"ns": "clara.server.tools.graph.rules.loan_doc_rules",
 	"ancestors": [
 		{
 			"name": "clojure.lang.IHashEq",

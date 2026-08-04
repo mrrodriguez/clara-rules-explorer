@@ -1,7 +1,44 @@
 {
+	"downstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
+						"known": true
+					}
+				}
+			]
+		}
+	],
 	"dynamic-insert-types-detected": {
-		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"],
-		"resolution": "partial"
+		"callsites": [
+			{
+				"source-str": "(laf/map->AllGivenDocuments {:app-id ?app-id, :docs ?docs})",
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "full",
+				"resolved-types": [
+					{
+						"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
+						"known": true
+					}
+				]
+			}
+		],
+		"resolution": "partial",
+		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"]
 	},
 	"source-rule": true,
 	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[:?docs\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.GivenDocument\n  (= ?app-id app-id)]]\n",
@@ -46,6 +83,11 @@
 	"notes": null,
 	"insert-types": [
 		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
+			"known": true
+		},
+		{
 			"name": "\"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck\"",
 			"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-th8jjfdm",
 			"known": true
@@ -53,6 +95,6 @@
 	],
 	"rhs-form": "(do\n (r/insert!\n  (laf/map->AllGivenDocuments {:app-id ?app-id, :docs ?docs})))\n",
 	"doc": null,
-	"sink-rule": true,
+	"sink-rule": false,
 	"props": {}
 }
