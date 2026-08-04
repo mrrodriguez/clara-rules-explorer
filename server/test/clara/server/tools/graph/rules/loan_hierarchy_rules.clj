@@ -1,11 +1,10 @@
 (ns clara.server.tools.graph.rules.loan-hierarchy-rules
   "Loan-domain rules exercising a keyword `derive` hierarchy, vector-tuple fact
-   types, and a record fact type in one session.  Mirrors the phase-2 edge-case
-   emphasis: plain keywords (majority case), vector tuples of keyword-led forms
-   (minor secondary), and class/record facts (minor).  Sessions must be built
-   with `fact-type-fn` so tuple types resolve; the keyword hierarchy flows
-   through the default ancestors-fn (clojure.core/ancestors on the global
-   hierarchy)."
+   types, and a record fact type in one session: plain keywords (majority
+   case), vector tuples of keyword-led forms (minor secondary), and
+   class/record facts (minor).  Sessions must be built with `fact-type-fn` so
+   tuple types resolve; the keyword hierarchy flows through the default
+   ancestors-fn (clojure.core/ancestors on the global hierarchy)."
   (:require [clara.rules :as r]))
 
 ;; Keyword hierarchy: income-document <: supporting-document <: loan-document

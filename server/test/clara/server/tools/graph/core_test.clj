@@ -574,7 +574,7 @@
                  (:callsites dyn))))))))
 
 ;; ---------------------------------------------------------------------------
-;; Phase 1b/1d — fact-type hierarchy: :ancestors, :known, ordering, :ns
+;; Fact-type hierarchy: :ancestors, :known, ordering, :ns
 ;; ---------------------------------------------------------------------------
 
 (deftest test-loan-hierarchy-behavior
@@ -767,7 +767,7 @@
                    :queries {"b" {:id "same-id" :name "b"}}})))))
 
 ;; ---------------------------------------------------------------------------
-;; Phase 2 — :match on upstream/downstream deps (type-bridge info)
+;; Type-bridge info (:match) on dependency edges
 ;; ---------------------------------------------------------------------------
 
 (derive ::match-child-a ::match-parent-a)

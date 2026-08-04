@@ -290,10 +290,10 @@
 
 (defn- get-analysis-state
   "Returns the cached analysis state (the analysis map plus derived internal
-   indexes), rebuilding when the session or annotations have changed.  Each
-   detail handler was previously calling core/rulebase-analysis on every
-   request, which builds all rules, queries, fact-types, the dep graph, and
-   nodes — even to serve a single rule lookup.  The fact-type id reverse
+   indexes), rebuilding when the session or annotations have changed.  A
+   single rulebase-analysis build produces all rules, queries, fact-types,
+   the dep graph, and nodes; detail handlers serve from the cache rather than
+   rebuilding per request.  The fact-type id reverse
    index is internal: it is never part of the /v1/analysis payload."
   [session-atom annotations-atom analysis-cache]
   (let [session @session-atom
