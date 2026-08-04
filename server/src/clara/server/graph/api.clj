@@ -261,35 +261,6 @@
   (s/conditional status-200? {:status (s/eq 200) :body ProductionActivity}
                  status-404? {:status (s/eq 404) :body ring-error-body}))
 
-(defn- get-analysis-known-set
-  "The analysis's serialized fact-type names, or #{} when the analysis cache
-   is empty (pre-first-build).  Session snapshot TypeReference `known` flags
-   are honest membership checks against this set."
-  [analysis-cache]
-  (or (some-> analysis-cache deref :analysis :fact-types keys set)
-      #{}))
-
-(defn- get-snapshot
-  "Returns the cached session snapshot, rebuilding when the session or the
-   analysis's fact-type known-set has changed.  The known-set (derived from
-   the analysis cache) seeds the snapshot's TypeReference `known` flags, so a
-   session fact type absent from the analysis is honestly marked unknown —
-   the UI must not link a session type to a /fact-types/:id route the
-   analysis cannot serve."
-  [session-atom snapshot-cache analysis-cache]
-  (let [session @session-atom
-        known-set (get-analysis-known-set analysis-cache)
-        cached @snapshot-cache]
-    (if (and cached
-             (identical? (:session cached) session)
-             (= (:known-set cached) known-set))
-      (:snapshot cached)
-      (let [snapshot (memory/session-snapshot session known-set)]
-        (reset! snapshot-cache {:session session
-                                :known-set known-set
-                                :snapshot snapshot})
-        snapshot))))
-
 (defn- enriched-annotations
   "Returns annotations enriched with fact-type provenance from the session's
    working memory when a live session is available.  Takes a bare
@@ -341,6 +312,32 @@
   "The cached analysis map (see `get-analysis-state`)."
   [session-atom annotations-atom analysis-cache]
   (:analysis (get-analysis-state session-atom annotations-atom analysis-cache)))
+
+(defn- get-snapshot
+  "Returns the cached session snapshot, rebuilding when the session or the
+   analysis's fact-type known-set has changed.
+
+   The known-set is derived from `get-analysis-state` — the validated,
+   current analysis — never read passively from the cache: every session
+   request first confirms the analysis is coherent with the current session
+   + annotations (rebuilding it when either has been swapped/reloaded), and
+   only then checks the snapshot cache.  A session fact type absent from the
+   analysis that serves the analysis endpoints is therefore honestly marked
+   unknown — the UI must not link a session type to a /fact-types/:id route
+   the analysis cannot serve."
+  [session-atom snapshot-cache analysis-cache annotations-atom]
+  (let [{:keys [session analysis]} (get-analysis-state session-atom annotations-atom analysis-cache)
+        known-set (-> analysis :fact-types keys set)
+        cached @snapshot-cache]
+    (if (and cached
+             (identical? (:session cached) session)
+             (= (:known-set cached) known-set))
+      (:snapshot cached)
+      (let [snapshot (memory/session-snapshot session known-set)]
+        (reset! snapshot-cache {:session session
+                                :known-set known-set
+                                :snapshot snapshot})
+        snapshot))))
 
 (s/defn handle-get-rulebase-summary :- {:status (s/eq 200) :body RulebaseSummary}
   [session-atom annotations-atom analysis-cache _req]
@@ -399,16 +396,16 @@
 
 (s/defn handle-get-session-fact-types
   :- {:status (s/eq 200) :body {:types [SessionFactTypeItem] :total-count s/Int}}
-  [session-atom snapshot-cache analysis-cache _req]
-  (let [snapshot (get-snapshot session-atom snapshot-cache analysis-cache)]
+  [session-atom snapshot-cache analysis-cache annotations-atom _req]
+  (let [snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)]
     {:status 200
      :body (core/session-fact-types-summary snapshot)}))
 
 (s/defn handle-get-session-fact-type
   :- GetSessionFactTypeResponse
-  [session-atom snapshot-cache analysis-cache req]
+  [session-atom snapshot-cache analysis-cache annotations-atom req]
   (let [id (get-in req [:path-params :id])
-        snapshot (get-snapshot session-atom snapshot-cache analysis-cache)
+        snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
         name (get (:fact-type-id-index snapshot) id)
         type-info (get (:fact-types snapshot) name)]
     (if type-info
@@ -417,9 +414,9 @@
 
 (s/defn handle-get-session-fact
   :- GetSessionFactResponse
-  [session-atom snapshot-cache analysis-cache req]
+  [session-atom snapshot-cache analysis-cache annotations-atom req]
   (let [id (Integer/parseInt (get-in req [:path-params :id]))
-        snapshot (get-snapshot session-atom snapshot-cache analysis-cache)
+        snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
         fact (get-in snapshot [:facts id])]
     (if fact
       {:status 200 :body fact}
@@ -427,9 +424,9 @@
 
 (s/defn handle-get-session-rule
   :- GetSessionRuleResponse
-  [session-atom snapshot-cache analysis-cache req]
+  [session-atom snapshot-cache analysis-cache annotations-atom req]
   (let [id (get-in req [:path-params :id])
-        snapshot (get-snapshot session-atom snapshot-cache analysis-cache)
+        snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
         name (get (:rule-id-index snapshot) id)
         rule-activity (memory/get-session-rule-activity snapshot name)]
     (if rule-activity
@@ -438,9 +435,9 @@
 
 (s/defn handle-get-session-query
   :- GetSessionQueryResponse
-  [session-atom snapshot-cache analysis-cache req]
+  [session-atom snapshot-cache analysis-cache annotations-atom req]
   (let [id (get-in req [:path-params :id])
-        snapshot (get-snapshot session-atom snapshot-cache analysis-cache)
+        snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
         name (get (:query-id-index snapshot) id)
         query-activity (memory/get-session-query-activity snapshot name)]
     (if query-activity
@@ -448,12 +445,12 @@
       {:status 404 :body {:error "Query matches not found"}})))
 
 (defn- handle-get-session-snapshot
-  [session-atom snapshot-cache analysis-cache _req]
+  [session-atom snapshot-cache analysis-cache annotations-atom _req]
   {:status 200
    ;; :fact-raw-types is an internal enrichment index (raw Class/keyword/...
    ;; objects that do not serialize to JSON); the served snapshot keeps only
    ;; the serialized, id-indexed views.
-   :body (dissoc (get-snapshot session-atom snapshot-cache analysis-cache)
+   :body (dissoc (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
                  :fact-raw-types)})
 
 (s/defn handle-get-annotations :- {:status (s/eq 200) :body AnnotationsMap}
@@ -492,17 +489,17 @@
 
        ["/session"
         ["/fact-types"
-         ["" {:get (partial handle-get-session-fact-types session-atom snapshot-cache analysis-cache)}]
-         ["/:id" {:get (partial handle-get-session-fact-type session-atom snapshot-cache analysis-cache)}]]
+         ["" {:get (partial handle-get-session-fact-types session-atom snapshot-cache analysis-cache annotations-atom)}]
+         ["/:id" {:get (partial handle-get-session-fact-type session-atom snapshot-cache analysis-cache annotations-atom)}]]
         ["/facts/:id"
-         {:get (partial handle-get-session-fact session-atom snapshot-cache analysis-cache)}]
+         {:get (partial handle-get-session-fact session-atom snapshot-cache analysis-cache annotations-atom)}]
         ["/rules/:id"
-         {:get (partial handle-get-session-rule session-atom snapshot-cache analysis-cache)}]
+         {:get (partial handle-get-session-rule session-atom snapshot-cache analysis-cache annotations-atom)}]
         ["/queries/:id"
-         {:get (partial handle-get-session-query session-atom snapshot-cache analysis-cache)}]]
+         {:get (partial handle-get-session-query session-atom snapshot-cache analysis-cache annotations-atom)}]]
 
        ["/session-snapshot"
-        {:get (partial handle-get-session-snapshot session-atom snapshot-cache analysis-cache)}]
+        {:get (partial handle-get-session-snapshot session-atom snapshot-cache analysis-cache annotations-atom)}]
 
        ["/annotations"
         [""

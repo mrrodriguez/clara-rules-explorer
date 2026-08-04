@@ -191,3 +191,42 @@
           (is (contains? body :used-by))
           (is (contains? body :origin))
           (is (seq (:facts body))))))))
+
+(deftest test-session-snapshot-known-tracks-session-swap
+  (testing "After the host swaps the session atom, the snapshot known-set is recomputed against the new session's analysis — never served stale"
+    (let [loan-app-application "clara.server.tools.graph.rules.loan_app_facts.Application"
+          income-document ":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document"
+          session-a (-> (->test-session)
+                        (r/insert (clara.server.tools.graph.rules.loan_app_facts.Application. "app-1"))
+                        (r/fire-rules))
+          ;; A session whose analysis lacks the loan-app Application type but
+          ;; contains its own keyword hierarchy (a different ruleset + fact-type-fn).
+          session-b (-> (r/mk-session 'clara.server.tools.graph.rules.loan-hierarchy-rules
+                                      :fact-type-fn lhr/fact-type-fn)
+                        (r/insert (clara.server.tools.graph.rules.loan_hierarchy_rules.LoanApplication. "app-2" :pending))
+                        (r/insert (clara.server.tools.graph.rules.loan_app_facts.Application. "app-1"))
+                        (r/fire-rules))
+          session-atom (atom session-a)
+          annotations-atom (atom (loan-doc-annotations session-a))
+          {:keys [handler]} (api/app session-atom annotations-atom)]
+      ;; Warm the analysis for session A so the pre-fix stale known-set is non-empty.
+      (is (= 200 (:status (handler (mock/request :get "/v1/analysis")))))
+      ;; Host application swaps in the new session + its annotations (the documented
+      ;; atom-swap feature).
+      (reset! session-atom session-b)
+      (reset! annotations-atom (loan-doc-annotations session-b))
+      (let [snapshot (parse-json (:body (handler (mock/request :get "/v1/session-snapshot"))))
+            facts (vals (:facts snapshot))
+            app-fact (some #(when (= loan-app-application (get-in % [:type :name])) %) facts)
+            income-doc-fact (some #(when (= income-document (get-in % [:type :name])) %) facts)]
+        (is (some? app-fact) "the swapped-in session's memory holds the loan-app Application fact")
+        (is (false? (:known (:type app-fact)))
+            "a type absent from the new session's analysis is honestly unknown — not a stale known: true dead link")
+        (is (some? income-doc-fact) "the swapped-in session produced its keyword-derived fact")
+        (is (true? (:known (:type income-doc-fact)))
+            "a type present in the new session's analysis is known — the known-set was recomputed, not served stale")
+        ;; The session-snapshot request itself rebuilt the analysis against session B.
+        (let [analysis (parse-json (:body (handler (mock/request :get "/v1/analysis"))))
+              analysis-names (set (map :name (:fact-types analysis)))]
+          (is (not (contains? analysis-names loan-app-application))
+              "the analysis cache now reflects the swapped-in session B"))))))
