@@ -59,7 +59,7 @@
    the UI can distinguish retraction coupling from production.  The dep-graph
    edge already exists, so this is computed only for actual edges — never in
    the O(n²) candidate loop."
-  [ancestors-set-fn produced-types consumed-types retract-types]
+  [{:keys [ancestors-set-fn produced-types consumed-types retract-types]}]
   (->> (for [pt produced-types
              ct consumed-types
              :when (downstream? ancestors-set-fn pt ct)]
@@ -70,8 +70,10 @@
 (defn- get-production-deps-summary
   "Serializes the :upstream / :downstream production refs of `production-name`
    and attaches `:match` — the raw type pairs that link each adjacent
-   production (each end serialized in its own production's ns context)."
-  [dep-graph production-name production-map type-analysis-map ancestors-set-fn known-set]
+   production (each end serialized in its own production's ns context).
+   `ctx` is the shared analysis context map (see `rulebase-analysis`)."
+  [production-name
+   {:keys [dep-graph production-map type-analysis-map ancestors-set-fn known-set]}]
   (letfn [(->match [direction adjacent-name]
             ;; For an :upstream entry the adjacent production is the producer
             ;; and this production is the consumer; :downstream is the reverse.
@@ -81,10 +83,16 @@
                   {:keys [produced-types retract-types] :as producer} (get type-analysis-map producer-name)
                   {:keys [consumed-types] :as consumer} (get type-analysis-map consumer-name)
                   producer-ns (:ns-name producer)
-                  consumer-ns (:ns-name consumer)]
-              (some-> (matching-type-pairs ancestors-set-fn produced-types consumed-types retract-types)
-                      not-empty
-                      (serialize/serialize-match known-set producer-ns consumer-ns))))
+                  consumer-ns (:ns-name consumer)
+                  pairs (matching-type-pairs {:ancestors-set-fn ancestors-set-fn
+                                              :produced-types produced-types
+                                              :consumed-types consumed-types
+                                              :retract-types retract-types})]
+              (when (seq pairs)
+                (serialize/serialize-match {:raw-pairs pairs
+                                            :known-set known-set
+                                            :producer-ns producer-ns
+                                            :consumer-ns consumer-ns}))))
 
           (serialize-deps [deps direction]
             (some->> deps
@@ -138,26 +146,18 @@
   derives the namespace from the fully-qualified :name.
 
   `annotations` is the merged rule→annotation map (see
-  annotations/merge-layers).  `known-set` is the analysis's serialized
-  fact-type names, used for TypeReference `known` flags."
+  annotations/merge-layers).  `ctx` is the shared analysis context map
+  (annotations, dep-graph, production-map, type-analysis-map,
+  ancestors-set-fn, known-set; see `rulebase-analysis`).  `known-set` is the
+  analysis's serialized fact-type names, used for TypeReference `known` flags."
   [{p-name :name :as production}
-   annotations
-   dep-graph
-   production-map
-   type-analysis-map
-   ancestors-set-fn
-   known-set]
+   {:keys [annotations dep-graph production-map known-set] :as ctx}]
   (let [ann (ann/production-annotation annotations production)
         ;; Queries in clara.rules.schema/Query have no :ns-name — derive it.
         p-ns-name (get-production-ns-name-sym production)
         serialize-type-ref (partial serialize/serialize-type-ref known-set p-ns-name)
 
-        {:keys [upstream downstream]} (get-production-deps-summary dep-graph
-                                                                   p-name
-                                                                   production-map
-                                                                   type-analysis-map
-                                                                   ancestors-set-fn
-                                                                   known-set)
+        {:keys [upstream downstream]} (get-production-deps-summary p-name ctx)
         is-rule? (some? (:rhs production))
         unlinked? (and is-rule?
                        (not (:no-output-types ann))
@@ -271,6 +271,22 @@
                        (distinct (concat consumed-types produced-types)))))
         (vals type-analysis-map)))
 
+(defn- next-hierarchy-node
+  "Picks the next raw ancestor type to emit in the deterministic topological
+   order: a node with no remaining descendant (deepest), ties broken
+   lexicographically by serialized name.  Falls back to the lexicographically
+   smallest remaining node when the custom ancestors-fn is cyclic (mutual
+   ancestry) — the cycle guard."
+  [remaining serialized ancestors-set-fn]
+  (or (->> remaining
+           (filter (fn [x]
+                     (not-any? (fn [d]
+                                 (contains? (ancestors-set-fn d) x))
+                               remaining)))
+           (sort-by serialized)
+           first)
+      (first (sort-by serialized remaining))))
+
 (defn- hierarchy-order
   "Deterministically orders a set of raw ancestor types: descendants before
    their own ancestors (per `ancestors-set-fn`), ties broken lexicographically
@@ -283,16 +299,7 @@
            ordered []]
       (if (empty? remaining)
         ordered
-        (let [ready (->> remaining
-                         (filter (fn [x]
-                                   (not-any? (fn [d]
-                                               (contains? (ancestors-set-fn d) x))
-                                             remaining)))
-                         (sort-by serialized)
-                         first)
-              pick (if ready
-                     ready
-                     (first (sort-by serialized remaining)))]
+        (let [pick (next-hierarchy-node remaining serialized ancestors-set-fn)]
           (recur (disj remaining pick)
                  (conj ordered (serialized pick))))))))
 
@@ -306,33 +313,63 @@
     (class? x) (not-empty (.getPackageName ^Class x))
     :else nil))
 
+(defn- assert-no-serialization-divergence!
+  "Throws when the same raw type serializes to different strings under
+   different production ns contexts (only possible for unresolved symbols)."
+  [raw-type existing-serialized new-serialized]
+  (when (not= existing-serialized new-serialized)
+    (throw (ex-info (format "Type serialization divergence: %s serializes as both %s and %s across production ns contexts"
+                            raw-type existing-serialized new-serialized)
+                    {:type raw-type
+                     :serialized existing-serialized
+                     :divergent new-serialized}))))
+
+(defn- ->ancestors-index-entry
+  "Fresh ancestors-index entry for `raw-type`, serialized in `ns-name` context:
+   {:serialized kind-explicit name, :ns best-effort namespace, :ancestors
+   hierarchy-ordered serialized ancestor names}."
+  [ancestors-set-fn resolve-memo ns-name raw-type]
+  {:serialized (resolve-memo ns-name raw-type)
+   :ns (raw-type-ns raw-type)
+   :ancestors (hierarchy-order (ancestors-set-fn raw-type)
+                               ancestors-set-fn
+                               (partial resolve-memo ns-name))})
+
+(defn- register-ancestors-entry
+  "Adds `raw-type` to the per-raw-type index, asserting the serialization is
+   stable across every production's ns context."
+  [acc resolve-memo ancestors-set-fn ns-name raw-type]
+  (if-let [existing (get acc raw-type)]
+    (do (assert-no-serialization-divergence! raw-type
+                                             (:serialized existing)
+                                             (resolve-memo ns-name raw-type))
+        acc)
+    (assoc acc raw-type
+           (->ancestors-index-entry ancestors-set-fn resolve-memo ns-name raw-type))))
+
+(defn- register-production-types
+  "Registers every raw type in one production's consumed/produced types into
+   the per-raw-type index."
+  [acc resolve-memo ancestors-set-fn {:keys [consumed-types produced-types ns-name]}]
+  (reduce (fn [acc raw-type]
+            (register-ancestors-entry acc resolve-memo ancestors-set-fn ns-name raw-type))
+          acc
+          (distinct (concat consumed-types produced-types))))
+
 (defn- build-ancestors-index
-  "Builds {serialized-type-name {:ancestors [hierarchy-ordered serialized ancestor-name ...] :ns
-  <best-effort namespace>}} for every raw type appearing in any production's consumed/produced
-  types. Each raw type is serialized in its production's ns context; raw ancestors come from the
-  memoized ancestor-set fn and are serialized with the same context. Divergence — the same raw type
-  serializing to different strings under different productions' ns contexts (only possible for
-  unresolved symbols) — throws."
+  "Builds {serialized-type-name {:ancestors [hierarchy-ordered serialized
+   ancestor-name ...] :ns <best-effort namespace>}} for every raw type
+   appearing in any production's consumed/produced types.  Each raw type is
+   serialized in its production's ns context; raw ancestors come from the
+   memoized ancestor-set fn and are serialized with the same context.
+   Divergence — the same raw type serializing to different strings under
+   different productions' ns contexts (only possible for unresolved symbols)
+   — throws."
   [type-analysis-map ancestors-set-fn]
   (let [resolve-memo (memoize (fn [ns-name t] (serialize/resolve-type ns-name t)))
         per-raw-type
-        (reduce (fn [acc {:keys [consumed-types produced-types ns-name]}]
-                  (reduce (fn [acc t]
-                            (let [s (resolve-memo ns-name t)
-                                  existing (get acc t)]
-                              (if existing
-                                (do (when (not= (:serialized existing) s)
-                                      (throw (ex-info (format "Type serialization divergence: %s serializes as both %s and %s across production ns contexts"
-                                                              t (:serialized existing) s)
-                                                      {:type t :serialized (:serialized existing) :divergent s})))
-                                    acc)
-                                (assoc acc t {:serialized s
-                                              :ns (raw-type-ns t)
-                                              :ancestors (hierarchy-order (ancestors-set-fn t)
-                                                                          ancestors-set-fn
-                                                                          (partial resolve-memo ns-name))}))))
-                          acc
-                          (distinct (concat consumed-types produced-types))))
+        (reduce (fn [acc production-analysis]
+                  (register-production-types acc resolve-memo ancestors-set-fn production-analysis))
                 {}
                 (vals type-analysis-map))]
     (reduce-kv (fn [idx _raw-type {:keys [serialized ancestors ns]}]
@@ -399,15 +436,9 @@
        (apply array-map)))
 
 (defn- build-production-summary-map
-  "Builds a summary map for the `productions` while maintaining the given load order."
-  [{:keys [production-type
-           productions
-           annotations
-           dep-graph
-           production-map
-           type-analysis-map
-           ancestors-set-fn
-           known-set]}]
+  "Builds a summary map for the `productions` while maintaining the given load order.
+   `ctx` is the shared analysis context map (see `rulebase-analysis`)."
+  [{:keys [production-type productions] :as ctx}]
   (let [filter-xf (case production-type
                     :rule (filter :rhs)
                     (remove :rhs))]
@@ -415,36 +446,18 @@
     (->> productions
          (sequence
           (comp filter-xf
-                (mapcat (juxt :name #(production-summary %
-                                                         annotations
-                                                         dep-graph
-                                                         production-map
-                                                         type-analysis-map
-                                                         ancestors-set-fn
-                                                         known-set)))))
+                (mapcat (juxt :name #(production-summary % ctx)))))
          (apply array-map))))
 
 (defn- build-rule-summary-map
-  [productions annotations dep-graph production-map type-analysis-map ancestors-set-fn known-set]
-  (build-production-summary-map {:production-type :rule
-                                 :productions productions
-                                 :annotations annotations
-                                 :dep-graph dep-graph
-                                 :production-map production-map
-                                 :type-analysis-map type-analysis-map
-                                 :ancestors-set-fn ancestors-set-fn
-                                 :known-set known-set}))
+  [productions ctx]
+  (build-production-summary-map (assoc ctx :production-type :rule
+                                       :productions productions)))
 
 (defn- build-query-summary-map
-  [productions annotations dep-graph production-map type-analysis-map ancestors-set-fn known-set]
-  (build-production-summary-map {:production-type :query
-                                 :productions productions
-                                 :annotations annotations
-                                 :dep-graph dep-graph
-                                 :production-map production-map
-                                 :type-analysis-map type-analysis-map
-                                 :ancestors-set-fn ancestors-set-fn
-                                 :known-set known-set}))
+  [productions ctx]
+  (build-production-summary-map (assoc ctx :production-type :query
+                                       :productions productions)))
 
 (defn- build-fact-type-summary-map
   "Aggregates fact-type usage across rules and queries, attaching `:ancestors`
@@ -453,7 +466,7 @@
    usage lists.  `ancestors-index` maps each serialized fact-type name to
    {:ancestors [...] :ns ...}; `known-set` is the serialized fact-type names,
    used for `known` flags."
-  [rules queries ancestors-index known-set]
+  [{:keys [rules queries ancestors-index known-set]}]
   (letfn [(init-summary [type-name]
             (let [{idx-ancestors :ancestors :keys [ns]} (get ancestors-index type-name)]
               {:name type-name
@@ -487,15 +500,21 @@
                                   (for [t retract-types] [(:name t) :retracted-by-rules]))]
               (reduce (fn [a [t k]] (update-summary a t k production-ref)) acc updates)))]
 
-    (let [summary-map (reduce add-production-types {} (concat rules queries))]
-      (->> (concat rules queries)
-           (sequence (comp (map val)
-                           (mapcat (juxt :lhs-types :insert-types :retract-types))
-                           cat
-                           (distinct)))
-           (mapcat (fn [type-ref]
-                     [(:name type-ref) (summary-map (:name type-ref))]))
-           (apply array-map)))))
+    (let [summary-map (reduce add-production-types {} (concat rules queries))
+          type-refs (into []
+                          (comp (map val)
+                                ;; The per-field vectors are flattened in one pass;
+                                ;; nil fields (queries have no insert/retract) drop out.
+                                (mapcat (fn [summary]
+                                          (concat (:lhs-types summary)
+                                                  (:insert-types summary)
+                                                  (:retract-types summary))))
+                                (distinct))
+                          (concat rules queries))]
+      (apply array-map
+             (mapcat (fn [type-ref]
+                       [(:name type-ref) (summary-map (:name type-ref))])
+                     type-refs)))))
 
 (defn- build-production-annotation-map
   [productions annotations]
@@ -536,23 +555,23 @@
         dep-graph (build-dep-graph type-analysis-map ancestors-set-fn)
         production-map (build-production-map productions)
 
-        rules (build-rule-summary-map productions
-                                      annotations
-                                      dep-graph
-                                      production-map
-                                      type-analysis-map
-                                      ancestors-set-fn
-                                      known-set)
+        ;; Shared context threaded through every production summary — the
+        ;; per-production summary functions destructure what they need.
+        analysis-ctx {:annotations annotations
+                      :dep-graph dep-graph
+                      :production-map production-map
+                      :type-analysis-map type-analysis-map
+                      :ancestors-set-fn ancestors-set-fn
+                      :known-set known-set}
 
-        queries (build-query-summary-map productions
-                                         annotations
-                                         dep-graph
-                                         production-map
-                                         type-analysis-map
-                                         ancestors-set-fn
-                                         known-set)
+        rules (build-rule-summary-map productions analysis-ctx)
 
-        fact-types (build-fact-type-summary-map rules queries ancestors-index known-set)
+        queries (build-query-summary-map productions analysis-ctx)
+
+        fact-types (build-fact-type-summary-map {:rules rules
+                                                 :queries queries
+                                                 :ancestors-index ancestors-index
+                                                 :known-set known-set})
 
         nodes (nodes/build-nodes id-to-node)
 

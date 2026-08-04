@@ -896,7 +896,7 @@
                      (fn [s] (ann.merge/merge-layers [(ann.merge/props-layer s)]))]]]
       (doseq [[session annotations-fn] sessions
               :let [analysis (core/rulebase-analysis session (annotations-fn session))]]
-        (doseq [[p-name summary] (:rules analysis)]
+        (doseq [[p-name summary] (concat (:rules analysis) (:queries analysis))]
           (doseq [dir [:upstream :downstream]]
             (doseq [dep (get summary dir)]
               (doseq [m (:match dep)]
@@ -913,6 +913,36 @@
                   (is (contains? (type-ref-names (:lhs-types consumer))
                                  (get-in m [:consumer-type :name]))
                       (str consumer-name " :match consumer-type must be in its own lhs-types")))))))))))
+
+(deftest test-match-sidecar-symbol-foreign-ns
+  (testing "A :match producer-type from a sidecar annotation with a foreign-ns symbol stays consistent with the producer's own insert-types"
+    (let [session (->hierarchy-session)
+          producer-name "clara.server.tools.graph.rules.loan-hierarchy-rules/insert-income-document"
+          consumer-name "clara.server.tools.graph.rules.loan-hierarchy-rules/review-supporting-document"
+          ;; Bare sidecar annotation (string rule-name keys): a foreign-ns
+          ;; unresolved symbol plus the rule's real keyword insert-type.
+          analysis (core/rulebase-analysis
+                    session
+                    {producer-name {:clara-rules/insert-types ['my.ns/foreign-symbol
+                                                               ::lhr/income-document]}})
+          producer (get-in analysis [:rules producer-name])
+          consumer (get-in analysis [:rules consumer-name])
+          down (dep-by-name (:downstream producer) consumer-name)
+          up (dep-by-name (:upstream consumer) producer-name)]
+      (is (contains? (type-ref-names (:insert-types producer)) "symbol[my.ns/foreign-symbol]")
+          "the foreign symbol serializes kind-explicitly in the producer's insert-types")
+      (is (= [[":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document"
+               ":clara.server.tools.graph.rules.loan-hierarchy-rules/supporting-document"]]
+             (match-pairs down))
+          "the edge still forms via the keyword type")
+      (is (= (match-pairs down) (match-pairs up)) "match is symmetric")
+      (doseq [m (:match down)]
+        (is (contains? (type-ref-names (concat (:insert-types producer)
+                                               (:retract-types producer)))
+                       (get-in m [:producer-type :name]))
+            "cross-field invariant holds with the sidecar layer present")
+        (is (contains? (type-ref-names (:lhs-types consumer))
+                       (get-in m [:consumer-type :name])))))))
 
 ;; Retraction-coupled bridge: the producer retracts ::retract-target, the
 ;; consumer reads it — the match is flagged :via :retract.

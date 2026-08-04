@@ -1,5 +1,6 @@
 (ns clara.server.tools.graph.serialize-test
   (:require [clara.server.tools.graph.serialize :as s]
+            [clara.server.tools.graph.rules.loan-app-rules]
             [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]))
 
@@ -65,6 +66,29 @@
       (is (not (record? pruned)))
       (is (= 1 (:a pruned)))
       (is (string? (:b pruned))))))
+
+(deftest test-serialize-match-per-ns-context
+  (testing "Each end of a match pair serializes in its own production's ns context"
+    (let [producer-ns 'clara.server.tools.graph.serialize-test
+          consumer-ns 'clara.server.tools.graph.rules.loan-app-rules
+          match (first (s/serialize-match {:raw-pairs [{:producer-type 'TestRecord
+                                                        :consumer-type 'clojure.lang.IPersistentMap}]
+                                           :known-set #{}
+                                           :producer-ns producer-ns
+                                           :consumer-ns consumer-ns}))]
+      (is (= "clara.server.tools.graph.serialize_test.TestRecord"
+             (get-in match [:producer-type :name]))
+          "unqualified symbol resolves to the class in the producer's ns")
+      (is (= "clojure.lang.IPersistentMap"
+             (get-in match [:consumer-type :name])))))
+
+  (testing "The same symbol degrades to symbol[...] under a ns where it does not resolve (per-ns divergence prevented)"
+    (let [match (first (s/serialize-match {:raw-pairs [{:producer-type 'TestRecord
+                                                        :consumer-type 'clojure.lang.IPersistentMap}]
+                                           :known-set #{}
+                                           :producer-ns 'clara.server.tools.graph.rules.loan-app-rules
+                                           :consumer-ns 'clara.server.tools.graph.rules.loan-app-rules}))]
+      (is (= "symbol[TestRecord]" (get-in match [:producer-type :name]))))))
 
 (deftest test-resolve-type-kind-explicit
   (testing "Classes serialize as .getName (unchanged)"

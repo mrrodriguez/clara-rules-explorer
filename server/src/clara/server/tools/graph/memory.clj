@@ -197,11 +197,19 @@
          (reduce-kv add-fact-type-instance-data {}))))
 
 (defn- build-id-name-index
-  "Reverse index {route-id(name) → name} for a collection of serialized names."
+  "Reverse index {route-id(name) → name} for a collection of serialized
+   names, asserting id uniqueness (a route-id collision throws loudly at
+   snapshot-build time rather than silently mislinking)."
   [names]
-  (into {}
-        (map (fn [n] [(serialize/route-id (str n)) n]))
-        names))
+  (reduce (fn [idx name]
+            (let [id (serialize/route-id (str name))]
+              (if-let [existing (get idx id)]
+                (throw (ex-info (format "Session route-id collision: %s and %s both map to %s"
+                                        existing name id)
+                                {:id id :names [existing name]}))
+                (assoc idx id name))))
+          {}
+          names))
 
 (defn- explanations->fact-match-data
   [explanations fact-table get-fact-id]

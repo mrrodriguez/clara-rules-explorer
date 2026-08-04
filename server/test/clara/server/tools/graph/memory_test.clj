@@ -1,5 +1,7 @@
 (ns clara.server.tools.graph.memory-test
   (:require [clara.rules :as r]
+            [clara.server.tools.graph.annotations.merge :as ann.merge]
+            [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.serialize :as serialize]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
@@ -222,3 +224,44 @@
       (is (nil? (get fact-types "clojure.lang.PersistentVector")) "PersistentVector should not be in fact types")
       (is (nil? (get fact-types "java.lang.Boolean")) "Boolean should not be in fact types")
       (is (some? (get fact-types "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"))))))
+
+(deftest test-session-id-indexes
+  (testing "Session snapshots expose id→name reverse indexes that resolve every id"
+    (let [app (laf/map->Application {:app-id "app-1"})
+          session (-> (->test-session)
+                      (r/insert app)
+                      (r/fire-rules))
+          snapshot (memory/session-snapshot session)]
+      (doseq [name (keys (:rule-matches snapshot))]
+        (is (= name (get (:rule-id-index snapshot)
+                         (serialize/route-id (str name))))
+            (str "rule-id-index resolves " (serialize/route-id (str name)) " back to " name)))
+      (doseq [name (keys (:query-matches snapshot))]
+        (is (= name (get (:query-id-index snapshot)
+                         (serialize/route-id (str name))))
+            (str "query-id-index resolves " (serialize/route-id (str name)) " back to " name)))))
+
+  (testing "A session route-id collision throws at snapshot-build time"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (#'memory/build-id-name-index ["same" "same"])))))
+
+(deftest test-session-analysis-id-parity
+  (testing "Session fact-type ids use the same route-id(name) function as the analysis side"
+    (let [app (laf/map->Application {:app-id "app-1"})
+          session (-> (->test-session)
+                      (r/insert app)
+                      (r/fire-rules))
+          snapshot (memory/session-snapshot session)
+          analysis (core/rulebase-analysis
+                    session
+                    (ann.merge/merge-layers [(ann.merge/props-layer session)]))
+          analysis-types (:fact-types analysis)]
+      (doseq [{type-name :name type-id :id} (vals (:fact-types snapshot))]
+        (is (= (serialize/route-id type-name) type-id)
+            (str "session id for " type-name " is route-id(name)"))
+        ;; Session facts include runtime-inserted types the analysis does not
+        ;; know (dynamic inserts); ids still agree wherever both surfaces
+        ;; cover the same type.
+        (when-let [analysis-type (get analysis-types type-name)]
+          (is (= (:id analysis-type) type-id)
+              (str "session id for " type-name " matches the analysis id")))))))

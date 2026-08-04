@@ -19,7 +19,9 @@
     (nil? x) nil
     (class? x) (.getName ^Class x)
     (keyword? x) (str x)
-    (symbol? x) (if-let [resolved (and ns-name (ns-resolve (the-ns ns-name) x))]
+    (symbol? x) (if-let [resolved (and ns-name
+                                       (some-> (find-ns ns-name)
+                                               (ns-resolve x)))]
                   (cond
                     (class? resolved) (.getName ^Class resolved)
                     (var? resolved) (let [{vns :ns vname :name} (meta resolved)
@@ -83,7 +85,7 @@
    consumer-type is what the consuming rule's LHS requires.  A raw pair's
    `:via :retract` (producer-type is a retract type) is carried through so
    the UI can distinguish retraction coupling from production."
-  [raw-pairs known-set producer-ns consumer-ns]
+  [{:keys [raw-pairs known-set producer-ns consumer-ns]}]
   (->> raw-pairs
        (map (fn [{:keys [producer-type consumer-type via]}]
               (cond-> {:producer-type (serialize-type-ref known-set producer-ns producer-type)

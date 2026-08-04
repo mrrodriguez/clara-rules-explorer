@@ -308,13 +308,13 @@
       (let [analysis (core/rulebase-analysis
                       session
                       (enriched-annotations session (->bare-annotations annotations)))]
+        ;; reset! returns the new cached state — the value this branch yields.
         (reset! analysis-cache
                 {:session session
                  :annotations annotations
                  :analysis analysis
                  :fact-type-id-index (core/build-fact-type-id-index analysis)
-                 :production-id-index (core/build-production-id-index analysis)})
-        @analysis-cache))))
+                 :production-id-index (core/build-production-id-index analysis)})))))
 
 (defn- get-analysis
   "The cached analysis map (see `get-analysis-state`)."

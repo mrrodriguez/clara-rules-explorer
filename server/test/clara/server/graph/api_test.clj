@@ -87,7 +87,10 @@
 
     (testing "Name-based rule lookup 404s (id-only resolution)"
       (is (= 404 (:status (handler (mock/request :get
-                                                 "/v1/rules/clara.server.tools.graph.rules.loan-doc-rules.collect-app-given-docs"))))))))
+                                                 "/v1/rules/clara.server.tools.graph.rules.loan-doc-rules.collect-app-given-docs"))))))
+
+    (testing "Unknown rule ids 404"
+      (is (= 404 (:status (handler (mock/request :get "/v1/rules/not-a-real-rule-id"))))))))
 
 (deftest test-v1-queries
   (let [handler (->handler)]
@@ -169,7 +172,10 @@
       (doseq [name ["clara.server.tools.graph.rules.loan_hierarchy_rules.LoanApplication"
                     ":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document"]]
         (is (= 404 (:status (handler (mock/request :get (str "/v1/fact-types/" name)))))
-            (str "name-based lookup must 404 for " name))))))
+            (str "name-based lookup must 404 for " name))))
+
+    (testing "Unknown fact-type ids 404"
+      (is (= 404 (:status (handler (mock/request :get "/v1/fact-types/not-a-real-fact-type-id"))))))))
 
 (deftest test-v1-session-snapshot
   (let [session (-> (->test-session)
