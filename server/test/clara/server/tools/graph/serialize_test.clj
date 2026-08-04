@@ -111,6 +111,20 @@
            (s/resolve-type 'clara.server.tools.graph.rules.loan-doc-rules
                            'clara.server.tools.graph.rules.loan_app_facts.Application))))
 
+  (testing "Symbols resolving to a var serialize as the fully-qualified var symbol"
+    ;; Regression: the ns-name parameter used to shadow clojure.core/ns-name,
+    ;; NPE-ing the var branch (Cannot invoke getName because "x" is null).
+    (is (= "clojure.string/join"
+           (s/resolve-type 'clojure.string 'join)))
+    (is (= "clojure.string/join"
+           (s/resolve-type 'clojure.string 'clojure.string/join)))
+    (is (= "clojure.string/join"
+           (s/resolve-type 'clara.server.tools.graph.rules.loan-doc-rules
+                           'clojure.string/join))))
+
+  (testing "An unresolvable ns never NPEs — degrades to symbol[...]"
+    (is (= "symbol[Foo]" (s/resolve-type 'diverge.a 'Foo))))
+
   (testing "Vectors / tuples serialize via pr-str (kind-explicit elements)"
     (is (= "[:a 1]" (s/resolve-type nil [:a 1])))
     (is (= "[:loan/status \"verified\"]" (s/resolve-type nil [:loan/status "verified"]))))
@@ -162,6 +176,17 @@
     (is (= "symbol[my.ns/foo]" (:name (s/serialize-type-ref #{} nil 'my.ns/foo))))
     (is (= "\"foo\"" (:name (s/serialize-type-ref #{} nil "foo"))))
     (is (= "[:a 1]" (:name (s/serialize-type-ref #{} nil [:a 1]))))))
+
+(deftest test-resolve-type-map-kind
+  (testing "Map literals serialize kind-explicitly via pr-str"
+    (is (= "{:a 1, :b 2}" (s/resolve-type nil {:a 1 :b 2})))
+    (is (= "{:my-type :tuple}" (s/resolve-type nil {:my-type :tuple})))
+    (is (= "{:a \"b\"}" (s/resolve-type nil {:a "b"}))
+        "string values keep their quotes (pr-str, unlike str)"))
+
+  (testing "Map fact types are distinct from tuples and strings"
+    (is (not= (s/resolve-type nil {:a 1}) (s/resolve-type nil [:a 1])))
+    (is (not= (s/resolve-type nil {:a 1}) (s/resolve-type nil "{:a 1}")))))
 
 (deftest test-serialize-condition
   (testing "Basic condition serialization: :type becomes a TypeReference"

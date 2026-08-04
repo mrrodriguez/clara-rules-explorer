@@ -7,6 +7,7 @@
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
+            [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
             [clojure.java.io :as io]))
 
 (def ^:dynamic *port* 9001)
@@ -39,13 +40,33 @@
                          'clara.server.tools.graph.rules.loan-app-rules)
      with-facts? run-app-outcome-approved)))
 
-(defn run-smoke-test
+(defn run-hierarchy-rules
+  "Session over the loan-hierarchy fixture rules (keyword derive hierarchy,
+   vector-tuple and record fact types) with a LoanApplication inserted so the
+   rules fire.  Requires `:fact-type-fn` so tuple types resolve.  Mirrors the
+   session used by the loan-hierarchy server unit tests — a different session
+   for smoke-testing the hierarchy features without touching the demo data."
+  ([_session-opts]
+   (-> (r/mk-session 'clara.server.tools.graph.rules.loan-hierarchy-rules
+                     :fact-type-fn lhr/fact-type-fn)
+       (r/insert (lhr/map->LoanApplication {:app-id "app-1" :status :new}))
+       (r/fire-rules)))
   ([]
-   (run-smoke-test {:session-opts {:with-facts? true}}))
-  ([{:keys [session-opts]}]
-   (let [session (run-rules session-opts)
-         server (server/start! {:port *port* :session session :layers [loan-doc-annotations-path]})]
-     server)))
+   (run-hierarchy-rules {})))
+
+(defn run-smoke-test
+  "Starts a server over the given session on `*port*`.  `:session-fn` builds
+   the session (default `run-rules`; pass `run-hierarchy-rules` for the
+   loan-hierarchy fixture); `:layers` is the annotation-layer vector (default
+   the loan-doc fixture layer)."
+  ([{:keys [session-opts session-fn layers]}]
+   (let [session ((or session-fn run-rules) session-opts)
+         server (server/start! {:port *port*
+                                :session session
+                                :layers (or layers [loan-doc-annotations-path])})]
+     server))
+  ([]
+   (run-smoke-test {:session-opts {:with-facts? true}})))
 
 (defn get-rules []
   (-> (client/get (->url "/rules") {:accept :json})

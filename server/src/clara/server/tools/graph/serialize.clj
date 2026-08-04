@@ -8,19 +8,19 @@
   (:import [java.math BigInteger]))
 
 (defn resolve-type
-  "Resolves a raw fact type (Class, keyword, symbol, string, tuple, ...) to its
+  "Resolves a raw fact type (Class, keyword, symbol, string, tuple, map, ...) to its
    kind-explicit string representation for JSON.  The kind is self-describing
-   in the output: classes as `.getName`, keywords with their colon, strings
-   and tuples via `pr-str` (quotes/elements preserved), unresolved symbols
-   wrapped in `symbol[...]`, anything else via `str`.  `ns-name` is the
+   in the output: classes as `.getName`, keywords with their colon, strings,
+   tuples and maps via `pr-str` (quotes/elements preserved), unresolved
+   symbols wrapped in `symbol[...]`, anything else via `str`.  `prod-ns` is the
    production's namespace, used to resolve symbol types."
-  [ns-name x]
+  [prod-ns x]
   (cond
     (nil? x) nil
     (class? x) (.getName ^Class x)
     (keyword? x) (str x)
-    (symbol? x) (if-let [resolved (and ns-name
-                                       (some-> (find-ns ns-name)
+    (symbol? x) (if-let [resolved (and prod-ns
+                                       (some-> (find-ns prod-ns)
                                                (ns-resolve x)))]
                   (cond
                     (class? resolved) (.getName ^Class resolved)
@@ -32,6 +32,7 @@
                   (str "symbol[" x "]"))
     (string? x) (pr-str x)
     (sequential? x) (pr-str x)
+    (map? x) (pr-str x)
     :else (str x)))
 
 (defn- slug
@@ -68,10 +69,10 @@
   "Serializes a raw fact type into a TypeReference map for JSON output:
    {:name kind-explicit serialized name, :id deterministic route id,
    :known true iff the serialized name is a member of `known-set` (the
-   analysis's fact-type names).  `ns-name` is the production's namespace,
+   analysis's fact-type names).  `prod-ns` is the production's namespace,
    used to resolve symbol types."
-  [known-set ns-name x]
-  (let [name (resolve-type ns-name x)]
+  [known-set prod-ns x]
+  (let [name (resolve-type prod-ns x)]
     {:name name
      :id (route-id name)
      :known (contains? known-set name)}))
@@ -172,9 +173,9 @@
 (defn serialize-condition
   "Serializes a single condition, including pretty-printing its constraints and
    args and converting its `:type` (raw fact type) into a TypeReference.
-   `ns-name` is the production's namespace, used to resolve symbol types;
+   `prod-ns` is the production's namespace, used to resolve symbol types;
    `known-set` is the analysis's serialized fact-type names."
-  [condition ns-name known-set]
+  [condition prod-ns known-set]
   (letfn [(serialize-form [form]
             (with-out-str (pp/pprint form)))
           (serialize-forms [forms]
@@ -187,7 +188,7 @@
           (serialize-node [node]
             (if (map? node)
               (cond-> node
-                (contains? node :type) (update :type #(serialize-type-ref known-set ns-name %))
+                (contains? node :type) (update :type #(serialize-type-ref known-set prod-ns %))
                 (contains? node :constraints) (update :constraints serialize-forms)
                 (contains? node :args) (update :args serialize-forms))
               node))]
@@ -198,8 +199,8 @@
    here — callers must apply `prune-fns` to the RESULT (not beforehand) so the
    types are still Classes/keywords when `serialize-condition` converts them
    to TypeReferences."
-  [lhs ns-name known-set]
-  (mapv #(serialize-condition % ns-name known-set) lhs))
+  [lhs prod-ns known-set]
+  (mapv #(serialize-condition % prod-ns known-set) lhs))
 
 (defn- condition->form
   "Reconstructs a Clojure code form from a condition map.
@@ -249,9 +250,9 @@
    - :fact-type (var-alias context) serializes like resolved-types tokens;
      :fact-type-spec map values are stringified (e.g. {:aliases-var my.ns/f}
      encodes as {\"aliases-var\": \"my.ns/f\"}).
-   ns-name is the production's namespace and known-set the analysis's
+   prod-ns is the production's namespace and known-set the analysis's
    serialized fact-type names, used to resolve and flag types."
-  [callsite ns-name known-set]
+  [callsite prod-ns known-set]
   (cond-> callsite
       ;; rename :ns-name-sym → :ns, convert symbol → string
     true (set/rename-keys {:ns-name-sym :ns})
@@ -261,10 +262,10 @@
 
       ;; resolve :resolved-types / :fact-type tokens to TypeReferences
     (seq (:resolved-types callsite))
-    (update :resolved-types #(mapv (fn [t] (serialize-type-ref known-set ns-name t)) %))
+    (update :resolved-types #(mapv (fn [t] (serialize-type-ref known-set prod-ns t)) %))
 
     (:fact-type callsite)
-    (assoc :fact-type (serialize-type-ref known-set ns-name (:fact-type callsite)))
+    (assoc :fact-type (serialize-type-ref known-set prod-ns (:fact-type callsite)))
 
     (:fact-type-spec callsite)
     (update :fact-type-spec #(into {}
@@ -290,9 +291,9 @@
 (defn serialize-dynamic-detection
   "Serializes a dynamic detection info map (:dynamic-insert-types-detected or
    :dynamic-retract-types-detected) for JSON output.
-   ns-name is the production's namespace and known-set the analysis's
+   prod-ns is the production's namespace and known-set the analysis's
    serialized fact-type names, used to resolve type tokens."
-  [detection ns-name known-set]
+  [detection prod-ns known-set]
   (cond-> detection
     (:callsites detection)
-    (update :callsites (fn [callsites] (mapv #(serialize-dynamic-callsite % ns-name known-set) callsites)))))
+    (update :callsites (fn [callsites] (mapv #(serialize-dynamic-callsite % prod-ns known-set) callsites)))))

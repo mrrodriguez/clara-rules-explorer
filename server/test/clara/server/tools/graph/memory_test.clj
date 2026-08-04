@@ -135,7 +135,8 @@
         (is (int? (:id match)) "Match entry should have integer :id")
         (is (map? (:type match)) "Match entry :type is a TypeReference")
         (is (string? (get-in match [:type :name])))
-        (is (true? (get-in match [:type :known])) "session facts are always known")
+        (is (false? (get-in match [:type :known]))
+            "Session facts default to known: false without a known-set — the honest flag is computed against the analysis's fact-type names")
         (is (map? (:data match)) "Match entry should have :data (bindings)")
         (is (contains? match :is-root) "Match entry should have :is-root")
         (is (vector? (:inserted-from match)) "Match entry should have :inserted-from")
@@ -244,6 +245,52 @@
   (testing "A session route-id collision throws at snapshot-build time"
     (is (thrown? clojure.lang.ExceptionInfo
                  (#'memory/build-id-name-index ["same" "same"])))))
+
+(deftest test-session-fact-known-parity
+  (testing "Session fact-type known flags honestly reflect membership in the analysis's fact-type names"
+    (let [app (laf/map->Application {:app-id "app-1"})
+          session (-> (->test-session)
+                      (r/insert app)
+                      (r/fire-rules))
+          analysis (core/rulebase-analysis
+                    session
+                    (ann.merge/merge-layers [(ann.merge/props-layer session)]))
+          known-set (set (keys (:fact-types analysis)))
+          snapshot (memory/session-snapshot session known-set)
+          fact-types (map :type (vals (:facts snapshot)))]
+      (is (seq fact-types) "Snapshot should contain facts")
+      (doseq [{type-name :name type-known :known} fact-types]
+        (is (= (contains? known-set type-name) type-known)
+            (str "known flag for " type-name " must equal analysis membership")))))
+
+  (testing "Without a known-set every session fact type is unknown"
+    (let [app (laf/map->Application {:app-id "app-1"})
+          session (-> (->test-session)
+                      (r/insert app)
+                      (r/fire-rules))
+          snapshot (memory/session-snapshot session)]
+      (is (every? (comp false? :known :type) (vals (:facts snapshot)))
+          "Default snapshot marks no session fact type known"))))
+
+(deftest test-snapshot-raw-types
+  (testing "Snapshot exposes fact-id → raw type for the enrichment boundary"
+    (let [app (laf/map->Application {:app-id "app-1"})
+          req-doc (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+          given-doc (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card})
+          session (-> (->test-session)
+                      (r/insert app req-doc given-doc)
+                      (r/fire-rules))
+          snapshot (memory/session-snapshot session)
+          raw-types (:fact-raw-types snapshot)]
+      (is (seq raw-types))
+      (is (some (comp class? val) raw-types) "record facts map to their Class object")
+      (is (some (comp keyword? val) raw-types)
+          "tagged facts (e.g. :loan-doc-rules/document-check-input) map to their keyword — never a string")
+      ;; Every fact's raw type re-serializes to the served :type :name
+      (doseq [[id fact] (:facts snapshot)]
+        (is (= (get-in fact [:type :name])
+               (serialize/serialize-fact-type nil (get raw-types id)))
+            (str "raw type of fact " id " re-serializes to its served :type :name"))))))
 
 (deftest test-session-analysis-id-parity
   (testing "Session fact-type ids use the same route-id(name) function as the analysis side"

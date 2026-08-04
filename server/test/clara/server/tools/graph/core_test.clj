@@ -674,6 +674,44 @@
           "string ancestor is quoted, keyword keeps its colon; lexicographic tie-break orders them")
       (is (= [false true] (mapv :known (:ancestors income)))))))
 
+(deftest test-divergent-serialization-degrades
+  (testing "A raw type serializing differently across production ns contexts degrades (keeps the first load-order serialization, logs a warning) instead of throwing"
+    (let [tam (array-map
+               'prod-a {:consumed-types ['join] :produced-types [] :retract-types #{} :ns-name 'clojure.string}
+               'prod-b {:consumed-types ['join] :produced-types [] :retract-types #{} :ns-name 'clara.server.tools.graph.rules.loan-app-rules})
+          idx (#'core/build-ancestors-index tam
+                                            (fn [_] #{})
+                                            [{:name 'prod-a} {:name 'prod-b}])]
+      (is (= {"clojure.string/join" {:ancestors [] :ns nil}}
+             idx)
+          "The first (load-order) production's serialization is canonical; the divergent symbol[...] one is dropped")
+      (is (seq idx) "Degradation still yields an ancestors index — no build-wide failure")))
+
+  (testing "A full rulebase-analysis over a divergent annotation set still builds (no throw)"
+    (let [session (->test-session)
+          anns (ann.merge/merge-layers
+                [(ann.merge/props-layer session)
+                 (ann.merge/layer
+                  {:id :divergent
+                   :annotations
+                   {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
+                    {:clara-rules/insert-types ['AllRequiredDocuments]}
+                    "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
+                    {:clara-rules/insert-types ['AllRequiredDocuments]}}})])
+          ;; 'AllRequiredDocuments resolves in loan-doc-rules (imported there)
+          ;; but not in loan-app-rules → the same raw symbol serializes to
+          ;; both "...AllRequiredDocuments" and "symbol[AllRequiredDocuments]".
+          analysis (core/rulebase-analysis session anns)
+          canonical (fact-type-by-name analysis
+                                       "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments")
+          divergent (fact-type-by-name analysis "symbol[AllRequiredDocuments]")]
+      (is (seq (:fact-types analysis)) "Analysis builds despite the divergent type")
+      (is (some? canonical) "The load-order (loan-doc) serialization is the canonical fact-type entry")
+      (is (some? divergent) "The other serialization still surfaces as a fact type (per-production serialization)")
+      (is (empty? (:ancestors divergent)) "A divergent alias has no ancestors entry — localized degradation, not a crash")
+      (is (get-in analysis [:rules "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"])
+          "The rule summaries are still produced"))))
+
 (deftest test-ancestors-intransitive-and-cyclic
   (testing "Intransitive hierarchy/string ordering terminates without a comparator error"
     (let [analysis (intra-analysis)

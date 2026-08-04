@@ -46,7 +46,7 @@
   [ancestors-fn]
   (memoize (fn [t]
              (try (set (ancestors-fn t))
-                  (catch Throwable _ #{})))))
+                  (catch Exception _ #{})))))
 
 (defn- downstream? [ancestors-set-fn inserter-type reader-type]
   (or (= inserter-type reader-type)
@@ -313,16 +313,18 @@
     (class? x) (not-empty (.getPackageName ^Class x))
     :else nil))
 
-(defn- assert-no-serialization-divergence!
-  "Throws when the same raw type serializes to different strings under
-   different production ns contexts (only possible for unresolved symbols)."
-  [raw-type existing-serialized new-serialized]
-  (when (not= existing-serialized new-serialized)
-    (throw (ex-info (format "Type serialization divergence: %s serializes as both %s and %s across production ns contexts"
-                            raw-type existing-serialized new-serialized)
-                    {:type raw-type
-                     :serialized existing-serialized
-                     :divergent new-serialized}))))
+(defn- warn-serialization-divergence!
+  "Logs a warning (once per raw type per analysis build) when the same raw
+   type serializes to different strings under different production ns
+   contexts — only possible for unresolved symbols.  Localized degradation:
+   the first (load-order) serialization is kept and the build continues, so
+   one bad sidecar symbol cannot take down every analysis endpoint."
+  [raw-type existing-serialized new-serialized warned-types]
+  (when (and (not= existing-serialized new-serialized)
+             (not (contains? @warned-types raw-type)))
+    (vswap! warned-types conj! raw-type)
+    (println (format "WARN: type serialization divergence — %s serializes as both %s and %s across production ns contexts; keeping %s"
+                     raw-type existing-serialized new-serialized existing-serialized))))
 
 (defn- ->ancestors-index-entry
   "Fresh ancestors-index entry for `raw-type`, serialized in `ns-name` context:
@@ -336,13 +338,16 @@
                                (partial resolve-memo ns-name))})
 
 (defn- register-ancestors-entry
-  "Adds `raw-type` to the per-raw-type index, asserting the serialization is
-   stable across every production's ns context."
-  [acc resolve-memo ancestors-set-fn ns-name raw-type]
+  "Adds `raw-type` to the per-raw-type index, keyed by its first (load-order)
+   serialization.  When the same raw type serializes differently under another
+   production's ns context, the first serialization is kept and a warning is
+   logged — localized degradation instead of a build-wide failure."
+  [acc resolve-memo ancestors-set-fn warned-types ns-name raw-type]
   (if-let [existing (get acc raw-type)]
-    (do (assert-no-serialization-divergence! raw-type
-                                             (:serialized existing)
-                                             (resolve-memo ns-name raw-type))
+    (do (warn-serialization-divergence! raw-type
+                                        (:serialized existing)
+                                        (resolve-memo ns-name raw-type)
+                                        warned-types)
         acc)
     (assoc acc raw-type
            (->ancestors-index-entry ancestors-set-fn resolve-memo ns-name raw-type))))
@@ -350,9 +355,9 @@
 (defn- register-production-types
   "Registers every raw type in one production's consumed/produced types into
    the per-raw-type index."
-  [acc resolve-memo ancestors-set-fn {:keys [consumed-types produced-types ns-name]}]
+  [acc resolve-memo ancestors-set-fn warned-types {:keys [consumed-types produced-types ns-name]}]
   (reduce (fn [acc raw-type]
-            (register-ancestors-entry acc resolve-memo ancestors-set-fn ns-name raw-type))
+            (register-ancestors-entry acc resolve-memo ancestors-set-fn warned-types ns-name raw-type))
           acc
           (distinct (concat consumed-types produced-types))))
 
@@ -362,16 +367,25 @@
    appearing in any production's consumed/produced types.  Each raw type is
    serialized in its production's ns context; raw ancestors come from the
    memoized ancestor-set fn and are serialized with the same context.
-   Divergence — the same raw type serializing to different strings under
-   different productions' ns contexts (only possible for unresolved symbols)
-   — throws."
-  [type-analysis-map ancestors-set-fn]
+
+   Productions are iterated in load order, so a raw type that serializes
+   differently under different nses (unresolved symbols) is canonically keyed
+   by its first production's serialization — deterministic, never hash-order.
+   Divergence logs a warning and keeps the first serialization (localized
+   degradation; the type's other serializations still surface via the
+   per-production rule summaries and the known-set)."
+  [type-analysis-map ancestors-set-fn productions]
   (let [resolve-memo (memoize (fn [ns-name t] (serialize/resolve-type ns-name t)))
+        warned-types (volatile! (transient #{}))
         per-raw-type
-        (reduce (fn [acc production-analysis]
-                  (register-production-types acc resolve-memo ancestors-set-fn production-analysis))
+        (reduce (fn [acc production]
+                  (register-production-types acc
+                                             resolve-memo
+                                             ancestors-set-fn
+                                             warned-types
+                                             (get type-analysis-map (:name production))))
                 {}
-                (vals type-analysis-map))]
+                productions)]
     (reduce-kv (fn [idx _raw-type {:keys [serialized ancestors ns]}]
                  (assoc idx serialized {:ancestors ancestors :ns ns}))
                {}
@@ -550,7 +564,7 @@
         ancestors-set-fn (->memoized-ancestors ancestors-fn)
         type-analysis-map (build-type-analysis-map productions production-annotation-map)
         known-set (->known-type-names type-analysis-map)
-        ancestors-index (build-ancestors-index type-analysis-map ancestors-set-fn)
+        ancestors-index (build-ancestors-index type-analysis-map ancestors-set-fn productions)
 
         dep-graph (build-dep-graph type-analysis-map ancestors-set-fn)
         production-map (build-production-map productions)

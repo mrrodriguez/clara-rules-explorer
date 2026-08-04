@@ -27,7 +27,6 @@
         :config-dir \"my-kondo-config\"})"
   (:require [clj-kondo.core :as kondo]
             [clojure.string :as str]
-            [clojure.set :as set]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [schema.core :as s]
@@ -839,6 +838,22 @@
   [ns-name type-val]
   (serialize/resolve-type ns-name type-val))
 
+(defn- rule->session-raw-types
+  "Per rule name → set of RAW fact types the rule inserted at runtime, from
+   the snapshot's fact-id → raw-type index crossed with each fact's
+   :inserted-from rules.  Raw types (classes, keywords, tuples, strings,
+   maps — whatever the session's fact-type-fn returns) flow through the
+   enrichment stack un-serialized; only the boundary serializes them."
+  [snapshot]
+  (reduce-kv (fn [acc fact-id {:keys [inserted-from]}]
+               (let [raw-type (get-in snapshot [:fact-raw-types fact-id])]
+                 (reduce (fn [acc' {:keys [name]}]
+                           (update acc' name (fnil conj #{}) raw-type))
+                         acc
+                         inserted-from)))
+             {}
+             (:facts snapshot)))
+
 (defn- fq-name->namespace
   "Extract the namespace portion from a fully-qualified rule name string like
    \"some.ns/rule-name\".  Returns a symbol, or nil if the name has no
@@ -852,33 +867,33 @@
    :clara-rules/dynamic-insert-types-detected entries for rules whose working-
    memory fact types are not already declared in the annotations.
 
-   Each new entry carries :fact-instance-derived-types and :resolution :partial.
-   Rules whose session-derived types are already covered by the annotations are
-   left unchanged.
+   Each new entry carries :fact-instance-derived-types (the rule-ns serialized
+   names, for display) and :resolution :partial.  Rules whose session-derived
+   types are already covered by the annotations are left unchanged.
+
+   Raw types stay objects throughout: the snapshot's fact-id → raw-type index
+   is compared against the annotation insert-types via per-rule-ns
+   serialization only at the comparison point — never demoted to strings
+   ahead of the merge.
 
    NOTE: This function only compares against the annotations map — it does NOT
    check rule :props.  Use `enrich-annotations-from-session` for the full
    pipeline that also deduplicates against :props."
   [session-analysis annotations]
   (let [annotations (ann/normalize-annotations annotations)
-        rule->session-types
-        (reduce-kv (fn [acc _id {:keys [type inserted-from]}]
-                     (reduce (fn [acc' {:keys [name]}]
-                               (update acc' name (fnil conj #{}) (:name type)))
-                             acc
-                             inserted-from))
-                   {}
-                   (:facts session-analysis))
-
+        rule->session-types (rule->session-raw-types session-analysis)
         annotations'
-        (reduce-kv (fn [acc rule-fq-str session-type-strs]
-                     (let [rule-ns       (fq-name->namespace rule-fq-str)
-                           rule-ann      (get acc rule-fq-str)
-                           existing      (get rule-ann :clara-rules/insert-types)
+        (reduce-kv (fn [acc rule-fq-str raw-types]
+                     (let [rule-ns (fq-name->namespace rule-fq-str)
+                           rule-ann (get acc rule-fq-str)
+                           existing (get rule-ann :clara-rules/insert-types)
                            existing-strs (set (map (partial annot-type->str rule-ns)
                                                    existing))
-                           new-types     (sort (set/difference session-type-strs
-                                                               existing-strs))]
+                           serialize-rule-ns (partial annot-type->str rule-ns)
+                           new-types (->> raw-types
+                                          (remove (comp existing-strs serialize-rule-ns))
+                                          (sort-by serialize-rule-ns)
+                                          (mapv serialize-rule-ns))]
                        (if (seq new-types)
                          (let [existing-dynamic (get rule-ann :clara-rules/dynamic-insert-types-detected)
                                derived-entry    {:fact-instance-derived-types (vec new-types)
@@ -904,8 +919,11 @@
    2. Builds a production-annotation-map from the session's rulebase and the
       enriched annotations to identify types already declared in rule :props
       or sidecar annotations.
-   3. Merges truly-new derived types into each rule's :clara-rules/insert-types
-      so they connect in the dependency graph.
+   3. Merges truly-new derived types (raw objects from the snapshot's
+      fact-id → raw-type index — classes, keywords, tuples, strings, maps,
+      whatever the session's fact-type-fn returns) into each rule's
+      :clara-rules/insert-types so they connect in the dependency graph;
+      types are only serialized at the boundary.
    4. For rules whose derived types are already fully covered, restores the
       original pre-enrichment annotation (preserving any pre-existing dynamic
       detection keys such as :callsites from static analysis).
@@ -916,6 +934,7 @@
   (let [original     (ann/normalize-annotations annotations)
         snapshot     (memory/session-snapshot session)
         enriched     (add-auto-detected-annotations snapshot original)
+        rule->session-types (rule->session-raw-types snapshot)
         rulebase     (-> session eng/components :rulebase)
         productions  (:productions rulebase)
 
@@ -932,12 +951,20 @@
 
         result
         (reduce-kv (fn [acc p-name resolved-ann]
-                     (let [raw-entry      (get acc p-name)
-                           resolved-strs  (set (map (partial annot-type->str nil)
-                                                    (:insert-types resolved-ann)))
-                           dynamic        (:dynamic-insert-types-detected resolved-ann)
-                           derived-types  (set (:fact-instance-derived-types dynamic))
-                           truly-new      (set/difference derived-types resolved-strs)]
+                     (let [rule-ns      (fq-name->namespace p-name)
+                           serialize-rule-ns (partial annot-type->str rule-ns)
+                           raw-entry    (get acc p-name)
+                           resolved-strs (set (map serialize-rule-ns
+                                                   (:insert-types resolved-ann)))
+                           dynamic      (:dynamic-insert-types-detected resolved-ann)
+                           derived-raws (get rule->session-types p-name)
+                           ;; Raw session types (never demoted to name strings)
+                           ;; not covered by the fully-merged annotation's
+                           ;; insert-types, compared under this rule's own ns.
+                           truly-new    (when (seq derived-raws)
+                                          (sort-by serialize-rule-ns
+                                                   (remove (comp resolved-strs serialize-rule-ns)
+                                                           derived-raws)))]
                        (if dynamic
                          (if (seq truly-new)
                            (let [raw-inserts (:clara-rules/insert-types raw-entry)
@@ -946,7 +973,7 @@
                                  (assoc-in [p-name :clara-rules/insert-types] merged)
                                  (assoc-in [p-name :clara-rules/dynamic-insert-types-detected
                                             :fact-instance-derived-types]
-                                           (vec truly-new))))
+                                           (mapv serialize-rule-ns truly-new))))
                            ;; No truly-new types from this enrichment pass.
                            ;; Restore the original annotation for this rule to
                            ;; preserve any pre-existing dynamic detection

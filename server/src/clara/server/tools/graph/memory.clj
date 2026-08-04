@@ -134,23 +134,39 @@
            root-facts
            get-fact-id
            origin-map
-           used-by-index]}]
-  (into {}
-        (map (fn [wrapped]
-               (let [fact (platform/fact-id-unwrap wrapped)
-                     id (get-fact-id fact)
-                     raw-type (fact-type-fn fact)
-                     type-name (serialize/serialize-fact-type nil raw-type)]
-                 [id {:id id
-                      :type {:name type-name
-                             :id (serialize/route-id type-name)
-                             :known true}
-                      :ns (core/raw-type-ns raw-type)
-                      :data (serialize/prune-fns fact)
-                      :is-root (boolean (some #(identical? fact %) root-facts))
-                      :inserted-from (get origin-map id [])
-                      :used-by (get used-by-index id [])}])))
-        sorted-facts))
+           used-by-index
+           known-set]}]
+  (let [raw-types (reduce (fn [acc wrapped]
+                            (let [fact (platform/fact-id-unwrap wrapped)]
+                              (assoc acc (get-fact-id fact) (fact-type-fn fact))))
+                          {}
+                          sorted-facts)
+        facts (into {}
+                    (map (fn [wrapped]
+                           (let [fact (platform/fact-id-unwrap wrapped)
+                                 id (get-fact-id fact)
+                                 raw-type (get raw-types id)
+                                 type-name (serialize/serialize-fact-type nil raw-type)]
+                             [id {:id id
+                                  :type {:name type-name
+                                         :id (serialize/route-id type-name)
+                                         ;; Honest membership check: a session fact type is
+                                         ;; `known` iff the analysis has that serialized
+                                         ;; name among its fact types.  Runtime-derived
+                                         ;; types absent from the analysis (e.g.
+                                         ;; clojure.lang.Symbol from a dynamic insert)
+                                         ;; are `known: false` — the UI must not link to a
+                                         ;; /fact-types/:id route the analysis cannot
+                                         ;; serve.
+                                         :known (contains? known-set type-name)}
+                                  :ns (core/raw-type-ns raw-type)
+                                  :data (serialize/prune-fns fact)
+                                  :is-root (boolean (some #(identical? fact %) root-facts))
+                                  :inserted-from (get origin-map id [])
+                                  :used-by (get used-by-index id [])}])))
+                    sorted-facts)]
+    {:facts facts
+     :raw-types raw-types}))
 
 (defn- group-instances-by-role
   "Groups instances of a fact type by their origin (inserted-from) or usage (used-by)."
@@ -264,58 +280,73 @@
 
 (defn session-snapshot
   "Return a snapshot of the memory state of the given `session`. This includes details of all facts
-  in the memory and information about rule/query matches for those facts."
-  [session]
-  (let [{:keys [root-facts fact->explanations query-matches rule-matches] :as inspection}
-        (inspect/inspect session)
+  in the memory and information about rule/query matches for those facts.
 
-        {:keys [get-alphas-fn rulebase]} (eng/components session)
-        {:keys [fact-type-fn]} (meta get-alphas-fn)
+  Two-arity takes the analysis's serialized fact-type names (`known-set`);
+  session TypeReference `known` flags are honest membership checks against it
+  (runtime-derived types absent from the analysis are marked unknown).  The
+  one-arity defaults to no known types."
+  ([session]
+   (session-snapshot session #{}))
+  ([session known-set]
+   (let [{:keys [root-facts fact->explanations query-matches rule-matches] :as inspection}
+         (inspect/inspect session)
 
-        production-order (get-production-order rulebase)
-        fact-type-order (get-fact-type-order rulebase)
+         {:keys [get-alphas-fn rulebase]} (eng/components session)
+         {:keys [fact-type-fn]} (meta get-alphas-fn)
 
-        all-facts-wrapped (get-all-facts-wrapped inspection)
-        sorted-facts (sort-facts all-facts-wrapped fact-type-fn fact-type-order)
-        id-map (build-id-map sorted-facts)
-        get-fact-id (fn get-fact-id [fact] (.get ^java.util.IdentityHashMap id-map fact))
+         production-order (get-production-order rulebase)
+         fact-type-order (get-fact-type-order rulebase)
 
-        production-order-key-fn (->production-order-key-fn production-order)
+         all-facts-wrapped (get-all-facts-wrapped inspection)
+         sorted-facts (sort-facts all-facts-wrapped fact-type-fn fact-type-order)
+         id-map (build-id-map sorted-facts)
+         get-fact-id (fn get-fact-id [fact] (.get ^java.util.IdentityHashMap id-map fact))
 
-        used-by-index (build-used-by-index inspection
-                                           get-fact-id
-                                           production-order-key-fn)
-        origin-map (build-origin-map fact->explanations
-                                     get-fact-id
-                                     production-order-key-fn)
+         production-order-key-fn (->production-order-key-fn production-order)
 
-        fact-table (build-fact-table {:sorted-facts sorted-facts
-                                      :fact-type-fn fact-type-fn
-                                      :root-facts root-facts
-                                      :get-fact-id get-fact-id
-                                      :origin-map origin-map
-                                      :used-by-index used-by-index})
-        fact-type-index (build-fact-type-index fact-table
-                                               production-order-key-fn)
-        rule-match-index (build-rule-match-index rule-matches
-                                                 fact->explanations
-                                                 fact-table
-                                                 get-fact-id)
-        query-match-index (build-query-match-index query-matches
-                                                   fact-table
-                                                   get-fact-id)]
-    {:fact-types        fact-type-index
-     :facts             fact-table
-     :used-by           used-by-index
-     :origin            origin-map
-     :rule-matches      rule-match-index
-     :query-matches     query-match-index
-     ;; Per-snapshot id→name indexes for the session detail handlers — built
-     ;; here (no analysis-cache dependency) with the same id function over the
-     ;; snapshot's serialized names, so session ids align with analysis ids.
-     :fact-type-id-index (build-id-name-index (keys fact-type-index))
-     :rule-id-index      (build-id-name-index (keys rule-match-index))
-     :query-id-index     (build-id-name-index (keys query-match-index))}))
+         used-by-index (build-used-by-index inspection
+                                            get-fact-id
+                                            production-order-key-fn)
+         origin-map (build-origin-map fact->explanations
+                                      get-fact-id
+                                      production-order-key-fn)
+
+         fact-table (build-fact-table {:sorted-facts sorted-facts
+                                       :fact-type-fn fact-type-fn
+                                       :root-facts root-facts
+                                       :get-fact-id get-fact-id
+                                       :origin-map origin-map
+                                       :used-by-index used-by-index
+                                       :known-set known-set})
+         fact-type-index (build-fact-type-index (:facts fact-table)
+                                                production-order-key-fn)
+         rule-match-index (build-rule-match-index rule-matches
+                                                  fact->explanations
+                                                  (:facts fact-table)
+                                                  get-fact-id)
+         query-match-index (build-query-match-index query-matches
+                                                    (:facts fact-table)
+                                                    get-fact-id)]
+     {:fact-types        fact-type-index
+      :facts             (:facts fact-table)
+      ;; Internal fact-id → raw type index for the annotation-enrichment
+      ;; boundary (add-auto-detected-annotations / enrich-annotations-from-session):
+      ;; session-derived types must merge into annotations as the raw objects
+      ;; the analysis itself serializes — never as serialized name strings,
+      ;; which would double-serialize (phantom string-kinded fact types).
+      ;; Stripped from the served snapshot in api.clj.
+      :fact-raw-types    (:raw-types fact-table)
+      :used-by           used-by-index
+      :origin            origin-map
+      :rule-matches      rule-match-index
+      :query-matches     query-match-index
+      ;; Per-snapshot id→name indexes for the session detail handlers — built
+      ;; here (no analysis-cache dependency) with the same id function over the
+      ;; snapshot's serialized names, so session ids align with analysis ids.
+      :fact-type-id-index (build-id-name-index (keys fact-type-index))
+      :rule-id-index      (build-id-name-index (keys rule-match-index))
+      :query-id-index     (build-id-name-index (keys query-match-index))})))
 
 (defn get-session-rule-activity
   "Returns a unified activity map for a rule: {:matches [...] :inserted-facts [...]}"
