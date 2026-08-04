@@ -423,3 +423,126 @@ Fixture facts appear to be flat enough to miss this entirely. Worth a table test
 the four shapes above, plus two determinism assertions: the same map built in
 different key orders, and the same set built in different element orders, must
 produce identical strings.
+
+---
+
+## 5. A layer cannot contribute `:fact-instance-derived-types` without losing something
+
+**Where:** `clara.server.tools.graph.annotations.merge/fold-detection-key`,
+`merge-detection-maps`, `normalize-detection-map`
+
+**Severity:** medium — no crash. A caller either silently destroys the analyzer's
+callsite audit trail or silently loses its own contribution, and both look like
+success.
+
+### What happens
+
+`:fact-instance-derived-types` is described in `DetectionMap` as "the
+session-enrichment channel … such maps carry no `:callsites` and merge as opaque
+values". That works when session enrichment owns the whole annotation map. It
+does not work for a caller that wants enrichment to be *its own layer* folded over
+a generated one — and layering is the model everything else here is built around.
+
+Both routes through the detection-map fold lose information:
+
+**Route A — emit `{:fact-instance-derived-types [...]}` with no `:callsites`.**
+`fold-detection-key` takes the no-callsites branch: opaque, last declared wins. The
+whole merged detection map is replaced, so every callsite the generated layer
+contributed is erased.
+
+**Route B — emit the base's `:callsites` alongside, to stay on the deep path.**
+`merge-detection-maps` ends with
+
+```clojure
+;; non-callsite keys on `a` (e.g. :fact-instance-derived-types from
+;; session enrichment) survive the deep merge
+(merge (dissoc a :callsites :resolution)
+       {:callsites callsites
+        :resolution (ann.callsite/aggregate-resolution callsites)})
+```
+
+Non-callsite keys survive from `a`, the accumulator — not from `b`, the incoming
+layer. So the layer's `:fact-instance-derived-types` is dropped. `normalize-detection-map`
+(first fold of a key) has the same shape and keeps them, so the asymmetry only bites
+on the second and later layers to touch a given rule.
+
+### Minimal repro
+
+```clojure
+(require '[clara.server.tools.graph.annotations.merge :as m])
+
+(def generated
+  (m/layer {:id :generated
+            :annotations {"a.ns/r" {:clara-rules/dynamic-insert-types-detected
+                                    {:callsites [{:ns-name-sym 'a.ns
+                                                  :source-str "(->fact :a/one)"
+                                                  :status :full}]}}}}))
+
+;; Route A: callsites erased
+(def route-a
+  (m/layer {:id :enriched
+            :annotations {"a.ns/r" {:clara-rules/dynamic-insert-types-detected
+                                    {:fact-instance-derived-types ["a/two"]}}}}))
+(get-in (m/merge-layers [generated route-a])
+        [:annotations "a.ns/r" :clara-rules/dynamic-insert-types-detected])
+;; => {:fact-instance-derived-types ["a/two"]}      ; the callsite is gone
+
+;; Route B: derived types dropped
+(def route-b
+  (m/layer {:id :enriched
+            :annotations {"a.ns/r" {:clara-rules/dynamic-insert-types-detected
+                                    {:callsites [{:ns-name-sym 'a.ns
+                                                  :source-str "(->fact :a/one)"
+                                                  :status :full}]
+                                     :fact-instance-derived-types ["a/two"]}}}}))
+(get-in (m/merge-layers [generated route-b])
+        [:annotations "a.ns/r" :clara-rules/dynamic-insert-types-detected
+         :fact-instance-derived-types])
+;; => nil                                            ; the contribution is gone
+```
+
+### Why it matters
+
+The types themselves are fine either way: `:clara-rules/insert-types` merges by
+`:union` and its provenance correctly reports both layers as contributing. What is
+unreachable is the *audit trail* — the record of which of those types came from
+observing a running session rather than from reading source.
+
+A caller can work around it by withholding the key whenever the base already has
+callsites, which is what `gateless-rules-explorer`'s working-memory layer does. That
+keeps both the callsites and the union, and loses only the per-rule note of which
+types were runtime-derived — for exactly the rules where static analysis found
+something, i.e. the interesting ones.
+
+### Suggested fix
+
+Merge non-callsite keys from **both** sides in `merge-detection-maps`, preferring the
+incoming layer, and let a no-callsites map merge into an existing one instead of
+replacing it wholesale:
+
+```clojure
+;; in merge-detection-maps, replace (dissoc a :callsites :resolution) with
+(merge (dissoc a :callsites :resolution)
+       (dissoc b :callsites :resolution)
+       {:callsites callsites
+        :resolution (ann.callsite/aggregate-resolution callsites)})
+
+;; and in fold-detection-key, the no-callsites branch becomes a merge rather
+;; than a replace when something is already there:
+(if-not (contains? v :callsites)
+  [(assoc merged k (merge (get merged k) v))
+   (assoc prov k (contributing (get prov k) layer-id))]
+  ...)
+```
+
+That makes `:fact-instance-derived-types` behave like every other layered value —
+additive, attributable — instead of being a channel only the whole-map caller can
+use. Worth checking whether any consumer depends on the current replace semantics
+first; the schema comment suggests the opaque path was written for a single-writer
+assumption that layering has since outgrown.
+
+### Test gap
+
+No coverage of a detection map arriving from a *second* layer. Worth both routes
+above as tests: callsites must survive an incoming derived-types map, and an
+incoming derived-types map must survive alongside callsites.
