@@ -9,7 +9,7 @@
 			}
 		],
 		"resolution": "partial",
-		"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
+		"fact-instance-derived-types": [":compliance-review-result"]
 	},
 	"source-rule": false,
 	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n (= ?app-id app-id)\n (= status :pass)]\n",
@@ -37,8 +37,8 @@
 	"notes": null,
 	"insert-types": [
 		{
-			"name": "\"clojure.lang.PersistentVector\"",
-			"id": "clojure.lang.PersistentVector-rijubkki",
+			"name": "\":compliance-review-result\"",
+			"id": "compliance-review-result-9hzuqwda",
 			"known": true
 		}
 	],

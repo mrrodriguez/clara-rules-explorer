@@ -9,7 +9,7 @@
 			}
 		],
 		"resolution": "partial",
-		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"]
+		"fact-instance-derived-types": [":extract-doc-meta"]
 	},
 	"source-rule": true,
 	"lhs-form": "",
@@ -22,12 +22,12 @@
 	"notes": null,
 	"insert-types": [
 		{
-			"name": "\"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck\"",
-			"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-th8jjfdm",
+			"name": "\":extract-doc-meta\"",
+			"id": "extract-doc-meta-rrf2xstt",
 			"known": true
 		}
 	],
-	"rhs-form": "(do\n (clojure.core/let\n  [resolved__25945__auto__ #'extract-doc-meta]\n  (clara.rules/insert! resolved__25945__auto__)))\n",
+	"rhs-form": "(do\n (clojure.core/let\n  [resolved__62199__auto__ #'extract-doc-meta]\n  (clara.rules/insert! resolved__62199__auto__)))\n",
 	"doc": null,
 	"sink-rule": true,
 	"props": {}

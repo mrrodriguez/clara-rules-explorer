@@ -307,14 +307,12 @@
     :else nil))
 
 (defn- build-ancestors-index
-  "Builds {serialized-type-name {:ancestors [hierarchy-ordered serialized
-   ancestor-name ...] :ns <best-effort namespace>}} for every raw type
-   appearing in any production's consumed/produced types.  Each raw type is
-   serialized in its production's ns context; raw ancestors come from the
-   memoized ancestor-set fn and are serialized with the same context.
-   Divergence — the same raw type serializing to different strings under
-   different productions' ns contexts (only possible for unresolved symbols)
-   — throws."
+  "Builds {serialized-type-name {:ancestors [hierarchy-ordered serialized ancestor-name ...] :ns
+  <best-effort namespace>}} for every raw type appearing in any production's consumed/produced
+  types. Each raw type is serialized in its production's ns context; raw ancestors come from the
+  memoized ancestor-set fn and are serialized with the same context. Divergence — the same raw type
+  serializing to different strings under different productions' ns contexts (only possible for
+  unresolved symbols) — throws."
   [type-analysis-map ancestors-set-fn]
   (let [resolve-memo (memoize (fn [ns-name t] (serialize/resolve-type ns-name t)))
         per-raw-type

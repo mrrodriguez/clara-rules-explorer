@@ -1,8 +1,8 @@
 {
 	"fact-types": [
 		{
-			"name": "\"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck\"",
-			"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-th8jjfdm",
+			"name": "\":extract-doc-meta\"",
+			"id": "extract-doc-meta-rrf2xstt",
 			"ns": null,
 			"used-by-rules": [],
 			"used-by-queries": [],
@@ -10,12 +10,6 @@
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-extract-doc-me-k8p61ty2",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}
@@ -147,28 +141,6 @@
 			"retracted-by-rules": []
 		},
 		{
-			"name": "\"clara.server.tools.graph.rules.loan_app_facts.FraudCheck\"",
-			"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-crxd5as9",
-			"ns": null,
-			"used-by-rules": [],
-			"used-by-queries": [],
-			"inserted-by-rules": [
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-hsdgwycv",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				}
-			],
-			"retracted-by-rules": []
-		},
-		{
 			"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
 			"id": "clara.server.tools.graph.rules.loan-doc-rules.AllIdCardGiven-4xiyfnsl",
 			"ns": "clara.server.tools.graph.rules.loan_doc_rules",
@@ -178,46 +150,6 @@
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-id-fhyj46dq",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				}
-			],
-			"retracted-by-rules": []
-		},
-		{
-			"name": "\"clojure.lang.PersistentVector\"",
-			"id": "clojure.lang.PersistentVector-rijubkki",
-			"ns": null,
-			"used-by-rules": [],
-			"used-by-queries": [],
-			"inserted-by-rules": [
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-id-fhyj46dq",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-re-q9oiwl3n",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-ma1dm3n7",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-3snojfsz",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}
@@ -382,15 +314,31 @@
 			"retracted-by-rules": []
 		},
 		{
-			"name": "\"clara.server.tools.graph.rules.loan_app_facts.GivenDocument\"",
-			"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-4vz3t7i4",
+			"name": "\"clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview\"",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules.ComplianceRevi-iqfkxzzo",
 			"ns": null,
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
 				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-hsdgwycv",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"retracted-by-rules": []
+		},
+		{
+			"name": "\":compliance-review-result\"",
+			"id": "compliance-review-result-9hzuqwda",
+			"ns": null,
+			"used-by-rules": [],
+			"used-by-queries": [],
+			"inserted-by-rules": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-ma1dm3n7",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}
@@ -412,6 +360,22 @@
 					"type": "rule"
 				}
 			]
+		},
+		{
+			"name": "\"clara.server.tools.graph.rules.loan_doc_rules.AuditTrail\"",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules.AuditTrail-gveofqzt",
+			"ns": null,
+			"used-by-rules": [],
+			"used-by-queries": [],
+			"inserted-by-rules": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-3snojfsz",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"retracted-by-rules": []
 		},
 		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
@@ -517,28 +481,6 @@
 				{
 					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
 					"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-pe-jeh9cbbi",
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"type": "rule"
-				},
-				{
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo",
-					"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-rhgclp5w",
-					"ns": "clara.server.tools.graph.rules.loan-app-rules",
-					"type": "rule"
-				}
-			],
-			"retracted-by-rules": []
-		},
-		{
-			"name": "\"clojure.lang.Symbol\"",
-			"id": "clojure.lang.Symbol-2dmvkwj9",
-			"ns": null,
-			"used-by-rules": [],
-			"used-by-queries": [],
-			"inserted-by-rules": [
-				{
-					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
-					"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
 					"ns": "clara.server.tools.graph.rules.loan-app-rules",
 					"type": "rule"
 				}

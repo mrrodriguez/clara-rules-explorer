@@ -2,29 +2,19 @@
 	"matches": [],
 	"inserted-facts": [
 		{
-			"id": 3,
+			"id": 5,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
-				"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
+				"name": ":extract-doc-meta",
+				"id": "extract-doc-meta-is5qkiib",
 				"known": true
 			},
-			"ns": "clara.server.tools.graph.rules.loan_app_facts",
-			"data": {
-				"app-id": "app-1",
-				"status": "pass",
-				"message": null
-			},
+			"ns": null,
+			"data": "#'clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta",
 			"is-root": false,
 			"inserted-from": [
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-extract-doc-me-k8p61ty2",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}
@@ -33,12 +23,6 @@
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}

@@ -1,31 +1,17 @@
 {
 	"id": 3,
 	"type": {
-		"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
-		"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
+		"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+		"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
 		"known": true
 	},
 	"ns": "clara.server.tools.graph.rules.loan_app_facts",
 	"data": {
 		"app-id": "app-1",
-		"status": "pass",
-		"message": null
+		"doc-type": "id-card"
 	},
-	"is-root": false,
-	"inserted-from": [
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-extract-doc-me-k8p61ty2",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		},
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		}
-	],
+	"is-root": true,
+	"inserted-from": [],
 	"used-by": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
@@ -34,8 +20,14 @@
 			"type": "rule"
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-id-fhyj46dq",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}

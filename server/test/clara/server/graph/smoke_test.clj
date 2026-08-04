@@ -224,6 +224,7 @@
   (def rule (get-rule "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"))
   (def rule (get-rule "clara.server.tools.graph.rules.loan-doc-rules.dynamic-insert-audit-trail"))
   (def rule (get-rule "clara.server.tools.graph.rules.loan-doc-rules.dynamic-insert-compliance-review"))
+  (def rule (get-rule "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"))
 
   (def queries (get-queries))
   (def query (get-query "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"))

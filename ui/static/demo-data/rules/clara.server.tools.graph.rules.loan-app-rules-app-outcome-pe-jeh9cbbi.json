@@ -192,26 +192,6 @@
 	"upstream": [
 		{
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo",
-			"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-rhgclp5w",
-			"type": "rule",
-			"match": [
-				{
-					"producer-type": {
-						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
-						"known": true
-					},
-					"consumer-type": {
-						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
-						"known": true
-					}
-				}
-			]
-		},
-		{
-			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 			"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
 			"type": "rule",

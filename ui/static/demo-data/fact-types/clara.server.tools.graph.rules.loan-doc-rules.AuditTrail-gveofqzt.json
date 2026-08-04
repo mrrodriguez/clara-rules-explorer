@@ -1,0 +1,17 @@
+{
+	"name": "\"clara.server.tools.graph.rules.loan_doc_rules.AuditTrail\"",
+	"id": "clara.server.tools.graph.rules.loan-doc-rules.AuditTrail-gveofqzt",
+	"used-by-rules": [],
+	"used-by-queries": [],
+	"inserted-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-3snojfsz",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	],
+	"retracted-by-rules": [],
+	"ns": null,
+	"ancestors": []
+}
