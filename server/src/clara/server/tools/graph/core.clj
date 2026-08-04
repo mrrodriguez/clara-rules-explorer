@@ -13,6 +13,16 @@
     (-> session-or-rulebase eng/components :rulebase)
     session-or-rulebase))
 
+(defn extract-ancestors-fn
+  "Returns the rulebase's ancestors-fn: the wrapped fn from `:get-alphas-fn`
+   metadata when present (Clara's own, which filters internal system facts),
+   else `clojure.core/ancestors`.  The fallback matches
+   `analyze/build-fallback-type-filter`; only a hand-built rulebase lacks the
+   meta."
+  [session-or-rulebase]
+  (or (-> session-or-rulebase get-rulebase :get-alphas-fn meta :ancestors-fn)
+      clojure.core/ancestors))
+
 (defn extract-lhs-fact-types
   "Recursively walks the LHS of a rule and extracts all fact types."
   [lhs]
@@ -28,10 +38,19 @@
          (distinct)
          (vec))))
 
-(defn- downstream? [ancestors-fn inserter-type reader-type]
+(defn- ->memoized-ancestors
+  "Returns a memoized fn mapping a raw fact type to its set of ancestor raw
+   types.  Never returns nil: a nil or throwing ancestors-fn result degrades
+   to the empty set.  Memoizing the set (not the seq) also removes the
+   per-call `(set ...)` allocation from `downstream?`."
+  [ancestors-fn]
+  (memoize (fn [t]
+             (try (set (ancestors-fn t))
+                  (catch Throwable _ #{})))))
+
+(defn- downstream? [ancestors-set-fn inserter-type reader-type]
   (or (= inserter-type reader-type)
-      (and ancestors-fn
-           (contains? (set (ancestors-fn inserter-type)) reader-type))))
+      (contains? (ancestors-set-fn inserter-type) reader-type)))
 
 (defn- get-production-deps-summary
   [dep-graph production-name production-map]
@@ -82,15 +101,17 @@
   derives the namespace from the fully-qualified :name.
 
   `annotations` is the merged rule→annotation map (see
-  annotations/merge-layers)."
+  annotations/merge-layers).  `known-set` is the analysis's serialized
+  fact-type names, used for TypeReference `known` flags."
   [{p-name :name :as production}
    annotations
    dep-graph
-   production-map]
+   production-map
+   known-set]
   (let [ann (ann/production-annotation annotations production)
         ;; Queries in clara.rules.schema/Query have no :ns-name — derive it.
         p-ns-name (get-production-ns-name-sym production)
-        serialize-fact-type (partial serialize/serialize-fact-type p-ns-name)
+        serialize-type-ref (partial serialize/serialize-type-ref known-set p-ns-name)
 
         {:keys [upstream downstream]} (get-production-deps-summary dep-graph
                                                                    p-name
@@ -105,20 +126,20 @@
                         (not (:no-output-types ann))
                         (rule-is-sink? production dep-graph production-map))
         dynamic-inserts (some-> (:dynamic-insert-types-detected ann)
-                                (serialize/serialize-dynamic-detection p-ns-name))
+                                (serialize/serialize-dynamic-detection p-ns-name known-set))
         dynamic-retracts (some-> (:dynamic-retract-types-detected ann)
-                                 (serialize/serialize-dynamic-detection p-ns-name))
+                                 (serialize/serialize-dynamic-detection p-ns-name known-set))
         summary
         (cond-> {:name      p-name
                  :ns        (str p-ns-name)
                  :doc       (:doc production)
-                 :lhs-types (mapv serialize-fact-type (extract-lhs-fact-types (:lhs production)))
+                 :lhs-types (mapv serialize-type-ref (extract-lhs-fact-types (:lhs production)))
                  :props     (-> (or (:props production) {})
                                 serialize/prune-fns
                                 serialize/stringify-map-keys)
                  :lhs       (-> production :lhs
-                                serialize/prune-fns
-                                serialize/serialize-lhs)
+                                (serialize/serialize-lhs p-ns-name known-set)
+                                serialize/prune-fns)
                  :lhs-form   (-> production :lhs
                                  serialize/serialize-lhs-form)
                  :notes     (:notes ann)}
@@ -127,12 +148,12 @@
           (assoc :insert-types  (->> ann
                                      :insert-types
                                      (into []
-                                           (comp (map serialize-fact-type)
+                                           (comp (map serialize-type-ref)
                                                  (distinct))))
                  :retract-types (->> ann
                                      :retract-types
                                      (into []
-                                           (comp (map serialize-fact-type)
+                                           (comp (map serialize-type-ref)
                                                  (distinct))))
                  :rhs-form      (-> production
                                     :rhs
@@ -172,48 +193,142 @@
        :reason "RHS likely contains insertion/retraction calls but no :clara-rules/insert-types or :clara-rules/retract-types declared."
        :hint "Add :clara-rules/insert-types to the rule's properties map or a sidecar annotation file."})))
 
+(defn build-type-analysis-map
+  "Builds the per-production raw type analysis map used by the dep-graph and
+   the serialized ancestors index: {:consumed-types [...] :produced-types
+   [...] :ns-name <sym-or-nil>} per production name.  `:produced-types` is
+   `(into insert-types retract-types)` — it includes retracts.  Each entry
+   carries the production's ns-name (queries have no `:ns-name`; derived via
+   `get-production-ns-name-sym`) so types can be serialized in per-production
+   ns context later."
+  [productions production-annotation-map]
+  (into {}
+        (map (fn [{p-name :name :keys [lhs] :as production}]
+               (let [{:keys [insert-types retract-types]} (get production-annotation-map p-name)
+                     upstream-types (extract-lhs-fact-types lhs)
+                     produced-types (->> insert-types set (into retract-types))]
+                 [p-name {:consumed-types upstream-types
+                          :produced-types produced-types
+                          :ns-name (get-production-ns-name-sym production)}])))
+        productions))
+
+(defn- ->known-type-names
+  "Serialized names of every raw type in any production's consumed or produced
+   types, each serialized in its own production's ns context.  Equals the
+   future fact-types map keys by construction; the ancestors enrichment and
+   TypeReference `known` flags are computed against this set upfront."
+  [type-analysis-map]
+  (into #{}
+        (mapcat (fn [{:keys [consumed-types produced-types ns-name]}]
+                  (map (partial serialize/resolve-type ns-name)
+                       (distinct (concat consumed-types produced-types)))))
+        (vals type-analysis-map)))
+
+(defn- hierarchy-order
+  "Deterministically orders a set of raw ancestor types: descendants before
+   their own ancestors (per `ancestors-set-fn`), ties broken lexicographically
+   on the serialized names.  `serialize-fn` maps a raw type to its serialized
+   string.  A pathological custom ancestors-fn with mutual ancestry is handled
+   by a cycle guard that emits the lexicographically smallest remaining node."
+  [raw-ancestors ancestors-set-fn serialize-fn]
+  (let [serialized (into {} (map (fn [t] [t (serialize-fn t)])) raw-ancestors)]
+    (loop [remaining (set raw-ancestors)
+           ordered []]
+      (if (empty? remaining)
+        ordered
+        (let [ready (->> remaining
+                         (filter (fn [x]
+                                   (not-any? (fn [d]
+                                               (contains? (ancestors-set-fn d) x))
+                                             remaining)))
+                         (sort-by serialized)
+                         first)
+              pick (if ready
+                     ready
+                     (first (sort-by serialized remaining)))]
+          (recur (disj remaining pick)
+                 (conj ordered (serialized pick))))))))
+
+(defn- raw-type-ns
+  "Best-effort namespace/package of a raw fact type for grouping: keyword or
+   symbol → `(namespace x)`, class → package name, other kinds → nil."
+  [x]
+  (cond
+    (keyword? x) (namespace x)
+    (symbol? x) (namespace x)
+    (class? x) (not-empty (.getPackageName ^Class x))
+    :else nil))
+
+(defn- build-ancestors-index
+  "Builds {serialized-type-name {:ancestors [hierarchy-ordered serialized
+   ancestor-name ...] :ns <best-effort namespace>}} for every raw type
+   appearing in any production's consumed/produced types.  Each raw type is
+   serialized in its production's ns context; raw ancestors come from the
+   memoized ancestor-set fn and are serialized with the same context.
+   Divergence — the same raw type serializing to different strings under
+   different productions' ns contexts (only possible for unresolved symbols)
+   — throws."
+  [type-analysis-map ancestors-set-fn]
+  (let [resolve-memo (memoize (fn [ns-name t] (serialize/resolve-type ns-name t)))
+        per-raw-type
+        (reduce (fn [acc {:keys [consumed-types produced-types ns-name]}]
+                  (reduce (fn [acc t]
+                            (let [s (resolve-memo ns-name t)
+                                  existing (get acc t)]
+                              (if existing
+                                (do (when (not= (:serialized existing) s)
+                                      (throw (ex-info (format "Type serialization divergence: %s serializes as both %s and %s across production ns contexts"
+                                                              t (:serialized existing) s)
+                                                      {:type t :serialized (:serialized existing) :divergent s})))
+                                    acc)
+                                (assoc acc t {:serialized s
+                                              :ns (raw-type-ns t)
+                                              :ancestors (hierarchy-order (ancestors-set-fn t)
+                                                                          ancestors-set-fn
+                                                                          (partial resolve-memo ns-name))}))))
+                          acc
+                          (distinct (concat consumed-types produced-types))))
+                {}
+                (vals type-analysis-map))]
+    (reduce-kv (fn [idx _raw-type {:keys [serialized ancestors ns]}]
+                 (assoc idx serialized {:ancestors ancestors :ns ns}))
+               {}
+               per-raw-type)))
+
 (defn build-dep-graph
-  [{:keys [get-alphas-fn productions] :as _rulebase}
-   production-annotation-map]
-  (let [{:keys [ancestors-fn]} (meta get-alphas-fn)]
-    (letfn [(type-analysis [{p-name :name :keys [lhs] :as _production}]
-              (let [{:keys [insert-types retract-types]} (get production-annotation-map p-name)
-                    upstream-types (extract-lhs-fact-types lhs)
-                    produced-types (->> insert-types set (into retract-types))]
-                {:consumed-types upstream-types
-                 :produced-types produced-types}))
+  "Builds the production dependency graph: {production-name {:upstream #{...}
+   :downstream #{...}}} where an edge producer → consumer exists when some
+   produced type of the producer satisfies some consumed type of the consumer
+   directly or via the ancestors-fn hierarchy."
+  [type-analysis-map ancestors-set-fn]
+  (letfn [(some-type-consumed? [produced-types consumed-types]
+            (->> produced-types
+                 (some (fn [pt]
+                         (some (fn [ct] (downstream? ancestors-set-fn pt ct))
+                               consumed-types)))
+                 boolean))
 
-            (some-type-consumed? [produced-types consumed-types]
-              (->> produced-types
-                   (some (fn [pt]
-                           (some (fn [ct] (downstream? ancestors-fn pt ct))
-                                 consumed-types)))
-                   boolean))
+          (add-dep-graph-entry [graph [producer-name consumer-name]]
+            (-> graph
+                (update-in [producer-name :downstream]
+                           (fnil conj #{})
+                           consumer-name)
+                (update-in [consumer-name :upstream]
+                           (fnil conj #{})
+                           producer-name)))]
 
-            (add-dep-graph-entry [graph [producer-name consumer-name]]
-              (-> graph
-                  (update-in [producer-name :downstream]
-                             (fnil conj #{})
-                             consumer-name)
-                  (update-in [consumer-name :upstream]
-                             (fnil conj #{})
-                             producer-name)))]
+    (let [producer-consumer-pairs
+          (for [[p-name1 {produced-types1 :produced-types}] type-analysis-map
+                [p-name2 {consumed-types2 :consumed-types}] type-analysis-map
+                :when (and (not= p-name1 p-name2)
+                           (seq produced-types1)
+                           (seq consumed-types2)
+                           (some-type-consumed? produced-types1 consumed-types2))]
+            [p-name1 p-name2])
 
-      (let [type-analysis-map (->> productions
-                                   (into {} (map (juxt :name type-analysis))))
+          graph (reduce add-dep-graph-entry {} producer-consumer-pairs)]
 
-            producer-consumer-pairs
-            (for [[p-name1 {produced-types1 :produced-types}] type-analysis-map
-                  [p-name2 {consumed-types2 :consumed-types}] type-analysis-map
-                  :when (and (not= p-name1 p-name2)
-                             (seq produced-types1)
-                             (seq consumed-types2)
-                             (some-type-consumed? produced-types1 consumed-types2))]
-              [p-name1 p-name2])
-
-            graph (reduce add-dep-graph-entry {} producer-consumer-pairs)]
-
-        graph))))
+      graph)))
 
 (defn- build-production-map
   "Builds name to production map for the `productions` while maintaining the insertion order."
@@ -228,7 +343,8 @@
            productions
            annotations
            dep-graph
-           production-map]}]
+           production-map
+           known-set]}]
   (let [filter-xf (case production-type
                     :rule (filter :rhs)
                     (remove :rhs))]
@@ -239,48 +355,66 @@
                 (mapcat (juxt :name #(production-summary %
                                                          annotations
                                                          dep-graph
-                                                         production-map)))))
+                                                         production-map
+                                                         known-set)))))
          (apply array-map))))
 
 (defn- build-rule-summary-map
-  [productions annotations dep-graph production-map]
+  [productions annotations dep-graph production-map known-set]
   (build-production-summary-map {:production-type :rule
                                  :productions productions
                                  :annotations annotations
                                  :dep-graph dep-graph
-                                 :production-map production-map}))
+                                 :production-map production-map
+                                 :known-set known-set}))
 
 (defn- build-query-summary-map
-  [productions annotations dep-graph production-map]
+  [productions annotations dep-graph production-map known-set]
   (build-production-summary-map {:production-type :query
                                  :productions productions
                                  :annotations annotations
                                  :dep-graph dep-graph
-                                 :production-map production-map}))
+                                 :production-map production-map
+                                 :known-set known-set}))
 
 (defn- build-fact-type-summary-map
-  "Aggregates fact-type usage across rules and queries."
-  [rules queries]
+  "Aggregates fact-type usage across rules and queries, attaching `:ancestors`
+   (hierarchy-ordered `TypeReference` entries, from the serialized ancestors
+   index), `:ns` (best-effort namespace for grouping), and `[ProductionDep]`
+   usage lists.  `ancestors-index` maps each serialized fact-type name to
+   {:ancestors [...] :ns ...}; `known-set` is the serialized fact-type names,
+   used for `known` flags."
+  [rules queries ancestors-index known-set]
   (letfn [(init-summary [type-name]
-            {:name type-name
-             :used-by-rules []
-             :used-by-queries []
-             :inserted-by-rules []
-             :retracted-by-rules []})
+            (let [{idx-ancestors :ancestors :keys [ns]} (get ancestors-index type-name)]
+              {:name type-name
+               :used-by-rules []
+               :used-by-queries []
+               :inserted-by-rules []
+               :retracted-by-rules []
+               :ns ns
+               :ancestors (mapv (fn [a]
+                                  {:name a
+                                   :id (serialize/route-id a)
+                                   :known (contains? known-set a)})
+                                idx-ancestors)}))
 
-          (update-summary [acc type-name key production-name]
+          (update-summary [acc type-name key production-ref]
             (update acc type-name
                     (fn [summary]
                       (-> (or summary (init-summary type-name))
-                          (update key conj production-name)))))
+                          (update key conj production-ref)))))
 
-          (add-production-types [acc [p-name {:keys [lhs-types insert-types retract-types]}]]
+          (add-production-types [acc [p-name {:keys [lhs-types insert-types retract-types] :as summary}]]
             (let [is-rule? (contains? rules p-name)
                   used-key (if is-rule? :used-by-rules :used-by-queries)
-                  updates (concat (for [t lhs-types] [t used-key])
-                                  (for [t insert-types] [t :inserted-by-rules])
-                                  (for [t retract-types] [t :retracted-by-rules]))]
-              (reduce (fn [a [t k]] (update-summary a t k p-name)) acc updates)))]
+                  production-ref {:name p-name
+                                  :ns (:ns summary)
+                                  :type (if is-rule? "rule" "query")}
+                  updates (concat (for [t lhs-types] [(:name t) used-key])
+                                  (for [t insert-types] [(:name t) :inserted-by-rules])
+                                  (for [t retract-types] [(:name t) :retracted-by-rules]))]
+              (reduce (fn [a [t k]] (update-summary a t k production-ref)) acc updates)))]
 
     (let [summary-map (reduce add-production-types {} (concat rules queries))]
       (->> (concat rules queries)
@@ -288,7 +422,8 @@
                            (mapcat (juxt :lhs-types :insert-types :retract-types))
                            cat
                            (distinct)))
-           (mapcat (juxt identity summary-map))
+           (mapcat (fn [type-ref]
+                     [(:name type-ref) (summary-map (:name type-ref))]))
            (apply array-map)))))
 
 (defn- build-production-annotation-map
@@ -321,20 +456,28 @@
 
         production-annotation-map (build-production-annotation-map productions annotations)
 
-        dep-graph (build-dep-graph rulebase production-annotation-map)
+        ancestors-fn (extract-ancestors-fn rulebase)
+        ancestors-set-fn (->memoized-ancestors ancestors-fn)
+        type-analysis-map (build-type-analysis-map productions production-annotation-map)
+        known-set (->known-type-names type-analysis-map)
+        ancestors-index (build-ancestors-index type-analysis-map ancestors-set-fn)
+
+        dep-graph (build-dep-graph type-analysis-map ancestors-set-fn)
         production-map (build-production-map productions)
 
         rules (build-rule-summary-map productions
                                       annotations
                                       dep-graph
-                                      production-map)
+                                      production-map
+                                      known-set)
 
         queries (build-query-summary-map productions
                                          annotations
                                          dep-graph
-                                         production-map)
+                                         production-map
+                                         known-set)
 
-        fact-types (build-fact-type-summary-map rules queries)
+        fact-types (build-fact-type-summary-map rules queries ancestors-index known-set)
 
         nodes (nodes/build-nodes id-to-node)
 
@@ -377,9 +520,10 @@
         (vals (:queries analysis))))
 
 (defn fact-types-list
-  "Returns a sequence of lightweight fact type summaries, preserving order."
+  "Returns a sequence of lightweight fact type summaries, preserving order.
+   Omits :ancestors (detail-only) but keeps :ns for grouping."
   [analysis]
-  (mapv #(select-keys % [:name :used-by-rules :used-by-queries
+  (mapv #(select-keys % [:name :ns :used-by-rules :used-by-queries
                          :inserted-by-rules :retracted-by-rules])
         (vals (:fact-types analysis))))
 

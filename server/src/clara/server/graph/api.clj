@@ -39,11 +39,21 @@
    :ns s/Str
    :type s/Str})
 
+(s/defschema TypeReference
+  "A linkable fact-type reference: `name` is the kind-explicit serialized
+   type string (display), `id` the deterministic route id (linkage), and
+   `known` distinguishes types linkable in this rulebase (`true`) from
+   hierarchy ghosts that render as plain text."
+  {:name s/Str
+   :id s/Str
+   :known s/Bool})
+
 (s/defschema LhsCondition
   "A serialized LHS condition from the Clara Rete network.
    Known keys mirror the frontend LhsElement type:
-   :type, :constraints, :args, :accumulator, :from, :result-binding, :fact-binding."
-  {(s/optional-key :type) s/Any
+   :type (a TypeReference), :constraints, :args, :accumulator, :from,
+   :result-binding, :fact-binding."
+  {(s/optional-key :type) TypeReference
    (s/optional-key :constraints) s/Str
    (s/optional-key :args) s/Str
    (s/optional-key :accumulator) s/Any
@@ -72,7 +82,8 @@
    :ns s/Str
    :filename s/Str
    (s/optional-key :status) (s/enum :none :partial :full)
-   (s/optional-key :resolved-types) [s/Str]
+   (s/optional-key :resolved-types) [TypeReference]
+   (s/optional-key :fact-type) TypeReference
    (s/optional-key :constructor-sym) s/Str
    (s/optional-key :via) ViaChain})
 
@@ -87,9 +98,9 @@
   {:name          s/Str
    :ns            s/Str
    :doc           (s/maybe s/Str)
-   :lhs-types     [s/Str]
-   :insert-types  [s/Str]
-   :retract-types [s/Str]
+   :lhs-types     [TypeReference]
+   :insert-types  [TypeReference]
+   :retract-types [TypeReference]
    :source-rule   s/Bool
    :sink-rule     s/Bool
    (s/optional-key :unlinked-rule) (s/maybe {:downstream (s/enum :unknown)
@@ -114,7 +125,7 @@
   {:name      s/Str
    :ns        s/Str
    :doc       (s/maybe s/Str)
-   :lhs-types [s/Str]
+   :lhs-types [TypeReference]
    :params    (s/maybe #{s/Str})
    (s/optional-key :upstream)   [ProductionDep]
    (s/optional-key :downstream) [ProductionDep]})
@@ -128,12 +139,15 @@
           (s/optional-key :notes) (s/maybe s/Str)}))
 
 (s/defschema FactTypeListItem
-  "Lightweight fact-type summary (list endpoint)."
+  "Lightweight fact-type summary (list endpoint).  `:ancestors` is
+   detail-only: the list endpoint omits it (see `core/fact-types-list`)."
   {:name               s/Str
-   :used-by-rules      [s/Str]
-   :used-by-queries    [s/Str]
-   :inserted-by-rules  [s/Str]
-   :retracted-by-rules [s/Str]})
+   :ns                 (s/maybe s/Str)
+   :used-by-rules      [ProductionDep]
+   :used-by-queries    [ProductionDep]
+   :inserted-by-rules  [ProductionDep]
+   :retracted-by-rules [ProductionDep]
+   (s/optional-key :ancestors) [TypeReference]})
 
 (s/defschema SessionFactTypeItem
   "A fact-type entry in the session fact-types summary."

@@ -4,15 +4,21 @@
    [clojure.pprint :as pp]
    [clojure.set :as set]
    [clojure.string :as str]
-   [clojure.walk :as w]))
+   [clojure.walk :as w])
+  (:import [java.math BigInteger]))
 
 (defn resolve-type
-  "Resolves a type (Class, Symbol, etc.) to a string representation for JSON."
+  "Resolves a raw fact type (Class, keyword, symbol, string, tuple, ...) to its
+   kind-explicit string representation for JSON.  The kind is self-describing
+   in the output: classes as `.getName`, keywords with their colon, strings
+   and tuples via `pr-str` (quotes/elements preserved), unresolved symbols
+   wrapped in `symbol[...]`, anything else via `str`.  `ns-name` is the
+   production's namespace, used to resolve symbol types."
   [ns-name x]
   (cond
     (nil? x) nil
     (class? x) (.getName ^Class x)
-    (keyword? x) (-> x symbol str)
+    (keyword? x) (str x)
     (symbol? x) (if-let [resolved (and ns-name (ns-resolve (the-ns ns-name) x))]
                   (cond
                     (class? resolved) (.getName ^Class resolved)
@@ -21,8 +27,52 @@
                                           name-str (name vname)]
                                       (str (symbol ns-str name-str)))
                     :else (str resolved))
-                  (str x))
+                  (str "symbol[" x "]"))
+    (string? x) (pr-str x)
+    (sequential? x) (pr-str x)
     :else (str x)))
+
+(defn- slug
+  "URL-safe slug of a name: every char outside [A-Za-z0-9.-] replaced by '-',
+   runs collapsed, leading/trailing '-' trimmed, capped at 60 chars."
+  [s]
+  (let [slug (-> s
+                 (str/replace #"[^A-Za-z0-9.-]" "-")
+                 (str/replace #"-+" "-")
+                 (str/replace #"^-|-$" ""))
+        slug (subs slug 0 (min 60 (count slug)))]
+    (if (empty? slug) "x" slug)))
+
+(defn- sha1-base36
+  "Base36 representation of the SHA-1 digest of `s`."
+  [^String s]
+  (let [digest (java.security.MessageDigest/getInstance "SHA-1")
+        bytes (.digest digest (.getBytes s "UTF-8"))]
+    (.toString (BigInteger. 1 bytes) 36)))
+
+(defn- route-id*
+  "Deterministic URL-safe id for a canonical serialized name: slug of the name
+   plus an 8-char base36 SHA-1 suffix.  The id is a pure function of the name,
+   so re-running the analysis never changes existing ids."
+  [s]
+  (str (slug s) "-" (subs (sha1-base36 s) 0 8)))
+
+(def route-id
+  "Memoized `route-id*` — the same name recurs in thousands of ProductionDep
+   entries across an analysis build."
+  (memoize route-id*))
+
+(defn serialize-type-ref
+  "Serializes a raw fact type into a TypeReference map for JSON output:
+   {:name kind-explicit serialized name, :id deterministic route id,
+   :known true iff the serialized name is a member of `known-set` (the
+   analysis's fact-type names).  `ns-name` is the production's namespace,
+   used to resolve symbol types."
+  [known-set ns-name x]
+  (let [name (resolve-type ns-name x)]
+    {:name name
+     :id (route-id name)
+     :known (contains? known-set name)}))
 
 (defn serialize-fact-type
   [production-ns-name x]
@@ -97,8 +147,11 @@
       (nil? rhs) (assoc :type "query"))))
 
 (defn serialize-condition
-  "Serializes a single condition, including pretty-printing its constraints and args."
-  [condition]
+  "Serializes a single condition, including pretty-printing its constraints and
+   args and converting its `:type` (raw fact type) into a TypeReference.
+   `ns-name` is the production's namespace, used to resolve symbol types;
+   `known-set` is the analysis's serialized fact-type names."
+  [condition ns-name known-set]
   (letfn [(serialize-form [form]
             (with-out-str (pp/pprint form)))
           (serialize-forms [forms]
@@ -111,15 +164,19 @@
           (serialize-node [node]
             (if (map? node)
               (cond-> node
+                (contains? node :type) (update :type #(serialize-type-ref known-set ns-name %))
                 (contains? node :constraints) (update :constraints serialize-forms)
                 (contains? node :args) (update :args serialize-forms))
               node))]
     (w/prewalk serialize-node condition)))
 
 (defn serialize-lhs
-  "Serializes the LHS of a rule."
-  [lhs]
-  (mapv serialize-condition lhs))
+  "Serializes the LHS of a rule.  Condition `:type` values are raw fact types
+   here — callers must apply `prune-fns` to the RESULT (not beforehand) so the
+   types are still Classes/keywords when `serialize-condition` converts them
+   to TypeReferences."
+  [lhs ns-name known-set]
+  (mapv #(serialize-condition % ns-name known-set) lhs))
 
 (defn- condition->form
   "Reconstructs a Clojure code form from a condition map.
@@ -169,8 +226,9 @@
    - :fact-type (var-alias context) serializes like resolved-types tokens;
      :fact-type-spec map values are stringified (e.g. {:aliases-var my.ns/f}
      encodes as {\"aliases-var\": \"my.ns/f\"}).
-   ns-name is the production's namespace, used to resolve types."
-  [callsite ns-name]
+   ns-name is the production's namespace and known-set the analysis's
+   serialized fact-type names, used to resolve and flag types."
+  [callsite ns-name known-set]
   (cond-> callsite
       ;; rename :ns-name-sym → :ns, convert symbol → string
     true (set/rename-keys {:ns-name-sym :ns})
@@ -178,12 +236,12 @@
     true (select-keys #{:source-str :ns :filename :status :resolved-types
                         :fact-type :fact-type-spec :constructor-sym :via})
 
-      ;; resolve :resolved-types / :fact-type tokens
+      ;; resolve :resolved-types / :fact-type tokens to TypeReferences
     (seq (:resolved-types callsite))
-    (update :resolved-types #(mapv (partial resolve-type ns-name) %))
+    (update :resolved-types #(mapv (fn [t] (serialize-type-ref known-set ns-name t)) %))
 
     (:fact-type callsite)
-    (assoc :fact-type (resolve-type ns-name (:fact-type callsite)))
+    (assoc :fact-type (serialize-type-ref known-set ns-name (:fact-type callsite)))
 
     (:fact-type-spec callsite)
     (update :fact-type-spec #(into {}
@@ -209,8 +267,9 @@
 (defn serialize-dynamic-detection
   "Serializes a dynamic detection info map (:dynamic-insert-types-detected or
    :dynamic-retract-types-detected) for JSON output.
-   ns-name is the production's namespace, used to resolve type symbols."
-  [detection ns-name]
+   ns-name is the production's namespace and known-set the analysis's
+   serialized fact-type names, used to resolve type tokens."
+  [detection ns-name known-set]
   (cond-> detection
     (:callsites detection)
-    (update :callsites (fn [callsites] (mapv #(serialize-dynamic-callsite % ns-name) callsites)))))
+    (update :callsites (fn [callsites] (mapv #(serialize-dynamic-callsite % ns-name known-set) callsites)))))

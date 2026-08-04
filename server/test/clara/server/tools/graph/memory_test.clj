@@ -175,7 +175,7 @@
       (let [types (set (map :type matches))]
         (is (contains? types "clara.server.tools.graph.rules.loan_app_facts.Application")
             "Should include Application fact")
-        (is (contains? types "loan-doc-rules/document-check-input")
+        (is (contains? types ":loan-doc-rules/document-check-input")
             "Should include document-check-input fact"))
       ;; Verify all match entries share the same bindings data
       (let [bindings (map :data matches)]

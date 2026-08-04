@@ -37,6 +37,7 @@
             [clara.server.tools.graph.analyze.index :as index]
             [clara.server.tools.graph.analyze.synth :as synth]
             [clara.server.tools.graph.serialize :as serialize]
+            [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.annotations :as ann]
             [clara.server.tools.graph.annotations.callsite :as ann.callsite]
@@ -610,8 +611,7 @@
   (let [lhs-type-names (into #{}
                              (map type-name-str)
                              (alias/rulebase-fact-types rulebase))
-        ancestors-fn (or (-> rulebase :get-alphas-fn meta :ancestors-fn)
-                         ancestors)
+        ancestors-fn (core/extract-ancestors-fn rulebase)
         allowed? (memoize
                   (fn [type-sym]
                     (or (contains? lhs-type-names (str type-sym))
