@@ -38,9 +38,11 @@
    producing rule inserts (or retracts), `consumer-type` is what the
    consuming rule's LHS requires.  Identical shape and meaning on upstream
    and downstream entries — direct matches (same type both ends) are
-   included."
+   included.  `:via :retract` marks a pair whose producer-type is a retract
+   type of the producer (retraction coupling, distinct from production)."
   {:producer-type TypeReference
-   :consumer-type TypeReference})
+   :consumer-type TypeReference
+   (s/optional-key :via) (s/enum :retract)})
 
 (s/defschema ProductionDep
   "A reference to another production (rule or query) in the dependency graph.

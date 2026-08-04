@@ -112,6 +112,9 @@ end produces:
 
 - `producer-type` — the concrete type the producing rule inserts (or retracts).
 - `consumer-type` — the concrete type the consuming rule's LHS requires.
+- `via` — `"retract"` when `producer-type` is a **retract type** of the
+  producer, so the UI can distinguish retraction coupling from production;
+  absent (omitted) for insertion-based bridges.
 - Direct matches (same type both ends) are included — no client-side special-casing.
 - `match` is an array because one production pair can link via multiple type pairs.
 - Entries are deterministically sorted by `producer-type` `:name`, then

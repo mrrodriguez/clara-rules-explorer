@@ -920,3 +920,59 @@
                   (is (contains? (type-ref-names (:lhs-types consumer))
                                  (get-in m [:consumer-type :name]))
                       (str consumer-name " :match consumer-type must be in its own lhs-types")))))))))))
+
+;; Retraction-coupled bridge: the producer retracts ::retract-target, the
+;; consumer reads it — the match is flagged :via :retract.
+(r/defrule via-retract-producer
+  {:clara-rules/retract-types [::retract-target]}
+  [String]
+  =>
+  (r/retract! (with-meta {:x 1} {:type ::retract-target})))
+
+(r/defrule via-retract-consumer
+  [?t <- ::retract-target]
+  =>
+  (r/insert! (with-meta {:done true} {:type ::via-retract-done})))
+
+;; Mixed bridge: one producer inserts ::insert-target and retracts
+;; ::retract-target; the consumer reads both — two matches, flagged distinctly.
+(r/defrule via-mixed-producer
+  {:clara-rules/insert-types  [::insert-target]
+   :clara-rules/retract-types [::retract-target]}
+  [Long]
+  =>
+  (r/insert! (with-meta {:i 1} {:type ::insert-target}))
+  (r/retract! (with-meta {:r 1} {:type ::retract-target})))
+
+(r/defrule via-mixed-consumer
+  [?i <- ::insert-target]
+  [?r <- ::retract-target]
+  =>
+  (r/insert! (with-meta {:done true} {:type ::via-mixed-done})))
+
+(deftest test-match-via-retract
+  (testing "A retract-only bridge is flagged :via :retract on both directions"
+    (let [analysis (match-session-analysis [via-retract-producer via-retract-consumer])
+          producer (get-in analysis [:rules "clara.server.tools.graph.core-test/via-retract-producer"])
+          consumer (get-in analysis [:rules "clara.server.tools.graph.core-test/via-retract-consumer"])
+          down (dep-by-name (:downstream producer) (:name consumer))
+          up (dep-by-name (:upstream consumer) (:name producer))]
+      (is (= [[":clara.server.tools.graph.core-test/retract-target"
+               ":clara.server.tools.graph.core-test/retract-target"]]
+             (match-pairs down)))
+      (is (= [:retract] (mapv :via (:match down))))
+      (is (= (mapv :via (:match down)) (mapv :via (:match up)))
+          "via flag is symmetric across both directions"))))
+
+(deftest test-match-via-insert-and-retract
+  (testing "Insert and retract bridges in one pair are flagged distinctly"
+    (let [analysis (match-session-analysis [via-mixed-producer via-mixed-consumer])
+          producer (get-in analysis [:rules "clara.server.tools.graph.core-test/via-mixed-producer"])
+          down (dep-by-name (:downstream producer) "clara.server.tools.graph.core-test/via-mixed-consumer")]
+      (is (= [[":clara.server.tools.graph.core-test/insert-target"
+               ":clara.server.tools.graph.core-test/insert-target"]
+              [":clara.server.tools.graph.core-test/retract-target"
+               ":clara.server.tools.graph.core-test/retract-target"]]
+             (match-pairs down)))
+      (is (= [nil :retract] (mapv :via (:match down)))
+          "insert match unflagged, retract match flagged"))))

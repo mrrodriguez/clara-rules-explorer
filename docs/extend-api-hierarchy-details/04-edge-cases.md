@@ -13,10 +13,9 @@
   carries a `:match` whose `producer-type` is the retracted type —
   "producer" wording is imperfect there, but the coupling is real (a
   retraction can invalidate downstream joins) and matches the existing edge
-  semantics.  Documented as a known limitation; the fix — a
-  `"via": "retract"` flag on such `:match` entries — is a named
-  fast-follow task (see Implementation Order), kept out of Phase 2
-  proper to keep the initial contract minimal.
+  semantics.  Such `:match` entries carry `"via": "retract"` (see the
+  fast-follow in Implementation Order) so the UI can distinguish retraction
+  coupling from production.
 - **Self-edges excluded** (`(not= p-name1 p-name2)`): a rule that inserts
   and reads the same type gets no edge and no `:match` — pre-existing,
   unchanged.

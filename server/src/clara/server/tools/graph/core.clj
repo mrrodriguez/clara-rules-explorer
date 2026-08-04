@@ -54,14 +54,17 @@
 
 (defn- matching-type-pairs
   "All (produced, consumed) raw-type pairs linking a producer to a consumer.
-   Direct matches included (producer-type = consumer-type).  The dep-graph
+   Direct matches included (producer-type = consumer-type).  A pair whose
+   producer-type is a retract type of the producer carries `:via :retract` so
+   the UI can distinguish retraction coupling from production.  The dep-graph
    edge already exists, so this is computed only for actual edges — never in
    the O(n²) candidate loop."
-  [ancestors-set-fn produced-types consumed-types]
+  [ancestors-set-fn produced-types consumed-types retract-types]
   (->> (for [pt produced-types
              ct consumed-types
              :when (downstream? ancestors-set-fn pt ct)]
-         {:producer-type pt :consumer-type ct})
+         (cond-> {:producer-type pt :consumer-type ct}
+           (contains? retract-types pt) (assoc :via :retract)))
        (distinct)))
 
 (defn- get-production-deps-summary
@@ -75,11 +78,11 @@
             (let [[producer-name consumer-name] (if (= direction :upstream)
                                                   [adjacent-name production-name]
                                                   [production-name adjacent-name])
-                  {:keys [produced-types] :as producer} (get type-analysis-map producer-name)
+                  {:keys [produced-types retract-types] :as producer} (get type-analysis-map producer-name)
                   {:keys [consumed-types] :as consumer} (get type-analysis-map consumer-name)
                   producer-ns (:ns-name producer)
                   consumer-ns (:ns-name consumer)]
-              (some-> (matching-type-pairs ancestors-set-fn produced-types consumed-types)
+              (some-> (matching-type-pairs ancestors-set-fn produced-types consumed-types retract-types)
                       not-empty
                       (serialize/serialize-match known-set producer-ns consumer-ns))))
 
@@ -236,9 +239,11 @@
 (defn build-type-analysis-map
   "Builds the per-production raw type analysis map used by the dep-graph and
    the serialized ancestors index: {:consumed-types [...] :produced-types
-   [...] :ns-name <sym-or-nil>} per production name.  `:produced-types` is
-   `(into insert-types retract-types)` — it includes retracts.  Each entry
-   carries the production's ns-name (queries have no `:ns-name`; derived via
+   [...] :retract-types <set> :ns-name <sym-or-nil>} per production name.
+   `:produced-types` is `(into insert-types retract-types)` — it includes
+   retracts; `:retract-types` keeps the retract subset so type-bridge matches
+   can be flagged as retraction-based.  Each entry carries the production's
+   ns-name (queries have no `:ns-name`; derived via
    `get-production-ns-name-sym`) so types can be serialized in per-production
    ns context later."
   [productions production-annotation-map]
@@ -246,9 +251,11 @@
         (map (fn [{p-name :name :keys [lhs] :as production}]
                (let [{:keys [insert-types retract-types]} (get production-annotation-map p-name)
                      upstream-types (extract-lhs-fact-types lhs)
-                     produced-types (->> insert-types set (into retract-types))]
+                     retract-set (set retract-types)
+                     produced-types (into retract-set (set insert-types))]
                  [p-name {:consumed-types upstream-types
                           :produced-types produced-types
+                          :retract-types retract-set
                           :ns-name (get-production-ns-name-sym production)}])))
         productions))
 

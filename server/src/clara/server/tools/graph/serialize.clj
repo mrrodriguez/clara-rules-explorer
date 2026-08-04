@@ -79,13 +79,16 @@
    `matching-type-pairs` output) into TypeReference pairs, each end
    serialized in its own production's ns context, sorted by producer then
    consumer :name.  Symmetric shape and meaning on upstream and downstream
-   entries: producer-type is what the producing rule inserts, consumer-type
-   is what the consuming rule's LHS requires."
+   entries: producer-type is what the producing rule inserts (or retracts),
+   consumer-type is what the consuming rule's LHS requires.  A raw pair's
+   `:via :retract` (producer-type is a retract type) is carried through so
+   the UI can distinguish retraction coupling from production."
   [raw-pairs known-set producer-ns consumer-ns]
   (->> raw-pairs
-       (map (fn [{:keys [producer-type consumer-type]}]
-              {:producer-type (serialize-type-ref known-set producer-ns producer-type)
-               :consumer-type (serialize-type-ref known-set consumer-ns consumer-type)}))
+       (map (fn [{:keys [producer-type consumer-type via]}]
+              (cond-> {:producer-type (serialize-type-ref known-set producer-ns producer-type)
+                       :consumer-type (serialize-type-ref known-set consumer-ns consumer-type)}
+                via (assoc :via via))))
        (sort-by (juxt (comp :name :producer-type)
                       (comp :name :consumer-type)))
        (vec)))

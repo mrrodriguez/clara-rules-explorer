@@ -140,6 +140,17 @@ without cross-referencing.
 >   doc for its own contract.  **143 tests / 1010 assertions green,
 >   lint/format/reflection clean.**
 >
+> - **Fast-follow complete (2026-08-04):** `"via": "retract"` flag on
+>   `:match` entries whose bridge comes from a retract type.
+>   `build-type-analysis-map` keeps the retract subset (`:retract-types`
+>   set) alongside `:produced-types`; `matching-type-pairs` flags pairs whose
+>   producer-type is a retract type with `:via :retract`; `serialize-match`
+>   carries it through; `TypeBridgeMatch` schema gains `(s/optional-key :via)
+>   (s/enum :retract)`; `explorer-graph-api.md` documents the flag.  Tests:
+>   retract-only bridge (flagged both directions), mixed insert+retract bridge
+>   (insert match unflagged, retract match flagged).  **145 tests / 1015
+>   assertions green, lint/format/reflection clean.**
+>
 > **State after M5:** the server API fully implements the plan's contract
 > (kind-explicit types, `TypeReference` everywhere, id-based routes, `:id` /
 > `:ns` / `:ancestors` / `:match`).  Remaining server work: `explorer-graph-api.md`
@@ -161,5 +172,5 @@ without cross-referencing.
 - [ ] **Phase 2e:** Update UI types (`ProductionReference`, `TypeBridgeMatch` in `api.ts`) — deferred with the UI phases (1e/1h); the server contract is complete
 - [x] **Phase 2f:** Update `explorer-graph-api.md` with the `:match` contract (symmetric shape + semantics, citing `ProductionDep` schema) — landed in the M6 rewrite
 - [x] **Docs hygiene pass:** verify the Documentation & Schema Principles — schemas carry the structural truth; no docstring enumerates shapes, narrates design history, or references this plan; project docs cite code (not vice versa) for impl details
-- [ ] **Fast-follow (post-Phase 2, small):** `"via": "retract"` flag on `:match` entries whose bridge comes from a retract type, so the UI can distinguish retraction coupling from production
+- [x] **Fast-follow (post-Phase 2, small):** `"via": "retract"` flag on `:match` entries whose bridge comes from a retract type, so the UI can distinguish retraction coupling from production
 - [ ] **Phase 3:** UI integration (future, scoped separately)
