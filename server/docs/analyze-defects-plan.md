@@ -87,6 +87,9 @@ possibly the UI.
 - `synth`: round-trip test — `reconstruct-ns-source` output must
   `read-string` + `eval` as a legal ns form; stronger variant asserts
   `ns-refers`/`ns-aliases`/`ns-imports` of the evaled ns match the original.
+  Also assert the `:refer-clojure` clause is emitted as a **list**, matching
+  the `(:require …)` / `(:import …)` clauses beside it (the round-trip eval
+  alone would not catch the vector form, since `ns` tolerates it).
   Extend the existing `test-analyze-session-rules--reconstructed-ns-fallback`
   fixture with a namespace that refers something (e.g. `clojure.set`), which
   is the exact gap that let this through.
@@ -120,6 +123,10 @@ is wanted.**
   `condition-type` branch — `:not`, `:or`, `:and`, `:exists`, a group nested
   inside an accumulator's `:from`, and a rule whose entire LHS is one group.
   Assert each operator keyword survives into the rendered string.
+  Also add direct regression cases for the **leaf** branches that fall
+  through to the default — a plain `:fact` condition and a `:test` condition
+  — since those are the common case and a regression there must not hide
+  behind the invariant below.
 - Add the cheap invariant from the todo: every fact type in
   `extract-lhs-fact-types` appears in `serialize-lhs-form`'s output for the
   same LHS.
@@ -163,6 +170,11 @@ consumers are fluid until the API stabilizes and these defects are resolved.
 Do not contort the fix to preserve the old behavior; just record what
 changed (see "Downstream summary" below).**
 
+Stated risk: this assumes `gateless-rules-explorer` is the only downstream
+layer writer. If an unknown consumer depends on the old replace semantics
+(a derived-types-only layer wiping callsites), it breaks silently — the
+downstream summary is the mitigation, so make it precise.
+
 ### Fix
 
 - In `merge-detection-maps` (`annotations/merge.clj:174`): merge non-callsite
@@ -205,33 +217,44 @@ are fluid; design the API the way it should be, then document it.**
 
 Scope is broader than the todo's defect 3: in addition to accepting a
 rulebase, `start!` gains an explicit option to disable working-memory
-analysis even when handed a live session. So working-memory availability
-becomes a **server configuration**, not something inferred from the input
-type alone.
+analysis even when handed a live session. Rationale (explicit requirement,
+not scope creep): the common deployment for this tool is static analysis of
+a ruleset — dependency graph, annotations, fact types — where working memory
+is unwanted overhead or unavailable input. Inferring WM availability solely
+from the input type forces callers to contort their setup (e.g. extract a
+rulebase from a perfectly good session) just to opt out; making it a
+first-class option keeps the common case one flag away. Working-memory
+availability therefore becomes a **server configuration**, not something
+inferred from the input type alone.
 
 ### Step 1 — capability predicate + config option
 
 - Add `working-memory-available?` (e.g. in `tools/graph/core.clj` or
   `memory.clj`): `(satisfies? eng/ISession x)`.
+- Migrate the two existing `instance? LocalSession` checks (`core.clj:16`,
+  `api.clj:271`) to the new predicate in this milestone. Rationale (from the
+  todo, and consistent with the clojure-engineering preference for protocol
+  capability checks over concrete-type checks): `satisfies? ISession` names
+  the capability actually required and does not exclude other session
+  implementations. Unifying all three sites now avoids leaving two divergent
+  notions of "is this a session" in the codebase.
 - `start!` (`server.clj:46`) accepts an option such as
-  `:working-memory? false` (name TBD at implementation). Effective
-  availability = `(and (:working-memory? opts true) (working-memory-available? session-or-rulebase))`.
+  `:working-memory? false` (default `true`). Effective availability =
+  `(and (:working-memory? opts true) (working-memory-available? session-or-rulebase))`.
 - Store the resolved flag alongside `session-atom` (e.g. in the same config
   map threaded to handlers) so `get-snapshot` and route setup can read it
   without re-deriving.
-- Consider migrating the two existing `instance? LocalSession` checks
-  (`core.clj:16`, `api.clj:271`) to the predicate in the same pass, or
-  deliberately leave them and note why.
 
 ### Step 2 — uniform early failure
 
 - Guard in `api/get-snapshot` (`api.clj:317`) so all six working-memory
-  routes inherit one behavior: return
-  `{:status 409 :body {:error ... :reason :no-working-memory}}`
-  (409 stays distinguishable from the existing 404 "fact not found").
-  Alternative: omit the `/session*` routes at router construction when
-  disabled — the explicit 409 is preferred since "disabled by configuration"
-  should not look like "not found". Decide finally at implementation.
+  routes inherit one behavior. **Decision (adopted from the todo, not
+  deferred):** return
+  `{:status 409 :body {:error ... :reason :no-working-memory}}`.
+  A distinct status with a machine-readable reason beats a 500 and stays
+  distinguishable from the existing 404 "fact not found"; omitting the
+  routes at router construction was considered and rejected because it
+  conflates "disabled by configuration" with "not found".
 
 ### Step 3 — startup + docs + capability advertisement
 
@@ -257,7 +280,9 @@ type alone.
   `:working-memory?` flag, and the new `start!` option.
 - Update `ui/src/lib/types/api.ts` to match the final contract, then verify
   via the UI Makefile: `cd ui && make format check lint` (and `make test` if
-  UI behavior changes beyond types).
+  UI behavior changes beyond types). Note: these Makefile targets wrap the
+  `pnpm run format && pnpm run check && pnpm run lint` scripts `AGENTS.md`
+  lists — same checks, single entry point.
 
 ---
 
