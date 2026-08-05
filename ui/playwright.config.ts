@@ -26,25 +26,24 @@ import { defineConfig } from '@playwright/test';
 // backend/frontend already running on the port and starts one otherwise —
 // so local runs and CI behave identically.
 const loanAppBackend = {
-	command: 'bash bin/ci/start-loan-app-backend.sh',
+	command: 'E2E_PID_FILE=.e2e-pids/loan-app-backend.pid bash bin/ci/start-loan-app-backend.sh',
 	port: 9101,
 	reuseExistingServer: true,
 	timeout: 120_000
 };
 
 const hierarchyBackend = {
-	command: 'bash bin/ci/start-hierarchy-backend.sh',
+	command: 'E2E_PID_FILE=.e2e-pids/hierarchy-backend.pid bash bin/ci/start-hierarchy-backend.sh',
 	port: 9201,
 	reuseExistingServer: true,
 	timeout: 120_000
 };
 
-function frontend(proxyTarget: string, port: number) {
+function frontend(proxyTarget: string, port: number, pidLabel: string) {
 	return {
-		command: `API_PROXY_TARGET=${proxyTarget} PORT=${port} bash bin/ci/start-e2e-frontend.sh`,
+		command: `E2E_PID_FILE=.e2e-pids/${pidLabel}.pid API_PROXY_TARGET=${proxyTarget} PORT=${port} bash bin/ci/start-e2e-frontend.sh`,
 		url: `http://localhost:${port}`,
 		reuseExistingServer: true,
-		// vite preview starts instantly (no compilation) — 30s is generous.
 		timeout: 30_000
 	};
 }
@@ -67,8 +66,8 @@ export default defineConfig({
 	webServer: [
 		loanAppBackend,
 		hierarchyBackend,
-		frontend('http://localhost:9101', 4173),
-		frontend('http://localhost:9201', 4174)
+		frontend('http://localhost:9101', 4173, 'loan-app-frontend'),
+		frontend('http://localhost:9201', 4174, 'hierarchy-frontend')
 	],
 	use: {
 		baseURL: 'http://localhost:4173',

@@ -5,7 +5,7 @@
 # bare `pnpm test:e2e` does not: the serialized demo session
 # (server/demo-data/session.bin, gitignored), the e2e production SPA build,
 # and installed deps.
-.PHONY: test test-unit test-e2e deps demo-setup e2e-build check lint format format-check clean
+.PHONY: test test-unit test-e2e deps demo-setup e2e-build check lint format format-check clean e2e-stop
 
 SHELL := /bin/bash
 
@@ -53,7 +53,7 @@ e2e-build:
 test: test-unit test-e2e
 
 test-unit: node_modules
-	pnpm run test:unit -- --run
+	pnpm exec vitest --passWithNoTests --run
 
 test-e2e: node_modules $(DEMO_SESSION) $(E2E_BUILD_SENTINEL)
 	pnpm run test:e2e
@@ -73,3 +73,24 @@ format-check:
 clean:
 	rm -rf build .svelte-kit test-results node_modules/.vite
 	@echo "Run 'make e2e-build' to regenerate the e2e SPA before the next test-e2e."
+
+# Kill any hanging e2e servers by their saved PIDs.
+# Playwright writes each server's PID to .e2e-pids/<name>.pid on startup;
+# this reads them back and kills the processes directly — no port scanning.
+E2E_PID_DIR := .e2e-pids
+e2e-stop:
+	@if [ -d "$(E2E_PID_DIR)" ]; then \
+		for pidfile in $(E2E_PID_DIR)/*.pid; do \
+			[ -f "$$pidfile" ] || continue; \
+			pid=$$(cat "$$pidfile"); \
+			label=$$(basename "$$pidfile" .pid); \
+			if kill -9 $$pid 2>/dev/null; then \
+				echo "stopped $$label (pid $$pid)"; \
+			else \
+				echo "$$label (pid $$pid) already gone"; \
+			fi; \
+			rm -f "$$pidfile"; \
+		done; \
+	else \
+		echo "no pid files found in $(E2E_PID_DIR)"; \
+	fi
