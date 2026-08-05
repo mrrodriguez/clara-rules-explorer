@@ -1,10 +1,14 @@
 (ns clara.server.tools.graph.core
-  "Core logic for Clara rulebase static analysis and dependency graph construction."
+  "Core logic for Clara rulebase static analysis and dependency graph
+   construction.  Production-level logic (dep-graph, rule/query summaries)
+   lives here; fact-type hierarchy bookkeeping and read-side accessors live
+   in `clara.server.tools.graph.fact-types`."
   (:require [clara.rules.engine :as eng]
             [clara.rules.schema :as schema]
-            [clara.server.tools.graph.serialize :as serialize]
             [clara.server.tools.graph.annotations :as ann]
+            [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.nodes :as nodes]
+            [clara.server.tools.graph.serialize :as serialize]
             [clojure.string :as str])
   (:import [clara.rules.engine LocalSession]))
 
@@ -259,138 +263,6 @@
                           :ns-name (get-production-ns-name-sym production)}])))
         productions))
 
-(defn- ->known-type-names
-  "Serialized names of every raw type in any production's consumed or produced
-   types, each serialized in its own production's ns context.  Equals the
-   future fact-types map keys by construction; the ancestors enrichment and
-   TypeReference `known` flags are computed against this set upfront."
-  [type-analysis-map]
-  (into #{}
-        (mapcat (fn [{:keys [consumed-types produced-types ns-name]}]
-                  (map (partial serialize/resolve-type ns-name)
-                       (distinct (concat consumed-types produced-types)))))
-        (vals type-analysis-map)))
-
-(defn- next-hierarchy-node
-  "Picks the next raw ancestor type to emit in the deterministic topological
-   order: a node with no remaining descendant (deepest), ties broken
-   lexicographically by serialized name.  Falls back to the lexicographically
-   smallest remaining node when the custom ancestors-fn is cyclic (mutual
-   ancestry) — the cycle guard."
-  [remaining serialized ancestors-set-fn]
-  (or (->> remaining
-           (filter (fn [x]
-                     (not-any? (fn [d]
-                                 (contains? (ancestors-set-fn d) x))
-                               remaining)))
-           (sort-by serialized)
-           first)
-      (first (sort-by serialized remaining))))
-
-(defn- hierarchy-order
-  "Deterministically orders a set of raw ancestor types: descendants before
-   their own ancestors (per `ancestors-set-fn`), ties broken lexicographically
-   on the serialized names.  `serialize-fn` maps a raw type to its serialized
-   string.  A pathological custom ancestors-fn with mutual ancestry is handled
-   by a cycle guard that emits the lexicographically smallest remaining node."
-  [raw-ancestors ancestors-set-fn serialize-fn]
-  (let [serialized (into {} (map (fn [t] [t (serialize-fn t)])) raw-ancestors)]
-    (loop [remaining (set raw-ancestors)
-           ordered []]
-      (if (empty? remaining)
-        ordered
-        (let [pick (next-hierarchy-node remaining serialized ancestors-set-fn)]
-          (recur (disj remaining pick)
-                 (conj ordered (serialized pick))))))))
-
-(defn raw-type-ns
-  "Best-effort namespace/package of a raw fact type for grouping: keyword or
-   symbol → `(namespace x)`, class → package name, other kinds → nil."
-  [x]
-  (cond
-    (keyword? x) (namespace x)
-    (symbol? x) (namespace x)
-    (class? x) (not-empty (.getPackageName ^Class x))
-    :else nil))
-
-(defn- warn-serialization-divergence!
-  "Logs a warning (once per raw type per analysis build) when the same raw
-   type serializes to different strings under different production ns
-   contexts — only possible for unresolved symbols.  Localized degradation:
-   the first (load-order) serialization is kept and the build continues, so
-   one bad sidecar symbol cannot take down every analysis endpoint."
-  [raw-type existing-serialized new-serialized warned-types]
-  (when (and (not= existing-serialized new-serialized)
-             (not (contains? @warned-types raw-type)))
-    (swap! warned-types conj raw-type)
-    (println (format "WARN: type serialization divergence — %s serializes as both %s and %s across production ns contexts; keeping %s"
-                     raw-type existing-serialized new-serialized existing-serialized))))
-
-(defn- ->ancestors-index-entry
-  "Fresh ancestors-index entry for `raw-type`, serialized in `ns-name` context:
-   {:serialized kind-explicit name, :ns best-effort namespace, :ancestors
-   hierarchy-ordered serialized ancestor names}."
-  [ancestors-set-fn resolve-memo ns-name raw-type]
-  {:serialized (resolve-memo ns-name raw-type)
-   :ns (raw-type-ns raw-type)
-   :ancestors (hierarchy-order (ancestors-set-fn raw-type)
-                               ancestors-set-fn
-                               (partial resolve-memo ns-name))})
-
-(defn- register-ancestors-entry
-  "Adds `raw-type` to the per-raw-type index, keyed by its first (load-order)
-   serialization.  When the same raw type serializes differently under another
-   production's ns context, the first serialization is kept and a warning is
-   logged — localized degradation instead of a build-wide failure."
-  [acc resolve-memo ancestors-set-fn warned-types ns-name raw-type]
-  (if-let [existing (get acc raw-type)]
-    (do (warn-serialization-divergence! raw-type
-                                        (:serialized existing)
-                                        (resolve-memo ns-name raw-type)
-                                        warned-types)
-        acc)
-    (assoc acc raw-type
-           (->ancestors-index-entry ancestors-set-fn resolve-memo ns-name raw-type))))
-
-(defn- register-production-types
-  "Registers every raw type in one production's consumed/produced types into
-   the per-raw-type index."
-  [acc resolve-memo ancestors-set-fn warned-types {:keys [consumed-types produced-types ns-name]}]
-  (reduce (fn [acc raw-type]
-            (register-ancestors-entry acc resolve-memo ancestors-set-fn warned-types ns-name raw-type))
-          acc
-          (distinct (concat consumed-types produced-types))))
-
-(defn- build-ancestors-index
-  "Builds {serialized-type-name {:ancestors [hierarchy-ordered serialized
-   ancestor-name ...] :ns <best-effort namespace>}} for every raw type
-   appearing in any production's consumed/produced types.  Each raw type is
-   serialized in its production's ns context; raw ancestors come from the
-   memoized ancestor-set fn and are serialized with the same context.
-
-   Productions are iterated in load order, so a raw type that serializes
-   differently under different nses (unresolved symbols) is canonically keyed
-   by its first production's serialization — deterministic, never hash-order.
-   Divergence logs a warning and keeps the first serialization (localized
-   degradation; the type's other serializations still surface via the
-   per-production rule summaries and the known-set)."
-  [type-analysis-map ancestors-set-fn productions]
-  (let [resolve-memo (memoize (fn [ns-name t] (serialize/resolve-type ns-name t)))
-        warned-types (atom #{})
-        per-raw-type
-        (reduce (fn [acc production]
-                  (register-production-types acc
-                                             resolve-memo
-                                             ancestors-set-fn
-                                             warned-types
-                                             (get type-analysis-map (:name production))))
-                {}
-                productions)]
-    (reduce-kv (fn [idx _raw-type {:keys [serialized ancestors ns]}]
-                 (assoc idx serialized {:ancestors ancestors :ns ns}))
-               {}
-               per-raw-type)))
-
 (defn build-production-id-index
   "Reverse index {id → name} for every rule and query in the analysis,
    asserting id uniqueness (a route-id collision throws loudly at
@@ -473,75 +345,18 @@
   (build-production-summary-map (assoc ctx :production-type :query
                                        :productions productions)))
 
-(defn- build-fact-type-summary-map
-  "Aggregates fact-type usage across rules and queries, attaching `:ancestors`
-   (hierarchy-ordered `TypeReference` entries, from the serialized ancestors
-   index), `:ns` (best-effort namespace for grouping), and `[ProductionDep]`
-   usage lists.  `ancestors-index` maps each serialized fact-type name to
-   {:ancestors [...] :ns ...}; `known-set` is the serialized fact-type names,
-   used for `known` flags."
-  [{:keys [rules queries ancestors-index known-set]}]
-  (letfn [(init-summary [type-name]
-            (let [{idx-ancestors :ancestors :keys [ns]} (get ancestors-index type-name)]
-              {:name type-name
-               :id (serialize/route-id type-name)
-               :used-by-rules []
-               :used-by-queries []
-               :inserted-by-rules []
-               :retracted-by-rules []
-               :ns ns
-               :ancestors (mapv (fn [a]
-                                  {:name a
-                                   :id (serialize/route-id a)
-                                   :known (contains? known-set a)})
-                                idx-ancestors)}))
-
-          (update-summary [acc type-name key production-ref]
-            (update acc type-name
-                    (fn [summary]
-                      (-> (or summary (init-summary type-name))
-                          (update key conj production-ref)))))
-
-          (add-production-types [acc [p-name {:keys [lhs-types insert-types retract-types] :as summary}]]
-            (let [is-rule? (contains? rules p-name)
-                  used-key (if is-rule? :used-by-rules :used-by-queries)
-                  production-ref {:name p-name
-                                  :id (serialize/route-id (str p-name))
-                                  :ns (:ns summary)
-                                  :type (if is-rule? "rule" "query")}
-                  updates (concat (for [t lhs-types] [(:name t) used-key])
-                                  (for [t insert-types] [(:name t) :inserted-by-rules])
-                                  (for [t retract-types] [(:name t) :retracted-by-rules]))]
-              (reduce (fn [a [t k]] (update-summary a t k production-ref)) acc updates)))]
-
-    (let [summary-map (reduce add-production-types {} (concat rules queries))
-          type-refs (into []
-                          (comp (map val)
-                                ;; The per-field vectors are flattened in one pass;
-                                ;; nil fields (queries have no insert/retract) drop out.
-                                (mapcat (fn [summary]
-                                          (concat (:lhs-types summary)
-                                                  (:insert-types summary)
-                                                  (:retract-types summary))))
-                                (distinct))
-                          (concat rules queries))]
-      (apply array-map
-             (mapcat (fn [type-ref]
-                       [(:name type-ref) (summary-map (:name type-ref))])
-                     type-refs)))))
-
 (defn- build-production-annotation-map
   [productions annotations]
   (into {}
         (for [p productions]
           [(:name p) (ann/production-annotation annotations p)])))
 
-(defn- ->merged
-  "Coerces the second argument of `rulebase-analysis`: a MergedAnnotations
-   value passes through; a bare rule→annotation map is treated as merged
-   content with no provenance.  (Key membership is tested with `some` — a
-   bare map may be a string-keyed sorted map, where a keyword `contains?`
-   throws ClassCastException.)"
+(defn- coerce-annotations-arg
+  "Normalizes the annotations argument of `rulebase-analysis`: a
+   MergedAnnotations value passes through; a bare rule→annotation map is
+   wrapped as merged content with no provenance.  (Key membership is tested
+   with `some` — a bare map may be a string-keyed sorted map, where a
+   keyword `contains?` throws ClassCastException.)"
   [x]
   (if (and (map? x)
            (some #{:annotations} (keys x))
@@ -556,15 +371,15 @@
   [session-or-rulebase annotations]
   (let [{:keys [productions id-to-node] :as rulebase} (get-rulebase session-or-rulebase)
 
-        annotations (:annotations (->merged annotations))
+        annotations (:annotations (coerce-annotations-arg annotations))
 
         production-annotation-map (build-production-annotation-map productions annotations)
 
         ancestors-fn (extract-ancestors-fn rulebase)
         ancestors-set-fn (->memoized-ancestors ancestors-fn)
         type-analysis-map (build-type-analysis-map productions production-annotation-map)
-        known-set (->known-type-names type-analysis-map)
-        ancestors-index (build-ancestors-index type-analysis-map ancestors-set-fn productions)
+        known-set (ft/known-type-names type-analysis-map)
+        ancestors-index (ft/build-ancestors-index type-analysis-map ancestors-set-fn productions)
 
         dep-graph (build-dep-graph type-analysis-map ancestors-set-fn)
         production-map (build-production-map productions)
@@ -582,10 +397,10 @@
 
         queries (build-query-summary-map productions analysis-ctx)
 
-        fact-types (build-fact-type-summary-map {:rules rules
-                                                 :queries queries
-                                                 :ancestors-index ancestors-index
-                                                 :known-set known-set})
+        fact-types (ft/build-fact-type-summary-map {:rules rules
+                                                    :queries queries
+                                                    :ancestors-index ancestors-index
+                                                    :known-set known-set})
 
         nodes (nodes/build-nodes id-to-node)
 
@@ -608,21 +423,6 @@
    :query-count (count (:queries analysis))
    :fact-type-count (count (:fact-types analysis))})
 
-(defn build-fact-type-id-index
-  "Reverse index {id → name} for every fact type in the analysis, asserting
-   id uniqueness (a route-id collision throws loudly at analysis-build time
-   rather than silently mislinking).  Internal — never part of the
-   /v1/analysis payload."
-  [analysis]
-  (reduce (fn [idx {:keys [id name]}]
-            (if-let [existing (get idx id)]
-              (throw (ex-info (format "Fact-type route-id collision: %s and %s both map to %s"
-                                      existing name id)
-                              {:id id :names [existing name]}))
-              (assoc idx id name)))
-          {}
-          (vals (:fact-types analysis))))
-
 (defn rules-list
   "Returns a sequence of lightweight rule summaries, preserving load order.
    Omits :upstream and :downstream — they are only needed in the detail view
@@ -642,20 +442,5 @@
   (mapv #(select-keys % [:name :id :ns :doc :lhs-types :params])
         (vals (:queries analysis))))
 
-(defn fact-types-list
-  "Returns a sequence of lightweight fact type summaries, preserving order.
-   Omits :ancestors (detail-only) but keeps :ns for grouping and :id for
-   links."
-  [analysis]
-  (mapv #(select-keys % [:name :id :ns :used-by-rules :used-by-queries
-                         :inserted-by-rules :retracted-by-rules])
-        (vals (:fact-types analysis))))
 
-(defn session-fact-types-summary
-  "Returns a lightweight summary of fact types in the session and the total count."
-  [snapshot]
-  {:types (->> (:fact-types snapshot)
-               vals
-               (mapv #(select-keys % [:name :id :ns :count])))
-   :total-count (count (:facts snapshot))})
 

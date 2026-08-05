@@ -9,7 +9,7 @@ producer/consumer types.
 
 This relates to the work recently done (on this branch) for @docs/extend-api-hierarchy-details/README.md (which is the primary purpose of this branch).
 
-2. clara.server.tools.graph.core/build-fact-type-summary-map is huge and needs refactored. Do fact
+2. DONE clara.server.tools.graph.core/build-fact-type-summary-map is huge and needs refactored. Do fact
    type logic in general need split to new ns to keep nses organized and focused?
 
 3. rebuild demo-data

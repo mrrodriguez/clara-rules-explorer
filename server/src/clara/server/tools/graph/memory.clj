@@ -4,8 +4,9 @@
             [clara.rules.engine :as eng]
             [clara.rules.memory :as mem]
             [clara.rules.platform :as platform]
-            [clara.server.tools.graph.serialize :as serialize]
-            [clara.server.tools.graph.core :as core]))
+            [clara.server.tools.graph.core :as core]
+            [clara.server.tools.graph.fact-types :as ft]
+            [clara.server.tools.graph.serialize :as serialize]))
 
 (defn- deterministic-fact-str
   "Returns a deterministic pr-str representation of a fact for stable sorting.
@@ -159,7 +160,7 @@
                                          ;; /fact-types/:id route the analysis cannot
                                          ;; serve.
                                          :known (contains? known-set type-name)}
-                                  :ns (core/raw-type-ns raw-type)
+                                  :ns (ft/raw-type-ns raw-type)
                                   :data (serialize/prune-fns fact)
                                   :is-root (boolean (some #(identical? fact %) root-facts))
                                   :inserted-from (get origin-map id [])

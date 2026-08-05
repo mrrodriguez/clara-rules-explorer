@@ -6,6 +6,7 @@
             [jsonista.core :as j]
             [schema.core :as s]
             [clara.server.tools.graph.core :as core]
+            [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.analyze :as analyze]))
 
@@ -305,7 +306,7 @@
                 {:session session
                  :annotations annotations
                  :analysis analysis
-                 :fact-type-id-index (core/build-fact-type-id-index analysis)
+                 :fact-type-id-index (ft/build-fact-type-id-index analysis)
                  :production-id-index (core/build-production-id-index analysis)})))))
 
 (defn- get-analysis
@@ -382,7 +383,7 @@
 (s/defn handle-get-fact-types :- {:status (s/eq 200) :body {:fact-types [FactTypeListItem]}}
   [session-atom annotations-atom analysis-cache _req]
   {:status 200
-   :body {:fact-types (core/fact-types-list (get-analysis session-atom annotations-atom analysis-cache))}})
+   :body {:fact-types (ft/fact-types-list (get-analysis session-atom annotations-atom analysis-cache))}})
 
 (s/defn handle-get-fact-type :- GetFactTypeResponse
   [session-atom annotations-atom analysis-cache req]
@@ -399,7 +400,7 @@
   [session-atom snapshot-cache analysis-cache annotations-atom _req]
   (let [snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)]
     {:status 200
-     :body (core/session-fact-types-summary snapshot)}))
+     :body (ft/session-fact-types-summary snapshot)}))
 
 (s/defn handle-get-session-fact-type
   :- GetSessionFactTypeResponse

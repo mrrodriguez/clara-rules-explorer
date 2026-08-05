@@ -4,6 +4,7 @@
             [clara.server.tools.graph.annotation-fixtures :as fixtures]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.core :as core]
+            [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
@@ -398,26 +399,42 @@
       (is (contains? (get-in graph ["clara.server.tools.graph.core-test/vehicle-consumer" :upstream])
                      "clara.server.tools.graph.core-test/car-producer")))))
 
+(def ^:private loan-app-fact-type-order
+  "Directly-referenced fact types in canonical load order (rules first, then
+   queries).  Hierarchy-only ancestor types (e.g. clojure.lang.IPersistentMap,
+   java.lang.Object) appear after these, sorted alphabetically."
+  ["clara.server.tools.graph.rules.loan_app_facts.Application"
+   "clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
+   ":extract-doc-meta"
+   "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta"
+   "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"
+   "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"
+   "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument"
+   "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"
+   ":loan-doc-rules/document-check-input"
+   "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"
+   "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"
+   "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"
+   "clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
+   "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"])
+
 (deftest test-fact-type-summary-order
   (let [session (->test-session)
         analysis (core/rulebase-analysis session (loan-doc-annotations session))
         fact-types (:fact-types analysis)]
-    (testing "Fact type summary maintains insertion order (rules first, then queries)"
-      (is (= ["clara.server.tools.graph.rules.loan_app_facts.Application"
-              "clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
-              ":extract-doc-meta"
-              "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta"
-              "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"
-              "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"
-              "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument"
-              "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"
-              ":loan-doc-rules/document-check-input"
-              "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"
-              "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"
-              "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"
-              "clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
-              "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"]
-             (vec (keys fact-types)))))
+    (testing "Directly-referenced fact types maintain insertion order as a prefix"
+      (is (= loan-app-fact-type-order
+             (take (count loan-app-fact-type-order) (keys fact-types)))))
+
+    (testing "Hierarchy-only ancestor types appear at the end, sorted"
+      (let [all-keys (vec (keys fact-types))
+            hierarchy-keys (drop (count loan-app-fact-type-order) all-keys)]
+        (is (seq hierarchy-keys)
+            "Record types have Java interface ancestors (IPersistentMap, Object, etc.)")
+        (is (every? (fn [k] (str/starts-with? k "clojure.lang."))
+                    (take 3 hierarchy-keys)))
+        (is (= (sort hierarchy-keys) hierarchy-keys)
+            "Hierarchy-only types are sorted alphabetically")))
 
     (testing "Fact type summary entry structure"
       (let [entry (get fact-types "clara.server.tools.graph.rules.loan_app_facts.Application")]
@@ -679,9 +696,9 @@
     (let [tam (array-map
                'prod-a {:consumed-types ['join] :produced-types [] :retract-types #{} :ns-name 'clojure.string}
                'prod-b {:consumed-types ['join] :produced-types [] :retract-types #{} :ns-name 'clara.server.tools.graph.rules.loan-app-rules})
-          idx (#'core/build-ancestors-index tam
-                                            (fn [_] #{})
-                                            [{:name 'prod-a} {:name 'prod-b}])]
+          idx (ft/build-ancestors-index tam
+                                        (fn [_] #{})
+                                        [{:name 'prod-a} {:name 'prod-b}])]
       (is (= {"clojure.string/join" {:ancestors [] :ns nil}}
              idx)
           "The first (load-order) production's serialization is canonical; the divergent symbol[...] one is dropped")
@@ -770,14 +787,14 @@
   (testing "The reverse index resolves every fact-type id back to its name"
     (let [session (->hierarchy-session)
           analysis (core/rulebase-analysis session (hierarchy-annotations session))
-          index (core/build-fact-type-id-index analysis)]
+          index (ft/build-fact-type-id-index analysis)]
       (doseq [{type-name :name type-id :id} (vals (:fact-types analysis))]
         (is (= type-name (get index type-id))
             (str "index resolves " type-id " back to " type-name)))))
 
   (testing "A route-id collision throws at index build time"
     (is (thrown? clojure.lang.ExceptionInfo
-                 (core/build-fact-type-id-index
+                 (ft/build-fact-type-id-index
                   {:fact-types {"a" {:id "same-id" :name "a"}
                                 "b" {:id "same-id" :name "b"}}})))))
 
