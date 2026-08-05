@@ -4,7 +4,8 @@
    [clojure.pprint :as pp]
    [clojure.set :as set]
    [clojure.string :as str]
-   [clojure.walk :as w])
+   [clojure.walk :as w]
+   [clara.rules.schema :as schema])
   (:import [java.math BigInteger]))
 
 (defn resolve-type
@@ -203,24 +204,27 @@
   (mapv #(serialize-condition % prod-ns known-set) lhs))
 
 (defn- condition->form
-  "Reconstructs a Clojure code form from a condition map.
-   Produces a vector that mirrors the original Clara defrule/defquery syntax."
+  "Reconstructs a Clojure code form from a condition, mirroring defrule syntax.
+   Dispatches on `schema/condition-type` so that boolean groups (`:and`, `:or`,
+   `:not`, `:exists`) and accumulator `:from` conditions are recursively
+   reconstructed rather than silently dropped."
   [condition]
-  (if (:accumulator condition)
-    ;; Accumulator: [?result <- (acc-fn ...) :from [nested-form]]
-    (let [acc-form (:accumulator condition)
-          parts (-> []
-                    (cond-> (:result-binding condition) (conj (:result-binding condition) '<-))
-                    (conj acc-form)
-                    (cond-> (:from condition) (conj :from (condition->form (:from condition)))))]
-      (vec parts))
-    ;; Regular condition: [?binding <- Type args... constraints...]
-    (let [parts (-> []
-                    (cond-> (:fact-binding condition) (conj (:fact-binding condition) '<-))
-                    (cond-> (:type condition) (conj (:type condition)))
-                    (cond-> (:args condition) (conj (:args condition)))
-                    (into (or (:constraints condition) [])))]
-      (vec parts))))
+  (case (schema/condition-type condition)
+    :accumulator
+    (vec (-> []
+             (cond-> (:result-binding condition) (conj (:result-binding condition) '<-))
+             (conj (:accumulator condition))
+             (cond-> (:from condition) (conj :from (condition->form (:from condition))))))
+
+    (:and :or :not :exists)
+    (into [(first condition)] (map condition->form) (rest condition))
+
+    ;; :fact and :test are both leaf maps with :type, :args, :constraints
+    (vec (-> []
+             (cond-> (:fact-binding condition) (conj (:fact-binding condition) '<-))
+             (cond-> (:type condition) (conj (:type condition)))
+             (cond-> (:args condition) (conj (:args condition)))
+             (into (or (:constraints condition) []))))))
 
 (defn serialize-lhs-form
   "Pretty-prints the full LHS as a single Clojure code string."

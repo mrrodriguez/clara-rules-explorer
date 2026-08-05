@@ -6,6 +6,7 @@
             [clara.server.tools.graph.annotations.callsite :as ann.callsite]
             [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.analyze.alias :as alias]
+            [clara.server.tools.graph.analyze.synth :as synth]
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
             [clara.server.tools.graph.rules.loan-app-rules]
@@ -706,11 +707,42 @@
                 (ann/get-annotation annotations 'fake.eval-rules/fake-eval-rule)))
             "literal args are captured, not classified — classification defers to the caller")
         (is (nil? (:clara-rules/insert-types (ann/get-annotation annotations 'fake.eval-rules/fake-eval-rule)))
-            "rule from a source-less namespace is analyzed via the reconstructed ns form")))))
+            "rule from a source-less namespace is analyzed via the reconstructed ns form"))))
+
+  (testing "reconstructed ns form with a :refer clause survives a round trip"
+    (let [ref-ns-sym 'fake.eval-refers]
+      (create-ns ref-ns-sym)
+      (binding [*ns* (the-ns ref-ns-sym)]
+        (clojure.core/refer-clojure)
+        (clojure.core/refer 'clojure.set :only '[union difference]))
+      (let [src (synth/reconstruct-ns-source ref-ns-sym)
+            _ (eval (read-string src))   ;; must not throw
+            evaled-nsobj (the-ns ref-ns-sym)]
+        (is (contains? (set (keys (ns-refers evaled-nsobj))) 'union)
+            "referred symbol union must be present after round-trip")
+        (is (contains? (set (keys (ns-refers evaled-nsobj))) 'difference)
+            "referred symbol difference must be present after round-trip")
+        (is (str/includes? src
+                           (str ":refer [" (str/join " " (sort ["difference" "union"])) "]"))
+            "source must contain a proper nested :refer clause with sorted symbols"))))
+
+  (testing ":refer-clojure clause is emitted as a list, not a vector"
+    (let [ex-ns-sym 'fake.eval-exclude]
+      (create-ns ex-ns-sym)
+      (binding [*ns* (the-ns ex-ns-sym)]
+        (clojure.core/refer-clojure :exclude '[read-string]))
+      (let [src (synth/reconstruct-ns-source ex-ns-sym)
+            _ (eval (read-string src))]  ;; must not throw
+        (is (re-find #"\(:refer-clojure" src)
+            ":refer-clojure clause must be a list form, not a vector")))))
 
 ;; ---------------------------------------------------------------------------
-;; Utility fns
+;; Callsite identity edge cases
 ;; ---------------------------------------------------------------------------
+
+(deftest test-assign-callsite-ids--empty
+  (is (= [] (ann.callsite/assign-callsite-ids []))
+      "empty callsite vector must return empty without crashing"))
 
 (deftest test-ns->resource-base
   (is (= "clara/server/tools/graph/rules/analyze_test_rules"

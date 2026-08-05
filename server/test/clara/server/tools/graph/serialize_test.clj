@@ -1,5 +1,6 @@
 (ns clara.server.tools.graph.serialize-test
   (:require [clara.server.tools.graph.serialize :as s]
+            [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]))
@@ -228,3 +229,126 @@
       (is (string? (:constraints (first serialized))))
       (is (= ":type-b" (get-in (second serialized) [:type :name])))
       (is (string? (:constraints (second serialized)))))))
+
+;; ---------------------------------------------------------------------------
+;; serialize-lhs-form — condition-type dispatch
+;; ---------------------------------------------------------------------------
+
+(defn- lhs-form-contains?
+  "True when `lhs-form-str` contains `kw` as a keyword operator (preceded by
+   `:` or whitespace + `:`, not as part of a larger word)."
+  [lhs-form-str kw]
+  (boolean (re-find (re-pattern (str "(?:^|\\s|\\[):" (name kw) "\\b"))
+                    lhs-form-str)))
+
+(deftest test-serialize-lhs-form--leaf-fact
+  (testing "Plain :fact condition renders correctly"
+    (let [lhs [{:type 'my.ns/Foo
+                :fact-binding '?f
+                :constraints '[(= ?f 1)]}]
+          form (s/serialize-lhs-form lhs)]
+      (is (str/includes? form "my.ns/Foo")
+          "form must contain the fact type")
+      (is (str/includes? form "?f")
+          "form must contain the fact binding")
+      (is (str/includes? form "(= ?f 1)")
+          "form must contain constraints"))))
+
+(deftest test-serialize-lhs-form--test
+  (testing ":test condition renders as a leaf"
+    (let [lhs [{:type :test
+                :constraints '[(> ?n 0)]}]
+          form (s/serialize-lhs-form lhs)]
+      (is (str/includes? form ">")
+          "form must contain the test constraint"))))
+
+(deftest test-serialize-lhs-form--not
+  (testing ":not group preserves the operator and nested conditions"
+    (let [lhs [[:not {:type 'my.ns/Order
+                      :fact-binding '?o
+                      :constraints '[(= ?o ?order-id)]}]]
+          form (s/serialize-lhs-form lhs)]
+      (is (lhs-form-contains? form :not)
+          ":not operator must appear in the rendered form")
+      (is (str/includes? form "my.ns/Order")
+          "nested fact type must survive the group"))))
+
+(deftest test-serialize-lhs-form--or
+  (testing ":or group preserves the operator and all branches"
+    (let [lhs [[:or {:type 'my.ns/WebOrder
+                     :fact-binding '?o
+                     :constraints '[(= ?o ?id)]}
+                     {:type 'my.ns/PhoneOrder
+                      :fact-binding '?o
+                      :constraints '[(= ?o ?id)]}]]
+          form (s/serialize-lhs-form lhs)]
+      (is (lhs-form-contains? form :or)
+          ":or operator must appear in the rendered form")
+      (is (str/includes? form "my.ns/WebOrder")
+          "first branch type must survive")
+      (is (str/includes? form "my.ns/PhoneOrder")
+          "second branch type must survive"))))
+
+(deftest test-serialize-lhs-form--and
+  (testing ":and group preserves the operator"
+    (let [lhs [[:and {:type 'my.ns/A
+                      :fact-binding '?a
+                      :constraints '[(= ?a ?id)]}
+                     {:type 'my.ns/B
+                      :fact-binding '?b
+                      :constraints '[(= ?b ?id)]}]]
+          form (s/serialize-lhs-form lhs)]
+      (is (lhs-form-contains? form :and)
+          ":and operator must appear in the rendered form")
+      (is (str/includes? form "my.ns/A"))
+      (is (str/includes? form "my.ns/B")))))
+
+(deftest test-serialize-lhs-form--exists
+  (testing ":exists group preserves the operator"
+    (let [lhs [[:exists {:type 'my.ns/Child
+                         :fact-binding '?c
+                         :constraints '[(= ?c ?id)]}]]
+          form (s/serialize-lhs-form lhs)]
+      (is (lhs-form-contains? form :exists)
+          ":exists operator must appear in the rendered form")
+      (is (str/includes? form "my.ns/Child")))))
+
+(deftest test-serialize-lhs-form--single-group-lhs
+  (testing "Rule whose entire LHS is one boolean group renders correctly"
+    (let [lhs [[:or {:type 'my.ns/A :fact-binding '?a}
+                    {:type 'my.ns/B :fact-binding '?b}]]
+          form (s/serialize-lhs-form lhs)]
+      (is (lhs-form-contains? form :or)
+          ":or operator must appear when LHS is a single group")
+      (is (str/includes? form "my.ns/A"))
+      (is (str/includes? form "my.ns/B"))
+      (is (not (str/includes? form "[]:"))
+          "form must not render as empty brackets"))))
+
+(deftest test-serialize-lhs-form--accumulator-from-group
+  (testing "Group nested inside an accumulator's :from renders recursively"
+    (let [lhs [{:accumulator '(acc/all)
+                :result-binding '?result
+                :from [:not {:type 'my.ns/Done
+                             :fact-binding '?d}]}]
+          form (s/serialize-lhs-form lhs)]
+      (is (str/includes? form "acc/all")
+          "accumulator fn must appear")
+      (is (lhs-form-contains? form :not)
+          ":not inside :from must be preserved")
+      (is (str/includes? form "my.ns/Done")
+          "nested fact type inside :from must survive"))))
+
+(deftest test-serialize-lhs-form--fact-type-invariant
+  (testing "Every fact type in extract-lhs-fact-types appears in serialize-lhs-form output"
+    (let [lhs [{:type 'my.ns/X :fact-binding '?x :constraints '[(= ?x 1)]}
+               [:not {:type 'my.ns/Y :fact-binding '?y}]
+               {:accumulator '(acc/min)
+                :result-binding '?m
+                :from {:type 'my.ns/Z :fact-binding '?z}}]
+          lhs-form-str (s/serialize-lhs-form lhs)
+          fact-types (core/extract-lhs-fact-types lhs)]
+      (is (seq fact-types) "LHS must yield at least one fact type")
+      (doseq [ft fact-types]
+        (is (str/includes? lhs-form-str (str ft))
+            (str "fact type " ft " must appear in serialize-lhs-form output"))))))

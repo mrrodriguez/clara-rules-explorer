@@ -136,7 +136,7 @@
       (let [ids (mapv (fn [prefix h o]
                         (format "%s:%s:%d" prefix (subs h 0 (min len (count h))) o))
                       prefixes hashes ordinals)]
-        (if (or (apply distinct? ids) (>= len 64))
+        (if (or (empty? ids) (apply distinct? ids) (>= len 64))
           (mapv (fn [c id] (assoc c :callsite-id id)) callsites ids)
           (recur (inc len)))))))
 
