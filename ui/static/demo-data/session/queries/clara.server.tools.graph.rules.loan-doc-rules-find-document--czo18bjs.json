@@ -1,17 +1,18 @@
 {
 	"matches": [
 		{
-			"id": 2,
+			"id": 10,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
-				"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
 				"known": true
 			},
 			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"?document-check": {
 					"app-id": "app-1",
-					"doc-type": "paycheck"
+					"status": "pass",
+					"message": "All required documents found"
 				},
 				"?app-id": "app-1"
 			},

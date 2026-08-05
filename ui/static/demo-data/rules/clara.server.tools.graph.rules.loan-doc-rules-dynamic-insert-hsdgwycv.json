@@ -9,7 +9,9 @@
 			}
 		],
 		"resolution": "partial",
-		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.FraudCheck"]
+		"fact-instance-derived-types": [
+			"clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"
+		]
 	},
 	"source-rule": false,
 	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n (= ?app-id app-id)\n (= status :pass)]\n",
@@ -37,8 +39,8 @@
 	"notes": null,
 	"insert-types": [
 		{
-			"name": "\"clara.server.tools.graph.rules.loan_app_facts.FraudCheck\"",
-			"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-crxd5as9",
+			"name": "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules.ComplianceRevi-nx3kfyoz",
 			"known": true
 		}
 	],

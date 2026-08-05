@@ -1,13 +1,13 @@
 {
 	"matches": [
 		{
-			"id": 9,
+			"id": 1,
 			"type": {
-				"name": "clojure.lang.PersistentVector",
-				"id": "clojure.lang.PersistentVector-8g4ux02t",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
 				"known": true
 			},
-			"ns": "clojure.lang",
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"?app-id": "app-1"
 			},
@@ -59,10 +59,10 @@
 			]
 		},
 		{
-			"id": 2,
+			"id": 10,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
-				"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
 				"known": true
 			},
 			"ns": "clara.server.tools.graph.rules.loan_app_facts",
@@ -112,13 +112,13 @@
 			]
 		},
 		{
-			"id": 8,
+			"id": 11,
 			"type": {
-				"name": "clojure.lang.PersistentVector",
-				"id": "clojure.lang.PersistentVector-8g4ux02t",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
 				"known": true
 			},
-			"ns": "clojure.lang",
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"?app-id": "app-1"
 			},
@@ -134,13 +134,13 @@
 			]
 		},
 		{
-			"id": 11,
+			"id": 12,
 			"type": {
-				"name": "clojure.lang.Symbol",
-				"id": "clojure.lang.Symbol-lmnfptrf",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-9sjv10vl",
 				"known": true
 			},
-			"ns": "clojure.lang",
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"?app-id": "app-1"
 			},
@@ -160,12 +160,30 @@
 		{
 			"id": 13,
 			"type": {
-				"name": "clojure.lang.Symbol",
-				"id": "clojure.lang.Symbol-lmnfptrf",
+				"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+				"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
 				"known": true
 			},
-			"ns": "clojure.lang",
-			"data": "clara.server.tools.graph.rules.loan-app-facts/map->IdentityCheck",
+			"ns": "clara.server.tools.graph.rules.loan_app_rules",
+			"data": {
+				"app-id": "app-1",
+				"status": "approved",
+				"message": "Application approved",
+				"passed-checks": [
+					{
+						"check-type": "document"
+					},
+					{
+						"check-type": "identity"
+					},
+					{
+						"check-type": "fraud"
+					}
+				],
+				"failed-checks": null,
+				"checks-complete": null,
+				"checks-incomplete": null
+			},
 			"is-root": false,
 			"inserted-from": [
 				{

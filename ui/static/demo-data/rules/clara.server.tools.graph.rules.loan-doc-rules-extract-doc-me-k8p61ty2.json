@@ -1,4 +1,26 @@
 {
+	"downstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": ":extract-doc-meta",
+						"id": "extract-doc-meta-is5qkiib",
+						"known": true
+					},
+					"consumer-type": {
+						"name": ":extract-doc-meta",
+						"id": "extract-doc-meta-is5qkiib",
+						"known": true
+					}
+				}
+			]
+		}
+	],
 	"dynamic-insert-types-detected": {
 		"callsites": [
 			{
@@ -9,7 +31,7 @@
 			}
 		],
 		"resolution": "partial",
-		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"]
+		"fact-instance-derived-types": [":extract-doc-meta"]
 	},
 	"source-rule": true,
 	"lhs-form": "",
@@ -22,13 +44,13 @@
 	"notes": null,
 	"insert-types": [
 		{
-			"name": "\"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck\"",
-			"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-th8jjfdm",
+			"name": ":extract-doc-meta",
+			"id": "extract-doc-meta-is5qkiib",
 			"known": true
 		}
 	],
 	"rhs-form": "(do\n (clojure.core/let\n  [resolved__25945__auto__ #'extract-doc-meta]\n  (clara.rules/insert! resolved__25945__auto__)))\n",
 	"doc": null,
-	"sink-rule": true,
+	"sink-rule": false,
 	"props": {}
 }

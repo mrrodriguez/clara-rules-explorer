@@ -1,30 +1,43 @@
 {
 	"id": 7,
 	"type": {
-		"name": "clojure.lang.PersistentVector",
-		"id": "clojure.lang.PersistentVector-8g4ux02t",
+		"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+		"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
 		"known": true
 	},
-	"ns": "clojure.lang",
-	"data": [
-		"clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",
-		{
-			"app-id": "app-1",
-			"doc-type": "id-card"
-		},
-		{
-			"app-id": "app-1",
-			"doc-type": "id-card"
-		}
-	],
+	"ns": "clara.server.tools.graph.rules.loan_app_facts",
+	"data": {
+		"app-id": "app-1",
+		"docs": [
+			{
+				"app-id": "app-1",
+				"doc-type": "id-card"
+			},
+			{
+				"app-id": "app-1",
+				"doc-type": "paycheck"
+			},
+			{
+				"app-id": "app-1",
+				"doc-type": "bank-statement"
+			}
+		]
+	},
 	"is-root": false,
 	"inserted-from": [
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-3snojfsz",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}
 	],
-	"used-by": []
+	"used-by": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	]
 }

@@ -37,8 +37,7 @@
 				]
 			}
 		],
-		"resolution": "partial",
-		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"]
+		"resolution": "full"
 	},
 	"source-rule": true,
 	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[:?docs\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.GivenDocument\n  (= ?app-id app-id)]]\n",
@@ -85,11 +84,6 @@
 		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
 			"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
-			"known": true
-		},
-		{
-			"name": "\"clara.server.tools.graph.rules.loan_app_facts.IdentityCheck\"",
-			"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-th8jjfdm",
 			"known": true
 		}
 	],

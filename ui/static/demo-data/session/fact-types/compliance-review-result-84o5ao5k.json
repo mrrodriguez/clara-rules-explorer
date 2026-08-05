@@ -1,0 +1,42 @@
+{
+	"name": ":compliance-review-result",
+	"id": "compliance-review-result-84o5ao5k",
+	"ns": null,
+	"count": 1,
+	"inserted-from": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-ma1dm3n7",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 14,
+					"type": {
+						"name": ":compliance-review-result",
+						"id": "compliance-review-result-84o5ao5k",
+						"known": true
+					},
+					"ns": null,
+					"data": {
+						"app-id": "app-1",
+						"status": "pass",
+						"reviewer": "metadata-review"
+					},
+					"is-root": false,
+					"inserted-from": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
+							"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-ma1dm3n7",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					],
+					"used-by": []
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		}
+	],
+	"used-by": [],
+	"ids": [14]
+}

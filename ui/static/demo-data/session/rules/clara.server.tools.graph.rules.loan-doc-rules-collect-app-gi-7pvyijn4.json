@@ -1,20 +1,29 @@
 {
 	"matches": [
 		{
-			"id": 9,
+			"id": 1,
 			"type": {
-				"name": "clojure.lang.PersistentVector",
-				"id": "clojure.lang.PersistentVector-8g4ux02t",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
 				"known": true
 			},
-			"ns": "clojure.lang",
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"?app-id": "app-1",
-				"?docs": {
-					"app-id": "app-1",
-					"status": "pass",
-					"message": "All required documents found"
-				}
+				"?docs": [
+					{
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					},
+					{
+						"app-id": "app-1",
+						"doc-type": "paycheck"
+					},
+					{
+						"app-id": "app-1",
+						"doc-type": "bank-statement"
+					}
+				]
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -64,20 +73,29 @@
 			]
 		},
 		{
-			"id": 12,
+			"id": 3,
 			"type": {
-				"name": "clojure.lang.Symbol",
-				"id": "clojure.lang.Symbol-lmnfptrf",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
 				"known": true
 			},
-			"ns": "clojure.lang",
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"?app-id": "app-1",
-				"?docs": {
-					"app-id": "app-1",
-					"status": "pass",
-					"message": "All required documents found"
-				}
+				"?docs": [
+					{
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					},
+					{
+						"app-id": "app-1",
+						"doc-type": "paycheck"
+					},
+					{
+						"app-id": "app-1",
+						"doc-type": "bank-statement"
+					}
+				]
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -103,7 +121,7 @@
 			]
 		},
 		{
-			"id": 1,
+			"id": 4,
 			"type": {
 				"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
 				"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
@@ -112,11 +130,20 @@
 			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"?app-id": "app-1",
-				"?docs": {
-					"app-id": "app-1",
-					"status": "pass",
-					"message": "All required documents found"
-				}
+				"?docs": [
+					{
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					},
+					{
+						"app-id": "app-1",
+						"doc-type": "paycheck"
+					},
+					{
+						"app-id": "app-1",
+						"doc-type": "bank-statement"
+					}
+				]
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -136,7 +163,7 @@
 			]
 		},
 		{
-			"id": 1,
+			"id": 2,
 			"type": {
 				"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
 				"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
@@ -145,11 +172,20 @@
 			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"?app-id": "app-1",
-				"?docs": {
-					"app-id": "app-1",
-					"status": "pass",
-					"message": "All required documents found"
-				}
+				"?docs": [
+					{
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					},
+					{
+						"app-id": "app-1",
+						"doc-type": "paycheck"
+					},
+					{
+						"app-id": "app-1",
+						"doc-type": "bank-statement"
+					}
+				]
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -171,26 +207,32 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 3,
+			"id": 7,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
-				"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
 				"known": true
 			},
 			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"app-id": "app-1",
-				"status": "pass",
-				"message": null
+				"docs": [
+					{
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					},
+					{
+						"app-id": "app-1",
+						"doc-type": "paycheck"
+					},
+					{
+						"app-id": "app-1",
+						"doc-type": "bank-statement"
+					}
+				]
 			},
 			"is-root": false,
 			"inserted-from": [
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-extract-doc-me-k8p61ty2",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
@@ -199,12 +241,6 @@
 				}
 			],
 			"used-by": [
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",

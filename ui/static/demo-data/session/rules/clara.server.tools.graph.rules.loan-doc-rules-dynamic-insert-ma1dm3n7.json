@@ -1,10 +1,10 @@
 {
 	"matches": [
 		{
-			"id": 2,
+			"id": 10,
 			"type": {
-				"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
-				"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
 				"known": true
 			},
 			"ns": "clara.server.tools.graph.rules.loan_app_facts",
@@ -56,29 +56,20 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 5,
+			"id": 14,
 			"type": {
-				"name": "clojure.lang.PersistentVector",
-				"id": "clojure.lang.PersistentVector-8g4ux02t",
+				"name": ":compliance-review-result",
+				"id": "compliance-review-result-84o5ao5k",
 				"known": true
 			},
-			"ns": "clojure.lang",
-			"data": [
-				[
-					{
-						"app-id": "app-1",
-						"doc-type": "bank-statement"
-					}
-				]
-			],
+			"ns": null,
+			"data": {
+				"app-id": "app-1",
+				"status": "pass",
+				"reviewer": "metadata-review"
+			},
 			"is-root": false,
 			"inserted-from": [
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-id-fhyj46dq",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-ma1dm3n7",

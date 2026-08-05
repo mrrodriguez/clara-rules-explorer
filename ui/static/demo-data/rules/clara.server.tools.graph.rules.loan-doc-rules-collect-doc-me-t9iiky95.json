@@ -15,10 +15,9 @@
 				]
 			}
 		],
-		"resolution": "partial",
-		"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_app_facts.FraudCheck"]
+		"resolution": "full"
 	},
-	"source-rule": true,
+	"source-rule": false,
 	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[:?docs\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.GivenDocument\n  (= ?app-id app-id)]]\n[:?extract-doc-meta <- :extract-doc-meta]\n",
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
@@ -78,14 +77,31 @@
 			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
 			"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-9kes1f1s",
 			"known": true
-		},
-		{
-			"name": "\"clara.server.tools.graph.rules.loan_app_facts.FraudCheck\"",
-			"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-crxd5as9",
-			"known": true
 		}
 	],
 	"rhs-form": "(do\n (let\n  [doc-metas (mapv ?extract-doc-meta ?docs)]\n  (r/insert!\n   (laf/map->AllGivenDocumentsMeta\n    {:app-id ?app-id, :doc-metas doc-metas}))))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-extract-doc-me-k8p61ty2",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": ":extract-doc-meta",
+						"id": "extract-doc-meta-is5qkiib",
+						"known": true
+					},
+					"consumer-type": {
+						"name": ":extract-doc-meta",
+						"id": "extract-doc-meta-is5qkiib",
+						"known": true
+					}
+				}
+			]
+		}
+	],
 	"doc": null,
 	"sink-rule": true,
 	"props": {}

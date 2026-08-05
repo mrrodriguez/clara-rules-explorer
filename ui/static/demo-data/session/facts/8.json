@@ -1,29 +1,34 @@
 {
 	"id": 8,
 	"type": {
-		"name": "clojure.lang.PersistentVector",
-		"id": "clojure.lang.PersistentVector-8g4ux02t",
+		"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+		"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
 		"known": true
 	},
-	"ns": "clojure.lang",
-	"data": [
-		"clara.server.tools.graph.rules.loan-app-facts/map->GivenDocument",
+	"ns": "clara.server.tools.graph.rules.loan_app_facts",
+	"data": {
+		"app-id": "app-1",
+		"docs": [
+			{
+				"app-id": "app-1",
+				"doc-type": "id-card"
+			}
+		]
+	},
+	"is-root": false,
+	"inserted-from": [
 		{
-			"app-id": "app-1",
-			"doc-type": "id-card"
-		},
-		{
-			"app-id": "app-1",
-			"doc-type": "id-card"
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-re-q9oiwl3n",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
 		}
 	],
-	"is-root": true,
-	"inserted-from": [],
 	"used-by": [
 		{
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
-			"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
-			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}
 	]

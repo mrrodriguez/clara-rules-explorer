@@ -1,19 +1,21 @@
 {
 	"matches": [
 		{
-			"id": 9,
+			"id": 1,
 			"type": {
-				"name": "clojure.lang.PersistentVector",
-				"id": "clojure.lang.PersistentVector-8g4ux02t",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
 				"known": true
 			},
-			"ns": "clojure.lang",
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"?app-id": "app-1",
-				"?docs": {
-					"app-id": "app-1",
-					"doc-type": "bank-statement"
-				}
+				"?docs": [
+					{
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					}
+				]
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -63,19 +65,21 @@
 			]
 		},
 		{
-			"id": 12,
+			"id": 3,
 			"type": {
-				"name": "clojure.lang.Symbol",
-				"id": "clojure.lang.Symbol-lmnfptrf",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
 				"known": true
 			},
-			"ns": "clojure.lang",
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
 			"data": {
 				"?app-id": "app-1",
-				"?docs": {
-					"app-id": "app-1",
-					"doc-type": "bank-statement"
-				}
+				"?docs": [
+					{
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					}
+				]
 			},
 			"is-root": true,
 			"inserted-from": [],
@@ -103,32 +107,27 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 5,
+			"id": 16,
 			"type": {
-				"name": "clojure.lang.PersistentVector",
-				"id": "clojure.lang.PersistentVector-8g4ux02t",
+				"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
+				"id": "clara.server.tools.graph.rules.loan-doc-rules.AllIdCardGiven-4xiyfnsl",
 				"known": true
 			},
-			"ns": "clojure.lang",
-			"data": [
-				[
+			"ns": "clara.server.tools.graph.rules.loan_doc_rules",
+			"data": {
+				"app-id": "app-1",
+				"docs": [
 					{
 						"app-id": "app-1",
-						"doc-type": "bank-statement"
+						"doc-type": "id-card"
 					}
 				]
-			],
+			},
 			"is-root": false,
 			"inserted-from": [
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-id-fhyj46dq",
-					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-					"type": "rule"
-				},
-				{
-					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
-					"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-ma1dm3n7",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}

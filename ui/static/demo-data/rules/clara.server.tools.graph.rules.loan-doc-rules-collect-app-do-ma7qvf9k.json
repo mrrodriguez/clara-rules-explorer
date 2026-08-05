@@ -72,8 +72,7 @@
 				]
 			}
 		],
-		"resolution": "partial",
-		"fact-instance-derived-types": ["clojure.lang.PersistentVector"]
+		"resolution": "full"
 	},
 	"source-rule": false,
 	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments\n (= ?app-id app-id)\n (= ?given-docs docs)]\n[clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments\n (= ?app-id app-id)\n (= ?required-docs docs)]\n",
@@ -129,11 +128,6 @@
 		{
 			"name": ":loan-doc-rules/document-check-input",
 			"id": "loan-doc-rules-document-check-input-bsfqrt8a",
-			"known": true
-		},
-		{
-			"name": "\"clojure.lang.PersistentVector\"",
-			"id": "clojure.lang.PersistentVector-rijubkki",
 			"known": true
 		}
 	],
