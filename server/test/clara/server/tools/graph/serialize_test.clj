@@ -278,9 +278,9 @@
     (let [lhs [[:or {:type 'my.ns/WebOrder
                      :fact-binding '?o
                      :constraints '[(= ?o ?id)]}
-                     {:type 'my.ns/PhoneOrder
-                      :fact-binding '?o
-                      :constraints '[(= ?o ?id)]}]]
+                {:type 'my.ns/PhoneOrder
+                 :fact-binding '?o
+                 :constraints '[(= ?o ?id)]}]]
           form (s/serialize-lhs-form lhs)]
       (is (lhs-form-contains? form :or)
           ":or operator must appear in the rendered form")
@@ -294,9 +294,9 @@
     (let [lhs [[:and {:type 'my.ns/A
                       :fact-binding '?a
                       :constraints '[(= ?a ?id)]}
-                     {:type 'my.ns/B
-                      :fact-binding '?b
-                      :constraints '[(= ?b ?id)]}]]
+                {:type 'my.ns/B
+                 :fact-binding '?b
+                 :constraints '[(= ?b ?id)]}]]
           form (s/serialize-lhs-form lhs)]
       (is (lhs-form-contains? form :and)
           ":and operator must appear in the rendered form")
@@ -316,7 +316,7 @@
 (deftest test-serialize-lhs-form--single-group-lhs
   (testing "Rule whose entire LHS is one boolean group renders correctly"
     (let [lhs [[:or {:type 'my.ns/A :fact-binding '?a}
-                    {:type 'my.ns/B :fact-binding '?b}]]
+                {:type 'my.ns/B :fact-binding '?b}]]
           form (s/serialize-lhs-form lhs)]
       (is (lhs-form-contains? form :or)
           ":or operator must appear when LHS is a single group")

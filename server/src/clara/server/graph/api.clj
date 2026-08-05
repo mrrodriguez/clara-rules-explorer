@@ -23,7 +23,8 @@
   "Basic counts for the dashboard."
   {:rule-count s/Int
    :query-count s/Int
-   :fact-type-count s/Int})
+   :fact-type-count s/Int
+   :working-memory? s/Bool})
 
 (s/defschema TypeReference
   "A linkable fact-type reference: `name` is the kind-explicit serialized
@@ -268,7 +269,7 @@
    rule→annotation map (the caller unwraps any MergedAnnotations) and returns
    a bare map."
   [session bare-annotations]
-  (if (instance? clara.rules.engine.LocalSession session)
+  (if (core/working-memory-available? session)
     (analyze/enrich-annotations-from-session session bare-annotations)
     bare-annotations))
 
@@ -315,35 +316,30 @@
   (:analysis (get-analysis-state session-atom annotations-atom analysis-cache)))
 
 (defn- get-snapshot
-  "Returns the cached session snapshot, rebuilding when the session or the
-   analysis's fact-type known-set has changed.
-
-   The known-set is derived from `get-analysis-state` — the validated,
-   current analysis — never read passively from the cache: every session
-   request first confirms the analysis is coherent with the current session
-   + annotations (rebuilding it when either has been swapped/reloaded), and
-   only then checks the snapshot cache.  A session fact type absent from the
-   analysis that serves the analysis endpoints is therefore honestly marked
-   unknown — the UI must not link a session type to a /fact-types/:id route
-   the analysis cannot serve."
+  "Returns the cached session snapshot when working memory is available,
+   rebuilding when the session or the analysis's fact-type known-set has
+   changed.  Returns nil (with no error) when working memory is unavailable,
+   so callers can branch on the result."
   [session-atom snapshot-cache analysis-cache annotations-atom]
-  (let [{:keys [session analysis]} (get-analysis-state session-atom annotations-atom analysis-cache)
-        known-set (-> analysis :fact-types keys set)
-        cached @snapshot-cache]
-    (if (and cached
-             (identical? (:session cached) session)
-             (= (:known-set cached) known-set))
-      (:snapshot cached)
-      (let [snapshot (memory/session-snapshot session known-set)]
-        (reset! snapshot-cache {:session session
-                                :known-set known-set
-                                :snapshot snapshot})
-        snapshot))))
+  (let [{:keys [session analysis]} (get-analysis-state session-atom annotations-atom analysis-cache)]
+    (when (core/working-memory-available? session)
+      (let [known-set (-> analysis :fact-types keys set)
+            cached @snapshot-cache]
+        (if (and cached
+                 (identical? (:session cached) session)
+                 (= (:known-set cached) known-set))
+          (:snapshot cached)
+          (let [snapshot (memory/session-snapshot session known-set)]
+            (reset! snapshot-cache {:session session
+                                    :known-set known-set
+                                    :snapshot snapshot})
+            snapshot))))))
 
 (s/defn handle-get-rulebase-summary :- {:status (s/eq 200) :body RulebaseSummary}
   [session-atom annotations-atom analysis-cache _req]
   {:status 200
-   :body (core/rulebase-summary (get-analysis session-atom annotations-atom analysis-cache))})
+   :body (assoc (core/rulebase-summary (get-analysis session-atom annotations-atom analysis-cache))
+                :working-memory? (core/working-memory-available? @session-atom))})
 
 (defn- handle-get-analysis
   [session-atom annotations-atom analysis-cache _req]
@@ -395,64 +391,80 @@
       {:status 200 :body fact-type}
       {:status 404 :body {:error "Fact type not found"}})))
 
+(def ^:private no-working-memory-response
+  {:status 409
+   :body {:error "No working memory: the server was started with a rulebase, not a session"
+          :reason :no-working-memory}})
+
+(defn- with-snapshot
+  "Calls `get-snapshot` and invokes `f` with the snapshot.  Returns 409 when
+   working memory is unavailable."
+  [session-atom snapshot-cache analysis-cache annotations-atom f]
+  (if-let [snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)]
+    (f snapshot)
+    no-working-memory-response))
+
 (s/defn handle-get-session-fact-types
   :- {:status (s/eq 200) :body {:types [SessionFactTypeItem] :total-count s/Int}}
   [session-atom snapshot-cache analysis-cache annotations-atom _req]
-  (let [snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)]
-    {:status 200
-     :body (ft/session-fact-types-summary snapshot)}))
+  (with-snapshot session-atom snapshot-cache analysis-cache annotations-atom
+    (fn [snapshot]
+      {:status 200
+       :body (ft/session-fact-types-summary snapshot)})))
 
 (s/defn handle-get-session-fact-type
   :- GetSessionFactTypeResponse
   [session-atom snapshot-cache analysis-cache annotations-atom req]
-  (let [id (get-in req [:path-params :id])
-        snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
-        name (get (:fact-type-id-index snapshot) id)
-        type-info (get (:fact-types snapshot) name)]
-    (if type-info
-      {:status 200 :body type-info}
-      {:status 404 :body {:error "Fact type not found in session"}})))
+  (with-snapshot session-atom snapshot-cache analysis-cache annotations-atom
+    (fn [snapshot]
+      (let [id (get-in req [:path-params :id])
+            name (get (:fact-type-id-index snapshot) id)
+            type-info (get (:fact-types snapshot) name)]
+        (if type-info
+          {:status 200 :body type-info}
+          {:status 404 :body {:error "Fact type not found in session"}})))))
 
 (s/defn handle-get-session-fact
   :- GetSessionFactResponse
   [session-atom snapshot-cache analysis-cache annotations-atom req]
-  (let [id (Integer/parseInt (get-in req [:path-params :id]))
-        snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
-        fact (get-in snapshot [:facts id])]
-    (if fact
-      {:status 200 :body fact}
-      {:status 404 :body {:error "Fact not found in session"}})))
+  (with-snapshot session-atom snapshot-cache analysis-cache annotations-atom
+    (fn [snapshot]
+      (let [id (Integer/parseInt (get-in req [:path-params :id]))
+            fact (get-in snapshot [:facts id])]
+        (if fact
+          {:status 200 :body fact}
+          {:status 404 :body {:error "Fact not found in session"}})))))
 
 (s/defn handle-get-session-rule
   :- GetSessionRuleResponse
   [session-atom snapshot-cache analysis-cache annotations-atom req]
-  (let [id (get-in req [:path-params :id])
-        snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
-        name (get (:rule-id-index snapshot) id)
-        rule-activity (memory/get-session-rule-activity snapshot name)]
-    (if rule-activity
-      {:status 200 :body rule-activity}
-      {:status 404 :body {:error "Rule matches not found"}})))
+  (with-snapshot session-atom snapshot-cache analysis-cache annotations-atom
+    (fn [snapshot]
+      (let [id (get-in req [:path-params :id])
+            name (get (:rule-id-index snapshot) id)
+            rule-activity (memory/get-session-rule-activity snapshot name)]
+        (if rule-activity
+          {:status 200 :body rule-activity}
+          {:status 404 :body {:error "Rule matches not found"}})))))
 
 (s/defn handle-get-session-query
   :- GetSessionQueryResponse
   [session-atom snapshot-cache analysis-cache annotations-atom req]
-  (let [id (get-in req [:path-params :id])
-        snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
-        name (get (:query-id-index snapshot) id)
-        query-activity (memory/get-session-query-activity snapshot name)]
-    (if query-activity
-      {:status 200 :body query-activity}
-      {:status 404 :body {:error "Query matches not found"}})))
+  (with-snapshot session-atom snapshot-cache analysis-cache annotations-atom
+    (fn [snapshot]
+      (let [id (get-in req [:path-params :id])
+            name (get (:query-id-index snapshot) id)
+            query-activity (memory/get-session-query-activity snapshot name)]
+        (if query-activity
+          {:status 200 :body query-activity}
+          {:status 404 :body {:error "Query matches not found"}})))))
 
 (defn- handle-get-session-snapshot
   [session-atom snapshot-cache analysis-cache annotations-atom _req]
-  {:status 200
-   ;; :fact-raw-types is an internal enrichment index (raw Class/keyword/...
-   ;; objects that do not serialize to JSON); the served snapshot keeps only
-   ;; the serialized, id-indexed views.
-   :body (dissoc (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
-                 :fact-raw-types)})
+  (with-snapshot session-atom snapshot-cache analysis-cache annotations-atom
+    (fn [snapshot]
+      {:status 200
+       :body (dissoc snapshot :fact-raw-types)})))
 
 (s/defn handle-get-annotations :- {:status (s/eq 200) :body AnnotationsMap}
   [_session-atom annotations-atom _req]
