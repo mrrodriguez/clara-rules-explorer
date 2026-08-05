@@ -375,22 +375,22 @@
   (testing "Fressian fact round-trip preserves correct fact count"
     (let [session (run-loan-app-rules)
           {:keys [memory]} (eng/components session)
-          {:keys [indexed-facts]} (d/indexed-session-memory-state memory)]
+          {:keys [indexed-facts]} (d/indexed-session-memory-state memory)
+          baos (java.io.ByteArrayOutputStream.)]
       ;; Serialize facts to bytes (same pattern as FressianFactWriter)
-      (let [baos (java.io.ByteArrayOutputStream.)]
-        (with-open [w (fres/create-writer baos :handlers df/write-handler-lookup)]
-          (binding [d/*clj-struct-holder* (java.util.IdentityHashMap.)]
-            (doseq [fact indexed-facts]
-              (fres/write-object w fact))))
-        ;; Deserialize via FressianFactReader
-        (let [bais (java.io.ByteArrayInputStream. (.toByteArray baos))
-              reader (main/->FressianFactReader bais)
-              deserialized (d/deserialize-facts reader)]
-          (is (= (count indexed-facts) (count deserialized))
-              (str "Fact count mismatch after Fressian round-trip. "
-                   "Expected " (count indexed-facts)
-                   " got " (count deserialized)
-                   ". Double-add bug in FressianFactReader?")))))))
+      (with-open [w (fres/create-writer baos :handlers df/write-handler-lookup)]
+        (binding [d/*clj-struct-holder* (java.util.IdentityHashMap.)]
+          (doseq [fact indexed-facts]
+            (fres/write-object w fact))))
+      ;; Deserialize via FressianFactReader
+      (let [bais (java.io.ByteArrayInputStream. (.toByteArray baos))
+            reader (main/->FressianFactReader bais)
+            deserialized (d/deserialize-facts reader)]
+        (is (= (count indexed-facts) (count deserialized))
+            (str "Fact count mismatch after Fressian round-trip. "
+                 "Expected " (count indexed-facts)
+                 " got " (count deserialized)
+                 ". Double-add bug in FressianFactReader?"))))))
 
 (deftest ^{:doc "End-to-end: session → serialize → deserialize → snapshot must contain
   only legitimate Clara fact types — no internal Clojure/Java types like
