@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { splitQualifiedName } from '$lib/utils';
+	import { splitDisplayName } from '$lib/utils';
 
 	interface Props {
 		fullName: string;
@@ -8,7 +8,8 @@
 	}
 
 	let { fullName, size = 'md', class: className = '' }: Props = $props();
-	let { name, namespace } = $derived(splitQualifiedName(fullName));
+
+	let { name, namespace } = $derived(splitDisplayName(fullName));
 
 	const fontSizes = {
 		sm: { name: '0.9rem', ns: '0.75rem' },

@@ -3,7 +3,7 @@
 	import RulebaseComponentSummaryHeader from '$lib/components/rulebase/RulebaseComponentSummaryHeader.svelte';
 	import RulebaseComponentSummaryDescription from '$lib/components/rulebase/RulebaseComponentSummaryDescription.svelte';
 	import DependencyRow from '$lib/components/rulebase/DependencyRow.svelte';
-	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
+	import ReferenceCategory from '$lib/components/rulebase/ReferenceCategory.svelte';
 	import LhsTabs from '$lib/components/rulebase/LhsTabs.svelte';
 	import SessionProductionActivity from '$lib/components/rulebase/SessionProductionActivity.svelte';
 	import { queryPath } from '$lib/utils';
@@ -19,7 +19,7 @@
 
 	let { query, activity, fullView = false }: Props = $props();
 
-	let fullViewHref = $derived(resolve(queryPath(query.name, true) as Pathname));
+	let fullViewHref = $derived(resolve(queryPath(query.id, true) as Pathname));
 
 	$effect(() => {
 		if (fullView) {
@@ -35,8 +35,9 @@
 	<RulebaseComponentSummaryHeader
 		type="query"
 		name={query.name}
+		id={query.id}
 		{fullView}
-		href={queryPath(query.name, true)}
+		href={queryPath(query.id, true)}
 	>
 		{#if query.params.length > 0}
 			<div class="ms-4 d-flex align-items-center gap-1">
@@ -59,10 +60,11 @@
 
 				<div class="row g-3">
 					<div class="col-md-12">
-						<ProductionReferenceCategory
+						<ReferenceCategory
 							title="Matched Types"
 							icon="bi-box-arrow-in-right"
 							items={query['lhs-types']}
+							itemKind="type"
 							{fullView}
 						/>
 					</div>

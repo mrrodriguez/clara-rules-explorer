@@ -16,7 +16,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
 		activity,
 		breadcrumbs: [
 			{ label: 'Queries', href: '/queries' },
-			{ label: getShortName(query.name), href: queryPath(query.name) },
+			{ label: getShortName(query.name), href: queryPath(query.id) },
 			{ label: 'Full Details' }
 		]
 	};

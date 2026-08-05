@@ -1,0 +1,90 @@
+{
+	"lhs-form": "[:?outcome\n <-\n clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome\n (= ?app-id app-id)]\n",
+	"ns": "clara.server.tools.graph.rules.loan-app-rules",
+	"name": "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome",
+	"params": ["?app-id"],
+	"lhs-types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+			"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+			"known": true
+		}
+	],
+	"lhs": [
+		{
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+				"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+				"known": true
+			},
+			"constraints": "[\n(= ?app-id app-id)\n]",
+			"fact-binding": "?outcome"
+		}
+	],
+	"id": "clara.server.tools.graph.rules.loan-app-rules-find-app-outco-9qb1iqvl",
+	"notes": null,
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+			"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					}
+				}
+			]
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
+			"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-de-5lgk14oz",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					}
+				}
+			]
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
+			"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-pe-jeh9cbbi",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					}
+				}
+			]
+		}
+	],
+	"doc": null,
+	"props": {}
+}

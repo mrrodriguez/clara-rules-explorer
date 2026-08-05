@@ -1,5 +1,4 @@
 import { base } from '$app/paths';
-import { toRouteId } from '$lib/utils';
 import type {
 	RuleSummary,
 	QuerySummary,
@@ -92,49 +91,43 @@ export async function fetchFactTypesList(
 }
 
 /**
- * Fetches the summary for a specific rule by name.
+ * Fetches the summary for a specific rule by id.
  */
 export async function fetchRule(
-	name: string,
+	id: string,
 	customFetch: typeof fetch = fetch
 ): Promise<RuleSummary> {
-	const response = await customFetch(
-		getUrl(`${API_BASE}/rules/${encodeURIComponent(toRouteId(name))}`)
-	);
+	const response = await customFetch(getUrl(`${API_BASE}/rules/${id}`));
 	if (!response.ok) {
-		throw new Error(`Failed to fetch rule ${name}: ${response.statusText}`);
+		throw new Error(`Failed to fetch rule ${id}: ${response.statusText}`);
 	}
 	return response.json();
 }
 
 /**
- * Fetches the summary for a specific query by name.
+ * Fetches the summary for a specific query by id.
  */
 export async function fetchQuery(
-	name: string,
+	id: string,
 	customFetch: typeof fetch = fetch
 ): Promise<QuerySummary> {
-	const response = await customFetch(
-		getUrl(`${API_BASE}/queries/${encodeURIComponent(toRouteId(name))}`)
-	);
+	const response = await customFetch(getUrl(`${API_BASE}/queries/${id}`));
 	if (!response.ok) {
-		throw new Error(`Failed to fetch query ${name}: ${response.statusText}`);
+		throw new Error(`Failed to fetch query ${id}: ${response.statusText}`);
 	}
 	return response.json();
 }
 
 /**
- * Fetches the summary for a specific fact type by name.
+ * Fetches the summary for a specific fact type by id.
  */
 export async function fetchFactType(
-	name: string,
+	id: string,
 	customFetch: typeof fetch = fetch
 ): Promise<FactTypeSummary> {
-	const response = await customFetch(
-		getUrl(`${API_BASE}/fact-types/${encodeURIComponent(toRouteId(name))}`)
-	);
+	const response = await customFetch(getUrl(`${API_BASE}/fact-types/${id}`));
 	if (!response.ok) {
-		throw new Error(`Failed to fetch fact type ${name}: ${response.statusText}`);
+		throw new Error(`Failed to fetch fact type ${id}: ${response.statusText}`);
 	}
 	return response.json();
 }
@@ -160,14 +153,12 @@ export async function fetchSessionFactTypes(
  * Fetches all instances of a specific fact type in the session.
  */
 export async function fetchSessionFactTypeInstances(
-	typeName: string,
+	id: string,
 	customFetch: typeof fetch = fetch
 ): Promise<SessionFactTypeInstancesResponse> {
-	const response = await customFetch(
-		getUrl(`${API_BASE}/session/fact-types/${encodeURIComponent(toRouteId(typeName))}`)
-	);
+	const response = await customFetch(getUrl(`${API_BASE}/session/fact-types/${id}`));
 	if (!response.ok) {
-		throw new Error(`Failed to fetch instances for type ${typeName}: ${response.statusText}`);
+		throw new Error(`Failed to fetch instances for type ${id}: ${response.statusText}`);
 	}
 	return response.json();
 }
@@ -190,38 +181,26 @@ export async function fetchSessionFactDetail(
  * Fetches facts and matches for a specific rule.
  */
 export async function fetchSessionRuleActivity(
-	ruleName: string,
+	id: string,
 	customFetch: typeof fetch = fetch
 ): Promise<SessionProductionActivityResponse> {
-	const response = await customFetch(
-		getUrl(`${API_BASE}/session/rules/${encodeURIComponent(toRouteId(ruleName))}`)
-	);
+	const response = await customFetch(getUrl(`${API_BASE}/session/rules/${id}`));
 	if (!response.ok) {
-		throw new Error(
-			`Failed to fetch session activity for rule ${ruleName}: ${response.statusText}`
-		);
+		throw new Error(`Failed to fetch session activity for rule ${id}: ${response.statusText}`);
 	}
 	return response.json();
 }
 
 /**
- * --- Phase 2: Session Snapshot Endpoints ---
- */
-
-/**
  * Fetches current result sets and fact IDs for a specific query.
  */
 export async function fetchSessionQueryActivity(
-	queryName: string,
+	id: string,
 	customFetch: typeof fetch = fetch
 ): Promise<SessionProductionActivityResponse> {
-	const response = await customFetch(
-		getUrl(`${API_BASE}/session/queries/${encodeURIComponent(toRouteId(queryName))}`)
-	);
+	const response = await customFetch(getUrl(`${API_BASE}/session/queries/${id}`));
 	if (!response.ok) {
-		throw new Error(
-			`Failed to fetch session activity for query ${queryName}: ${response.statusText}`
-		);
+		throw new Error(`Failed to fetch session activity for query ${id}: ${response.statusText}`);
 	}
 	return response.json();
 }

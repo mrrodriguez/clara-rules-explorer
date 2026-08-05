@@ -16,7 +16,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
 		activity,
 		breadcrumbs: [
 			{ label: 'Rules', href: '/rules' },
-			{ label: getShortName(rule.name), href: rulePath(rule.name) },
+			{ label: getShortName(rule.name), href: rulePath(rule.id) },
 			{ label: 'Full Details' }
 		]
 	};

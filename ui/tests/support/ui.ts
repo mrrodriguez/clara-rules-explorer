@@ -94,6 +94,31 @@ export const ui = {
 		collapseAllButton(page: Page) {
 			return page.locator('button.btn-link').filter({ hasText: 'Collapse all' });
 		},
+		/** Clicks "Expand all" if the button is present and items are not
+		 *  already visible (e.g. single-namespace pages auto-expand). */
+		async expandAll(page: Page) {
+			// Fast-path: if items are already visible, nothing to do.
+			if (await page.locator('a.list-group-item').first().isVisible().catch(() => false)) {
+				return;
+			}
+			const btn = this.expandAllButton(page);
+			if (await btn.isVisible().catch(() => false)) {
+				await btn.click();
+				await page.locator('a.list-group-item').first().waitFor({ state: 'visible', timeout: 5_000 });
+			}
+		},
+		/** Clicks "Collapse all" if the button is present. */
+		async collapseAll(page: Page) {
+			const btn = this.collapseAllButton(page);
+			if (await btn.isVisible().catch(() => false)) {
+				await btn.click();
+				await page
+					.locator('button.list-group-item i.bi-chevron-down')
+					.first()
+					.waitFor({ state: 'hidden', timeout: 5_000 })
+					.catch(() => {});
+			}
+		},
 		/** The empty state message (when no items match) */
 		emptyState(page: Page) {
 			return page.locator('.text-muted.fst-italic');

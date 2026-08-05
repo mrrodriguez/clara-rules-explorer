@@ -1,5 +1,6 @@
 (ns clara.server.tools.graph.serialize-test
   (:require [clara.server.tools.graph.serialize :as s]
+            [clara.server.tools.graph.rules.loan-app-rules]
             [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]))
 
@@ -66,12 +67,135 @@
       (is (= 1 (:a pruned)))
       (is (string? (:b pruned))))))
 
+(deftest test-serialize-match-per-ns-context
+  (testing "Each end of a match pair serializes in its own production's ns context"
+    (let [producer-ns 'clara.server.tools.graph.serialize-test
+          consumer-ns 'clara.server.tools.graph.rules.loan-app-rules
+          match (first (s/serialize-match {:raw-pairs [{:producer-type 'TestRecord
+                                                        :consumer-type 'clojure.lang.IPersistentMap}]
+                                           :known-set #{}
+                                           :producer-ns producer-ns
+                                           :consumer-ns consumer-ns}))]
+      (is (= "clara.server.tools.graph.serialize_test.TestRecord"
+             (get-in match [:producer-type :name]))
+          "unqualified symbol resolves to the class in the producer's ns")
+      (is (= "clojure.lang.IPersistentMap"
+             (get-in match [:consumer-type :name])))))
+
+  (testing "The same symbol degrades to symbol[...] under a ns where it does not resolve (per-ns divergence prevented)"
+    (let [match (first (s/serialize-match {:raw-pairs [{:producer-type 'TestRecord
+                                                        :consumer-type 'clojure.lang.IPersistentMap}]
+                                           :known-set #{}
+                                           :producer-ns 'clara.server.tools.graph.rules.loan-app-rules
+                                           :consumer-ns 'clara.server.tools.graph.rules.loan-app-rules}))]
+      (is (= "symbol[TestRecord]" (get-in match [:producer-type :name]))))))
+
+(deftest test-resolve-type-kind-explicit
+  (testing "Classes serialize as .getName (unchanged)"
+    (is (= "clara.server.tools.graph.serialize_test.TestRecord"
+           (s/resolve-type nil TestRecord))))
+
+  (testing "Keywords keep their colon"
+    (is (= ":my.ns/child" (s/resolve-type nil :my.ns/child)))
+    (is (= ":extract-doc-meta" (s/resolve-type nil :extract-doc-meta))))
+
+  (testing "Strings are quoted (pr-str)"
+    (is (= "\"foo\"" (s/resolve-type nil "foo"))))
+
+  (testing "Unresolved symbols are wrapped in symbol[...]"
+    (is (= "symbol[my.ns/foo]" (s/resolve-type nil 'my.ns/foo)))
+    (is (= "symbol[extract-doc-meta]" (s/resolve-type nil 'extract-doc-meta))))
+
+  (testing "Symbols resolving to a class via the ns-name serialize as the class name"
+    (is (= "clara.server.tools.graph.rules.loan_app_facts.Application"
+           (s/resolve-type 'clara.server.tools.graph.rules.loan-doc-rules
+                           'clara.server.tools.graph.rules.loan_app_facts.Application))))
+
+  (testing "Symbols resolving to a var serialize as the fully-qualified var symbol"
+    ;; Regression: the ns-name parameter used to shadow clojure.core/ns-name,
+    ;; NPE-ing the var branch (Cannot invoke getName because "x" is null).
+    (is (= "clojure.string/join"
+           (s/resolve-type 'clojure.string 'join)))
+    (is (= "clojure.string/join"
+           (s/resolve-type 'clojure.string 'clojure.string/join)))
+    (is (= "clojure.string/join"
+           (s/resolve-type 'clara.server.tools.graph.rules.loan-doc-rules
+                           'clojure.string/join))))
+
+  (testing "An unresolvable ns never NPEs — degrades to symbol[...]"
+    (is (= "symbol[Foo]" (s/resolve-type 'diverge.a 'Foo))))
+
+  (testing "Vectors / tuples serialize via pr-str (kind-explicit elements)"
+    (is (= "[:a 1]" (s/resolve-type nil [:a 1])))
+    (is (= "[:loan/status \"verified\"]" (s/resolve-type nil [:loan/status "verified"]))))
+
+  (testing "Distinct kinds never collide"
+    (let [kw (s/resolve-type nil :foo)
+          s1 (s/resolve-type nil "foo")
+          sym (s/resolve-type nil 'foo)]
+      (is (not= kw s1))
+      (is (not= kw sym))
+      (is (not= s1 sym)))))
+
+(deftest test-route-id
+  (testing "Deterministic per name"
+    (is (= (s/route-id "my.ns.MarkerRecord") (s/route-id "my.ns.MarkerRecord")))
+    (is (= (s/route-id ":my.ns/child") (s/route-id ":my.ns/child"))))
+
+  (testing "Uniform slug + 8-char base36 hash suffix for every kind"
+    (doseq [name ["my.ns.MarkerRecord"
+                  ":my.ns/child"
+                  "\"foo\""
+                  "[:loan/status \"verified\"]"
+                  "my.ns/verify-docs?"]]
+      (is (re-matches #"[A-Za-z0-9.-]+-[a-z0-9]{8}" (s/route-id name))
+          (str "route-id of " name " must be slug + 8 base36 chars"))))
+
+  (testing "Special characters are slugged away"
+    (is (str/starts-with? (s/route-id "my.ns/verify-docs?") "my.ns-verify-docs-"))
+    (is (str/starts-with? (s/route-id "[:loan/status \"verified\"]") "loan-status-verified-")))
+
+  (testing "60-char slug truncation still distinguishes via the hash"
+    (let [long-a (apply str (repeat 80 \a))
+          long-b (str long-a "b")]
+      (is (= 69 (count (s/route-id long-a))))
+      (is (not= (s/route-id long-a) (s/route-id long-b))))))
+
+(deftest test-serialize-type-ref
+  (testing "Known flag reflects membership in the known set"
+    (let [known #{":my.ns/child"}
+          ref (s/serialize-type-ref known nil :my.ns/child)
+          ghost (s/serialize-type-ref known nil :my.ns/other)]
+      (is (= {:name ":my.ns/child"
+              :id (s/route-id ":my.ns/child")
+              :known true}
+             ref))
+      (is (false? (:known ghost)))))
+
+  (testing "Kind-explicit name with nil ns-name"
+    (is (= "symbol[my.ns/foo]" (:name (s/serialize-type-ref #{} nil 'my.ns/foo))))
+    (is (= "\"foo\"" (:name (s/serialize-type-ref #{} nil "foo"))))
+    (is (= "[:a 1]" (:name (s/serialize-type-ref #{} nil [:a 1]))))))
+
+(deftest test-resolve-type-map-kind
+  (testing "Map literals serialize kind-explicitly via pr-str"
+    (is (= "{:a 1, :b 2}" (s/resolve-type nil {:a 1 :b 2})))
+    (is (= "{:my-type :tuple}" (s/resolve-type nil {:my-type :tuple})))
+    (is (= "{:a \"b\"}" (s/resolve-type nil {:a "b"}))
+        "string values keep their quotes (pr-str, unlike str)"))
+
+  (testing "Map fact types are distinct from tuples and strings"
+    (is (not= (s/resolve-type nil {:a 1}) (s/resolve-type nil [:a 1])))
+    (is (not= (s/resolve-type nil {:a 1}) (s/resolve-type nil "{:a 1}")))))
+
 (deftest test-serialize-condition
-  (testing "Basic condition serialization"
+  (testing "Basic condition serialization: :type becomes a TypeReference"
     (let [condition {:type :some-type
                      :constraints '[(= ?a 1)]}
-          serialized (s/serialize-condition condition)]
-      (is (= :some-type (:type serialized)))
+          serialized (s/serialize-condition condition nil #{})]
+      (is (= ":some-type" (get-in serialized [:type :name])))
+      (is (string? (get-in serialized [:type :id])))
+      (is (false? (get-in serialized [:type :known])))
       (is (string? (:constraints serialized)))
       (is (str/includes? (:constraints serialized) "(= ?a 1)"))))
 
@@ -79,23 +203,28 @@
     (let [condition [:or
                      {:type :type-a :constraints '[(= ?a 1)]}
                      {:type :type-b :constraints '[(= ?b 2)]}]
-          serialized (s/serialize-condition condition)]
+          serialized (s/serialize-condition condition nil #{})]
       (is (= :or (first serialized)))
+      (is (= ":type-a" (get-in (second serialized) [:type :name])))
       (is (string? (:constraints (second serialized))))
+      (is (= ":type-b" (get-in (nth serialized 2) [:type :name])))
       (is (string? (:constraints (nth serialized 2))))))
 
   (testing "Accumulator condition serialization"
     (let [condition {:accumulator '(acc/all)
                      :from {:type :some-type :constraints '[(= ?a 1)]}}
-          serialized (s/serialize-condition condition)]
+          serialized (s/serialize-condition condition nil #{})]
       (is (= '(acc/all) (:accumulator serialized)))
+      (is (= ":some-type" (get-in serialized [:from :type :name])))
       (is (string? (get-in serialized [:from :constraints]))))))
 
 (deftest test-serialize-lhs
   (testing "Serializing a full LHS vector"
     (let [lhs [{:type :type-a :constraints '[(= ?a 1)]}
                {:type :type-b :constraints '[(= ?b 2)]}]
-          serialized (s/serialize-lhs lhs)]
+          serialized (s/serialize-lhs lhs nil #{})]
       (is (= 2 (count serialized)))
+      (is (= ":type-a" (get-in (first serialized) [:type :name])))
       (is (string? (:constraints (first serialized))))
+      (is (= ":type-b" (get-in (second serialized) [:type :name])))
       (is (string? (:constraints (second serialized)))))))

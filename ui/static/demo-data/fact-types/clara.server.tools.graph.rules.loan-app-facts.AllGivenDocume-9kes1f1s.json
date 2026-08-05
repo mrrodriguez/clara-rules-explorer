@@ -1,0 +1,93 @@
+{
+	"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
+	"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-9kes1f1s",
+	"used-by-rules": [],
+	"used-by-queries": [],
+	"inserted-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	],
+	"retracted-by-rules": [],
+	"ns": "clara.server.tools.graph.rules.loan_app_facts",
+	"ancestors": [
+		{
+			"name": "clojure.lang.IHashEq",
+			"id": "clojure.lang.IHashEq-bkwe48s5",
+			"known": false
+		},
+		{
+			"name": "clojure.lang.IKeywordLookup",
+			"id": "clojure.lang.IKeywordLookup-frx3uu13",
+			"known": false
+		},
+		{
+			"name": "clojure.lang.IObj",
+			"id": "clojure.lang.IObj-r3vahgt5",
+			"known": false
+		},
+		{
+			"name": "clojure.lang.IMeta",
+			"id": "clojure.lang.IMeta-gyperjpp",
+			"known": false
+		},
+		{
+			"name": "clojure.lang.IPersistentMap",
+			"id": "clojure.lang.IPersistentMap-l9zfvder",
+			"known": false
+		},
+		{
+			"name": "clojure.lang.Associative",
+			"id": "clojure.lang.Associative-2y6rdpfd",
+			"known": false
+		},
+		{
+			"name": "clojure.lang.Counted",
+			"id": "clojure.lang.Counted-iwg2yoz6",
+			"known": false
+		},
+		{
+			"name": "clojure.lang.ILookup",
+			"id": "clojure.lang.ILookup-6r9cmuae",
+			"known": false
+		},
+		{
+			"name": "clojure.lang.IPersistentCollection",
+			"id": "clojure.lang.IPersistentCollection-iftobj0a",
+			"known": false
+		},
+		{
+			"name": "clojure.lang.IRecord",
+			"id": "clojure.lang.IRecord-sdijyhha",
+			"known": false
+		},
+		{
+			"name": "clojure.lang.Seqable",
+			"id": "clojure.lang.Seqable-sqzfy379",
+			"known": false
+		},
+		{
+			"name": "java.io.Serializable",
+			"id": "java.io.Serializable-kwmretfj",
+			"known": false
+		},
+		{
+			"name": "java.lang.Iterable",
+			"id": "java.lang.Iterable-ip5jrdp2",
+			"known": false
+		},
+		{
+			"name": "java.lang.Object",
+			"id": "java.lang.Object-134c3tkk",
+			"known": false
+		},
+		{
+			"name": "java.util.Map",
+			"id": "java.util.Map-isuqcqje",
+			"known": false
+		}
+	]
+}

@@ -106,6 +106,34 @@ Once the server is running, explore the API with `curl` — see the
 [Graph API reference](../docs/explorer-graph-api.md) for example requests and
 response shapes.
 
+### Hierarchy Rules Server
+
+A second dev entry point serves the `loan-hierarchy-rules` session — keyword
+`derive` hierarchy, vector-tuple fact types, and a record fact type.  This is
+what the hierarchy e2e project drives, and is handy for exploring
+hierarchy-specific features (ancestors, type-bridge `:match` rows) in a REPL
+or with `curl`:
+
+```bash
+# Start on the default port 9201 (override with PORT=NNNN or a positional arg)
+clojure -M:hierarchy-run
+clojure -M:hierarchy-run 9202
+
+# Makefile shorthand
+make hierarchy-run
+make hierarchy-run PORT=9202
+```
+
+The session is built in-memory (no serialized `session.bin`); the rules
+require `:fact-type-fn` so tuple types resolve in the rete network.
+
+Makefile shorthands for the demo workflow:
+
+```bash
+make demo-setup    # serialize demo-data/session.bin
+make demo-run      # start the loan-app-rules demo server on port 9001
+```
+
 ## Running Tests
 
 Run the full project suite via CLI:
@@ -125,7 +153,8 @@ server/
 ├── deps.edn                         # Dependencies (Ring, Reitit, Jetty, JSON)
 ├── dev/clara/server/graph/
 │   ├── demo_setup.clj               # Demo session serialization
-│   └── demo_run.clj                 # Demo server entry point
+│   ├── demo_run.clj                 # Demo server entry point (loan-app rules)
+│   └── hierarchy_run.clj            # Hierarchy rules server entry point
 ├── src/clara/server/
 │   ├── graph/                       # API and Server logic
 │   └── tools/graph/                 # Core analysis engine

@@ -1,0 +1,74 @@
+{
+	"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+	"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
+	"ns": "clara.server.tools.graph.rules.loan_app_facts",
+	"count": 1,
+	"inserted-from": [
+		{
+			"name": "Root Facts (External)",
+			"id": "Root-Facts-External-jrphr9m0",
+			"type": "root",
+			"facts": [
+				{
+					"id": 11,
+					"type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
+						"known": true
+					},
+					"ns": "clara.server.tools.graph.rules.loan_app_facts",
+					"data": {
+						"app-id": "app-1",
+						"status": "pass",
+						"message": null
+					},
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+							"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
+							"ns": "clara.server.tools.graph.rules.loan-app-rules",
+							"type": "rule"
+						}
+					]
+				}
+			]
+		}
+	],
+	"used-by": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+			"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 11,
+					"type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
+						"known": true
+					},
+					"ns": "clara.server.tools.graph.rules.loan_app_facts",
+					"data": {
+						"app-id": "app-1",
+						"status": "pass",
+						"message": null
+					},
+					"is-root": true,
+					"inserted-from": [],
+					"used-by": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+							"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
+							"ns": "clara.server.tools.graph.rules.loan-app-rules",
+							"type": "rule"
+						}
+					]
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-app-rules"
+		}
+	],
+	"ids": [11]
+}

@@ -1,0 +1,19 @@
+{
+	// Standalone type-check for root-level config files.  The SvelteKit
+	// generated tsconfig (.svelte-kit/tsconfig.json) only includes src/, tests/
+	// and vite.config — it misses playwright.config.ts, so svelte-check alone
+	// would not catch type errors there (e.g. a `webServer` key on a Project).
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"strict": true,
+		"skipLibCheck": true,
+		"noEmit": true,
+		"allowJs": true,
+		"checkJs": true,
+		"esModuleInterop": true,
+		"types": ["node"]
+	},
+	"include": ["playwright.config.ts", "vite.config.ts", "svelte.config.js", "eslint.config.js"]
+}

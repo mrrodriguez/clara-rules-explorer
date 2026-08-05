@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tooltip } from '$lib/actions/popover';
+	import { truncationTooltip } from '$lib/actions/tooltip';
 
 	interface Props {
 		/** Namespace (group) identifier string. */
@@ -24,7 +24,7 @@
 	<span class="d-flex align-items-center w-100">
 		<i class="bi bi-{expanded ? 'chevron-down' : 'chevron-right'} me-1 opacity-50 flex-shrink-0"
 		></i>
-		<span class="text-truncate" use:tooltip>
+		<span class="text-truncate" use:truncationTooltip>
 			{ns}
 		</span>
 	</span>

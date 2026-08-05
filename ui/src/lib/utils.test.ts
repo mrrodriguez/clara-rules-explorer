@@ -1,60 +1,44 @@
 import { describe, it, expect } from 'vitest';
-import {
-	toRouteId,
-	fromRouteId,
-	getShortName,
-	splitQualifiedName,
-	rulePath,
-	queryPath,
-	factPath
-} from './utils';
+import { getShortName, rulePath, queryPath, factPath, splitDisplayName } from './utils';
 
 describe('utils', () => {
-	describe('toRouteId', () => {
-		it('should replace slash with dot', () => {
-			expect(toRouteId('my.ns/my-rule')).toBe('my.ns.my-rule');
-		});
-
-		it('should preserve dots in namespace', () => {
-			expect(toRouteId('clojure.core/str')).toBe('clojure.core.str');
-		});
-	});
-
-	describe('fromRouteId', () => {
-		it('should restore slash from dot', () => {
-			expect(fromRouteId('my.ns.my-rule')).toBe('my.ns/my-rule');
-		});
-
-		it('should handle URL-unsafe characters in decoded params', () => {
-			// SvelteKit decodes percent-encoded params, so fromRouteId receives
-			// the raw characters (e.g., 'my.ns.my-rule?') directly.
-			expect(fromRouteId('my.ns.my-rule?')).toBe('my.ns/my-rule?');
-		});
-
-		it('should be idempotent for strings without dots', () => {
-			expect(fromRouteId('my-rule')).toBe('my-rule');
-		});
-	});
-
 	describe('rulePath', () => {
-		it('should encode URL-unsafe characters', () => {
-			expect(rulePath('my.ns/my-rule?')).toBe('/rules/my.ns.my-rule%3F');
+		it('passes the server-issued id through verbatim', () => {
+			expect(rulePath('my.ns.my-rule-a1b2c3d4')).toBe('/rules/my.ns.my-rule-a1b2c3d4');
 		});
 
-		it('should handle full path', () => {
-			expect(rulePath('my.ns/my-rule?', true)).toBe('/rules/my.ns.my-rule%3F/full');
+		it('handles full path', () => {
+			expect(rulePath('my.ns.my-rule-a1b2c3d4', true)).toBe('/rules/my.ns.my-rule-a1b2c3d4/full');
+		});
+
+		it('handles keyword-derived ids with hyphens', () => {
+			expect(rulePath('my.ns.verify-docs-q2w8e5r4')).toBe('/rules/my.ns.verify-docs-q2w8e5r4');
 		});
 	});
 
 	describe('queryPath', () => {
-		it('should encode URL-unsafe characters', () => {
-			expect(queryPath('my.ns/my-query#test')).toBe('/queries/my.ns.my-query%23test');
+		it('passes the server-issued id through verbatim', () => {
+			expect(queryPath('my.ns.find-cold-c3d5e7f9')).toBe('/queries/my.ns.find-cold-c3d5e7f9');
+		});
+
+		it('handles full path', () => {
+			expect(queryPath('my.ns.find-cold-c3d5e7f9', true)).toBe(
+				'/queries/my.ns.find-cold-c3d5e7f9/full'
+			);
 		});
 	});
 
 	describe('factPath', () => {
-		it('should encode URL-unsafe characters', () => {
-			expect(factPath('my.ns.MyType?extra')).toBe('/fact-types/my.ns.MyType%3Fextra');
+		it('passes the server-issued id through verbatim', () => {
+			expect(factPath('my.ns.MarkerRecord-a1b2c3d4')).toBe(
+				'/fact-types/my.ns.MarkerRecord-a1b2c3d4'
+			);
+		});
+
+		it('handles tuple-derived ids with dots', () => {
+			expect(factPath('loan.status.verified-k4x9p2m8')).toBe(
+				'/fact-types/loan.status.verified-k4x9p2m8'
+			);
 		});
 	});
 
@@ -64,28 +48,58 @@ describe('utils', () => {
 				getShortName('clara.server.tools.graph.rules.loan-app-rules/collect-app-given-docs')
 			).toBe('collect-app-given-docs');
 		});
+
+		it('returns the name unchanged for kind-explicit keyword types', () => {
+			expect(getShortName(':my.ns/child')).toBe('child');
+		});
+
+		it('returns the name unchanged when no slash is present', () => {
+			expect(getShortName('MarkerRecord')).toBe('MarkerRecord');
+		});
 	});
 
-	describe('splitQualifiedName', () => {
-		it('should split Clojure qualified name', () => {
-			expect(splitQualifiedName('my.ns/my-rule')).toEqual({
-				name: 'my-rule',
+	describe('splitDisplayName', () => {
+		it('splits a Clojure production name on the last slash', () => {
+			expect(splitDisplayName('my.ns/verify-docs?')).toEqual({
+				name: 'verify-docs?',
 				namespace: 'my.ns'
 			});
 		});
 
-		it('should split Java qualified name', () => {
-			expect(splitQualifiedName('my.ns.MyClass')).toEqual({
-				name: 'MyClass',
+		it('splits a class name on the last dot', () => {
+			expect(splitDisplayName('my.ns.MarkerRecord')).toEqual({
+				name: 'MarkerRecord',
 				namespace: 'my.ns'
 			});
 		});
 
-		it('should return empty namespace for unqualified name', () => {
-			expect(splitQualifiedName('my-rule')).toEqual({
-				name: 'my-rule',
+		it('keeps the colon on the namespace for keyword types', () => {
+			expect(splitDisplayName(':my.ns/child')).toEqual({
+				name: 'child',
+				namespace: ':my.ns'
+			});
+		});
+
+		it('does not split string types (quotes preserved)', () => {
+			expect(splitDisplayName('"foo"')).toEqual({ name: '"foo"', namespace: '' });
+		});
+
+		it('does not split tuple types', () => {
+			expect(splitDisplayName('[:loan/status "verified"]')).toEqual({
+				name: '[:loan/status "verified"]',
 				namespace: ''
 			});
+		});
+
+		it('does not split unresolved symbols', () => {
+			expect(splitDisplayName('symbol[my.ns/foo]')).toEqual({
+				name: 'symbol[my.ns/foo]',
+				namespace: ''
+			});
+		});
+
+		it('returns an empty namespace for unqualified names', () => {
+			expect(splitDisplayName('my-rule')).toEqual({ name: 'my-rule', namespace: '' });
 		});
 	});
 });

@@ -1,26 +1,33 @@
 <script lang="ts">
-	import { splitQualifiedName, factPath } from '$lib/utils';
+	import type { TypeReference } from '$lib/types/api';
+	import { factPath, splitDisplayName } from '$lib/utils';
 	import { resolve } from '$app/paths';
 
 	interface Props {
-		type: string;
+		type: TypeReference;
 		class?: string;
 		component?: 'a' | 'span';
 	}
 
 	let { type, class: className = '', component = 'a' }: Props = $props();
 
-	const info = $derived.by(() => ({
-		...splitQualifiedName(type),
-		href: resolve(factPath(type))
-	}));
+	const info = $derived.by(() => {
+		const { name, namespace } = splitDisplayName(type.name);
+		const linkable = type.known && component === 'a';
+		return {
+			name,
+			namespace,
+			href: resolve(factPath(type.id)),
+			linkable
+		};
+	});
 </script>
 
-{#if component === 'a'}
+{#if info.linkable}
 	<a
 		href={info.href}
 		class="fact-type-simple d-flex flex-column text-decoration-none {className}"
-		title={type}
+		title={type.name}
 	>
 		<span class="type-name fw-medium text-primary">{info.name}</span>
 		{#if info.namespace}
@@ -28,7 +35,10 @@
 		{/if}
 	</a>
 {:else}
-	<span class="fact-type-simple d-flex flex-column text-decoration-none {className}" title={type}>
+	<span
+		class="fact-type-simple d-flex flex-column text-decoration-none {className}"
+		title={type.name}
+	>
 		<span class="type-name fw-medium">{info.name}</span>
 		{#if info.namespace}
 			<span class="type-ns text-muted small opacity-75">{info.namespace}</span>

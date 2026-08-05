@@ -6,22 +6,14 @@
             [jsonista.core :as j]
             [schema.core :as s]
             [clara.server.tools.graph.core :as core]
+            [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.memory :as memory]
-            [clara.server.tools.graph.analyze :as analyze]
-            [clojure.string :as str]))
+            [clara.server.tools.graph.analyze :as analyze]))
 
 (defn- json-mapper []
   (j/object-mapper
    {:encode-key-fn true
     :decode-key-fn true}))
-
-(defn- fq-name-from-param [p]
-  (let [parts (str/split p #"\.")]
-    (if (> (count parts) 1)
-      (format "%s/%s"
-              (str/join "." (butlast parts))
-              (last parts))
-      p)))
 
 ;; ---------------------------------------------------------------------------
 ;; Schema definitions for API response bodies
@@ -33,17 +25,42 @@
    :query-count s/Int
    :fact-type-count s/Int})
 
-(s/defschema ProductionDep
-  "A reference to another production (rule or query) in the dependency graph."
+(s/defschema TypeReference
+  "A linkable fact-type reference: `name` is the kind-explicit serialized
+   type string (display), `id` the deterministic route id (linkage), and
+   `known` distinguishes types linkable in this rulebase (`true`) from
+   hierarchy ghosts that render as plain text."
   {:name s/Str
+   :id s/Str
+   :known s/Bool})
+
+(s/defschema TypeBridgeMatch
+  "A single type pair linking two productions: `producer-type` is what the
+   producing rule inserts (or retracts), `consumer-type` is what the
+   consuming rule's LHS requires.  Identical shape and meaning on upstream
+   and downstream entries — direct matches (same type both ends) are
+   included.  `:via :retract` marks a pair whose producer-type is a retract
+   type of the producer (retraction coupling, distinct from production)."
+  {:producer-type TypeReference
+   :consumer-type TypeReference
+   (s/optional-key :via) (s/enum :retract)})
+
+(s/defschema ProductionDep
+  "A reference to another production (rule or query) in the dependency graph.
+   `id` is the deterministic route id for linkage.  `match` (when present)
+   lists the type pairs that link the two productions."
+  {:name s/Str
+   :id s/Str
    :ns s/Str
-   :type s/Str})
+   :type s/Str
+   (s/optional-key :match) [TypeBridgeMatch]})
 
 (s/defschema LhsCondition
   "A serialized LHS condition from the Clara Rete network.
    Known keys mirror the frontend LhsElement type:
-   :type, :constraints, :args, :accumulator, :from, :result-binding, :fact-binding."
-  {(s/optional-key :type) s/Any
+   :type (a TypeReference), :constraints, :args, :accumulator, :from,
+   :result-binding, :fact-binding."
+  {(s/optional-key :type) TypeReference
    (s/optional-key :constraints) s/Str
    (s/optional-key :args) s/Str
    (s/optional-key :accumulator) s/Any
@@ -72,7 +89,8 @@
    :ns s/Str
    :filename s/Str
    (s/optional-key :status) (s/enum :none :partial :full)
-   (s/optional-key :resolved-types) [s/Str]
+   (s/optional-key :resolved-types) [TypeReference]
+   (s/optional-key :fact-type) TypeReference
    (s/optional-key :constructor-sym) s/Str
    (s/optional-key :via) ViaChain})
 
@@ -85,11 +103,12 @@
 (s/defschema RuleListItem
   "Lightweight rule summary (list endpoint)."
   {:name          s/Str
+   :id            s/Str
    :ns            s/Str
    :doc           (s/maybe s/Str)
-   :lhs-types     [s/Str]
-   :insert-types  [s/Str]
-   :retract-types [s/Str]
+   :lhs-types     [TypeReference]
+   :insert-types  [TypeReference]
+   :retract-types [TypeReference]
    :source-rule   s/Bool
    :sink-rule     s/Bool
    (s/optional-key :unlinked-rule) (s/maybe {:downstream (s/enum :unknown)
@@ -112,9 +131,10 @@
 (s/defschema QueryListItem
   "Lightweight query summary (list endpoint)."
   {:name      s/Str
+   :id        s/Str
    :ns        s/Str
    :doc       (s/maybe s/Str)
-   :lhs-types [s/Str]
+   :lhs-types [TypeReference]
    :params    (s/maybe #{s/Str})
    (s/optional-key :upstream)   [ProductionDep]
    (s/optional-key :downstream) [ProductionDep]})
@@ -128,22 +148,35 @@
           (s/optional-key :notes) (s/maybe s/Str)}))
 
 (s/defschema FactTypeListItem
-  "Lightweight fact-type summary (list endpoint)."
+  "Lightweight fact-type summary (list endpoint).  `:ancestors` is
+   detail-only."
   {:name               s/Str
-   :used-by-rules      [s/Str]
-   :used-by-queries    [s/Str]
-   :inserted-by-rules  [s/Str]
-   :retracted-by-rules [s/Str]})
+   :id                 s/Str
+   :ns                 (s/maybe s/Str)
+   :used-by-rules      [ProductionDep]
+   :used-by-queries    [ProductionDep]
+   :inserted-by-rules  [ProductionDep]
+   :retracted-by-rules [ProductionDep]})
+
+(s/defschema FactTypeDetail
+  "Full fact-type summary (detail endpoint) — the list shape plus the
+   hierarchy-ordered `:ancestors` (TypeReferences; `known: false` ghosts
+   render as plain text, never links)."
+  (merge FactTypeListItem
+         {:ancestors [TypeReference]}))
 
 (s/defschema SessionFactTypeItem
   "A fact-type entry in the session fact-types summary."
   {:name  s/Str
+   :id    s/Str
+   :ns    (s/maybe s/Str)
    :count s/Int})
 
 (s/defschema SessionFact
   "A single fact instance in working memory."
   {:id            s/Int
-   :type          s/Str
+   :type          TypeReference
+   :ns            (s/maybe s/Str)
    :data          s/Any
    :is-root       s/Bool
    :inserted-from [ProductionDep]
@@ -157,6 +190,7 @@
 (s/defschema FactTypeRoleGroup
   "A grouping of fact instances by a production (rule/query) or root origin."
   {:name  s/Str
+   :id    s/Str
    :type  s/Str
    :facts [SessionFact]
    (s/optional-key :ns) s/Str})
@@ -164,6 +198,8 @@
 (s/defschema SessionFactTypeDetail
   "Full detail for a single fact type in the session, including role groupings."
   {:name          s/Str
+   :id            s/Str
+   :ns            (s/maybe s/Str)
    :count         s/Int
    :inserted-from [FactTypeRoleGroup]
    :used-by       [FactTypeRoleGroup]
@@ -207,7 +243,7 @@
                  status-404? {:status (s/eq 404) :body ring-error-body}))
 
 (s/defschema GetFactTypeResponse
-  (s/conditional status-200? {:status (s/eq 200) :body FactTypeListItem}
+  (s/conditional status-200? {:status (s/eq 200) :body FactTypeDetail}
                  status-404? {:status (s/eq 404) :body ring-error-body}))
 
 (s/defschema GetSessionFactTypeResponse
@@ -225,15 +261,6 @@
 (s/defschema GetSessionQueryResponse
   (s/conditional status-200? {:status (s/eq 200) :body ProductionActivity}
                  status-404? {:status (s/eq 404) :body ring-error-body}))
-
-(defn- get-snapshot [session-atom snapshot-cache]
-  (let [session @session-atom
-        cached @snapshot-cache]
-    (if (and cached (= (:session cached) session))
-      (:snapshot cached)
-      (let [snapshot (memory/session-snapshot session)]
-        (reset! snapshot-cache {:session session :snapshot snapshot})
-        snapshot))))
 
 (defn- enriched-annotations
   "Returns annotations enriched with fact-type provenance from the session's
@@ -255,11 +282,14 @@
     (:annotations x)
     x))
 
-(defn- get-analysis
-  "Returns the cached rulebase-analysis, rebuilding only when the session or
-   annotations have changed.  Each detail handler was previously calling
-   core/rulebase-analysis on every request, which builds all rules, queries,
-   fact-types, the dep graph, and nodes — even to serve a single rule lookup."
+(defn- get-analysis-state
+  "Returns the cached analysis state (the analysis map plus derived internal
+   indexes), rebuilding when the session or annotations have changed.  A
+   single rulebase-analysis build produces all rules, queries, fact-types,
+   the dep graph, and nodes; detail handlers serve from the cache rather than
+   rebuilding per request.  The reverse indexes — fact-type id→name and
+   production id→name — are internal: never part of the /v1/analysis
+   payload."
   [session-atom annotations-atom analysis-cache]
   (let [session @session-atom
         annotations @annotations-atom
@@ -267,14 +297,48 @@
     (if (and cached
              (identical? (:session cached) session)
              (identical? (:annotations cached) annotations))
-      (:analysis cached)
+      cached
       (let [analysis (core/rulebase-analysis
                       session
                       (enriched-annotations session (->bare-annotations annotations)))]
-        (reset! analysis-cache {:session session
-                                :annotations annotations
-                                :analysis analysis})
-        analysis))))
+        ;; reset! returns the new cached state — the value this branch yields.
+        (reset! analysis-cache
+                {:session session
+                 :annotations annotations
+                 :analysis analysis
+                 :fact-type-id-index (ft/build-fact-type-id-index analysis)
+                 :production-id-index (core/build-production-id-index analysis)})))))
+
+(defn- get-analysis
+  "The cached analysis map (see `get-analysis-state`)."
+  [session-atom annotations-atom analysis-cache]
+  (:analysis (get-analysis-state session-atom annotations-atom analysis-cache)))
+
+(defn- get-snapshot
+  "Returns the cached session snapshot, rebuilding when the session or the
+   analysis's fact-type known-set has changed.
+
+   The known-set is derived from `get-analysis-state` — the validated,
+   current analysis — never read passively from the cache: every session
+   request first confirms the analysis is coherent with the current session
+   + annotations (rebuilding it when either has been swapped/reloaded), and
+   only then checks the snapshot cache.  A session fact type absent from the
+   analysis that serves the analysis endpoints is therefore honestly marked
+   unknown — the UI must not link a session type to a /fact-types/:id route
+   the analysis cannot serve."
+  [session-atom snapshot-cache analysis-cache annotations-atom]
+  (let [{:keys [session analysis]} (get-analysis-state session-atom annotations-atom analysis-cache)
+        known-set (-> analysis :fact-types keys set)
+        cached @snapshot-cache]
+    (if (and cached
+             (identical? (:session cached) session)
+             (= (:known-set cached) known-set))
+      (:snapshot cached)
+      (let [snapshot (memory/session-snapshot session known-set)]
+        (reset! snapshot-cache {:session session
+                                :known-set known-set
+                                :snapshot snapshot})
+        snapshot))))
 
 (s/defn handle-get-rulebase-summary :- {:status (s/eq 200) :body RulebaseSummary}
   [session-atom annotations-atom analysis-cache _req]
@@ -293,8 +357,10 @@
 
 (s/defn handle-get-rule :- GetRuleResponse
   [session-atom annotations-atom analysis-cache req]
-  (let [fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
-        rule (get-in (get-analysis session-atom annotations-atom analysis-cache) [:rules fq-name])]
+  (let [id (get-in req [:path-params :id])
+        state (get-analysis-state session-atom annotations-atom analysis-cache)
+        name (get (:production-id-index state) id)
+        rule (get-in state [:analysis :rules name])]
     (if rule
       {:status 200 :body rule}
       {:status 404 :body {:error "Rule not found"}})))
@@ -306,8 +372,10 @@
 
 (s/defn handle-get-query :- GetQueryResponse
   [session-atom annotations-atom analysis-cache req]
-  (let [fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
-        query (get-in (get-analysis session-atom annotations-atom analysis-cache) [:queries fq-name])]
+  (let [id (get-in req [:path-params :id])
+        state (get-analysis-state session-atom annotations-atom analysis-cache)
+        name (get (:production-id-index state) id)
+        query (get-in state [:analysis :queries name])]
     (if query
       {:status 200 :body query}
       {:status 404 :body {:error "Query not found"}})))
@@ -315,42 +383,41 @@
 (s/defn handle-get-fact-types :- {:status (s/eq 200) :body {:fact-types [FactTypeListItem]}}
   [session-atom annotations-atom analysis-cache _req]
   {:status 200
-   :body {:fact-types (core/fact-types-list (get-analysis session-atom annotations-atom analysis-cache))}})
+   :body {:fact-types (ft/fact-types-list (get-analysis session-atom annotations-atom analysis-cache))}})
 
 (s/defn handle-get-fact-type :- GetFactTypeResponse
   [session-atom annotations-atom analysis-cache req]
-  (let [p (get-in req [:path-params :fq-name])
-        fact-types (:fact-types (get-analysis session-atom annotations-atom analysis-cache))
-        fact-type (or (get fact-types p)
-                      (get fact-types (fq-name-from-param p)))]
+  (let [id (get-in req [:path-params :id])
+        state (get-analysis-state session-atom annotations-atom analysis-cache)
+        name (get (:fact-type-id-index state) id)
+        fact-type (get-in state [:analysis :fact-types name])]
     (if fact-type
       {:status 200 :body fact-type}
       {:status 404 :body {:error "Fact type not found"}})))
 
 (s/defn handle-get-session-fact-types
   :- {:status (s/eq 200) :body {:types [SessionFactTypeItem] :total-count s/Int}}
-  [session-atom snapshot-cache _req]
-  (let [snapshot (get-snapshot session-atom snapshot-cache)]
+  [session-atom snapshot-cache analysis-cache annotations-atom _req]
+  (let [snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)]
     {:status 200
-     :body (core/session-fact-types-summary snapshot)}))
+     :body (ft/session-fact-types-summary snapshot)}))
 
 (s/defn handle-get-session-fact-type
   :- GetSessionFactTypeResponse
-  [session-atom snapshot-cache req]
-  (let [p (get-in req [:path-params :fq-name])
-        snapshot (get-snapshot session-atom snapshot-cache)
-        fact-types (:fact-types snapshot)
-        type-info (or (get fact-types p)
-                      (get fact-types (fq-name-from-param p)))]
+  [session-atom snapshot-cache analysis-cache annotations-atom req]
+  (let [id (get-in req [:path-params :id])
+        snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
+        name (get (:fact-type-id-index snapshot) id)
+        type-info (get (:fact-types snapshot) name)]
     (if type-info
       {:status 200 :body type-info}
       {:status 404 :body {:error "Fact type not found in session"}})))
 
 (s/defn handle-get-session-fact
   :- GetSessionFactResponse
-  [session-atom snapshot-cache req]
+  [session-atom snapshot-cache analysis-cache annotations-atom req]
   (let [id (Integer/parseInt (get-in req [:path-params :id]))
-        snapshot (get-snapshot session-atom snapshot-cache)
+        snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
         fact (get-in snapshot [:facts id])]
     (if fact
       {:status 200 :body fact}
@@ -358,28 +425,34 @@
 
 (s/defn handle-get-session-rule
   :- GetSessionRuleResponse
-  [session-atom snapshot-cache req]
-  (let [fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
-        snapshot (get-snapshot session-atom snapshot-cache)
-        rule-activity (memory/get-session-rule-activity snapshot fq-name)]
+  [session-atom snapshot-cache analysis-cache annotations-atom req]
+  (let [id (get-in req [:path-params :id])
+        snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
+        name (get (:rule-id-index snapshot) id)
+        rule-activity (memory/get-session-rule-activity snapshot name)]
     (if rule-activity
       {:status 200 :body rule-activity}
       {:status 404 :body {:error "Rule matches not found"}})))
 
 (s/defn handle-get-session-query
   :- GetSessionQueryResponse
-  [session-atom snapshot-cache req]
-  (let [fq-name (fq-name-from-param (get-in req [:path-params :fq-name]))
-        snapshot (get-snapshot session-atom snapshot-cache)
-        query-activity (memory/get-session-query-activity snapshot fq-name)]
+  [session-atom snapshot-cache analysis-cache annotations-atom req]
+  (let [id (get-in req [:path-params :id])
+        snapshot (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
+        name (get (:query-id-index snapshot) id)
+        query-activity (memory/get-session-query-activity snapshot name)]
     (if query-activity
       {:status 200 :body query-activity}
       {:status 404 :body {:error "Query matches not found"}})))
 
 (defn- handle-get-session-snapshot
-  [session-atom snapshot-cache _req]
+  [session-atom snapshot-cache analysis-cache annotations-atom _req]
   {:status 200
-   :body (get-snapshot session-atom snapshot-cache)})
+   ;; :fact-raw-types is an internal enrichment index (raw Class/keyword/...
+   ;; objects that do not serialize to JSON); the served snapshot keeps only
+   ;; the serialized, id-indexed views.
+   :body (dissoc (get-snapshot session-atom snapshot-cache analysis-cache annotations-atom)
+                 :fact-raw-types)})
 
 (s/defn handle-get-annotations :- {:status (s/eq 200) :body AnnotationsMap}
   [_session-atom annotations-atom _req]
@@ -400,34 +473,34 @@
        ["/rules"
         [""
          {:get (partial handle-get-rules session-atom annotations-atom analysis-cache)}]
-        ["/:fq-name"
+        ["/:id"
          {:get (partial handle-get-rule session-atom annotations-atom analysis-cache)}]]
 
        ["/queries"
         [""
          {:get (partial handle-get-queries session-atom annotations-atom analysis-cache)}]
-        ["/:fq-name"
+        ["/:id"
          {:get (partial handle-get-query session-atom annotations-atom analysis-cache)}]]
 
        ["/fact-types"
         [""
          {:get (partial handle-get-fact-types session-atom annotations-atom analysis-cache)}]
-        ["/:fq-name"
+        ["/:id"
          {:get (partial handle-get-fact-type session-atom annotations-atom analysis-cache)}]]
 
        ["/session"
         ["/fact-types"
-         ["" {:get (partial handle-get-session-fact-types session-atom snapshot-cache)}]
-         ["/:fq-name" {:get (partial handle-get-session-fact-type session-atom snapshot-cache)}]]
+         ["" {:get (partial handle-get-session-fact-types session-atom snapshot-cache analysis-cache annotations-atom)}]
+         ["/:id" {:get (partial handle-get-session-fact-type session-atom snapshot-cache analysis-cache annotations-atom)}]]
         ["/facts/:id"
-         {:get (partial handle-get-session-fact session-atom snapshot-cache)}]
-        ["/rules/:fq-name"
-         {:get (partial handle-get-session-rule session-atom snapshot-cache)}]
-        ["/queries/:fq-name"
-         {:get (partial handle-get-session-query session-atom snapshot-cache)}]]
+         {:get (partial handle-get-session-fact session-atom snapshot-cache analysis-cache annotations-atom)}]
+        ["/rules/:id"
+         {:get (partial handle-get-session-rule session-atom snapshot-cache analysis-cache annotations-atom)}]
+        ["/queries/:id"
+         {:get (partial handle-get-session-query session-atom snapshot-cache analysis-cache annotations-atom)}]]
 
        ["/session-snapshot"
-        {:get (partial handle-get-session-snapshot session-atom snapshot-cache)}]
+        {:get (partial handle-get-session-snapshot session-atom snapshot-cache analysis-cache annotations-atom)}]
 
        ["/annotations"
         [""

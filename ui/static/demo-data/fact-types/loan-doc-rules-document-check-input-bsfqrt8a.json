@@ -1,0 +1,30 @@
+{
+	"name": ":loan-doc-rules/document-check-input",
+	"id": "loan-doc-rules-document-check-input-bsfqrt8a",
+	"used-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-all-mi-j2j2xsfb",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	],
+	"used-by-queries": [],
+	"inserted-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	],
+	"retracted-by-rules": [],
+	"ns": "loan-doc-rules",
+	"ancestors": []
+}

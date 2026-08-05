@@ -812,14 +812,23 @@
         fe      (analyze/enrich-annotations-from-session session {})]
     (testing "Adds insert-types and dynamic detection for rules with session-derived facts"
       (let [crd (get fe "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
-        (is (= ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"]
+        (is (= [AllRequiredDocuments]
                (:clara-rules/insert-types crd))
-            "Should add the fact type to insert-types")
+            "Should add the fact type to insert-types as the raw class — never a phantom string kind (\"...AllRequiredDocuments\" vs ...AllRequiredDocuments)")
         (is (= {:fact-instance-derived-types
                 ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"]
                 :resolution :partial}
                (:clara-rules/dynamic-insert-types-detected crd))
             "Should add dynamic detection")))
+
+    (testing "Non-class (keyword) session-derived types stay raw objects through enrichment"
+      (let [dc (get fe "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input")]
+        (is (some #{:loan-doc-rules/document-check-input} (:clara-rules/insert-types dc))
+            "The keyword fact type merges as the keyword, not as a serialized string")
+        (is (contains? (set (:fact-instance-derived-types
+                             (:clara-rules/dynamic-insert-types-detected dc)))
+                       ":loan-doc-rules/document-check-input")
+            "The derived-type display name is the keyword's serialized form")))
 
     (testing "Does NOT add dynamic detection for rules whose types are already in :props"
       (let [aop (get fe "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?")]

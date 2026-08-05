@@ -1,9 +1,0 @@
-{
-	"name": "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice",
-	"used-by-rules": [],
-	"used-by-queries": [],
-	"inserted-by-rules": [],
-	"retracted-by-rules": [
-		"clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
-	]
-}

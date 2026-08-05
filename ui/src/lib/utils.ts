@@ -1,74 +1,34 @@
 /**
- * Converts a Clara fully-qualified name into the dot-separated route
- * identifier used in SvelteKit route params and API path segments.
- *
- * This replaces the Clojure namespace separator ("/") with a dot so the
- * identifier is safe to use as a single path segment (after percent-encoding
- * by callers). The result is NOT percent-encoded — callers are responsible
- * for wrapping with {@link encodeURIComponent} when generating actual URLs.
- *
- * @param fqName The fully-qualified name (e.g., "my.ns/my-rule")
- * @returns A dot-separated route identifier (e.g., "my.ns.my-rule")
- */
-export function toRouteId(fqName: string): string {
-	return fqName.replace('/', '.');
-}
-
-/**
- * Reverses {@link toRouteId} — converts a dot-separated route identifier
- * back to the canonical fully-qualified name.
- *
- * e.g., "my.ns.my-rule" -> "my.ns/my-rule"
- *
- * This receives SvelteKit-decoded route params, so percent-encoded
- * characters (like %3F for "?") have already been decoded by the router.
- *
- * Note: For Java class names (which already use dots), this is a heuristic
- * based on the last dot.
- */
-export function fromRouteId(id: string): string {
-	// If it was a Clojure rule/query, it had a slash that we converted to a dot.
-	// However, Java classes use dots. The convention in the backend is that
-	// the LAST dot is the separator for rules/queries.
-	const lastDotIndex = id.lastIndexOf('.');
-	if (lastDotIndex === -1) return id;
-
-	// Check if it's likely a rule (contains namespace)
-	const ns = id.substring(0, lastDotIndex);
-	const name = id.substring(lastDotIndex + 1);
-
-	// This is a heuristic. In a real app, we might check if the ID
-	// corresponds to a known rule/query vs a fact type.
-	// For now, let's keep it simple as the backend handle-get-rule does similar.
-	return `${ns}/${name}`;
-}
-
-/**
  * Generates the application path for a specific rule's summary or full view.
+ *
+ * `id` is the server-issued route id — passed through verbatim, never
+ * encoded or parsed. Ids contain only `[A-Za-z0-9.-]` and always route as
+ * plain single path segments.
  */
-export function rulePath(fqName: string, full = false): `/rules/${string}` {
-	const id = encodeURIComponent(toRouteId(fqName));
+export function rulePath(id: string, full = false): `/rules/${string}` {
 	return (full ? `/rules/${id}/full` : `/rules/${id}`) as `/rules/${string}`;
 }
 
 /**
  * Generates the application path for a specific query's summary or full view.
+ *
+ * `id` is the server-issued route id — passed through verbatim.
  */
-export function queryPath(fqName: string, full = false): `/queries/${string}` {
-	const id = encodeURIComponent(toRouteId(fqName));
+export function queryPath(id: string, full = false): `/queries/${string}` {
 	return (full ? `/queries/${id}/full` : `/queries/${id}`) as `/queries/${string}`;
 }
 
 /**
  * Generates the application path for a specific fact type's summary.
+ *
+ * `id` is the server-issued route id — passed through verbatim.
  */
-export function factPath(name: string): `/fact-types/${string}` {
-	const id = encodeURIComponent(toRouteId(name));
+export function factPath(id: string): `/fact-types/${string}` {
 	return `/fact-types/${id}` as `/fact-types/${string}`;
 }
 
 /**
- * Extracts the short name from a fully-qualified name.
+ * Extracts the short display name from a fully-qualified name.
  * e.g., "clara.server.tools.graph.rules.loan-app-rules/collect-app-given-docs" -> "collect-app-given-docs"
  */
 export function getShortName(fqName: string): string {
@@ -76,21 +36,25 @@ export function getShortName(fqName: string): string {
 }
 
 /**
- * Splits a qualified name into its name and namespace/package parts.
- * Handles both Clojure-style (/) and Java-style (.) separators.
+ * Display-only splitter for kind-explicit serialized type/production names.
+ *
+ * Never used for URL construction — routes use server-issued ids, so this
+ * parses names purely for presentation. String types (`"foo"`), tuples
+ * (`[:loan/status "verified"]`), and unresolved symbols (`symbol[my.ns/foo]`)
+ * have no namespace to split out; other names split on the last `/`
+ * (Clojure) then last `.` (classes/keywords).
  */
-export function splitQualifiedName(fqName: string): { name: string; namespace: string } {
-	if (fqName.includes('/')) {
-		const parts = fqName.split('/');
-		const name = parts.pop() || '';
-		return { name, namespace: parts.join('/') };
+export function splitDisplayName(name: string): { name: string; namespace: string } {
+	if (name.startsWith('"') || name.startsWith('[') || name.startsWith('symbol[')) {
+		return { name, namespace: '' };
 	}
-
-	if (fqName.includes('.')) {
-		const parts = fqName.split('.');
-		const name = parts.pop() || '';
-		return { name, namespace: parts.join('.') };
+	const slashIdx = name.lastIndexOf('/');
+	if (slashIdx !== -1) {
+		return { name: name.slice(slashIdx + 1), namespace: name.slice(0, slashIdx) };
 	}
-
-	return { name: fqName, namespace: '' };
+	const dotIdx = name.lastIndexOf('.');
+	if (dotIdx !== -1) {
+		return { name: name.slice(dotIdx + 1), namespace: name.slice(0, dotIdx) };
+	}
+	return { name, namespace: '' };
 }

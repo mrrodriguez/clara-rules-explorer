@@ -5,10 +5,6 @@ const API_HOST = 'http://localhost:9001';
 const API_BASE = `${API_HOST}/v1`;
 const OUTPUT_DIR = path.resolve('static/demo-data');
 
-function toUrlId(fqName) {
-	return fqName.replace('/', '.');
-}
-
 async function fetchJson(url) {
 	const res = await fetch(url);
 	if (!res.ok) {
@@ -44,7 +40,7 @@ async function scrape() {
 		writeJson('rules.json', rulesData);
 		const rules = rulesData.rules || [];
 		for (const rule of rules) {
-			const ruleId = encodeURIComponent(toUrlId(rule.name));
+			const ruleId = rule.id;
 			// Static detail
 			const ruleDetail = await fetchJson(`${API_BASE}/rules/${ruleId}`);
 			writeJson(`rules/${ruleId}.json`, ruleDetail);
@@ -58,7 +54,7 @@ async function scrape() {
 		writeJson('queries.json', queriesData);
 		const queries = queriesData.queries || [];
 		for (const query of queries) {
-			const queryId = encodeURIComponent(toUrlId(query.name));
+			const queryId = query.id;
 			// Static detail
 			const queryDetail = await fetchJson(`${API_BASE}/queries/${queryId}`);
 			writeJson(`queries/${queryId}.json`, queryDetail);
@@ -72,7 +68,7 @@ async function scrape() {
 		writeJson('fact-types.json', factTypesData);
 		const factTypes = factTypesData['fact-types'] || [];
 		for (const factType of factTypes) {
-			const factTypeId = encodeURIComponent(toUrlId(factType.name));
+			const factTypeId = factType.id;
 			// Static detail
 			const factTypeDetail = await fetchJson(`${API_BASE}/fact-types/${factTypeId}`);
 			writeJson(`fact-types/${factTypeId}.json`, factTypeDetail);
@@ -86,7 +82,7 @@ async function scrape() {
 		const factIds = new Set();
 		const sessionTypes = sessionFactTypes.types || [];
 		for (const typeInfo of sessionTypes) {
-			const typeId = encodeURIComponent(toUrlId(typeInfo.name));
+			const typeId = typeInfo.id;
 			const instances = await fetchJson(`${API_BASE}/session/fact-types/${typeId}`);
 			writeJson(`session/fact-types/${typeId}.json`, instances);
 
