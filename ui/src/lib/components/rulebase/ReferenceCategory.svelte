@@ -8,6 +8,13 @@
 
 	interface Props {
 		title: string;
+		/**
+		 * What kind of reference each `items` entry is.  Explicit so the
+		 * rendering choice is caller-declared rather than inferred at
+		 * runtime from item shape (a fragile check — `SessionFact` also
+		 * carries a `type` key).
+		 */
+		itemKind?: 'production' | 'type';
 		icon?: string;
 		items?: ReferenceItem[];
 		fullView?: boolean;
@@ -18,6 +25,7 @@
 
 	let {
 		title,
+		itemKind = 'production',
 		icon,
 		items = [],
 		fullView = false,
@@ -27,10 +35,6 @@
 	}: Props = $props();
 
 	const scrollable = $derived(items.length >= maxVisibleItems);
-
-	function isProduction(item: ReferenceItem): item is ProductionReference {
-		return 'type' in item && item.type !== undefined;
-	}
 
 	// Per-item height: py-2 (1rem vertical) + QualifiedName two-line text (~2rem) = ~3rem.
 	// Add 0.25rem buffer so the last visible item renders nearly fully.
@@ -56,10 +60,10 @@
 			style={scrollable ? `max-height: ${scrollMaxHeight}; overflow-y: auto;` : ''}
 		>
 			{#each items as item (item.id)}
-				{#if isProduction(item)}
-					<ProductionReferenceLink ref={item} {fullView} />
+				{#if itemKind === 'type'}
+					<FactTypeReferenceLink type={item as TypeReference} />
 				{:else}
-					<FactTypeReferenceLink type={item} />
+					<ProductionReferenceLink ref={item as ProductionReference} {fullView} />
 				{/if}
 			{/each}
 		</div>

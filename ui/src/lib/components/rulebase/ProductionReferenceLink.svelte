@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { ProductionReference } from '$lib/types/api';
 	import RulebaseComponentTypeBadge from '$lib/components/rulebase/RulebaseComponentTypeBadge.svelte';
-	import QualifiedName from '$lib/components/ui/QualifiedName.svelte';
+	import ReferenceListItem from '$lib/components/rulebase/nav/ReferenceListItem.svelte';
+	import FactTypeReferenceLink from '$lib/components/rulebase/FactTypeReferenceLink.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Popover from '$lib/components/ui/Popover.svelte';
 	import { tooltip } from '$lib/actions/tooltip';
@@ -30,79 +31,64 @@
 	let popoverOpen = $state(false);
 </script>
 
-<div
-	class="list-group-item d-flex justify-content-between align-items-center gap-2 py-2 px-3 {active
-		? 'active'
-		: ''}"
-	style:--active-color={activeColor}
->
-	<QualifiedName fullName={ref.name} size="sm" class="flex-grow-1 min-width-0" />
+{#snippet badge()}
+	<RulebaseComponentTypeBadge type={ref.type} />
+{/snippet}
 
-	<div class="d-flex align-items-center gap-1 flex-shrink-0">
-		<RulebaseComponentTypeBadge type={ref.type} />
-
-		{#if matches.length > 0}
-			<Popover bind:open={popoverOpen} width={400}>
-				{#snippet trigger(toggle)}
-					<button
-						type="button"
-						class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 d-flex align-items-center"
-						use:tooltip={`Show type matches (${matches.length})`}
-						aria-label="Show type matches"
-						aria-expanded={popoverOpen}
-						onclick={toggle}
-					>
-						<i class="bi bi-link-45deg"></i>
-					</button>
-				{/snippet}
-				{#snippet content()}
-					<div class="p-2 d-flex flex-column gap-2" style="max-height: 340px; overflow-y: auto;">
-						<div class="d-flex align-items-center justify-content-between px-1">
-							<h6 class="text-muted text-uppercase small fw-bold mb-0">Type matches</h6>
-							<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle"
-								>{matches.length}</span
-							>
-						</div>
-						{#each matches as m (m['producer-type'].name + '>' + m['consumer-type'].name)}
-							<div class="d-flex flex-column gap-1 border-start ps-2 pb-1">
-								<QualifiedName fullName={m['producer-type'].name} size="sm" />
-								<div class="d-flex align-items-center gap-1 text-muted small">
-									<i class="bi bi-arrow-down"></i>
-									<span class="text-uppercase fw-bold satisfies-label">satisfies</span>
-									{#if m.via === 'retract'}
-										<Badge variant="secondary" size="sm">retract</Badge>
-									{/if}
-								</div>
-								<QualifiedName fullName={m['consumer-type'].name} size="sm" />
-							</div>
-						{/each}
+{#snippet actions()}
+	{#if matches.length > 0}
+		<Popover bind:open={popoverOpen} width={400}>
+			{#snippet trigger(toggle)}
+				<button
+					type="button"
+					class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 d-flex align-items-center"
+					use:tooltip={`Show type matches (${matches.length})`}
+					aria-label="Show type matches"
+					aria-expanded={popoverOpen}
+					onclick={toggle}
+				>
+					<i class="bi bi-link-45deg"></i>
+				</button>
+			{/snippet}
+			{#snippet content()}
+				<div class="p-2 d-flex flex-column gap-2" style="max-height: 340px; overflow-y: auto;">
+					<div class="d-flex align-items-center justify-content-between px-1">
+						<h6 class="text-muted text-uppercase small fw-bold mb-0">Type matches</h6>
+						<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle"
+							>{matches.length}</span
+						>
 					</div>
-				{/snippet}
-			</Popover>
-		{/if}
+					{#each matches as m (m['producer-type'].name + '>' + m['consumer-type'].name)}
+						<div class="d-flex flex-column gap-1 border-start ps-2 pb-1">
+							<FactTypeReferenceLink type={m['producer-type']} compact />
+							<div class="d-flex align-items-center gap-1 text-muted small">
+								<i class="bi bi-arrow-down"></i>
+								<span class="text-uppercase fw-bold satisfies-label">satisfies</span>
+								{#if m.via === 'retract'}
+									<Badge variant="secondary" size="sm">retract</Badge>
+								{/if}
+							</div>
+							<FactTypeReferenceLink type={m['consumer-type']} compact />
+						</div>
+					{/each}
+				</div>
+			{/snippet}
+		</Popover>
+	{/if}
 
-		<a
-			href={path}
-			class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 d-flex align-items-center"
-			use:tooltip={`Open ${getShortName(ref.name)}`}
-			aria-label="Open {ref.name}"
-		>
-			<i class="bi bi-box-arrow-up-right"></i>
-		</a>
-	</div>
-</div>
+	<a
+		href={path}
+		class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 d-flex align-items-center"
+		use:tooltip={`Open ${getShortName(ref.name)}`}
+		aria-label="Open {ref.name}"
+	>
+		<i class="bi bi-box-arrow-up-right"></i>
+	</a>
+{/snippet}
+
+<ReferenceListItem title={ref.name} fullName={ref.name} {activeColor} {badge} {actions} {active} />
 
 <style>
-	.list-group-item {
-		border-left: 3px solid transparent;
-	}
-
-	.list-group-item.active {
-		border-left-color: var(--active-color);
-		background-color: #f8f9fa;
-		color: var(--active-color);
-	}
-
 	.satisfies-label {
 		font-size: 0.6rem;
 		letter-spacing: 0.06em;

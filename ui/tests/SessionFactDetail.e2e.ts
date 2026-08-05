@@ -24,5 +24,10 @@ test.describe('Session fact detail', () => {
 		await expect(typeLink).toHaveAttribute('href', /\/fact-types\//);
 		await typeLink.click();
 		await expect(page).toHaveURL(/\/fact-types\//);
+
+		// The target page actually resolved — the fact-type summary header
+		// rendered, rather than the "not found" fallback.  GivenDocument is a
+		// rulebase-known type, so its id is a real route.
+		await expect(page.locator('.card-header').filter({ hasText: 'GivenDocument' })).toBeVisible();
 	});
 });

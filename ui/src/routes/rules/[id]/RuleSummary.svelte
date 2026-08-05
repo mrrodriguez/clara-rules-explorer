@@ -3,7 +3,7 @@
 	import RulebaseComponentSummaryHeader from '$lib/components/rulebase/RulebaseComponentSummaryHeader.svelte';
 	import RulebaseComponentSummaryDescription from '$lib/components/rulebase/RulebaseComponentSummaryDescription.svelte';
 	import DependencyRow from '$lib/components/rulebase/DependencyRow.svelte';
-	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
+	import ReferenceCategory from '$lib/components/rulebase/ReferenceCategory.svelte';
 	import LhsTabs from '$lib/components/rulebase/LhsTabs.svelte';
 	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
 	import SessionProductionActivity from '$lib/components/rulebase/SessionProductionActivity.svelte';
@@ -75,27 +75,30 @@
 
 				<div class="row g-3">
 					<div class="col-md-4">
-						<ProductionReferenceCategory
+						<ReferenceCategory
 							title="LHS Types (Input)"
 							icon="bi-box-arrow-in-right"
 							items={rule['lhs-types']}
+							itemKind="type"
 							{fullView}
 						/>
 					</div>
 					<div class="col-md-4">
-						<ProductionReferenceCategory
+						<ReferenceCategory
 							title="Insert Types (Output)"
 							icon="bi-box-arrow-right"
 							items={rule['insert-types']}
+							itemKind="type"
 							{fullView}
 						/>
 					</div>
 					{#if rule['retract-types'].length > 0}
 						<div class="col-md-4">
-							<ProductionReferenceCategory
+							<ReferenceCategory
 								title="Retract Types"
 								icon="bi-dash-circle"
 								items={rule['retract-types']}
+								itemKind="type"
 								{fullView}
 							/>
 						</div>

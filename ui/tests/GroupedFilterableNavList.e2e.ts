@@ -548,12 +548,12 @@ test.describe('GroupedFilterableNavList — Rulebase filters', () => {
 
 		// Search within filtered results
 		const search = ui.groupedNav.searchInput(page, 'Search rules...');
-		await search.fill('collect-app-given-docs');
+		await search.fill('extract-doc-meta-rule');
 
 		// Only matching items (source + name match)
 		const items = page.locator('a.list-group-item');
 		await expect(items).toHaveCount(1);
-		await expect(items.first()).toContainText('collect-app-given-docs');
+		await expect(items.first()).toContainText('extract-doc-meta-rule');
 
 		// Clear search, verify filter remains active
 		await search.fill('');

@@ -2,7 +2,7 @@
 	import type { SessionFact } from '$lib/types/api';
 	import CopyableTitle from '$lib/components/ui/CopyableTitle.svelte';
 	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
-	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
+	import ReferenceCategory from '$lib/components/rulebase/ReferenceCategory.svelte';
 	import { factPath } from '$lib/utils';
 	import { resolve } from '$app/paths';
 	import type { Pathname } from '$app/types';
@@ -33,14 +33,16 @@
 			</div>
 			<div class="text-end d-flex align-items-start gap-2">
 				<CopyableTitle fullName={fact.type.name} size="md" />
-				<a
-					href={typeHref}
-					class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 d-flex align-items-center"
-					title="View fact type: {fact.type.name}"
-					aria-label="View fact type"
-				>
-					<i class="bi bi-box-arrow-up-right"></i>
-				</a>
+				{#if fact.type.known}
+					<a
+						href={typeHref}
+						class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 d-flex align-items-center"
+						title="View fact type: {fact.type.name}"
+						aria-label="View fact type"
+					>
+						<i class="bi bi-box-arrow-up-right"></i>
+					</a>
+				{/if}
 			</div>
 		</div>
 		<div class="card-body p-0">
@@ -51,7 +53,7 @@
 	<div class="row g-4">
 		<!-- Lineage (Origins) -->
 		<div class="col-md-6">
-			<ProductionReferenceCategory
+			<ReferenceCategory
 				title="Inserted From (Lineage)"
 				icon="bi-diagram-2"
 				items={fact['inserted-from']}
@@ -61,22 +63,18 @@
 				>
 					Inserted as a root fact (no rule origin)
 				</div>
-			</ProductionReferenceCategory>
+			</ReferenceCategory>
 		</div>
 
 		<!-- Impact (Usage) -->
 		<div class="col-md-6">
-			<ProductionReferenceCategory
-				title="Used By (Impact)"
-				icon="bi-lightning"
-				items={fact['used-by']}
-			>
+			<ReferenceCategory title="Used By (Impact)" icon="bi-lightning" items={fact['used-by']}>
 				<div
 					class="p-3 text-muted text-center fs-7 bg-light rounded fst-italic border border-dashed"
 				>
 					This fact is not currently being used by any rules or queries.
 				</div>
-			</ProductionReferenceCategory>
+			</ReferenceCategory>
 		</div>
 	</div>
 </div>

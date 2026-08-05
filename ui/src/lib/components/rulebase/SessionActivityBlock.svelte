@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { SessionFact } from '$lib/types/api';
-	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
+	import ReferenceCategory from '$lib/components/rulebase/ReferenceCategory.svelte';
 	import SessionActivityList from '$lib/components/rulebase/SessionActivityList.svelte';
 
 	export interface ActivityCategory {
@@ -21,7 +21,7 @@
 </script>
 
 <div class="mt-4 border-top pt-4">
-	<ProductionReferenceCategory title="Current Session Activity" icon="bi-play-circle-fill">
+	<ReferenceCategory title="Current Session Activity" icon="bi-play-circle-fill">
 		{#if activeCategories.length === 0}
 			<div class="p-3 text-muted text-center fs-7 bg-light rounded fst-italic border border-dashed">
 				{emptyText}
@@ -38,5 +38,5 @@
 				{/each}
 			</div>
 		{/if}
-	</ProductionReferenceCategory>
+	</ReferenceCategory>
 </div>

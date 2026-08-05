@@ -4,7 +4,12 @@
 	import type { Pathname } from '$app/types';
 
 	interface Props {
-		href: string;
+		/**
+		 * When given, the row renders as a link to this path; when omitted it
+		 * renders as a plain row (used by rows that carry interactive
+		 * actions, which must not be nested inside an anchor).
+		 */
+		href?: string;
 		active?: boolean;
 		title?: string;
 		activeColor?: string;
@@ -12,23 +17,30 @@
 	}
 
 	let { href, active = false, title, activeColor = '#0d6efd', children }: Props = $props();
-
-	// We cast to Pathname (the union of all valid app pathnames) to satisfy
-	// SvelteKit's strict routing types. NavigationListItem receives dynamic
-	// strings that correspond to these pathnames at runtime.
-	const resolvedHref = $derived(resolve(href as Pathname));
 </script>
 
-<a
-	href={resolvedHref}
-	{title}
-	class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-3 {active
-		? 'active'
-		: ''}"
-	style:--active-color={activeColor}
->
-	{@render children()}
-</a>
+{#if href}
+	<a
+		href={resolve(href as Pathname)}
+		{title}
+		class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-3 {active
+			? 'active'
+			: ''}"
+		style:--active-color={activeColor}
+	>
+		{@render children()}
+	</a>
+{:else}
+	<div
+		{title}
+		class="list-group-item d-flex justify-content-between align-items-center py-2 px-3 {active
+			? 'active'
+			: ''}"
+		style:--active-color={activeColor}
+	>
+		{@render children()}
+	</div>
+{/if}
 
 <style>
 	.list-group-item {

@@ -78,6 +78,25 @@ pnpm run dev                                          # dev server (requires bac
 
 ---
 
+## Finding clara-rules Source Code
+
+This project builds on the clara-rules engine. When you need to read, reference,
+or modify clara-rules source code, resolve it in this order:
+
+1. **`CLARA_HOME` env var (preferred)** — if set, it points to a local checkout
+   of the clara-rules repo and is the authoritative source to use:
+   ```bash
+   echo "$CLARA_HOME"   # e.g. /Users/mrrodriguez/Projects/gateless/clara-rules
+   ```
+2. **Maven cache fallback** — if `CLARA_HOME` is unset, look in
+   `~/.m2/repository` for clara-rules artifacts
+   (`~/.m2/repository/com/cerner/clara-rules*`). Note: this yields jars, not
+   source — check for `-sources.jar` files if you need actual source.
+3. **Ask the user** — if neither is available, ask the user where their
+   clara-rules checkout lives before guessing.
+
+---
+
 ## Cross-Project Work
 
 When making changes that span both projects:

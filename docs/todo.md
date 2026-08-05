@@ -8,3 +8,5 @@ upstream rule at all, even though there is an upstrem rule satisfying it just wi
 producer/consumer types.
 
 This relates to the work recently done (on this branch) for @docs/extend-api-hierarchy-details/README.md (which is the primary purpose of this branch).
+
+2. rebuild demo-data

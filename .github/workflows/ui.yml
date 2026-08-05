@@ -111,16 +111,10 @@ jobs:
         working-directory: server
         run: clojure -M:demo-setup
 
-      - name: Start Backend Server
-        working-directory: server
-        run: |
-          mkdir -p target
-          clojure -M:demo-run -s demo-data/session.bin > target/backend.log 2>&1 &
-        # demo-run now defaults to port 9001 which UI expects
-
-      - name: Wait for Backend
-        run: ui/bin/ci/wait-for-backend.sh http://localhost:9001/v1/rulebase-summary 60 server/target/backend.log
-
+      # Backends are started by Playwright's webServer config (one per e2e
+      # project: loan-app on 9101, hierarchy on 9201); the loan-app backend
+      # consumes the demo session serialized above.  Playwright reuses a
+      # backend already listening on the port.
       - name: Run E2E Tests
         working-directory: ui
         run: pnpm test:e2e

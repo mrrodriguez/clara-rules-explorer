@@ -3,7 +3,7 @@
 	import RulebaseComponentSummaryHeader from '$lib/components/rulebase/RulebaseComponentSummaryHeader.svelte';
 	import RulebaseComponentSummaryDescription from '$lib/components/rulebase/RulebaseComponentSummaryDescription.svelte';
 	import DependencyRow from '$lib/components/rulebase/DependencyRow.svelte';
-	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
+	import ReferenceCategory from '$lib/components/rulebase/ReferenceCategory.svelte';
 	import LhsTabs from '$lib/components/rulebase/LhsTabs.svelte';
 	import SessionProductionActivity from '$lib/components/rulebase/SessionProductionActivity.svelte';
 	import { queryPath } from '$lib/utils';
@@ -60,10 +60,11 @@
 
 				<div class="row g-3">
 					<div class="col-md-12">
-						<ProductionReferenceCategory
+						<ReferenceCategory
 							title="Matched Types"
 							icon="bi-box-arrow-in-right"
 							items={query['lhs-types']}
+							itemKind="type"
 							{fullView}
 						/>
 					</div>

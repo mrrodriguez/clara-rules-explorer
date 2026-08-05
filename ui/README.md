@@ -57,6 +57,30 @@ pnpm test:unit
 pnpm test:e2e
 ```
 
+### End-to-End Tests
+
+E2E tests run against **live explorer backends** (not the static demo data):
+Playwright's `webServer` config starts each backend and a SvelteKit dev
+server whose `/v1` proxy targets it (`API_PROXY_TARGET`, see
+`vite.config.ts`).  There are two Playwright projects:
+
+| Project   | Backend session                        | Backend port | Frontend port | Tests                                   |
+|-----------|----------------------------------------|--------------|---------------|-----------------------------------------|
+| `loan-app`  | loan-doc-rules + loan-app-rules        | `9101`       | `4173`        | `tests/*.e2e.ts` (except `Hierarchy*.e2e.ts`) |
+| `hierarchy` | loan-hierarchy-rules (keyword hierarchy, tuple fact types) | `9201` | `4174` | `tests/Hierarchy*.e2e.ts`               |
+
+Backends are started by `ui/bin/ci/start-loan-app-backend.sh` (port `9101`)
+and `ui/bin/ci/start-hierarchy-backend.sh` (port `9201`); `reuseExistingServer:
+true` reuses an already-running backend (e.g. a local `make hierarchy-run`).
+Ports `9101`/`9201` deliberately avoid the `9001` default used by local
+REPL/integration-test helpers.
+
+The static demo build (`pnpm build:demo`, hosted on GitHub Pages) is a
+separate concern: it serves scraped `static/demo-data` from the loan-app-rules
+session only, and is not used by the e2e suite.  See
+[`docs/static-demo-setup.md`](../docs/static-demo-setup.md).
+
+
 ## Building for Production
 
 To create an optimized production build:
