@@ -201,11 +201,11 @@ UI-specific types are in `$lib/types/ui.ts` (e.g., `ContextualMenuType`).
 After any UI change, run (from `ui/`):
 
 ```bash
-pnpm run format && pnpm run check && pnpm run lint
+make format check lint
 ```
 
 All three commands must pass with zero errors and zero warnings. For changes with UI impact, also run:
 
 ```bash
-pnpm run test:e2e
+make test-e2e
 ```

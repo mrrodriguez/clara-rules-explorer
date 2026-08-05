@@ -61,14 +61,14 @@ The normalization layer lives in `server/src/clara/server/tools/graph/annotation
 
 ## UI (`ui/`)
 
-A SvelteKit 2 + Svelte 5 application. Use `pnpm` for all package operations:
+A SvelteKit 2 + Svelte 5 application. The `ui/Makefile` is the authoritative source for all quality commands. Use `make` for tests and checks, and `pnpm` for other package operations:
 
 ```bash
 cd ui
-pnpm run format && pnpm run check && pnpm run lint   # format + type-check + lint
-pnpm run test                                         # unit + e2e tests
-pnpm run test:e2e                                     # Playwright e2e only
-pnpm run dev                                          # dev server (requires backend on :9999)
+make format check lint  # format + type-check + lint
+make test               # unit + e2e tests
+make test-e2e           # Playwright e2e only
+pnpm run dev            # dev server (requires backend on :9999)
 ```
 
 - Svelte engineering standards are documented in the
@@ -102,5 +102,5 @@ or modify clara-rules source code, resolve it in this order:
 When making changes that span both projects:
 
 1. Make and verify the server change first (`make test lint reflection-check`).
-2. Then update the UI to match, verifying with `pnpm run format && pnpm run check && pnpm run lint`.
+2. Then update the UI to match, verifying with `make format check lint`.
 3. If the API contract changes, update `docs/explorer-graph-api.md`.
