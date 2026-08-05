@@ -106,6 +106,12 @@ jobs:
       - name: Build UI
         working-directory: ui
         run: pnpm build
+        env:
+          # adapter-node for e2e (SSR on, /v1 proxied to the live backend).
+          # Without this, svelte.config.js falls back to @sveltejs/adapter-auto,
+          # which detects no platform on GitHub Actions and emits no build/
+          # output — so bin/ci/e2e-server.js fails to import build/handler.js.
+          E2E_BUILD: 'true'
 
       - name: Prepare Demo Session
         working-directory: server
