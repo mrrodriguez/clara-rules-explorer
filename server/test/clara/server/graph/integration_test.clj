@@ -12,10 +12,19 @@
    after the session they exercise.  This is not the demo itself: the demo
    data is built from the non-hierarchy loan session only."
   (:require [clara.rules :as r]
+            [clara.rules.durability :as d]
+            [clara.rules.durability.fressian :as df]
+            [clara.rules.engine :as eng]
             [clj-http.client :as client]
+            [clojure.data.fressian :as fres]
+            [clojure.set :as set]
+            [clojure.string :as str]
             [jsonista.core :as json]
             [clojure.test :refer [deftest is testing]]
+            [clara.server.graph.demo-setup :as demo]
+            [clara.server.graph.main :as main]
             [clara.server.graph.server :as server]
+            [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
@@ -352,6 +361,84 @@
               "income-document is an analysis insert-type → session known: true (linkable)")
           (is (nil? (get snapshot "fact-raw-types"))
               "The internal fact-id → raw-type index is stripped from the served snapshot (raw objects do not serialize to JSON)"))))))
+
+;; ---------------------------------------------------------------------------
+;; Fressian fact round-trip
+;; ---------------------------------------------------------------------------
+
+(deftest ^{:doc "The fix for main/FressianFactReader: d/*clj-struct-holder* must be a
+  throwaway list, separate from the facts list.  If they are the same list,
+  the Fressian record read handler (create-identity-based-handler)
+  double-adds every record via d/clj-struct-holder-add-obj!, shifting all
+  MemIdx positions and corrupting working-memory snapshots."}
+  test-fressian-fact-reader-no-double-add
+  (testing "Fressian fact round-trip preserves correct fact count"
+    (let [session (run-loan-app-rules)
+          {:keys [memory]} (eng/components session)
+          {:keys [indexed-facts]} (d/indexed-session-memory-state memory)]
+      ;; Serialize facts to bytes (same pattern as FressianFactWriter)
+      (let [baos (java.io.ByteArrayOutputStream.)]
+        (with-open [w (fres/create-writer baos :handlers df/write-handler-lookup)]
+          (binding [d/*clj-struct-holder* (java.util.IdentityHashMap.)]
+            (doseq [fact indexed-facts]
+              (fres/write-object w fact))))
+        ;; Deserialize via FressianFactReader
+        (let [bais (java.io.ByteArrayInputStream. (.toByteArray baos))
+              reader (main/->FressianFactReader bais)
+              deserialized (d/deserialize-facts reader)]
+          (is (= (count indexed-facts) (count deserialized))
+              (str "Fact count mismatch after Fressian round-trip. "
+                   "Expected " (count indexed-facts)
+                   " got " (count deserialized)
+                   ". Double-add bug in FressianFactReader?")))))))
+
+(deftest ^{:doc "End-to-end: session → serialize → deserialize → snapshot must contain
+  only legitimate Clara fact types — no internal Clojure/Java types like
+  clojure.lang.PersistentVector or clojure.lang.Symbol."}
+  test-fressian-roundtrip-no-garbage-fact-types
+  (testing "Session snapshot after Fressian round-trip has no internal Clojure/Java fact types"
+    (let [session (run-loan-app-rules)
+          ;; Full round-trip: serialize session + facts, then deserialize
+          session-baos (java.io.ByteArrayOutputStream.)
+          facts-baos (java.io.ByteArrayOutputStream.)
+          session-serializer (df/create-session-serializer session-baos)
+          facts-serializer (demo/->FressianFactWriter facts-baos)]
+      (d/serialize-session-state session session-serializer facts-serializer
+                                 {:with-rulebase? true})
+      (let [session-in (java.io.ByteArrayInputStream. (.toByteArray session-baos))
+            facts-in (java.io.ByteArrayInputStream. (.toByteArray facts-baos))
+            session-deser (df/create-session-serializer session-in)
+            facts-deser (main/->FressianFactReader facts-in)
+            restored (d/deserialize-session-state session-deser facts-deser)
+            snapshot (memory/session-snapshot restored)
+            type-names (into #{} (map :name) (vals (:fact-types snapshot)))]
+        (doseq [tname type-names]
+          (is (not (clojure.string/starts-with? tname "clojure.lang."))
+              (str "Internal Clojure type leaked into fact types: " tname))
+          (is (not (clojure.string/starts-with? tname "java.lang."))
+              (str "Internal Java type leaked into fact types: " tname))
+          (is (not (clojure.string/starts-with? tname "java.util."))
+              (str "Internal Java util type leaked into fact types: " tname)))
+        (let [expected #{"clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
+                         "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"
+                         "clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
+                         "clara.server.tools.graph.rules.loan_app_facts.Application"
+                         "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument"
+                         "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"
+                         "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta"
+                         "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"
+                         "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"
+                         "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"
+                         "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"
+                         "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"
+                         "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"
+                         "loan-doc-rules/document-check-input"
+                         "extract-doc-meta"}
+              present (set/intersection expected type-names)]
+          (is (seq present)
+              (str "No expected fact types found in snapshot. "
+                   "Expected at least some of: " (pr-str expected)
+                   " Got: " (pr-str type-names))))))))
 
 (comment
   ;; --- Interactive exploration over either canonical session --------------
