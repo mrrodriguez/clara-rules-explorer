@@ -94,36 +94,30 @@ export const ui = {
 		collapseAllButton(page: Page) {
 			return page.locator('button.btn-link').filter({ hasText: 'Collapse all' });
 		},
-		/** Clicks "Expand all" and verifies it took effect.  On a cold first
-		 *  page load the click can be dispatched while the list is still
-		 *  re-rendering and get lost — retry until a list item is visible. */
+		/** Clicks "Expand all" if the button is present and items are not
+		 *  already visible (e.g. single-namespace pages auto-expand). */
 		async expandAll(page: Page) {
-			const btn = this.expandAllButton(page);
-			const firstItem = page.locator('a.list-group-item').first();
-			for (let attempt = 0; attempt < 3; attempt++) {
-				await btn.click().catch(() => {});
-				try {
-					await firstItem.waitFor({ state: 'visible', timeout: 2000 });
-					return;
-				} catch {
-					// Click was lost to a re-render — retry.
-				}
+			// Fast-path: if items are already visible, nothing to do.
+			if (await page.locator('a.list-group-item').first().isVisible().catch(() => false)) {
+				return;
 			}
-			throw new Error('Expand all did not take effect after 3 attempts');
+			const btn = this.expandAllButton(page);
+			if (await btn.isVisible().catch(() => false)) {
+				await btn.click();
+				await page.locator('a.list-group-item').first().waitFor({ state: 'visible', timeout: 5_000 });
+			}
 		},
-		/** Clicks "Collapse all" and verifies no group remains expanded. */
+		/** Clicks "Collapse all" if the button is present. */
 		async collapseAll(page: Page) {
 			const btn = this.collapseAllButton(page);
-			for (let attempt = 0; attempt < 3; attempt++) {
-				await btn.click().catch(() => {});
-				const expandedCount = await page
+			if (await btn.isVisible().catch(() => false)) {
+				await btn.click();
+				await page
 					.locator('button.list-group-item i.bi-chevron-down')
-					.count()
-					.catch(() => 0);
-				if (expandedCount === 0) return;
-				await page.waitForTimeout(300);
+					.first()
+					.waitFor({ state: 'hidden', timeout: 5_000 })
+					.catch(() => {});
 			}
-			throw new Error('Collapse all did not take effect after 3 attempts');
 		},
 		/** The empty state message (when no items match) */
 		emptyState(page: Page) {

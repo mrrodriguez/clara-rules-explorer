@@ -29,14 +29,14 @@ const loanAppBackend = {
 	command: 'bash bin/ci/start-loan-app-backend.sh',
 	port: 9101,
 	reuseExistingServer: true,
-	timeout: 180_000
+	timeout: 120_000
 };
 
 const hierarchyBackend = {
 	command: 'bash bin/ci/start-hierarchy-backend.sh',
 	port: 9201,
 	reuseExistingServer: true,
-	timeout: 180_000
+	timeout: 120_000
 };
 
 function frontend(proxyTarget: string, port: number) {
@@ -44,7 +44,8 @@ function frontend(proxyTarget: string, port: number) {
 		command: `API_PROXY_TARGET=${proxyTarget} PORT=${port} bash bin/ci/start-e2e-frontend.sh`,
 		url: `http://localhost:${port}`,
 		reuseExistingServer: true,
-		timeout: 120_000
+		// vite preview starts instantly (no compilation) — 30s is generous.
+		timeout: 30_000
 	};
 }
 
@@ -60,9 +61,9 @@ export default defineConfig({
 	// retry is marked "flaky" but does not fail the run (revisit once the
 	// remaining cold-start flakes are understood).
 	retries: 1,
-	// Generous timeout: a cold SvelteKit dev server compiles the first-hit
-	// routes on demand, which can take well over 30s on the first test.
-	timeout: 120_000,
+	// Production build served via vite preview — no on-demand compilation.
+	// 30s is more than enough; most tests finish in < 1s.
+	timeout: 30_000,
 	webServer: [
 		loanAppBackend,
 		hierarchyBackend,

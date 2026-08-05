@@ -1,10 +1,9 @@
 #!/bin/bash
-# Start a SvelteKit dev server that proxies /v1 to a live explorer backend.
+# Start the e2e Node.js server (built with E2E_BUILD=true + adapter-node)
+# wrapped with a /v1 proxy to the live backend.
 #   API_PROXY_TARGET — backend origin (default: http://localhost:9001)
-#   PORT            — dev server port (default: 4173)
-# Used by Playwright's webServer config for e2e tests.  e2e runs against live
-# backends, not the static demo-data build (that is only for hosting the
-# static demo).
+#   PORT             — listen port (default: 4173)
+# Used by Playwright's webServer config for e2e tests.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -12,4 +11,4 @@ cd "$(dirname "$0")/../.."
 export API_PROXY_TARGET="${API_PROXY_TARGET:-http://localhost:9001}"
 PORT="${PORT:-4173}"
 
-exec pnpm exec vite dev --port "$PORT" --strictPort
+exec node bin/ci/e2e-server.js

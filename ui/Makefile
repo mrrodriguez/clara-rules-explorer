@@ -3,8 +3,9 @@
 #
 # `make test-e2e` (and the `test` aggregate) wires up the prerequisites that
 # bare `pnpm test:e2e` does not: the serialized demo session
-# (server/demo-data/session.bin, gitignored) and installed deps.
-.PHONY: test test-unit test-e2e deps demo-setup check lint format format-check clean
+# (server/demo-data/session.bin, gitignored), the e2e production SPA build,
+# and installed deps.
+.PHONY: test test-unit test-e2e deps demo-setup e2e-build check lint format format-check clean
 
 SHELL := /bin/bash
 
@@ -15,6 +16,12 @@ SERVER_DIR := $(CURDIR)/../server
 # `make demo-setup`.  Without it the backend exits immediately with
 # "Error: session file not found" and Playwright's webServer gives up.
 DEMO_SESSION := $(SERVER_DIR)/demo-data/session.bin
+
+# Production Node build for e2e tests.  `E2E_BUILD=true` switches
+# svelte.config.js to adapter-node (SSR on, /v1 proxied to live backend).
+# Tests run against `node build`, not the dev server — faster page loads
+# and the build matches what ships (just adapter-node vs adapter-auto).
+E2E_BUILD_SENTINEL := build/index.js
 
 # Installed dependencies.  Run `make deps` (or `pnpm install`) explicitly
 # after pnpm-lock.yaml changes; the file target below only installs when
@@ -34,12 +41,21 @@ $(DEMO_SESSION):
 demo-setup:
 	$(MAKE) -C $(SERVER_DIR) demo-setup
 
+# Build the e2e SPA only when missing.  Use `make e2e-build` to regenerate
+# unconditionally (e.g. after source changes).
+$(E2E_BUILD_SENTINEL):
+	E2E_BUILD=true pnpm exec vite build
+
+# Regenerate the e2e SPA build unconditionally.
+e2e-build:
+	E2E_BUILD=true pnpm exec vite build
+
 test: test-unit test-e2e
 
 test-unit: node_modules
 	pnpm run test:unit -- --run
 
-test-e2e: node_modules $(DEMO_SESSION)
+test-e2e: node_modules $(DEMO_SESSION) $(E2E_BUILD_SENTINEL)
 	pnpm run test:e2e
 
 check: node_modules
@@ -56,3 +72,4 @@ format-check:
 
 clean:
 	rm -rf build .svelte-kit test-results node_modules/.vite
+	@echo "Run 'make e2e-build' to regenerate the e2e SPA before the next test-e2e."
