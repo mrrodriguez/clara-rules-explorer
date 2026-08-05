@@ -25,7 +25,7 @@
   (deserialize-facts [_]
     (let [rdr (fres/create-reader stream :handlers df/read-handler-lookup)
           facts (java.util.ArrayList.)]
-      (binding [d/*clj-struct-holder* facts]
+      (binding [d/*clj-struct-holder* (java.util.ArrayList.)]
         (try
           (loop []
             (let [fact (fres/read-object rdr)]

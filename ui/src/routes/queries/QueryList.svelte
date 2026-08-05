@@ -13,12 +13,13 @@
 
 	const groupKey = (query: QueryListItem) => query.ns;
 	const activeId = $derived(page.params.id);
+	const hrefPrefix = (query: QueryListItem) => queryPath(query.id);
 </script>
 
 <GroupedFilterableNavList
 	items={queries}
 	{groupKey}
-	hrefPrefix={queryPath}
+	{hrefPrefix}
 	activeColor="#198754"
 	searchPlaceholder="Search queries..."
 	itemLabel="queries"

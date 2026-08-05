@@ -1,0 +1,56 @@
+{
+	"downstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": ":extract-doc-meta",
+						"id": "extract-doc-meta-is5qkiib",
+						"known": true
+					},
+					"consumer-type": {
+						"name": ":extract-doc-meta",
+						"id": "extract-doc-meta-is5qkiib",
+						"known": true
+					}
+				}
+			]
+		}
+	],
+	"dynamic-insert-types-detected": {
+		"callsites": [
+			{
+				"source-str": "resolved__44034__auto__",
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "none"
+			}
+		],
+		"resolution": "partial",
+		"fact-instance-derived-types": [":extract-doc-meta"]
+	},
+	"source-rule": true,
+	"lhs-form": "",
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
+	"lhs-types": [],
+	"lhs": [],
+	"id": "clara.server.tools.graph.rules.loan-doc-rules-extract-doc-me-k8p61ty2",
+	"retract-types": [],
+	"notes": null,
+	"insert-types": [
+		{
+			"name": ":extract-doc-meta",
+			"id": "extract-doc-meta-is5qkiib",
+			"known": true
+		}
+	],
+	"rhs-form": "(do\n (clojure.core/let\n  [resolved__25945__auto__ #'extract-doc-meta]\n  (clara.rules/insert! resolved__25945__auto__)))\n",
+	"doc": null,
+	"sink-rule": false,
+	"props": {}
+}

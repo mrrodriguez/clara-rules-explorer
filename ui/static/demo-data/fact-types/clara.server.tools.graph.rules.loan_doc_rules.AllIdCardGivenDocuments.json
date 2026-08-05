@@ -1,9 +1,0 @@
-{
-	"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
-	"used-by-rules": [],
-	"used-by-queries": [],
-	"inserted-by-rules": [
-		"clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs"
-	],
-	"retracted-by-rules": []
-}

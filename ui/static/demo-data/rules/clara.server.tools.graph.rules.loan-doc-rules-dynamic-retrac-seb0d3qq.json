@@ -1,0 +1,77 @@
+{
+	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n (= ?app-id app-id)\n (= status :pass)]\n",
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice",
+	"lhs-types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+			"known": true
+		}
+	],
+	"lhs": [
+		{
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+				"known": true
+			},
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+		}
+	],
+	"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-retrac-seb0d3qq",
+	"retract-types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules.StaleDocumentN-ruqre9or",
+			"known": true
+		}
+	],
+	"notes": null,
+	"insert-types": [],
+	"dynamic-retract-types-detected": {
+		"callsites": [
+			{
+				"source-str": "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")",
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "full",
+				"resolved-types": [
+					{
+						"name": "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice",
+						"id": "clara.server.tools.graph.rules.loan-doc-rules.StaleDocumentN-ruqre9or",
+						"known": true
+					}
+				]
+			}
+		],
+		"resolution": "full"
+	},
+	"rhs-form": "(do\n (r/retract!\n  (StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+						"known": true
+					}
+				}
+			]
+		}
+	],
+	"doc": "When doc check passes, retract any stale-document notice via Java constructor.\n   The analyzer captures the retract callsite with source coordinates.",
+	"sink-rule": true,
+	"props": {}
+}

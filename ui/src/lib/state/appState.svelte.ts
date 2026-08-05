@@ -1,6 +1,6 @@
 // src/lib/state/appState.svelte.ts
 
-import type { ProductionReference } from '$lib/types/api';
+import type { ProductionReference, TypeReference } from '$lib/types/api';
 import type { ContextualMenuType } from '$lib/types/ui';
 
 export class AppState {
@@ -13,9 +13,9 @@ export class AppState {
 	contextualNav = $state<{
 		upstream: ProductionReference[];
 		downstream: ProductionReference[];
-		inputTypes: string[];
-		insertTypes: string[];
-		retractTypes: string[];
+		inputTypes: TypeReference[];
+		insertTypes: TypeReference[];
+		retractTypes: TypeReference[];
 		type: 'rule' | 'query' | null;
 	}>({
 		upstream: [],
@@ -31,7 +31,7 @@ export class AppState {
 	// Locate-in-list signalling (summary → list communication).
 	// This is an ephemeral event, not ongoing derived state — the parent
 	// layout handles filtered-out state via callback + context instead.
-	locateRequest = $state<{ name: string; timestamp: number } | null>(null);
+	locateRequest = $state<{ id: string; timestamp: number } | null>(null);
 
 	// Derived state
 	isDark = $derived(this.uiTheme === 'dark');
@@ -53,9 +53,9 @@ export class AppState {
 		upstream: ProductionReference[] = [],
 		downstream: ProductionReference[] = [],
 		type: 'rule' | 'query' | null = null,
-		inputTypes: string[] = [],
-		insertTypes: string[] = [],
-		retractTypes: string[] = []
+		inputTypes: TypeReference[] = [],
+		insertTypes: TypeReference[] = [],
+		retractTypes: TypeReference[] = []
 	) {
 		this.contextualNav = { upstream, downstream, type, inputTypes, insertTypes, retractTypes };
 		this.activeContextualMenu = null;
@@ -77,8 +77,8 @@ export class AppState {
 		this.activeContextualMenu = this.activeContextualMenu === menu ? null : menu;
 	}
 
-	requestLocate(name: string) {
-		this.locateRequest = { name, timestamp: Date.now() };
+	requestLocate(id: string) {
+		this.locateRequest = { id, timestamp: Date.now() };
 	}
 
 	clearLocateRequest() {

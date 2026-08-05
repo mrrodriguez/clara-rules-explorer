@@ -18,6 +18,7 @@
 
 	const groupKey = (rule: RuleListItem) => rule.ns;
 	const activeId = $derived(page.params.id);
+	const hrefPrefix = (rule: RuleListItem) => rulePath(rule.id);
 
 	const ruleFilters: FilterOption<RuleListItem>[] = [
 		{
@@ -79,7 +80,7 @@
 <GroupedFilterableNavList
 	items={rules}
 	{groupKey}
-	hrefPrefix={rulePath}
+	{hrefPrefix}
 	activeColor="#0d6efd"
 	searchPlaceholder="Search rules..."
 	itemLabel="rules"

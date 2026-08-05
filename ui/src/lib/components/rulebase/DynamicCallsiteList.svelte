@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DynamicDetectionInfo, ViaChain } from '$lib/types/api';
+	import type { DynamicDetectionInfo, ViaChain, TypeReference } from '$lib/types/api';
 	import { factPath } from '$lib/utils';
 	import { resolve } from '$app/paths';
 	import type { Pathname } from '$app/types';
@@ -21,15 +21,36 @@
 	let hasFallback = $derived(!hasCallsites && fallbackTypes.length > 0);
 
 	function buildViaEntries(via: ViaChain) {
-		return [
-			{ label: 'boundary', sym: via['boundary-var-name-sym'] },
-			...via.callstack.map((e, i) => ({
-				label: i === via.callstack.length - 1 ? 'constructor' : 'caller',
+		const boundarySym = via['boundary-var-name-sym'] ?? '';
+		const entries = [{ label: 'boundary', sym: boundarySym }];
+		const callstack = via.callstack ?? [];
+		callstack.forEach((e, i) => {
+			entries.push({
+				label: i === callstack.length - 1 ? 'constructor' : 'caller',
 				sym: e['var-name-sym']
-			}))
-		];
+			});
+		});
+		return entries.filter((entry) => entry.sym.length > 0);
 	}
 </script>
+
+{#snippet resolvedType(type: TypeReference)}
+	{#if type.known}
+		<a href={resolve(factPath(type.id) as Pathname)} class="text-decoration-none">
+			<span class="d-inline-flex align-items-center border rounded px-2 py-1 bg-white">
+				<i class="bi bi-box me-2 text-info small"></i>
+				<QualifiedName fullName={type.name} size="sm" />
+			</span>
+		</a>
+	{:else}
+		<span
+			class="d-inline-flex align-items-center border rounded px-2 py-1 bg-white text-muted fst-italic"
+		>
+			<i class="bi bi-box me-2 text-info small"></i>
+			<QualifiedName fullName={type.name} size="sm" />
+		</span>
+	{/if}
+{/snippet}
 
 {#if detection}
 	<div class="mb-3">
@@ -68,15 +89,8 @@
 						<div class="d-flex flex-wrap align-items-start gap-2">
 							{#if types && types.length > 0}
 								<span class="text-muted small mt-1">→</span>
-								{#each types as type (type)}
-									<a href={resolve(factPath(type) as Pathname)} class="text-decoration-none">
-										<span
-											class="d-inline-flex align-items-center border rounded px-2 py-1 bg-white"
-										>
-											<i class="bi bi-box me-2 text-info small"></i>
-											<QualifiedName fullName={type} size="sm" />
-										</span>
-									</a>
+								{#each types as type (type.id)}
+									{@render resolvedType(type)}
 								{/each}
 							{:else if status === 'none'}
 								<span class="badge text-bg-secondary">
@@ -128,12 +142,12 @@
 							>→ Runtime-derived type{fallbackTypes.length !== 1 ? 's' : ''}:</span
 						>
 						{#each fallbackTypes as type (type)}
-							<a href={resolve(factPath(type) as Pathname)} class="text-decoration-none">
-								<span class="d-inline-flex align-items-center border rounded px-2 py-1 bg-white">
-									<i class="bi bi-box me-2 text-info small"></i>
-									<QualifiedName fullName={type} size="sm" />
-								</span>
-							</a>
+							<span
+								class="d-inline-flex align-items-center border rounded px-2 py-1 bg-white text-muted"
+							>
+								<i class="bi bi-box me-2 text-info small"></i>
+								<QualifiedName fullName={type} size="sm" />
+							</span>
 						{/each}
 					</div>
 					<div class="text-muted small mt-1 fst-italic">

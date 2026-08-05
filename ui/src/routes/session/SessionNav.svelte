@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { SessionFactTypeInfo } from '$lib/types/api';
-	import { toRouteId, splitQualifiedName } from '$lib/utils';
 	import GroupedFilterableNavList from '$lib/components/rulebase/nav/GroupedFilterableNavList.svelte';
 	import { page } from '$app/state';
 
@@ -12,21 +11,21 @@
 			: []
 	);
 
-	function sessionPath(name: string) {
-		return `/session/fact-types/${encodeURIComponent(toRouteId(name))}`;
+	function sessionPath(ft: SessionFactTypeInfo) {
+		return `/session/fact-types/${ft.id}`;
 	}
 
-	function isTypeActive(typeName: string) {
-		return page.params.typeName === toRouteId(typeName);
+	function isTypeActive(type: SessionFactTypeInfo) {
+		return page.params.id === type.id;
 	}
 
-	const groupKey = (ft: SessionFactTypeInfo) => splitQualifiedName(ft.name).namespace;
-	const activeId = $derived(page.params.typeName);
+	const groupKey = (ft: SessionFactTypeInfo) => ft.ns ?? '';
+	const activeId = $derived(page.params.id);
 </script>
 
 {#snippet itemRight(type: SessionFactTypeInfo)}
 	<span
-		class="badge rounded-pill {isTypeActive(type.name)
+		class="badge rounded-pill {isTypeActive(type)
 			? 'bg-white text-primary'
 			: 'bg-secondary bg-opacity-10 text-muted'}"
 	>

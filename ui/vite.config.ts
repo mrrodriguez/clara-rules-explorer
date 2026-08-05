@@ -2,16 +2,21 @@ import { defineConfig } from 'vitest/config';
 import { playwright } from '@vitest/browser-playwright';
 import { sveltekit } from '@sveltejs/kit/vite';
 
+// The /v1 API proxy target.  e2e runs two SvelteKit dev servers, each
+// proxying to a different explorer backend (loan-app vs hierarchy ruleset);
+// the static demo build leaves this unset and serves /demo-data instead.
+const apiProxyTarget = process.env.API_PROXY_TARGET ?? 'http://localhost:9001';
+
 export default defineConfig({
 	plugins: [sveltekit()],
 	server: {
 		proxy: {
-			'/v1': 'http://localhost:9001'
+			'/v1': apiProxyTarget
 		}
 	},
 	preview: {
 		proxy: {
-			'/v1': 'http://localhost:9001'
+			'/v1': apiProxyTarget
 		}
 	},
 	test: {

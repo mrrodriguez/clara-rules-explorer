@@ -56,3 +56,7 @@ To ensure code quality and adherence to Clojure standards, use `clj-kondo`:
     ```bash
     make lint
     ```
+
+# Schema Libraries
+
+This project uses `plumatic/schema` and NOT `malli`. This is due to its tight integration with `clara-rules` which itself uses `plumatic/schema`. Do not attempt to migrate or use `malli` in this project.

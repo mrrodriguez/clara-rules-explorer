@@ -1,0 +1,24 @@
+{
+	"name": ":extract-doc-meta",
+	"id": "extract-doc-meta-is5qkiib",
+	"used-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	],
+	"used-by-queries": [],
+	"inserted-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-extract-doc-me-k8p61ty2",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	],
+	"retracted-by-rules": [],
+	"ns": null,
+	"ancestors": []
+}

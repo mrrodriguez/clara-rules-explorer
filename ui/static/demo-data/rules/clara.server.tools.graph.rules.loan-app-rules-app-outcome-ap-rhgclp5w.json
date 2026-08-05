@@ -1,0 +1,95 @@
+{
+	"source-rule": false,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome\n [{:keys [app-id status]}]\n (= ?app-id app-id)\n (= status :approved)]\n",
+	"ns": "clara.server.tools.graph.rules.loan-app-rules",
+	"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo",
+	"lhs-types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+			"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+			"known": true
+		}
+	],
+	"lhs": [
+		{
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+				"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+				"known": true
+			},
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :approved)\n]",
+			"args": "[\n{:keys [app-id status]}\n]"
+		}
+	],
+	"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-rhgclp5w",
+	"no-output-types": true,
+	"retract-types": [],
+	"notes": null,
+	"insert-types": [],
+	"rhs-form": "(do (println (str \"Args demo: app \" ?app-id \" is approved\")))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+			"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					}
+				}
+			]
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
+			"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-de-5lgk14oz",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					}
+				}
+			]
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-app-rules",
+			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?",
+			"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-pe-jeh9cbbi",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					}
+				}
+			]
+		}
+	],
+	"doc": "Demonstrates LHS args destructuring — approved outcome with destructured fields.",
+	"sink-rule": false,
+	"props": {}
+}

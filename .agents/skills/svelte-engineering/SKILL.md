@@ -72,24 +72,24 @@ This skill provides guidance and enforcement of Svelte 5 and SvelteKit developme
 After making any change to the UI code, you MUST run the following commands in the `ui/` directory and ensure they pass with **zero errors and zero warnings**:
 
 ```bash
-cd ui && pnpm run format && pnpm run check && pnpm run lint
+cd ui && make format check lint
 ```
 
-- **`pnpm run format`**: Formats the code using Prettier to ensure style consistency.
-- **`pnpm run check`**: Runs `svelte-check` for TypeScript and template validation.
-- **`pnpm run lint`**: Runs a **whitelisted** scan of `src/`, `static/`, and root configs via Prettier and ESLint.
+- **`make format`**: Formats the code using Prettier to ensure style consistency.
+- **`make check`**: Runs `svelte-check` for TypeScript and template validation.
+- **`make lint`**: Runs a **whitelisted** scan of `src/`, `static/`, and root configs via Prettier and ESLint.
 
 If either command fails or produces warnings, you MUST fix them before completing the task.
 
 For changes with UI impact (layout, styling, user interactions), also run the E2E tests:
 
 ```bash
-cd ui && pnpm run test:e2e
+cd ui && make test-e2e
 ```
 
 - **Best Practices:**
-  - Run `pnpm run check` regularly during development to catch issues early
-  - Run `pnpm run lint` to ensure code style consistency
+  - Run `make check` regularly during development to catch issues early
+  - Run `make lint` to ensure code style consistency
   - Fix all TypeScript errors before merging code
   - Address all ESLint warnings to maintain code quality
 

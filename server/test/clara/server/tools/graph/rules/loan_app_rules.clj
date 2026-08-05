@@ -77,7 +77,6 @@
 
 (r/defrule app-outcome-approved-args-demo
   "Demonstrates LHS args destructuring — approved outcome with destructured fields."
-  {:clara-rules/insert-types [ApplicationOutcome]}
   [ApplicationOutcome [{:keys [app-id status]}] (= ?app-id app-id) (= status :approved)]
   =>
   (println (str "Args demo: app " ?app-id " is approved")))

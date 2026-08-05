@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { ProductionReference } from '$lib/types/api';
-	import ProductionReferenceCategory from '$lib/components/rulebase/ProductionReferenceCategory.svelte';
+	import ReferenceCategory from '$lib/components/rulebase/ReferenceCategory.svelte';
 
 	interface Props {
 		items: ProductionReference[] | undefined;
@@ -11,7 +11,7 @@
 	let { items = [], direction, fullView = false }: Props = $props();
 </script>
 
-<ProductionReferenceCategory
+<ReferenceCategory
 	title={direction}
 	icon="bi-arrow-{direction === 'upstream' ? 'up' : 'down'}-circle"
 	{items}

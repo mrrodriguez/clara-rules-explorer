@@ -24,11 +24,12 @@ export interface FilterOption<T> {
  * const cfg: GroupedFilterableNavListProps<RuleListItem> = { ... };
  * ```
  */
-export interface GroupedFilterableNavListProps<T extends { name: string }> {
+export interface GroupedFilterableNavListProps<T extends { name: string; id: string }> {
 	items: T[];
 	/** Extract the namespace/group key from an item. Empty string = ungrouped. */
 	groupKey: (item: T) => string;
-	hrefPrefix: (name: string) => string;
+	/** Build a link href from an item (use its server-issued `id`). */
+	hrefPrefix: (item: T) => string;
 	activeColor?: string;
 	searchPlaceholder?: string;
 	/** Fields to search against (default: [item.name]) */
@@ -36,10 +37,11 @@ export interface GroupedFilterableNavListProps<T extends { name: string }> {
 	/** Optional snippet for content to the right of the name */
 	itemRight?: Snippet<[T]>;
 	/**
-	 * URL-encoded ID of the currently active item (from route params).
-	 * Compared against `toRouteId(item.name)`. When `undefined`, no item
-	 * is highlighted. Callers should derive this from `page.params` on
-	 * their own route, where SvelteKit provides compile-time type safety.
+	 * Route id of the currently active item (from route params — passed
+	 * through verbatim, never encoded). Compared against `item.id`. When
+	 * `undefined`, no item is highlighted. Callers should derive this from
+	 * `page.params` on their own route, where SvelteKit provides
+	 * compile-time type safety.
 	 */
 	activeId?: string;
 	/** Whether to show a border on the container (default: true) */

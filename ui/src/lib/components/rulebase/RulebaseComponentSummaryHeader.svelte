@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import RulebaseComponentTypeBadge from '$lib/components/rulebase/RulebaseComponentTypeBadge.svelte';
-	import QualifiedName from '$lib/components/ui/QualifiedName.svelte';
+	import CopyableTitle from '$lib/components/ui/CopyableTitle.svelte';
 	import LocateInListButton from '$lib/components/ui/LocateInListButton.svelte';
 	import { resolve } from '$app/paths';
 	import type { Pathname } from '$app/types';
@@ -9,12 +9,14 @@
 	interface Props {
 		type: 'rule' | 'query' | 'fact';
 		name: string;
+		/** Server-issued route id — passed to the locate-in-list button. */
+		id: string;
 		fullView?: boolean;
 		href: string;
 		children?: Snippet;
 	}
 
-	let { type, name, fullView = false, href, children }: Props = $props();
+	let { type, name, id, fullView = false, href, children }: Props = $props();
 	let color = $derived(type === 'rule' ? 'primary' : type === 'query' ? 'success' : 'info');
 
 	const resolvedHref = $derived(resolve(href as Pathname));
@@ -23,12 +25,10 @@
 <div class="card-header bg-white py-2">
 	<!-- Row 1: Name + Full View button -->
 	<div class="d-flex justify-content-between align-items-center">
-		<div class="min-width-0 flex-grow-1">
-			<QualifiedName fullName={name} size="lg" class="text-{color}" />
-		</div>
+		<CopyableTitle fullName={name} size="lg" class="text-{color} flex-grow-1" />
 		<div class="d-flex gap-1 flex-shrink-0 ms-2">
 			{#if !fullView}
-				<LocateInListButton {name} />
+				<LocateInListButton {id} />
 			{/if}
 			{#if !fullView && type !== 'fact'}
 				<a href={resolvedHref} class="btn btn-outline-{color} btn-sm">
