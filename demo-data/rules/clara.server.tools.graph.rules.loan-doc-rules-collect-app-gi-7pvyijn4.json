@@ -1,0 +1,94 @@
+{
+	"downstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
+						"known": true
+					}
+				}
+			]
+		}
+	],
+	"dynamic-insert-types-detected": {
+		"callsites": [
+			{
+				"source-str": "(laf/map->AllGivenDocuments {:app-id ?app-id, :docs ?docs})",
+				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
+				"status": "full",
+				"resolved-types": [
+					{
+						"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
+						"known": true
+					}
+				]
+			}
+		],
+		"resolution": "full"
+	},
+	"source-rule": true,
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[:?docs\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.GivenDocument\n  (= ?app-id app-id)]]\n",
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+	"lhs-types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
+			"known": true
+		}
+	],
+	"lhs": [
+		{
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
+				"known": true
+			},
+			"constraints": "[\n(= ?app-id app-id)\n]"
+		},
+		{
+			"accumulator": ["clara.rules.accumulators/all"],
+			"from": {
+				"type": {
+					"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+					"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
+					"known": true
+				},
+				"constraints": "[\n(= ?app-id app-id)\n]"
+			},
+			"result-binding": "?docs"
+		}
+	],
+	"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
+	"retract-types": [],
+	"notes": null,
+	"insert-types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
+			"known": true
+		}
+	],
+	"rhs-form": "(do\n (r/insert!\n  (laf/map->AllGivenDocuments {:app-id ?app-id, :docs ?docs})))\n",
+	"doc": null,
+	"sink-rule": false,
+	"props": {}
+}

@@ -1,0 +1,57 @@
+{
+	"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
+	"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-9kes1f1s",
+	"ns": "clara.server.tools.graph.rules.loan_app_facts",
+	"count": 1,
+	"inserted-from": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+			"type": "rule",
+			"facts": [
+				{
+					"id": 15,
+					"type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-9kes1f1s",
+						"known": true
+					},
+					"ns": "clara.server.tools.graph.rules.loan_app_facts",
+					"data": {
+						"app-id": "app-1",
+						"doc-metas": [
+							{
+								"doc-meta": {
+									"clara.server.tools.graph.rules.loan-doc-rules/no-doc-meta": true
+								}
+							},
+							{
+								"doc-meta": {
+									"clara.server.tools.graph.rules.loan-doc-rules/no-doc-meta": true
+								}
+							},
+							{
+								"doc-meta": {
+									"clara.server.tools.graph.rules.loan-doc-rules/no-doc-meta": true
+								}
+							}
+						]
+					},
+					"is-root": false,
+					"inserted-from": [
+						{
+							"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+							"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+							"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					],
+					"used-by": []
+				}
+			],
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules"
+		}
+	],
+	"used-by": [],
+	"ids": [15]
+}

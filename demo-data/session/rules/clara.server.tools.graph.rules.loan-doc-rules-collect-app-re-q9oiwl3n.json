@@ -1,0 +1,139 @@
+{
+	"matches": [
+		{
+			"id": 1,
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
+				"known": true
+			},
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
+			"data": {
+				"?app": {
+					"app-id": "app-1"
+				},
+				"?app-id": "app-1",
+				"?docs": [
+					{
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					}
+				]
+			},
+			"is-root": true,
+			"inserted-from": [],
+			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-id-fhyj46dq",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-re-q9oiwl3n",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
+					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
+					"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
+					"ns": "clara.server.tools.graph.rules.loan-app-rules",
+					"type": "rule"
+				}
+			]
+		},
+		{
+			"id": 6,
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.RequiredDocume-7rfb9pky",
+				"known": true
+			},
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
+			"data": {
+				"?app": {
+					"app-id": "app-1"
+				},
+				"?app-id": "app-1",
+				"?docs": [
+					{
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					}
+				]
+			},
+			"is-root": true,
+			"inserted-from": [],
+			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-re-q9oiwl3n",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			]
+		}
+	],
+	"inserted-facts": [
+		{
+			"id": 8,
+			"type": {
+				"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
+				"known": true
+			},
+			"ns": "clara.server.tools.graph.rules.loan_app_facts",
+			"data": {
+				"app-id": "app-1",
+				"docs": [
+					{
+						"app-id": "app-1",
+						"doc-type": "id-card"
+					}
+				]
+			},
+			"is-root": false,
+			"inserted-from": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-re-q9oiwl3n",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"used-by": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			]
+		}
+	]
+}

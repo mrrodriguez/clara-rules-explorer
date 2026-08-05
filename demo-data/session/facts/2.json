@@ -1,42 +1,28 @@
 {
 	"id": 2,
-	"type": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+	"type": {
+		"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+		"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
+		"known": true
+	},
+	"ns": "clara.server.tools.graph.rules.loan_app_facts",
 	"data": {
 		"app-id": "app-1",
-		"doc-type": "paycheck"
+		"doc-type": "bank-statement"
 	},
-	"is-root": false,
-	"inserted-from": [
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		}
-	],
+	"is-root": true,
+	"inserted-from": [],
 	"used-by": [
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/find-document-check",
-			"ns": "",
-			"type": "query"
-		},
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		},
 		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-gi-7pvyijn4",
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		},
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		},
-		{
-			"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
-			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"type": "rule"
 		}
 	]

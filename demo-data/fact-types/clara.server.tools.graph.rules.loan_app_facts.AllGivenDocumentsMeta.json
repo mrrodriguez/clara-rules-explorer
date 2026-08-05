@@ -1,7 +1,0 @@
-{
-	"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
-	"used-by-rules": [],
-	"used-by-queries": [],
-	"inserted-by-rules": ["clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta"],
-	"retracted-by-rules": []
-}
