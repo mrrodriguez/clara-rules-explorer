@@ -52,7 +52,8 @@ Other drift worth noting:
       path; 3's guard should be written knowing 4 exists (a rulebase-only
       server never snapshots, so 4 is moot there).
 
-(5) detection-map merge      — independent, semantic change, needs consumer audit
+(5) detection-map merge      — independent, semantic change; consumers are
+                               fluid, so no audit — just summarize the delta
 (6) condition->form          — independent, self-contained
 ```
 
@@ -157,25 +158,17 @@ is wanted.**
 
 ## Milestone 4 — Detection-map layering semantics (defect 5)
 
-**Severity: medium, but it's a *semantics* change — needs a consumer audit
-before the code change.**
+**Severity: medium. Semantics change, but no consumer audit needed — all
+consumers are fluid until the API stabilizes and these defects are resolved.
+Do not contort the fix to preserve the old behavior; just record what
+changed (see "Downstream summary" below).**
 
-### Step 1 — audit current consumers
+### Fix
 
-- Check whether anything depends on the current replace semantics of the
-  no-callsites branch in `fold-detection-key` / `merge-detection-maps`
-  (`annotations/merge.clj:162-253`).
-- Known external consumer: `gateless-rules-explorer`'s working-memory layer,
-  which works around this by withholding `:fact-instance-derived-types` when
-  the base has callsites. Confirm the workaround stays valid (it should — it
-  just becomes unnecessary).
-
-### Step 2 — fix
-
-- In `merge-detection-maps`: merge non-callsite keys from **both** sides
-  (incoming layer `b` wins), per the todo's diff.
-- In `fold-detection-key`: no-callsites branch merges into an existing value
-  instead of replacing it wholesale.
+- In `merge-detection-maps` (`annotations/merge.clj:174`): merge non-callsite
+  keys from **both** sides (incoming layer `b` wins), per the todo's diff.
+- In `fold-detection-key` (`annotations/merge.clj:242`): the no-callsites
+  branch merges into an existing value instead of replacing it wholesale.
 - Keep `normalize-detection-map` (first-fold) behavior as is; it already
   keeps non-callsite keys.
 
@@ -186,60 +179,85 @@ before the code change.**
   (B) incoming derived types survive alongside callsites.
 - Assert provenance still reports both layers as contributors.
 
+### Downstream summary (deliverable)
+
+The milestone ends with a short written summary of the semantic delta, for
+fixing downstream layers (e.g. `gateless-rules-explorer`'s working-memory
+layer, which currently works around this by withholding
+`:fact-instance-derived-types` when the base has callsites — that workaround
+becomes unnecessary). Cover:
+
+- old vs. new behavior of the no-callsites branch (replace → merge);
+- old vs. new winner for non-callsite keys in a deep merge (accumulator-only
+  → both sides, incoming wins);
+- which downstream workarounds can now be deleted.
+
 ### Verify
 
 `make test lint reflection-check format-check`
 
 ---
 
-## Milestone 5 — Rulebase-only server support (defect 3)
+## Milestone 5 — Rulebase-only server support + explicit no-working-memory mode (defect 3)
 
-**Severity: medium. The only milestone that changes the API contract — do it
-last, and expect a cross-project follow-through per `AGENTS.md`.**
+**Severity: medium. Changes the API contract — do it last. Consumer contracts
+are fluid; design the API the way it should be, then document it.**
 
-### Step 1 — capability predicate
+Scope is broader than the todo's defect 3: in addition to accepting a
+rulebase, `start!` gains an explicit option to disable working-memory
+analysis even when handed a live session. So working-memory availability
+becomes a **server configuration**, not something inferred from the input
+type alone.
+
+### Step 1 — capability predicate + config option
 
 - Add `working-memory-available?` (e.g. in `tools/graph/core.clj` or
   `memory.clj`): `(satisfies? eng/ISession x)`.
+- `start!` (`server.clj:46`) accepts an option such as
+  `:working-memory? false` (name TBD at implementation). Effective
+  availability = `(and (:working-memory? opts true) (working-memory-available? session-or-rulebase))`.
+- Store the resolved flag alongside `session-atom` (e.g. in the same config
+  map threaded to handlers) so `get-snapshot` and route setup can read it
+  without re-deriving.
 - Consider migrating the two existing `instance? LocalSession` checks
-  (`core.clj:16`, `api.clj:271`) to it in the same pass, or deliberately
-  leave them and note why. (`get-rulebase`'s `instance?` is fine as a
-  dispatch; the predicate is about the snapshot capability. Decide during
-  implementation, don't churn both in one diff without reason.)
+  (`core.clj:16`, `api.clj:271`) to the predicate in the same pass, or
+  deliberately leave them and note why.
 
 ### Step 2 — uniform early failure
 
 - Guard in `api/get-snapshot` (`api.clj:317`) so all six working-memory
   routes inherit one behavior: return
   `{:status 409 :body {:error ... :reason :no-working-memory}}`
-  (409 chosen to stay distinguishable from the existing 404 "fact not
-  found"). Decide 409 vs. route-omission-404 during implementation; the todo
-  argues for the explicit status, which is the better default.
+  (409 stays distinguishable from the existing 404 "fact not found").
+  Alternative: omit the `/session*` routes at router construction when
+  disabled — the explicit 409 is preferred since "disabled by configuration"
+  should not look like "not found". Decide finally at implementation.
 
 ### Step 3 — startup + docs + capability advertisement
 
-- `server/start!` (`server.clj:46`): log once at startup when working-memory
-  routes are disabled; update the `:session` docstring to state a rulebase is
-  accepted and what is lost.
-- Advertise the capability: add a `:working-memory?` flag to an existing
-  summary/meta response (rulebase-summary is the natural home — check its
-  schema `api.clj:22`).
+- `start!`: log once at startup when working-memory routes are disabled, and
+  *why* (rulebase input vs. explicit opt-out). Update the docstring: it
+  should document both accepting a rulebase and the new option.
+- Advertise the capability: a `:working-memory?` flag on an existing
+  summary/meta response (rulebase-summary is the natural home — schema at
+  `api.clj:22`).
 
 ### Tests
 
-- New suite (likely in `session_api_test.clj` or `integration_test.clj`):
-  start the server with a rulebase; assert rulebase-backed routes return 200
-  and each of the six working-memory routes returns the chosen status, not
-  500.
+- New suite (likely in `session_api_test.clj` or `integration_test.clj`),
+  three configurations:
+  1. rulebase only → rulebase routes 200, working-memory routes return the
+     chosen status, not 500;
+  2. session + `:working-memory? false` → same behavior as (1);
+  3. session + default opts → unchanged current behavior (regression guard).
 
 ### Cross-project follow-through (per `AGENTS.md`)
 
-- Update `docs/explorer-graph-api.md` with the new status/reason and the
-  `:working-memory?` flag.
-- If the flag lands in a response the UI consumes, update
-  `ui/src/lib/types/api.ts` and verify with
-  `pnpm run format && pnpm run check && pnpm run lint`. If the UI can simply
-  ignore the flag, defer UI work and note it in the PR.
+- Update `docs/explorer-graph-api.md` with the new status/reason, the
+  `:working-memory?` flag, and the new `start!` option.
+- Update `ui/src/lib/types/api.ts` to match the final contract, then verify
+  via the UI Makefile: `cd ui && make format check lint` (and `make test` if
+  UI behavior changes beyond types).
 
 ---
 
@@ -250,4 +268,10 @@ Each milestone is one independently reviewable PR, in order 2 → 3 → 1 → 4 
 ordering constraint is **1a and 1b in the same PR**.
 
 Every PR runs `cd server && make test format-check lint reflection-check`
-before merge. Only Milestone 5 touches the API contract and the UI.
+before merge; UI-touching PRs (Milestone 5 only) additionally run
+`cd ui && make format check lint` (see `ui/Makefile`, which mirrors the
+server Makefile's target layout). Only Milestone 5 touches the API contract
+and the UI; since
+consumer contracts are fluid until the API stabilizes, Milestones 4 and 5
+optimize for the right end-state API, not backward compatibility — each ends
+with a written summary of the delta for downstream fixes.
