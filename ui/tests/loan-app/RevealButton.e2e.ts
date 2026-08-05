@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ui } from './support/ui';
+import { ui } from '../support/ui';
 
 test.describe('Reveal button', () => {
 	test.beforeEach(async ({ page }) => {
@@ -13,7 +13,7 @@ test.describe('Reveal button', () => {
 		await expect(page).toHaveURL(/\/rules/);
 
 		// Expand all, then click a specific rule to load its summary.
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		const ruleItem = page.locator('a.list-group-item').filter({ hasText: 'collect-app-given-docs' });
 		await ruleItem.click();
 
@@ -23,7 +23,7 @@ test.describe('Reveal button', () => {
 		await expect(reveal).toBeEnabled();
 
 		// Collapse all groups — the active item disappears from the DOM.
-		await ui.groupedNav.collapseAllButton(page).click();
+		await ui.groupedNav.collapseAll(page);
 		await expect(page.locator('a.list-group-item.active')).toHaveCount(0);
 
 		// Click Reveal — it should auto-expand the namespace and scroll to the item.
@@ -38,8 +38,7 @@ test.describe('Reveal button', () => {
 		await expect(page).toHaveURL(/\/queries/);
 
 		// Expand all, then click a specific query.
-		const expandAll = ui.groupedNav.expandAllButton(page);
-		if (await expandAll.isVisible()) await expandAll.click();
+		await ui.groupedNav.expandAll(page);
 
 		const queryItem = page.locator('a.list-group-item').first();
 		await queryItem.click();
@@ -54,8 +53,7 @@ test.describe('Reveal button', () => {
 		await expect(page).toHaveURL(/\/fact-types/);
 
 		// Expand all, then click a fact type.
-		const expandAll = ui.groupedNav.expandAllButton(page);
-		if (await expandAll.isVisible()) await expandAll.click();
+		await ui.groupedNav.expandAll(page);
 
 		const factTypeItem = page.locator('a.list-group-item').first();
 		await factTypeItem.click();
@@ -72,7 +70,7 @@ test.describe('Reveal button', () => {
 		await expect(page).toHaveURL(/\/rules/);
 
 		// Expand and pick a rule.
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		await page.locator('a.list-group-item').filter({ hasText: 'collect-app-given-docs' }).click();
 
 		const reveal = page.locator('button').filter({ hasText: 'Reveal' });
@@ -98,7 +96,7 @@ test.describe('Reveal button', () => {
 
 		// Pick 'app-outcome-approved?' — it has source-rule: false, so the
 		// "Source Rule" filter will hide it.
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		await page
 			.locator('a.list-group-item')
 			.filter({ hasText: 'app-outcome-approved?' })
@@ -129,7 +127,7 @@ test.describe('Reveal button', () => {
 		await expect(page).toHaveURL(/\/rules/);
 
 		// Expand and pick a rule in loan-doc-rules namespace.
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		await page
 			.locator('a.list-group-item')
 			.filter({ hasText: 'collect-app-given-docs' })
@@ -165,8 +163,7 @@ test.describe('Reveal button', () => {
 		await expect(page).toHaveURL(/\/session/);
 
 		// Expand all, then click a fact type.
-		const expandAll = ui.groupedNav.expandAllButton(page);
-		if (await expandAll.isVisible()) await expandAll.click();
+		await ui.groupedNav.expandAll(page);
 
 		const factTypeItem = page.locator('a.list-group-item').first();
 		await factTypeItem.click();

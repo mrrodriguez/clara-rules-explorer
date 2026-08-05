@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ui } from './support/ui';
+import { ui } from '../support/ui';
 
 const LOAN_DOC_NS = 'clara.server.tools.graph.rules.loan-doc-rules';
 const LOAN_APP_NS = 'clara.server.tools.graph.rules.loan-app-rules';
@@ -123,7 +123,7 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 	test('Expand all and Collapse all work', async ({ page }) => {
 		await expect(page.locator('a.list-group-item')).toHaveCount(0);
 
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		const expandedCount = await page.locator('a.list-group-item').count();
 		expect(expandedCount).toBeGreaterThan(0);
 
@@ -135,7 +135,7 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 			).toBeVisible();
 		}
 
-		await ui.groupedNav.collapseAllButton(page).click();
+		await ui.groupedNav.collapseAll(page);
 		await expect(page.locator('a.list-group-item')).toHaveCount(0);
 	});
 
@@ -161,7 +161,7 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 	});
 
 	test('first click exclusively selects one namespace (deselects all others)', async ({ page }) => {
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		const initialCount = await page.locator('a.list-group-item').count();
 
 		await ui.groupedNav.namespaceFilterButton(page).click();
@@ -187,7 +187,7 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 	});
 
 	test('subsequent clicks stack (add to selection)', async ({ page }) => {
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 
 		await ui.groupedNav.namespaceFilterButton(page).click();
 		const toggles = ui.groupedNav.allNamespaceToggles(page);
@@ -210,7 +210,7 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 	});
 
 	test('unchecking the last visible namespace shows all again', async ({ page }) => {
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		const initialCount = await page.locator('a.list-group-item').count();
 
 		await ui.groupedNav.namespaceFilterButton(page).click();
@@ -239,7 +239,7 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 	});
 
 	test('toggling the only selected namespace hides it and shows all', async ({ page }) => {
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		const initialCount = await page.locator('a.list-group-item').count();
 
 		// First click: exclusive select the first namespace
@@ -260,7 +260,7 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 	});
 
 	test('"Show all namespaces" button resets filters', async ({ page }) => {
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		const initialCount = await page.locator('a.list-group-item').count();
 
 		// Hide one namespace via exclusive select
@@ -312,7 +312,7 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 	// ── Item selection ────────────────────────────────────────────────────
 
 	test('clicking a rule item navigates to its summary', async ({ page }) => {
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 
 		const ruleItem = page.locator('a.list-group-item').filter({ hasText: 'app-outcome-approved?' });
 		await ruleItem.click();
@@ -322,7 +322,7 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 	});
 
 	test('active item is highlighted in the list', async ({ page }) => {
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 
 		await page.locator('a.list-group-item').filter({ hasText: 'app-outcome-denied' }).click();
 		await expect(ui.summary.title(page, 'app-outcome-denied')).toBeVisible();
@@ -345,7 +345,7 @@ test.describe('GroupedFilterableNavList — Rules page', () => {
 	});
 
 	test('badge counts match actual items when expanded', async ({ page }) => {
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		const totalExpanded = await page.locator('a.list-group-item').count();
 
 		const groupCount = await ui.groupedNav.allGroupToggles(page).count();
@@ -477,7 +477,7 @@ test.describe('GroupedFilterableNavList — Rulebase filters', () => {
 		await page.locator('body').click({ position: { x: 0, y: 0 } });
 
 		// Expand all groups so items are visible (filter spans multiple namespaces)
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 
 		const items = page.locator('a.list-group-item');
 		const count = await items.count();
@@ -516,7 +516,7 @@ test.describe('GroupedFilterableNavList — Rulebase filters', () => {
 	// ── Clear all ────────────────────────────────────────────────────────
 
 	test('"Clear all filters" resets the list', async ({ page }) => {
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		const fullCount = await page.locator('a.list-group-item').count();
 
 		// Apply a filter (dropdown stays open after toggle — close it by clicking outside)
@@ -531,7 +531,7 @@ test.describe('GroupedFilterableNavList — Rulebase filters', () => {
 		await ui.groupedNav.clearAllFiltersButton(page).click();
 
 		// All groups should be back
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		const restoredCount = await page.locator('a.list-group-item').count();
 		expect(restoredCount).toBe(fullCount);
 
@@ -606,7 +606,7 @@ test.describe('GroupedFilterableNavList — Rulebase filters', () => {
 
 	test('group badge counts reflect filtered results', async ({ page }) => {
 		// Expand all to see all items
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		const fullTotal = await page.locator('a.list-group-item').count();
 
 		// Apply source filter
@@ -649,10 +649,7 @@ test.describe('GroupedFilterableNavList — Queries page', () => {
 
 	test('search works on queries page', async ({ page }) => {
 		// Expand any groups first so items are visible
-		const expandAllBtn = ui.groupedNav.expandAllButton(page);
-		if (await expandAllBtn.isVisible()) {
-			await expandAllBtn.click();
-		}
+		await ui.groupedNav.expandAll(page);
 
 		const search = ui.groupedNav.searchInput(page, 'Search queries...');
 		await search.fill('find-document');

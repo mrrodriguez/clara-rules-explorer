@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ui } from './support/ui';
+import { ui } from '../support/ui';
 
 const NS = 'clara.server.tools.graph.rules.loan-hierarchy-rules';
 const INCOME = `:${NS}/income-document`;
@@ -13,7 +13,7 @@ test.describe('Hierarchy ancestors section (hierarchy ruleset)', () => {
 		await page.goto('/');
 		await ui.sidebar.navigateTo(page, 'Fact Types');
 		await expect(page).toHaveURL(/\/fact-types/);
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 	});
 
 	test('renders known ancestors as links and ghosts as non-linkable rows, in hierarchy order', async ({

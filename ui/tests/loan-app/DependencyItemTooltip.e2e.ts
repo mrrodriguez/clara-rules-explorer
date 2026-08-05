@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { ui } from './support/ui';
+import { ui } from '../support/ui';
 
 test.describe('Dependency item buttons — tooltips', () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto('/');
 		await ui.sidebar.navigateTo(page, 'Rules');
 		await expect(page).toHaveURL(/\/rules/);
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 	});
 
 	test('upstream items show tooltips on the info and jump buttons', async ({ page }) => {

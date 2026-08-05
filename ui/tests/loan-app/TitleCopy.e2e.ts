@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ui } from './support/ui';
+import { ui } from '../support/ui';
 
 test.describe('Summary title copy', () => {
 	test('clicking the summary title copies the fully qualified name to clipboard', async ({
@@ -13,7 +13,7 @@ test.describe('Summary title copy', () => {
 		await expect(page).toHaveURL(/\/rules/);
 
 		// Open a rule summary.
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 		const ruleName = 'collect-app-given-docs';
 		await page.locator('a.list-group-item').filter({ hasText: ruleName }).click();
 		await expect(ui.summary.title(page, ruleName)).toBeVisible();

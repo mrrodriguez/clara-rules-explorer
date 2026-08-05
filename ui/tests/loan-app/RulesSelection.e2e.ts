@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ui } from './support/ui';
+import { ui } from '../support/ui';
 
 test.describe('Rules Navigation and Selection', () => {
 	test.beforeEach(async ({ page }) => {
@@ -14,7 +14,7 @@ test.describe('Rules Navigation and Selection', () => {
 		await expect(page).toHaveURL(/\/rules/);
 
 		// 3. Groups start collapsed — expand all to see items
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 
 		// 4. Select the first rule from the EntityList
 		const firstRule = ui.list.firstItem(page);

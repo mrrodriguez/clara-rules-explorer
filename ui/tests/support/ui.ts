@@ -94,6 +94,37 @@ export const ui = {
 		collapseAllButton(page: Page) {
 			return page.locator('button.btn-link').filter({ hasText: 'Collapse all' });
 		},
+		/** Clicks "Expand all" and verifies it took effect.  On a cold first
+		 *  page load the click can be dispatched while the list is still
+		 *  re-rendering and get lost — retry until a list item is visible. */
+		async expandAll(page: Page) {
+			const btn = this.expandAllButton(page);
+			const firstItem = page.locator('a.list-group-item').first();
+			for (let attempt = 0; attempt < 3; attempt++) {
+				await btn.click().catch(() => {});
+				try {
+					await firstItem.waitFor({ state: 'visible', timeout: 2000 });
+					return;
+				} catch {
+					// Click was lost to a re-render — retry.
+				}
+			}
+			throw new Error('Expand all did not take effect after 3 attempts');
+		},
+		/** Clicks "Collapse all" and verifies no group remains expanded. */
+		async collapseAll(page: Page) {
+			const btn = this.collapseAllButton(page);
+			for (let attempt = 0; attempt < 3; attempt++) {
+				await btn.click().catch(() => {});
+				const expandedCount = await page
+					.locator('button.list-group-item i.bi-chevron-down')
+					.count()
+					.catch(() => 0);
+				if (expandedCount === 0) return;
+				await page.waitForTimeout(300);
+			}
+			throw new Error('Collapse all did not take effect after 3 attempts');
+		},
 		/** The empty state message (when no items match) */
 		emptyState(page: Page) {
 			return page.locator('.text-muted.fst-italic');

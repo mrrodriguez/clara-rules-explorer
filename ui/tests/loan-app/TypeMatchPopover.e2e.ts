@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { ui } from './support/ui';
+import { ui } from '../support/ui';
 
 test.describe('Type match popover on dependency rows', () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto('/');
 		await ui.sidebar.navigateTo(page, 'Rules');
 		await expect(page).toHaveURL(/\/rules/);
-		await ui.groupedNav.expandAllButton(page).click();
+		await ui.groupedNav.expandAll(page);
 	});
 
 	test('opens, lists match types as fact-type links, and navigates on click', async ({

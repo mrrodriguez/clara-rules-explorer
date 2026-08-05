@@ -14,10 +14,10 @@
 		"scrape:demo": "node bin/scrape-demo-data.js && prettier --write \"static/demo-data/**/*.json\"",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc --noEmit -p tsconfig.config.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"lint": "prettier --check src static *.config.js *.config.ts package.json tsconfig.json && eslint src *.config.js *.config.ts",
-		"format": "prettier --write src static *.config.js *.config.ts package.json tsconfig.json",
+		"lint": "prettier --check src static *.config.js *.config.ts *.config.json package.json tsconfig.json && eslint src *.config.js *.config.ts",
+		"format": "prettier --write src static *.config.js *.config.ts *.config.json package.json tsconfig.json",
 		"test:unit": "vitest --passWithNoTests",
 		"test": "npm run test:unit -- --run && npm run test:e2e",
 		"test:e2e": "playwright test"

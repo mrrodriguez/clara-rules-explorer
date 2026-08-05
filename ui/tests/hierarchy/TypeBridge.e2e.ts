@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ui } from './support/ui';
+import { ui } from '../support/ui';
 
 const NS = 'clara.server.tools.graph.rules.loan-hierarchy-rules';
 const INSERT = `clara.server.tools.graph.rules.loan-hierarchy-rules/insert-income-document`;
@@ -13,9 +13,9 @@ test.describe('Type-bridge :match rows (hierarchy ruleset)', () => {
 		await ui.sidebar.navigateTo(page, 'Rules');
 		await expect(page).toHaveURL(/\/rules/);
 		// The hierarchy ruleset has a single namespace, so the grouped nav
-		// auto-expands and offers no "Expand all" button.
-		const expandAll = ui.groupedNav.expandAllButton(page);
-		if (await expandAll.isVisible()) await expandAll.click();
+		// auto-expands and offers no "Expand all" button — the helper is a
+		// no-op when items are already visible.
+		await ui.groupedNav.expandAll(page);
 	});
 
 	test('downstream entry shows the hierarchy bridge and its types link to the fact-type pages', async ({
