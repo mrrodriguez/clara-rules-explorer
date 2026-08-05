@@ -7,9 +7,11 @@ test.describe('Session fact detail', () => {
 	}) => {
 		await context.grantPermissions(['clipboard-read', 'clipboard-write']);
 
-		// Fact 1 is a root GivenDocument with two consumers.
-		await page.goto('/session/facts/1');
-		await expect(page.locator('h5', { hasText: 'Fact 1' })).toBeVisible();
+		// Fact 2 is a root GivenDocument with two consumers.  (Fact 1 is the
+		// root Application — fact ids follow the snapshot's rulebase-order
+		// sort, and the demo working memory inserts Application first.)
+		await page.goto('/session/facts/2');
+		await expect(page.locator('h5', { hasText: 'Fact 2' })).toBeVisible();
 
 		// Clicking the name copies the fact type name (cohesive with summary titles).
 		const titleBtn = page.locator('button.copyable-title');
