@@ -24,6 +24,7 @@ This project defaults to the public Maven release of `clara-rules`. To develop a
 To ensure changes are correctly verified and to maintain development velocity, you MUST follow these steps in order:
 
 1.  **MANDATORY: Iterative Feedback (REPL):** If an nREPL server is available (check with `clj-nrepl-eval --discover-ports`), you MUST use `clj-nrepl-eval` for quick feedback on individual tests. This is the fastest way to work and avoids the overhead of starting a new JVM.
+
     ```bash
     clj-nrepl-eval -p <PORT> <<'EOF'
     (require '[clara.server.tools.graph.core-test] :reload)
@@ -32,10 +33,12 @@ To ensure changes are correctly verified and to maintain development velocity, y
     ```
 
 2.  **Targeted Test (CLI):** If no REPL is available, use `clojure.test` directly from the CLI.
+
     ```bash
     clojure -M:test -e "(require '[clojure.test :as t] '<namespace>) (let [result (t/run-tests '<namespace>)] (System/exit (+ (:fail result) (:error result))))"
     ```
-    *Example:* `clojure -M:test -e "(require '[clojure.test :as t] 'clara.server.tools.graph.core-test) (t/run-tests 'clara.server.tools.graph.core-test)"`
+
+    _Example:_ `clojure -M:test -e "(require '[clojure.test :as t] 'clara.server.tools.graph.core-test) (t/run-tests 'clara.server.tools.graph.core-test)"`
 
 3.  **Full Suite Verification:** Run the entire project test suite.
     ```bash
@@ -47,10 +50,12 @@ To ensure changes are correctly verified and to maintain development velocity, y
 To ensure code quality and adherence to Clojure standards, use `clj-kondo`:
 
 1.  **Targeted Linting:** Lint specific files or directories for quick feedback during development.
+
     ```bash
     clojure -M:lint --lint <file-or-dir>
     ```
-    *Example:* `clojure -M:lint --lint src/clara/server/tools/graph/`
+
+    _Example:_ `clojure -M:lint --lint src/clara/server/tools/graph/`
 
 2.  **Full Project Linting:** Run the full project linting.
     ```bash
@@ -60,3 +65,13 @@ To ensure code quality and adherence to Clojure standards, use `clj-kondo`:
 # Schema Libraries
 
 This project uses `plumatic/schema` and NOT `malli`. This is due to its tight integration with `clara-rules` which itself uses `plumatic/schema`. Do not attempt to migrate or use `malli` in this project.
+
+# Documentation
+
+## Docstrings
+
+Prefer `s/defschema` over large annotated docstrings for describing the shape
+of map arguments and return values.  A schema is compile-time verifiable,
+self-documenting, and stays in sync with code changes.  Use docstrings for
+*why*, not *what* — keep them concise (1-3 lines).  Reserve long-form
+commentary for architecture docs in `docs/`.

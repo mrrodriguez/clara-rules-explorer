@@ -549,9 +549,10 @@
    `some` because bare maps may have string keys and `contains?` throws
    ClassCastException on those."
   [x]
-  (and (map? x)
-       (some #{:annotations} (keys x))
-       (some #{:provenance} (keys x))))
+  (boolean
+   (and (map? x)
+        (some #{:annotations} (keys x))
+        (some #{:provenance} (keys x)))))
 
 (defn ->bare-annotations
   "Unwraps a MergedAnnotations to its bare rule→annotation map; bare maps
@@ -573,18 +574,18 @@
 (defn coerce-to-bare-annotations
   "Coerces an annotations input to a bare rule→annotation map.
 
-   `annotations` may be:
+   `annotations-input` may be:
      - A bare rule→annotation map (passes through)
      - A MergedAnnotations value (unwrapped to its `:annotations` payload)
      - A vector of Layer maps (merged via `merge-layers`, with
        `props-layer` from `session` folded in first as the base).
 
-   `session` is only needed when `annotations` is a vector of layers."
-  [annotations session]
-  (if (vector? annotations)
-    (annotations
+   `session` is only needed when `annotations-input` is a vector of layers."
+  [annotations-input session]
+  (if (vector? annotations-input)
+    (:annotations
      (merge-layers
       (into [(props-layer session)]
             (map ->layer)
-            annotations)))
-    (->bare-annotations annotations)))
+            annotations-input)))
+    (->bare-annotations annotations-input)))
