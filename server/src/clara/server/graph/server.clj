@@ -1,6 +1,7 @@
 (ns clara.server.graph.server
   "Lifecycle management for the Clara Rules Explorer server."
   (:require [ring.adapter.jetty :as jetty]
+            [clara.rules.engine :as eng]
             [clara.server.graph.api :as api]
             [clara.server.graph.cache :as cache]
             [clara.server.tools.graph.analyze :as analyze]
@@ -38,11 +39,26 @@
 ;; Runtime session / annotation swap
 ;; ---------------------------------------------------------------------------
 
+(s/defschema SessionOrRulebase
+  "A live Clara session or a raw rulebase map."
+  (s/pred #(or (satisfies? eng/ISession %) (map? %))
+          'session-or-rulebase?))
+
+(s/defschema AnnotationsInput
+  "Any of the three valid annotation-input forms:
+     - a MergedAnnotations value (from merge-layers)
+     - a vector of Layer maps (merged on the fly)
+     - a bare rule->annotation map."
+  (s/pred (some-fn ann.merge/merged-annotations?
+                   vector?
+                   map?)
+          'annotations-input?))
+
 (s/defschema SwapSessionOpts
   "Options for `swap-session!`.  At least one of :session or :annotations
    must be provided."
-  {(s/optional-key :session) s/Any
-   (s/optional-key :annotations) s/Any
+  {(s/optional-key :session) SessionOrRulebase
+   (s/optional-key :annotations) AnnotationsInput
    (s/optional-key :enrich-from-session?) s/Bool
    (s/optional-key :warm-cache?) s/Bool})
 

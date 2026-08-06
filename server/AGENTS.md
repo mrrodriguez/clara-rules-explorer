@@ -64,7 +64,19 @@ To ensure code quality and adherence to Clojure standards, use `clj-kondo`:
 
 # Schema Libraries
 
-This project uses `plumatic/schema` and NOT `malli`. This is due to its tight integration with `clara-rules` which itself uses `plumatic/schema`. Do not attempt to migrate or use `malli` in this project.
+### Schema Validation
+
+**All test namespaces MUST** enable `schema.test/validate-schemas` via a `:once`
+fixture:
+
+```clojure
+(:require ... [schema.test :as st])
+(use-fixtures :once st/validate-schemas)
+```
+
+This catches schema violations in `s/defn`-annotated handler return values at
+test time.  When combining with other `:once` fixtures, compose them:
+`(use-fixtures :once st/validate-schemas other-fixture)`.
 
 # Documentation
 

@@ -211,8 +211,9 @@
 ;; maps (string keys) are also accepted for callers that do not care about
 ;; provenance.
 (s/defschema AnnotationsMap
-  (s/cond-pre {s/Keyword s/Any}
-              {s/Str s/Any}))
+  "Open map of rule-name -> annotation.  Accepts both keyword-keyed
+   MergedAnnotations and bare string-keyed annotation maps."
+  {s/Any s/Any})
 
 ;; ---------------------------------------------------------------------------
 ;; Handler helpers

@@ -8,7 +8,8 @@
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clj-http.client :as client]
             [jsonista.core :as json]
-            [clojure.test :refer [deftest is testing use-fixtures]]))
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [schema.test :as st]))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
@@ -64,7 +65,7 @@
     (finally
       (server/stop!))))
 
-(use-fixtures :once server-fixture)
+(use-fixtures :once st/validate-schemas server-fixture)
 
 ;; ---------------------------------------------------------------------------
 ;; Helper — parse JSON body
