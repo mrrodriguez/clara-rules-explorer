@@ -7,6 +7,7 @@
             [schema.core :as s]
             [clara.server.graph.cache :as cache]
             [clara.server.tools.graph.core :as core]
+            [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.memory :as memory]))
 
@@ -211,9 +212,14 @@
 ;; maps (string keys) are also accepted for callers that do not care about
 ;; provenance.
 (s/defschema AnnotationsMap
-  "Open map of rule-name -> annotation.  Accepts both keyword-keyed
-   MergedAnnotations and bare string-keyed annotation maps."
-  {s/Any s/Any})
+  "Either a MergedAnnotations value (keyword keys, mixed value types) or
+   a bare rule→annotation map (string keys, all values are maps)."
+  (s/pred (fn [m]
+            (and (map? m)
+                 (or (ann.merge/merged-annotations? m)
+                     (and (every? string? (keys m))
+                          (every? map? (vals m))))))
+          'annotations-map?))
 
 ;; ---------------------------------------------------------------------------
 ;; Handler helpers
