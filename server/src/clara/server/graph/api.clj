@@ -427,7 +427,12 @@
     (no-working-memory-response :rulebase-input)))
 
 (s/defn handle-get-session-fact-types
-  :- {:status (s/cond-pre (s/eq 200) (s/eq 409)) :body {s/Any s/Any}}
+  :- {:status (s/cond-pre (s/eq 200) (s/eq 409))
+      :body (s/conditional
+             #(= 200 (:status %))
+             {:types [SessionFactTypeItem] :total-count s/Int}
+             #(= 409 (:status %))
+             no-working-memory-body)}
   [session-atom snapshot-cache analysis-cache annotations-atom _req]
   (with-snapshot session-atom snapshot-cache analysis-cache annotations-atom
     (fn [snapshot]

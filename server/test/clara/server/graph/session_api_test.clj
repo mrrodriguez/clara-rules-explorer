@@ -109,7 +109,7 @@
         (is (= 409 (:status resp)))
         (let [body (parse-json (:body resp))]
           (is (= "rulebase-input" (:reason body)))
-          (is (string? (:error body))))))
+          (is (string? (:error body)) "error should be a string"))))
 
     (testing "GET /v1/session-snapshot → 409"
       (let [resp (handler (mock/request :get "/v1/session-snapshot"))]

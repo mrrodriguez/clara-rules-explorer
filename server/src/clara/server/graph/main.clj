@@ -5,6 +5,7 @@
             [clara.rules.durability :as d]
             [clara.rules.durability.fressian :as df]
             [clojure.data.fressian :as fres]
+            [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.tools.cli :refer [parse-opts]]
             [clara.server.tools.graph.analyze :as analyze]
@@ -42,16 +43,11 @@
   "Parse a boolean CLI option value.
    Accepts \"true\" or \"false\" (case-insensitive); throws on anything else."
   [s]
-  (try
-    (case (clojure.string/lower-case s)
-      "true"  true
-      "false" false
-      (throw (IllegalArgumentException.
-              (format "Invalid boolean value: \"%s\". Expected \"true\" or \"false\"." s))))
-    (catch Exception e
-      (throw (ex-info (format "Failed to parse boolean option from \"%s\"" s)
-                      {:value s}
-                      e)))))
+  (case (str/lower-case s)
+    "true"  true
+    "false" false
+    (throw (IllegalArgumentException.
+            (format "Invalid boolean value: \"%s\". Expected \"true\" or \"false\"." s)))))
 
 ;; ---------------------------------------------------------------------------
 ;; CLI options
