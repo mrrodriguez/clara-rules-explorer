@@ -22,6 +22,13 @@
 ;; `swap-session!` can eagerly warm it after a runtime swap.
 (defonce ^:private cache-atom (atom nil))
 
+(defonce ^{:private true
+          :doc "Per-namespace analysis cache shared across `swap-session!` calls.
+                `analyze-session-rules` caches per-ns results here so repeated annotation
+                builds against the same session avoid re-analyzing rule namespaces.
+                Cleared when the session reference changes identity."}
+  analyze-cache-atom (atom {}))
+
 (defn- load-merged-annotations
   "Folds the rule-:props layer (base) plus the configured `:layers` through
    merge-layers.  File-backed layers are re-read on every call, so
@@ -71,7 +78,8 @@
     (#{:auto-detect-from-rulebase :auto-detect} enrichment)
     (conj {:id :clara.tools.graph.analyze/generated
            :annotations (let [analysis (analyze/analyze-session-rules
-                                        {:session-or-rulebase session})
+                                        {:session-or-rulebase session
+                                         :cache-atom analyze-cache-atom})
                               generated (analyze/generate-annotations-from-analysis
                                          {:analysis analysis
                                           :session-or-rulebase session})]
@@ -183,7 +191,10 @@
     ;; 1. Swap the session
     (when (some? session)
       (swap! config-atom assoc :session session)
-      (reset! session-atom session))
+      (reset! session-atom session)
+      ;; New session may have different rules in the same namespaces —
+      ;; clear the analysis cache so namespaces are re-analyzed.
+      (reset! analyze-cache-atom {}))
 
     ;; 2. Build annotations
     (when (or (some? session) (some? annotations))
