@@ -6,6 +6,7 @@
   (:require [clara.rules.engine :as eng]
             [clara.rules.schema :as schema]
             [clara.server.tools.graph.annotations :as ann]
+            [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.nodes :as nodes]
             [clara.server.tools.graph.serialize :as serialize]
@@ -270,8 +271,7 @@
 (defn build-production-id-index
   "Reverse index {id → name} for every rule and query in the analysis,
    asserting id uniqueness (a route-id collision throws loudly at
-   analysis-build time rather than silently mislinking).  Internal — never
-   part of the /v1/analysis payload."
+   analysis-build time rather than silently mislinking)."
   [analysis]
   (reduce (fn [idx {:keys [id name]}]
             (if-let [existing (get idx id)]
@@ -358,13 +358,9 @@
 (defn- coerce-annotations-arg
   "Normalizes the annotations argument of `rulebase-analysis`: a
    MergedAnnotations value passes through; a bare rule→annotation map is
-   wrapped as merged content with no provenance.  (Key membership is tested
-   with `some` — a bare map may be a string-keyed sorted map, where a
-   keyword `contains?` throws ClassCastException.)"
+   wrapped as merged content with no provenance."
   [x]
-  (if (and (map? x)
-           (some #{:annotations} (keys x))
-           (some #{:provenance} (keys x)))
+  (if (ann.merge/merged-annotations? x)
     x
     {:annotations (or x {}) :provenance {}}))
 
@@ -412,13 +408,16 @@
                          (keep (fn [p]
                                  (detect-unresolved p
                                                     (get production-annotation-map (:name p)))))
-                         productions)]
-    {:rules rules
-     :queries queries
-     :fact-types fact-types
-     :nodes nodes
-     :dep-graph dep-graph
-     :unresolved (vec unresolved)}))
+                         productions)
+        analysis {:rules rules
+                  :queries queries
+                  :fact-types fact-types
+                  :nodes nodes
+                  :dep-graph dep-graph
+                  :unresolved (vec unresolved)}]
+    (assoc analysis
+           :fact-type-id-index (ft/build-fact-type-id-index analysis)
+           :production-id-index (build-production-id-index analysis))))
 
 (defn rulebase-summary
   "Returns a high-level summary of the rulebase counts using kebab-case keys."
@@ -446,5 +445,12 @@
   (mapv #(select-keys % [:name :id :ns :doc :lhs-types :params])
         (vals (:queries analysis))))
 
+(defn analysis-result
+  "Returns the analysis map stripped of internal reverse indexes
+   (`:fact-type-id-index`, `:production-id-index`) that are only needed by
+   detail-by-id handlers.  Suitable for serialization to consumers that
+   should not depend on those implementation details."
+  [analysis]
+  (dissoc analysis :fact-type-id-index :production-id-index))
 
 

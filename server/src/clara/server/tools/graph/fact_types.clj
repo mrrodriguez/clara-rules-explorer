@@ -277,8 +277,7 @@
 (defn build-fact-type-id-index
   "Reverse index {id → name} for every fact type in the analysis, asserting
    id uniqueness (a route-id collision throws loudly at analysis-build time
-   rather than silently mislinking).  Internal — never part of the
-   /v1/analysis payload."
+   rather than silently mislinking)."
   [analysis]
   (reduce (fn [idx {:keys [id name]}]
             (if-let [existing (get idx id)]

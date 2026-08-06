@@ -352,6 +352,15 @@
       :rule-id-index      (build-id-name-index (keys rule-match-index))
       :query-id-index     (build-id-name-index (keys query-match-index))})))
 
+(defn session-snapshot-from-analysis
+  "Returns a working-memory snapshot like `session-snapshot`, deriving the
+   known-type set from the static `rulebase-analysis` result so TypeReference
+   `:known` flags are honest membership checks against the analysis.
+   Returns nil when `session` has no working memory (rulebase only)."
+  [session analysis]
+  (when (core/working-memory-available? session)
+    (session-snapshot session (-> analysis :fact-types keys set))))
+
 (defn get-session-rule-activity
   "Returns a unified activity map for a rule: {:matches [...] :inserted-facts [...]}"
   [snapshot p-name]

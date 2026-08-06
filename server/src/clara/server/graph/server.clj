@@ -2,6 +2,8 @@
   "Lifecycle management for the Clara Rules Explorer server."
   (:require [ring.adapter.jetty :as jetty]
             [clara.server.graph.api :as api]
+            [clara.server.graph.cache :as cache]
+            [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.core :as core])
   (:import
@@ -13,13 +15,9 @@
 (defonce ^:private annotations-atom (atom {}))
 (defonce ^:private config-atom (atom {}))
 
-(defn- ->layer
-  "Coerces a `:layers` entry to a Layer: a path string is read from disk, a
-   map is taken as an in-memory layer."
-  [x]
-  (if (string? x)
-    (ann.merge/read-layer x)
-    (ann.merge/layer x)))
+;; The cache atom created by `clara.server.graph.api/app`, stored here so
+;; `swap-session!` can eagerly warm it after a runtime swap.
+(defonce ^:private cache-atom (atom nil))
 
 (defn- load-merged-annotations
   "Folds the rule-:props layer (base) plus the configured `:layers` through
@@ -28,12 +26,91 @@
    as-is."
   [session layers]
   (ann.merge/merge-layers (into [(ann.merge/props-layer session)]
-                                (map ->layer)
+                                (map ann.merge/->layer)
                                 layers)))
 
 (defn- reload-annotations! []
   (let [{:keys [session layers]} @config-atom]
     (reset! annotations-atom (load-merged-annotations session layers))))
+
+;; ---------------------------------------------------------------------------
+;; Runtime session / annotation swap
+;; ---------------------------------------------------------------------------
+
+(defn swap-session!
+  "Update the running server's session and/or annotations at runtime.
+
+   Accepts keyword arguments:
+     :session      — New Clara session (or rulebase).  When working-memory
+                     was disabled at server start the server stays in
+                     rulebase-only mode — restart the server to change that.
+     :annotations  — Optional new annotations:
+                       - Bare rule→annotation map
+                       - MergedAnnotations (from ann.merge/merge-layers)
+                       - Vector of Layer maps (merged together, props-layer
+                         folded in first as the base)
+     :enrich-from-session? — When true, re-enrich the resulting annotations
+                             with fact types detected from the session's
+                             working memory.  Default false.  No-op when the
+                             session has no working memory.
+     :warm-cache?   — When true (default), eagerly rebuild the analysis cache
+                      so the next request is fast.
+
+   All four combinations are supported:
+     (swap-session! :session s)               ; new session, recompute annos
+     (swap-session! :annotations a)           ; new annotations only
+     (swap-session! :session s :annotations a); both
+     (swap-session! :annotations a :enrich-from-session? true)
+
+   When :session is provided without :annotations, annotations are
+   recomputed from the new session's rule :props merged with the currently
+   configured layers (same effect as POST /v1/annotations/reload but against
+   the new session).
+
+   When working memory is unavailable (rulebase session), the server stays
+   in rulebase-only mode: working-memory routes keep returning 409, and
+   :enrich-from-session? is a no-op.
+
+   Returns the new value of `annotations-atom` (the bare annotations map)."
+  [& {:keys [session annotations enrich-from-session? warm-cache?]
+      :or {enrich-from-session? false warm-cache? true}}]
+  (when (and (nil? session) (nil? annotations))
+    (throw (IllegalArgumentException.
+            "swap-session! requires at least one of :session or :annotations")))
+
+  (let [session-updated? (some? session)]
+    ;; 1. Swap the session
+    (when session-updated?
+      ;; config-atom keeps the canonical session ref for reload-annotations!
+      (swap! config-atom assoc :session session)
+      (reset! session-atom session))
+
+    ;; 2. Update annotations
+    (cond
+      ;; Explicit annotations supplied — coerce and store
+      (some? annotations)
+      (reset! annotations-atom
+              (ann.merge/coerce-to-bare-annotations annotations @session-atom))
+
+      ;; Session changed but no annotations given — recompute from new
+      ;; session's rule :props + existing layers
+      session-updated?
+      (reload-annotations!))
+
+    ;; 3. Optionally enrich with session working-memory types
+    (when enrich-from-session?
+      (let [s @session-atom]
+        (when (core/working-memory-available? s)
+          (swap! annotations-atom
+                 #(analyze/enrich-annotations-from-session s %)))))
+
+    ;; 4. Eagerly warm the cache so the next request avoids the full
+    ;;    rulebase-analysis build cost
+    (when warm-cache?
+      (when-let [c @cache-atom]
+        (cache/warm! c session-atom annotations-atom)))
+
+    @annotations-atom))
 
 (defn- wrap-reload [handler]
   (fn [req]
@@ -71,8 +148,9 @@
     (when (and wm-available? (not working-memory-enabled))
       (println "[server] Working-memory routes disabled by configuration (:working-memory-enabled false)"))
 
-    (let [{:keys [handler analysis-cache]} (api/app session-atom annotations-atom working-memory-enabled)
-          _ (api/warm-analysis-cache! session-atom annotations-atom analysis-cache)
+    (let [{:keys [handler cache]} (api/app session-atom annotations-atom working-memory-enabled)
+          _ (reset! cache-atom cache)
+          _ (cache/warm! cache session-atom annotations-atom)
           final-app (wrap-reload handler)]
       (when-let [server  @server-instance]
         (Server/.stop server))
