@@ -13,15 +13,23 @@ milestones that can land independently.
 - [x] Milestone 4 — Detection-map layering semantics (defect 5)
 - [x] Milestone 5 — Rulebase-only server support (defect 3)
 
-Final verification: **175 tests, 1243 assertions, 0 failures.**
+Final verification: **176 tests, 1259 assertions, 0 failures.**
 Format, lint, and reflection all clean (0 warnings).
 
 Review round (kimi-1) addressed:
-- `:working-memory? false` enforcement plumbed through to `api/app` → handlers.
+- Working-memory opt-out enforcement plumbed through to `api/app` → handlers.
 - 409 path now covered by automated tests in `session_api_test.clj`.
 - `:working-memory?` → `:working-memory-available` in JSON (kebab-case convention).
 - `:test` condition fixture corrected to real compiled shape.
 - Session handler return schemas updated for 200 | 409.
+
+Review round (kimi-2) addressed:
+- 409 cause attribution fixed (raw flag + dynamic capability check).
+- Static config resolved once at router construction (no per-request flag
+  branching); only session capability stays dynamic.
+- Flag renamed to `:working-memory-enabled` (start! option + CLI flag).
+- Opt-out test added; summary flag is effective-state; all four
+  `GetSession*Response` schemas carry 409; `main.clj` passthrough.
 
 ## Reconciliation with current branch state
 
@@ -209,17 +217,20 @@ rather than the plan's `list*` / `cond->` approach. Both produce a seq that
   `(satisfies? eng/ISession x)`.
 - Migrated both `instance? LocalSession` checks (`core.clj:16`, `api.clj:271`)
   to the new predicate. Removed the now-unused `LocalSession` import.
-- `start!` (`server.clj:46`) accepts `:working-memory? false` option
-  (default `true`).
+- `start!` (`server.clj:46`) accepts `:working-memory-enabled false` option
+  (default `true`).  Named without `?` for CLI ergonomics; also exposed as
+  `--working-memory-enabled BOOL` in `main.clj`'s CLI options and forwarded
+  by `run-explorer-server`.
 
 ### Step 2 — uniform early failure
 
 - Added `with-snapshot` helper in `api.clj` that wraps `get-snapshot`:
-  returns `{:status 409 :reason :no-working-memory}` when working memory is
-  unavailable. All 7 working-memory routes (6 `/session/*` +
-  `/session-snapshot`) use it, so the behavior is uniform.
-- `get-snapshot` itself returns `nil` (not throwing) when working memory is
-  absent, so the guard is at the handler level.
+  returns 409 `:rulebase-input` when the session is a rulebase.  Session
+  capability is checked per request (the session atom can be hot-swapped);
+  the static config flag is resolved once at router construction — when
+  `:working-memory-enabled` is false, `router` binds all 7 working-memory
+  routes (6 `/session/*` + `/session-snapshot`) to a fixed 409
+  `:disabled-by-config` handler instead of branching per request.
 
 ### Step 3 — startup + docs + capability advertisement
 
@@ -241,20 +252,61 @@ in the JSON API for consistency with existing kebab-case convention.
   without `:type`).
 - Session handler return schemas updated to `(s/cond-pre (s/eq 200) (s/eq 409))`.
 
+### Review-driven fixes (kimi-2)
+
+kimi-2 found that the kimi-1 flag threading conflated the two 409 causes and
+left gaps; fixed directly:
+
+- **Cause attribution fixed (was HIGH).** `start!` had passed
+  `(and wm-available? working-memory?)` to `api/app`, so rulebase input took
+  the `:disabled-by-config` branch — the API said "disabled by configuration"
+  while the startup log said "started with a rulebase", and `:rulebase-input`
+  was unreachable via the shipped path. Now `start!` passes the **raw**
+  config flag, and the two causes are attributed precisely (dynamic
+  capability check → `:rulebase-input`; static config flag →
+  `:disabled-by-config`).
+- **Flag renamed:** `:working-memory?` → `:working-memory-enabled`
+  (start! option, CLI flag, log/error messages) — predicate-style `?` names
+  are awkward in CLI/config maps.
+- **Opt-out test added (was MEDIUM).** New `test-working-memory-opt-out-409`:
+  live session + flag `false` → all six working-memory routes 409 with
+  `"disabled-by-config"`, rulebase routes still 200.
+- **Schemas completed (was partial).** All four `GetSession*Response`
+  `s/conditional` schemas now carry a 409 clause (`no-working-memory-body`:
+  `{:error s/Str :reason s/Keyword}`), matching the inline
+  `handle-get-session-fact-types` schema from kimi-1.
+- **Summary flag semantic decided (was open).** `:working-memory-available`
+  in `RulebaseSummary` is now the **effective state** —
+  `(and flag (working-memory-available? session))` — i.e. "working-memory
+  routes are served", which is what a client needs to branch without
+  probing. A live session with `:working-memory-enabled false` reports
+  `false`.
+- **`main.clj` passthrough added (was missing).** `run-explorer-server`
+  forwards `:working-memory-enabled` from its options to `start!` (nil-safe:
+  `start!`'s `:or` default of `true` applies when absent), and a
+  `--working-memory-enabled BOOL` CLI flag was added.
+
 ### Tests
 
-- `session_api_test.clj`: new `test-rulebase-only-409` — four session routes
-  return 409 with `"rulebase-input"` reason, rulebase routes return 200.
-- `session_api_test.clj`: new `test-rulebase-summary-working-memory-flag` —
-  `:working-memory-available` is `false` for rulebase, `true` for live session.
+- `session_api_test.clj`: `test-rulebase-only-409` — session routes return
+  409 with `"rulebase-input"` reason, rulebase routes return 200. (Flag
+  `true` + rulebase matches the shipped `start!` wiring.)
+- `session_api_test.clj`: `test-working-memory-opt-out-409` — live session +
+  flag `false` → 409 with `"disabled-by-config"` on all six working-memory
+  routes.
+- `session_api_test.clj`: `test-rulebase-summary-working-memory-flag` —
+  `:working-memory-available` is `false` for rulebase, `true` for live
+  session, `false` for live session + opt-out (effective state).
 - All existing session handler tests (live session) continue to pass
   (regression guard).
 
 ### Pending cross-project follow-through
 
-- [ ] Update `docs/explorer-graph-api.md` with the new `409` status/reason,
-  `:working-memory-available` flag in `RulebaseSummary`, and the new `start!`
-  option (`:working-memory?`).
+- [ ] Update `docs/explorer-graph-api.md` with the new `409` status, the two
+  `:reason` values (`rulebase-input`, `disabled-by-config`), the
+  `:working-memory-available` flag in `RulebaseSummary` (**effective state**
+  semantics — false means working-memory routes 409), and the new
+  `:working-memory-enabled` start! option / CLI flag.
 - [ ] Update `ui/src/lib/types/api.ts` to match the updated
   `RulebaseSummary` contract (add `workingMemoryAvailable: boolean`).
 

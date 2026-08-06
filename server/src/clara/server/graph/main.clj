@@ -51,6 +51,9 @@
     :default 9999
     :parse-fn #(Integer/parseInt %)
     :validate [#(< 0 % 65536) "Port must be between 1 and 65535"]]
+   [nil "--working-memory-enabled BOOL" "Set to false to disable working-memory routes (rulebase analysis only)."
+    :default true
+    :parse-fn #(Boolean/parseBoolean %)]
    [nil "--generate-analysis DIR" "Generate annotations and analysis EDN files to the specified output directory."
     :id :generate-analysis-dir]
    [nil "--load-session-state-fn SYMBOL" "Symbol naming a function to load the session state."
@@ -195,7 +198,7 @@
 (defn run-explorer-server
   "Starts the explorer server with the given options."
   [options facts-path]
-  (let [{:keys [session layer port load-session-state-fn]} options]
+  (let [{:keys [session layer port load-session-state-fn working-memory-enabled]} options]
     (println (format "Loading session from: %s" session))
     (when (or (not load-session-state-fn) (file-exists? facts-path))
       (println (format "Loading facts from:   %s" facts-path)))
@@ -208,7 +211,9 @@
       (server/start!
        {:session loaded-session
         :port port
-        :layers (into [] (filter file-exists?) layer)})
+        :layers (into [] (filter file-exists?) layer)
+        ;; nil when absent — start!'s :or default (true) applies
+        :working-memory-enabled working-memory-enabled})
       (println (format "Clara Graph Server running at http://localhost:%s" port))
       (println (format "API endpoints at http://localhost:%s/v1/" port))
       (println "Press Ctrl+C to stop."))))

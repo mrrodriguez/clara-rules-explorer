@@ -49,26 +49,29 @@
    Options:
    :session       - The Clara session to analyze.  A raw Rulebase is also
                     accepted; when given a rulebase, working-memory routes
-                    return 409 (see :working-memory?).
+                    return 409 (see :working-memory-enabled).
    :layers        - Ordered vector of annotation layers (lowest precedence
                     first): path strings (read from disk, re-read on reload)
                     or in-memory layer maps.  The rule-:props layer is
                     folded in first, as the base everything else overlays.
    :port          - Server port (default 9999).
-   :working-memory? - When false, working-memory routes return 409 even when
-                      a live session is provided (default true)."
-  [{:keys [session port working-memory?] :or {port 9999 working-memory? true} :as config}]
-  (let [wm-available? (core/working-memory-available? session)
-        wm-enabled?  (and wm-available? working-memory?)]
+   :working-memory-enabled - When false, working-memory routes return 409
+                             even when a live session is provided
+                             (default true)."
+  [{:keys [session port working-memory-enabled] :or {port 9999 working-memory-enabled true} :as config}]
+  ;; Pass the RAW :working-memory-enabled flag to api/app, not a conjunction
+  ;; with session capability: the 409 attribution (:rulebase-input vs
+  ;; :disabled-by-config) depends on the two causes staying separate.
+  (let [wm-available? (core/working-memory-available? session)]
     (reset! config-atom config)
     (reset! session-atom session)
     (reload-annotations!)
     (when-not wm-available?
       (println "[server] Working-memory routes disabled: started with a rulebase, not a session"))
-    (when (and wm-available? (not working-memory?))
-      (println "[server] Working-memory routes disabled by configuration (:working-memory? false)"))
+    (when (and wm-available? (not working-memory-enabled))
+      (println "[server] Working-memory routes disabled by configuration (:working-memory-enabled false)"))
 
-    (let [{:keys [handler analysis-cache]} (api/app session-atom annotations-atom wm-enabled?)
+    (let [{:keys [handler analysis-cache]} (api/app session-atom annotations-atom working-memory-enabled)
           _ (api/warm-analysis-cache! session-atom annotations-atom analysis-cache)
           final-app (wrap-reload handler)]
       (when-let [server  @server-instance]

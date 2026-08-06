@@ -98,6 +98,9 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-rulebase-only-409
+  ;; NOTE: flag=true matches the shipped start! wiring for rulebase input:
+  ;; start! passes the raw :working-memory-enabled flag (default true) and
+  ;; the 409 is attributed dynamically by with-snapshot (:rulebase-input).
   (let [rulebase (-> (->test-session) eng/components :rulebase)
         handler (:handler (api/app (atom rulebase) (atom {}) true))]
 
@@ -137,4 +140,41 @@
           resp (handler (mock/request :get "/v1/rulebase-summary"))
           body (parse-json (:body resp))]
       (is (= 200 (:status resp)))
-      (is (true? (:working-memory-available body))))))
+      (is (true? (:working-memory-available body)))))
+
+  (testing ":working-memory-available is effective state: false for live session + opt-out"
+    (let [session (-> (->test-session)
+                      (r/insert (laf/map->Application {:app-id "app-1"}))
+                      (r/fire-rules))
+          handler (:handler (api/app (atom session) (atom {}) false))
+          resp (handler (mock/request :get "/v1/rulebase-summary"))
+          body (parse-json (:body resp))]
+      (is (= 200 (:status resp)))
+      (is (false? (:working-memory-available body))
+          "flag reflects whether working-memory routes are served, not mere capability"))))
+
+;; ---------------------------------------------------------------------------
+;; Explicit opt-out: live session + :working-memory-enabled false
+;; ---------------------------------------------------------------------------
+
+(deftest test-working-memory-opt-out-409
+  (let [session (-> (->test-session)
+                    (r/insert (laf/map->Application {:app-id "app-1"}))
+                    (r/fire-rules))
+        handler (:handler (api/app (atom session) (atom {}) false))]
+
+    (testing "session routes 409 with :disabled-by-config despite live session"
+      (doseq [uri ["/v1/session/fact-types"
+                   "/v1/session-snapshot"
+                   "/v1/session/rules/some-rule"
+                   "/v1/session/queries/some-query"
+                   "/v1/session/facts/0"
+                   "/v1/session/fact-types/some-type"]]
+        (let [resp (handler (mock/request :get uri))]
+          (is (= 409 (:status resp)) (str uri " must 409"))
+          (is (= "disabled-by-config" (:reason (parse-json (:body resp))))
+              (str uri " must attribute the cause to the config flag")))))
+
+    (testing "rulebase routes still 200 under opt-out"
+      (is (= 200 (:status (handler (mock/request :get "/v1/rulebase-summary")))))
+      (is (= 200 (:status (handler (mock/request :get "/v1/rules"))))))))
