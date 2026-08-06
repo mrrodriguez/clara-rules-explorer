@@ -191,6 +191,7 @@ export interface RulebaseSummary {
 	'rule-count': number;
 	'query-count': number;
 	'fact-type-count': number;
+	'working-memory-available': boolean;
 }
 
 /**

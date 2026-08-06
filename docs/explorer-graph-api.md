@@ -31,8 +31,31 @@ The session and merged annotations are held in atoms so the host application can
 (def s (server/start! {:session my-session
                        :port    9999
                        :layers  ["/etc/clara/curated-annotations.edn"]}))
+
+;; Rulebase-only analysis (no working-memory routes): pass a raw rulebase
+;; and the session endpoints return 409 with reason :rulebase-input.
+(def s2 (server/start! {:session my-rulebase
+                        :port    9999
+                        :layers  ["/etc/clara/curated-annotations.edn"]}))
+
+;; Explicitly disable working-memory routes on a live session:
+(def s3 (server/start! {:session                   my-session
+                        :port                      9999
+                        :layers                    ["/etc/clara/curated-annotations.edn"]
+                        :working-memory-enabled    false}))
 (server/stop!)  ;; when done
 ```
+
+#### `start!` Options
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `:session` | session or rulebase | _required_ | Clara session (working memory enabled) or raw Rete rulebase (working memory disabled; session routes return 409 `:rulebase-input`) |
+| `:port` | int | `9999` | HTTP listen port |
+| `:layers` | vector | `[]` | Ordered annotation layers (paths or in-memory maps), folded lowest precedence first |
+| `:working-memory-enabled` | boolean | `true` | When `false`, all `/v1/session/*` and `/v1/session-snapshot` routes return 409 `:disabled-by-config` regardless of session type |
+
+**CLI flag:** `--working-memory-enabled BOOL` (passed through `run-explorer-server` → `start!`).
 
 ---
 
@@ -163,14 +186,15 @@ All static analysis is derived from the compiled Rete network. These endpoints d
 
 #### `GET /v1/rulebase-summary`
 
-High-level dashboard counts.
+High-level dashboard counts.  Always returns 200 — this endpoint does not require working memory.
 
 **Response** `200`:
 ```json
 {
   "rule-count": 7,
   "query-count": 2,
-  "fact-type-count": 10
+  "fact-type-count": 10,
+  "working-memory-available": true
 }
 ```
 
@@ -179,6 +203,7 @@ High-level dashboard counts.
 | `rule-count` | int | Number of rules (productions with an RHS) |
 | `query-count` | int | Number of queries |
 | `fact-type-count` | int | Distinct fact types across all rules/queries |
+| `working-memory-available` | boolean | **Effective state** — `true` iff working-memory routes are served. Computed as `(and :working-memory-enabled (working-memory-available? session))`. When `false`, all `/v1/session/*` and `/v1/session-snapshot` routes return 409. A rulebase input or explicit `:working-memory-enabled false` opt-out both produce `false`. |
 
 ---
 
@@ -476,6 +501,26 @@ Re-reads file-backed annotation layers from disk. In-memory layers are kept as-i
 
 All session endpoints return a **point-in-time snapshot** of working memory. The snapshot is cached per session and recalculated on session change.
 
+#### Working-Memory Availability (409)
+
+Every session endpoint may return a **409 Conflict** when working memory is unavailable. The `:reason` key is machine-readable; use it (not the message string) to branch:
+
+```json
+{
+  "error": "No working memory: the server was started with a rulebase, not a session",
+  "reason": "rulebase-input"
+}
+```
+
+| `:reason` | Cause |
+|-----------|-------|
+| `"rulebase-input"` | The server was started with a raw Rete rulebase instead of a session. Detected per request (the session atom can be hot-swapped at runtime). |
+| `"disabled-by-config"` | `:working-memory-enabled false` was set at startup. Resolved once at router construction — all seven working-memory routes return this fixed 409 without per-request branching. |
+
+Clients should check `:working-memory-available` on `/v1/rulebase-summary` to decide whether to attempt session navigation, rather than probing endpoints and handling 409s.
+
+---
+
 #### `GET /v1/session-snapshot`
 
 Full session snapshot. Internal indices included for completeness; the UI should use the targeted endpoints below.
@@ -494,6 +539,8 @@ Full session snapshot. Internal indices included for completeness; the UI should
   "query-id-index": { "id": "queryFqName", ... }
 }
 ```
+
+**Response** `409`: See [Working-Memory Availability (409)](#working-memory-availability-409) above.
 
 The `*-id-index` maps are the session-side reverse indexes used by the
 session detail handlers (id → name), built per snapshot with the same id
@@ -520,6 +567,8 @@ Summary of all fact types currently in working memory.
 |-----|------|-------------|
 | `types` | object[] | Each fact type in memory with `name`, `id`, `ns` (nullable), `count` |
 | `total-count` | int | Total number of fact instances across all types |
+
+**Response** `409`: See [Working-Memory Availability (409)](#working-memory-availability-409).
 
 ---
 
@@ -581,6 +630,8 @@ All instances of a specific fact type, grouped by origin and usage.
 
 **Response** `404`: `{ "error": "Fact type not found in session" }`
 
+**Response** `409`: See [Working-Memory Availability (409)](#working-memory-availability-409).
+
 ---
 
 #### `GET /v1/session/facts/:id`
@@ -613,6 +664,8 @@ A single fact instance with its lineage and usage.
 | `used-by` | ProductionDep[] | Rules/queries currently matching this fact |
 
 **Response** `404`: `{ "error": "Fact not found in session" }`
+
+**Response** `409`: See [Working-Memory Availability (409)](#working-memory-availability-409).
 
 ---
 
@@ -657,6 +710,8 @@ Unified activity view for a rule: what it matched + what it inserted.
 
 **Response** `404`: `{ "error": "Rule matches not found" }`
 
+**Response** `409`: See [Working-Memory Availability (409)](#working-memory-availability-409).
+
 ---
 
 #### `GET /v1/session/queries/:id`
@@ -683,6 +738,8 @@ Activity view for a query.
 Same match shape as rules; queries have no `inserted-facts`.
 
 **Response** `404`: `{ "error": "Query matches not found" }`
+
+**Response** `409`: See [Working-Memory Availability (409)](#working-memory-availability-409).
 
 ---
 

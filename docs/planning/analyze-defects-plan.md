@@ -302,12 +302,12 @@ left gaps; fixed directly:
 
 ### Pending cross-project follow-through
 
-- [ ] Update `docs/explorer-graph-api.md` with the new `409` status, the two
+- [x] Update `docs/explorer-graph-api.md` with the new `409` status, the two
   `:reason` values (`rulebase-input`, `disabled-by-config`), the
   `:working-memory-available` flag in `RulebaseSummary` (**effective state**
   semantics — false means working-memory routes 409), and the new
   `:working-memory-enabled` start! option / CLI flag.
-- [ ] Update `ui/src/lib/types/api.ts` to match the updated
+- [x] Update `ui/src/lib/types/api.ts` to match the updated
   `RulebaseSummary` contract (add `workingMemoryAvailable: boolean`).
 
 ### Verify
