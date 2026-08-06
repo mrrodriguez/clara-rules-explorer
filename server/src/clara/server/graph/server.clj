@@ -10,7 +10,8 @@
             [schema.core :as s])
   (:import
    [org.eclipse.jetty.server
-    Server]))
+    Server]
+   java.io.File))
 
 (defonce ^:private server-instance (atom nil))
 (defonce ^:private session-atom (atom nil))
@@ -32,21 +33,105 @@
                                 layers)))
 
 (defn- reload-annotations! []
-  (let [{:keys [session layers annotations]} @config-atom]
+  (let [{:keys [session layers]} @config-atom]
     (reset! annotations-atom
-            (if annotations
-              ;; Explicit annotations were set via swap-session! — preserve
-              ;; them across reload so layer-file edits don't overwrite.
-              (ann.merge/annotations
-               (ann.merge/merge-layers
-                (into [(ann.merge/props-layer session)]
-                      (map ann.merge/->layer)
-                      (or layers []))))
-              ;; No explicit annotations — merge layers + props as usual.
-              (load-merged-annotations session layers)))))
+            (load-merged-annotations session layers))))
 
 ;; ---------------------------------------------------------------------------
-;; Runtime session / annotation swap
+;; Annotation building
+;; ---------------------------------------------------------------------------
+
+(s/defschema AnnotationsSpec
+  "Specification for building annotations.
+   :source     — optional explicit annotations (nil, bare map, MergedAnnotations,
+                 vector of Layers, string path, or File).
+   :enrichment — optional mode: nil (source as-is), :none (explicitly no enrichment),
+                 :reuse (keep current annotations, source takes priority),
+                 :auto-detect-from-rulebase (props + static analysis on top of source),
+                 :auto-detect-from-memory (props + WM enrichment on top of source),
+                 :auto-detect (props + both on top of source)."
+  {(s/optional-key :source) (s/maybe (s/pred (some-fn ann.merge/merged-annotations?
+                                                      vector?
+                                                      map?
+                                                      string?
+                                                      #(instance? File %))
+                                             'annotations-input?))
+   (s/optional-key :enrichment) (s/maybe (s/enum :none :reuse
+                                                 :auto-detect-from-rulebase
+                                                 :auto-detect-from-memory
+                                                 :auto-detect))})
+
+(defn- build-auto-detect-layers
+  "Build the layer vector for auto-detect enrichment modes."
+  [session source enrichment wm?]
+  (cond-> [(ann.merge/props-layer session)]
+    (some? source)
+    (conj (ann.merge/->layer {:id :source
+                              :annotations (ann.merge/coerce-to-bare-annotations source session)}))
+    (#{:auto-detect-from-rulebase :auto-detect} enrichment)
+    (conj {:id :clara.tools.graph.analyze/generated
+           :annotations (let [analysis (analyze/analyze-session-rules
+                                        {:session-or-rulebase session})
+                              generated (analyze/generate-annotations-from-analysis
+                                         {:analysis analysis
+                                          :session-or-rulebase session})]
+                          generated)})
+    (and (#{:auto-detect-from-memory :auto-detect} enrichment)
+         wm?)
+    (conj {:id :clara.tools.graph.analyze/memory
+           :annotations (analyze/enrich-annotations-from-session session {})})))
+
+(defn- build-auto-detect-annotations
+  "Build annotations for :auto-detect-from-rulebase, :auto-detect-from-memory,
+   or :auto-detect enrichment modes."
+  [session source enrichment]
+  (let [wm? (core/working-memory-available? session)]
+    (when (and (#{:auto-detect-from-memory} enrichment)
+               (not wm?))
+      (println "[server] :auto-detect-from-memory requested but no working memory available — skipping"))
+    (-> (build-auto-detect-layers session source enrichment wm?)
+        ann.merge/merge-layers
+        ann.merge/annotations)))
+
+(defn build-annotations
+  "Resolve annotations for `session` from `annotations-spec`.
+
+   `annotations-spec` is an `AnnotationsSpec` map, or a legacy bare form
+   (bare map, MergedAnnotations, vector of Layers, string path, or File)
+   which is treated as `{:source <form>}`.
+
+   `current-annotations` is the current @annotations-atom value (used by
+   :reuse when no source is given)."
+  [session annotations-spec current-annotations]
+  (let [;; Normalize legacy forms to {:source ...}
+        {:keys [source enrichment]}
+        (if (or (nil? annotations-spec)
+                (and (map? annotations-spec)
+                     (or (contains? annotations-spec :source)
+                         (contains? annotations-spec :enrichment))))
+          annotations-spec
+          {:source annotations-spec})]
+    (case enrichment
+      :reuse
+      (if (some? source)
+        (ann.merge/coerce-to-bare-annotations source session)
+        current-annotations)
+
+      :none
+      (if (some? source)
+        (ann.merge/coerce-to-bare-annotations source session)
+        {})
+
+      nil
+      (if (some? source)
+        (ann.merge/coerce-to-bare-annotations source session)
+        {})
+
+      ;; Auto-detect modes
+      (build-auto-detect-annotations session source enrichment))))
+
+;; ---------------------------------------------------------------------------
+;; Schema
 ;; ---------------------------------------------------------------------------
 
 (s/defschema SessionOrRulebase
@@ -54,91 +139,65 @@
   (s/pred #(or (satisfies? eng/ISession %) (map? %))
           'session-or-rulebase?))
 
-(s/defschema AnnotationsInput
-  "Any of the valid annotation-input forms:
-     - a MergedAnnotations value (from merge-layers)
-     - a vector of Layer maps (merged on the fly)
-     - a bare rule->annotation map
-     - a string path to a layer file (read from disk)."
-  (s/pred (some-fn ann.merge/merged-annotations?
-                   vector?
-                   map?
-                   string?
-                   #(instance? java.io.File %))
-          'annotations-input?))
+(s/defschema AnnotationsArg
+  "Either an AnnotationsSpec map or a legacy annotation-input form
+   (bare map, MergedAnnotations, vector of Layers, string path, or File)."
+  (s/pred (fn [x]
+            (or (nil? x)
+                (and (map? x)
+                     (or (contains? x :source)
+                         (contains? x :enrichment)))
+                (ann.merge/merged-annotations? x)
+                (vector? x)
+                (string? x)
+                (instance? File x)
+                (map? x)))
+          'annotations-arg?))
 
 (s/defschema SwapSessionOpts
-  "Options for `swap-session!`.  At least one of :session, :annotations, or
-   :reuse-annotations? must be provided."
+  "Options for `swap-session!`.  At least one of :session or :annotations
+   must be provided."
   {(s/optional-key :session) SessionOrRulebase
-   (s/optional-key :annotations) AnnotationsInput
-   (s/optional-key :enrich-from-session?) s/Bool
-   (s/optional-key :warm-cache?) s/Bool
-   (s/optional-key :reuse-annotations?) s/Bool})
+   (s/optional-key :annotations) (s/maybe AnnotationsArg)
+   (s/optional-key :warm-cache?) s/Bool})
 
 (defn swap-session!
   "Hot-swap the running server's session and/or annotations at runtime.
 
    `opts` is a `SwapSessionOpts` map:
-
-     :session — New Clara session (or rulebase). When given without :annotations or
-  :reuse-annotations?, annotations are cleared — old annotations do not necessarily align with a
-  different ruleset.
-
-     :annotations — New annotations. Stored in config-atom so reload-annotations! respects them.
-
-     :reuse-annotations? — When true, keep current annotations as-is across a session swap. Default
-  false.
+     :session     — New Clara session (or rulebase).
+     :annotations — An `AnnotationsSpec` map, or a legacy bare form (map,
+                    MergedAnnotations, vector of Layers, string path, or
+                    File).  When absent and :session is given, annotations
+                    are cleared.
 
    Returns the new value of `annotations-atom` (a bare annotations map)."
   [opts]
-  (let [{:keys [session annotations enrich-from-session? warm-cache? reuse-annotations?]
-         :or {enrich-from-session? false warm-cache? true reuse-annotations? false}}
+  (let [{:keys [session annotations warm-cache?]
+         :or {warm-cache? true}}
         (s/validate SwapSessionOpts opts)]
-    (when (and (nil? session) (nil? annotations) (not reuse-annotations?))
+    (when (and (nil? session) (nil? annotations))
       (throw (IllegalArgumentException.
-              "swap-session! requires at least one of :session, :annotations, or :reuse-annotations?")))
+              "swap-session! requires at least one of :session or :annotations")))
 
-    (let [session-updated? (some? session)]
-      ;; 1. Swap the session
-      (when session-updated?
-        (swap! config-atom assoc :session session)
-        (reset! session-atom session))
+    ;; 1. Swap the session
+    (when (some? session)
+      (swap! config-atom assoc :session session)
+      (reset! session-atom session))
 
-      ;; 2. Update annotations
-      (cond
-        ;; Explicit annotations given — store in both atoms and in config-atom
-        ;; so reload-annotations! will respect them.
-        (some? annotations)
-        (let [bare (ann.merge/coerce-to-bare-annotations annotations @session-atom)]
-          (reset! annotations-atom bare)
-          (swap! config-atom assoc :annotations bare))
+    ;; 2. Build annotations
+    (when (or (some? session) (some? annotations))
+      (let [s @session-atom
+            bare (build-annotations s annotations @annotations-atom)]
+        (reset! annotations-atom bare)
+        (swap! config-atom assoc :annotations bare)))
 
-        ;; Session changed, reuse requested — keep current annotations as-is.
-        (and session-updated? reuse-annotations?)
-        nil
+    ;; 3. Warm the cache
+    (when warm-cache?
+      (when-let [c @cache-atom]
+        (cache/warm! c session-atom annotations-atom)))
 
-        ;; Session changed, no annotations, no reuse — clear them.  Old
-        ;; annotations do not necessarily align with a different ruleset.
-        session-updated?
-        (do
-          (reset! annotations-atom {})
-          (swap! config-atom dissoc :annotations)))
-
-      ;; 3. Optionally enrich with session working-memory types
-      (when enrich-from-session?
-        (let [s @session-atom]
-          (when (core/working-memory-available? s)
-            (swap! annotations-atom
-                   #(analyze/enrich-annotations-from-session s %)))))
-
-      ;; 4. Eagerly warm the cache so the next request avoids the full
-      ;;    rulebase-analysis build cost
-      (when warm-cache?
-        (when-let [c @cache-atom]
-          (cache/warm! c session-atom annotations-atom)))
-
-      @annotations-atom)))
+    @annotations-atom))
 
 (defn- wrap-reload [handler]
   (fn [req]

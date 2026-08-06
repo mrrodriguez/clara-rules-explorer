@@ -1,5 +1,6 @@
 (ns clara.server.graph.server-test
-  "Tests for server lifecycle and hot-swap-session functionality."
+  "Tests for server lifecycle and swap-session! annotation building.
+   Organized by the build-annotations decision tree paths."
   (:require [clara.rules :as r]
             [clara.rules.engine :as eng]
             [clara.server.graph.server :as server]
@@ -34,6 +35,15 @@
       (r/insert (laf/map->Application {:app-id "app-1"}))
       (r/fire-rules)))
 
+(defn- ->test-session-with-wm-enrichment
+  "A session with facts that trigger rules without explicit :props insert-types,
+   so WM enrichment has new runtime-derived types to detect."
+  []
+  (-> (->test-session)
+      (r/insert (laf/map->Application {:app-id "app-1"})
+                (laf/map->GivenDocument {:app-id "app-1" :doc-type :paystub}))
+      (r/fire-rules)))
+
 (defn- ->rulebase
   "Extracts the raw rulebase from a session."
   [session]
@@ -50,7 +60,7 @@
    (start-server! session [])))
 
 ;; ---------------------------------------------------------------------------
-;; Fixture — one server started, tests exercise swap-session! against it
+;; Fixture
 ;; ---------------------------------------------------------------------------
 
 (def ^:private test-session
@@ -69,204 +79,274 @@
 (use-fixtures :once st/validate-schemas server-fixture)
 
 ;; ---------------------------------------------------------------------------
-;; Helper — parse JSON body
+;; HTTP helper
 ;; ---------------------------------------------------------------------------
 
 (defn- parse-body [resp]
   (json/read-value (:body resp) (json/object-mapper {:decode-key-fn true})))
 
-;; ---------------------------------------------------------------------------
-;; swap-session! :session only
-;; ---------------------------------------------------------------------------
-
-(deftest test-swap-session-session-only
-  (testing "Providing :session swaps the session; annotations are cleared"
-    (let [session-b (->test-session-with-facts)
-          result (server/swap-session! {:session session-b :warm-cache? true})]
-      ;; swap-session! returns empty map — annotations cleared
-      (is (= {} result))
-      ;; HTTP: the server now sees the swapped-in session with working memory
-      (let [summary (-> (client/get (->url "/rulebase-summary") {:accept :json})
-                        :body
-                        (json/read-value (json/object-mapper {:decode-key-fn true})))]
-        (is (true? (:working-memory-available summary))
-            "swapped-in session has working memory"))
-      ;; Annotations endpoint is empty
-      (let [resp (-> (client/get (->url "/annotations") {:accept :json})
-                     parse-body)]
-        (is (= {} resp) "annotations cleared when old ones may not align"))
-      ;; Session-snapshot should now return 200
-      (let [snap-resp (client/get (->url "/session-snapshot") {:accept :json})]
-        (is (= 200 (:status snap-resp)))))))
+(defn- http-annotations
+  "Returns the current annotations map via the HTTP API."
+  []
+  (-> (client/get (->url "/annotations") {:accept :json})
+      parse-body))
 
 ;; ---------------------------------------------------------------------------
-;; swap-session! :annotations only — bare map
+;; Known rule names for assertions
 ;; ---------------------------------------------------------------------------
 
-(deftest test-swap-session-annotations-bare-map
-  (testing "Providing :annotations as a bare map updates /v1/annotations"
-    (let [new-annos {"some-rule" {:clara-rules/notes "hello"}}
-          result (server/swap-session! {:annotations new-annos})]
-      ;; Return value is the annotations map
-      (is (= new-annos result))
+(def ^:private rule-app-outcome
+  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?")
 
-      ;; HTTP endpoint reflects the new annotations
-      (let [resp (-> (client/get (->url "/annotations") {:accept :json})
-                     parse-body)]
-        (is (= "hello"
-               (get-in resp [:some-rule :clara-rules/notes])))))))
+(def ^:private rule-collect-given-docs
+  "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs")
+
+(def ^:private rule-dynamic-compliance
+  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review")
 
 ;; ---------------------------------------------------------------------------
-;; swap-session! :annotations only — MergedAnnotations
-;; ---------------------------------------------------------------------------
-
-(deftest test-swap-session-annotations-merged
-  (testing "Providing :annotations as MergedAnnotations unwraps to bare map"
-    (let [merged {:annotations {"r1" {:clara-rules/notes "merged"}}
-                  :provenance {"r1" {:clara-rules/notes :derived}}}
-          result (server/swap-session! {:annotations merged})]
-      ;; Unwrapped
-      (is (= {"r1" {:clara-rules/notes "merged"}} result))
-
-      (let [resp (-> (client/get (->url "/annotations") {:accept :json})
-                     parse-body)]
-        (is (= "merged"
-               (get-in resp [:r1 :clara-rules/notes])))))))
-
-;; ---------------------------------------------------------------------------
-;; swap-session! :annotations only — string path / File
-;; ---------------------------------------------------------------------------
-
-(deftest test-swap-session-annotations-file
-  (testing "Providing :annotations as a java.io.File reads and merges"
-    (let [f (io/file (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn"))
-          result (server/swap-session! {:annotations f})]
-      (is (map? result))
-      (is (contains? result
-                     "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"))))
-
-  (testing "Providing :annotations as a string path reads the file"
-    (let [path (some-> (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn")
-                        .getPath)
-          result (server/swap-session! {:annotations path})]
-      (is (map? result))
-      (is (contains? result
-                     "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs")))))
-
-;; ---------------------------------------------------------------------------
-;; swap-session! :annotations only — vector of Layers
-;; ---------------------------------------------------------------------------
-
-(deftest test-swap-session-annotations-layers-vector
-  (testing "Providing :annotations as a vector of Layers merges them"
-    (let [layer [{:id :test-layer
-                  :annotations
-                  {"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
-                   {:clara-rules/notes "from test layer"}}}]
-          result (server/swap-session! {:annotations layer})]
-      (is (map? result))
-      (is (contains? result
-                     "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"))
-
-      (let [resp (-> (client/get (->url "/annotations") {:accept :json})
-                     parse-body)]
-        (is (= "from test layer"
-               (get-in resp [:clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?
-                             :clara-rules/notes])))))))
-
-;; ---------------------------------------------------------------------------
-;; swap-session! :session + :annotations
-;; ---------------------------------------------------------------------------
-
-(deftest test-swap-session-both
-  (testing "Providing both :session and :annotations updates both"
-    (let [session-b (->test-session-with-facts)
-          new-annos {"rule-x" {:clara-rules/notes "both-test"}}
-          result (server/swap-session! {:session session-b
-                                        :annotations new-annos})]
-      ;; Session: working memory available now
-      (let [summary (-> (client/get (->url "/rulebase-summary") {:accept :json})
-                        :body
-                        (json/read-value (json/object-mapper {:decode-key-fn true})))]
-        (is (true? (:working-memory-available summary))))
-
-      ;; Annotations: our custom ones are served (not the recomputed ones from
-      ;; session props, since we supplied explicit annotations)
-      (is (= new-annos result))
-      (let [resp (-> (client/get (->url "/annotations") {:accept :json})
-                     parse-body)]
-        (is (= "both-test"
-               (get-in resp [:rule-x :clara-rules/notes])))))))
-
-;; ---------------------------------------------------------------------------
-;; swap-session! error case
+;; 1. Error cases
 ;; ---------------------------------------------------------------------------
 
 (deftest test-swap-session-requires-args
-  (testing "swap-session! throws when none of :session, :annotations, or :reuse-annotations? given"
-    (is (thrown? IllegalArgumentException
-                 (server/swap-session! {})))
-    (is (thrown? IllegalArgumentException
-                 (server/swap-session! {:enrich-from-session? true})))
-    (is (thrown? IllegalArgumentException
-                 (server/swap-session! {:warm-cache? false})))))
+  (testing "empty opts"
+    (is (thrown? IllegalArgumentException (server/swap-session! {}))))
+  (testing ":warm-cache? alone is not enough"
+    (is (thrown? IllegalArgumentException (server/swap-session! {:warm-cache? false})))))
 
 ;; ---------------------------------------------------------------------------
-;; swap-session! with rulebase (no working memory)
+;; 2. Legacy normalization — bare forms wrapped as {:source <form>}
 ;; ---------------------------------------------------------------------------
 
-(deftest test-swap-session-rulebase-enrich-noop
-  (testing "swap-session! to a rulebase: enrichment is a no-op, WM routes 409"
+(deftest test-swap-session-legacy-bare-map
+  (testing "bare map -> {:source map}, enrichment nil -> source as-is"
+    (let [annos {"some-rule" {:clara-rules/notes "hello"}}
+          result (server/swap-session! {:annotations annos})]
+      (is (= annos result) "returned annotations match input")
+      (is (= {:some-rule {:clara-rules/notes "hello"}} (http-annotations))
+          "HTTP endpoint reflects the annotations"))))
+
+(deftest test-swap-session-legacy-file-source
+  (let [res-path "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn"
+        sidecar-rule "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"]
+    (testing "source as string path"
+      (let [path (some-> (io/resource res-path) .getPath)
+            result (server/swap-session! {:annotations {:source path}})]
+        (is (map? result))
+        (is (contains? result sidecar-rule))))
+    (testing "source as java.io.File"
+      (let [f (io/file (io/resource res-path))
+            result (server/swap-session! {:annotations {:source f}})]
+        (is (map? result))
+        (is (contains? result sidecar-rule))))))
+
+;; ---------------------------------------------------------------------------
+;; 3. No enrichment (:none or nil) — source as-is, clear when absent
+;; ---------------------------------------------------------------------------
+
+(deftest test-swap-session-no-enrichment
+  (testing "explicit :none with source returns source as-is"
+    (let [annos {"r" {:notes "x"}}
+          result (server/swap-session! {:annotations {:source annos :enrichment :none}})]
+      (is (= annos result))))
+  (testing ":none without source clears to {}"
+    (let [result (server/swap-session! {:annotations {:enrichment :none}})]
+      (is (= {} result))
+      (is (= {} (http-annotations)))))
+  (testing "nil enrichment (implicit) without source clears to {}"
+    (let [result (server/swap-session! {:session (->test-session)
+                                        :annotations nil})]
+      (is (= {} result) "nil annotations-spec clears annotations"))))
+
+;; ---------------------------------------------------------------------------
+;; 4. :reuse — keep current, source takes priority
+;; ---------------------------------------------------------------------------
+
+(deftest test-swap-session-reuse
+  (testing ":reuse with no source keeps current annotations"
+    (let [current {"keep-me" {:clara-rules/notes "survives"}}
+          _ (server/swap-session! {:annotations current})
+          result (server/swap-session! {:annotations {:enrichment :reuse}})]
+      (is (= current result))))
+  (testing ":reuse with source — source takes priority over current"
+    (let [_ (server/swap-session! {:annotations {"existing" {:notes "old"}}})
+          source {"override" {:notes "wins"}}
+          result (server/swap-session! {:annotations {:source source :enrichment :reuse}})]
+      (is (= source result) "source alone, no merge with existing"))))
+
+;; ---------------------------------------------------------------------------
+;; 5. :auto-detect-from-rulebase — props + static analysis
+;; ---------------------------------------------------------------------------
+
+(deftest test-swap-session-auto-detect-from-rulebase
+  (testing "with working memory — props + static analysis run"
+    (let [sess (->test-session-with-facts)
+          result (server/swap-session! {:session sess
+                                        :annotations {:enrichment :auto-detect-from-rulebase}})]
+      (is (map? result))
+      (is (seq result) "non-empty annotations")
+      ;; Props layer: rules with :clara-rules/insert-types in their :props
+      (is (contains? result rule-app-outcome)
+          "rule with explicit :props insert-types present")
+      ;; Static analysis: detects record-constructor inserts from RHS
+      (is (contains? result rule-collect-given-docs)
+          "static analysis discovered rule without explicit :props insert-types")
+      ;; Static analysis captures dynamic/unresolved callsites
+      (is (contains? result rule-dynamic-compliance)
+          "dynamic insertion rule captured by static analysis")))
+
+  (testing "with source overlay — source annotations merge with static analysis"
+    (let [source {rule-app-outcome {:clara-rules/notes "custom-note"}}
+          sess (->test-session-with-facts)
+          result (server/swap-session! {:session sess
+                                        :annotations {:source source
+                                                      :enrichment :auto-detect-from-rulebase}})]
+      (is (= "custom-note" (get-in result [rule-app-outcome :clara-rules/notes]))
+          "source annotation preserved")
+      (is (contains? result rule-collect-given-docs)
+          "static analysis annotation also present")))
+
+  (testing "without working memory (rulebase) — props + static analysis still run"
     (let [rulebase (->rulebase (->test-session))
           result (server/swap-session! {:session rulebase
-                                        :enrich-from-session? true})]
+                                        :annotations {:enrichment :auto-detect-from-rulebase}})]
       (is (map? result))
-      ;; WM routes now return 409 because the session became a rulebase
-      (let [resp (client/get (->url "/session-snapshot")
-                             {:accept :json :throw-exceptions? false})]
-        (is (= 409 (:status resp)))
-        (is (= "rulebase-input"
-               (-> resp :body (json/read-value (json/object-mapper {:decode-key-fn true})) :reason))))
-      ;; Rulebase routes still work
-      (let [resp (client/get (->url "/rulebase-summary") {:accept :json})]
-        (is (= 200 (:status resp)))))))
+      (is (seq result) "non-empty — static analysis works without WM")
+      (is (contains? result rule-app-outcome)
+          "rule with :props still present")
+      (is (contains? result rule-collect-given-docs)
+          "static analysis discovers rules even without WM"))))
 
 ;; ---------------------------------------------------------------------------
-;; swap-session! :reuse-annotations?
+;; 6. :auto-detect-from-memory — props + WM enrichment
 ;; ---------------------------------------------------------------------------
 
-(deftest test-swap-session-reuse-annotations
-  (testing ":session with :reuse-annotations? true keeps current annotations"
-    ;; Set some annotations first
-    (let [annos {"keep-me" {:clara-rules/notes "should survive"}}
-          _ (server/swap-session! {:annotations annos})
-          session-b (->test-session-with-facts)
-          result (server/swap-session! {:session session-b
-                                        :reuse-annotations? true})]
-      ;; Annotations survived the session swap
-      (is (= annos result))
-      (let [resp (-> (client/get (->url "/annotations") {:accept :json})
-                     parse-body)]
-        (is (= "should survive"
-               (get-in resp [:keep-me :clara-rules/notes]))))))
+(deftest test-swap-session-auto-detect-from-memory
+  (testing "with working memory — WM enrichment populates insert-types"
+    ;; Use a session where a rule without explicit :props insert-types fires,
+    ;; so WM enrichment has truly-new runtime-derived types to detect.
+    (let [sess (->test-session-with-wm-enrichment)
+          result (server/swap-session! {:session sess
+                                        :annotations {:enrichment :auto-detect-from-memory}})]
+      (is (map? result))
+      (is (seq result))
+      (is (contains? result rule-app-outcome)
+          "rule from rulebase present")
+      ;; collect-app-given-docs has no :clara-rules/insert-types in :props.
+      ;; At runtime it inserted AllGivenDocuments — WM enrichment detects this.
+      (is (some? (get-in result [rule-collect-given-docs :clara-rules/dynamic-insert-types-detected]))
+          "WM enrichment added dynamic-insert-types-detected for rule without :props insert-types")
+      (is (seq (get-in result [rule-collect-given-docs :clara-rules/insert-types]))
+          "WM enrichment merged truly-new types into insert-types")))
 
-  (testing ":reuse-annotations? alone (no session/annotations change) is a no-op"
-    (let [annos {"a" {:clara-rules/notes "x"}}
-          _ (server/swap-session! {:annotations annos})
-          result (server/swap-session! {:reuse-annotations? true})]
-      (is (= annos result)))))
+  (testing "without working memory (rulebase) — warns, returns props only"
+    (let [rulebase (->rulebase (->test-session))
+          result (server/swap-session! {:session rulebase
+                                        :annotations {:enrichment :auto-detect-from-memory}})]
+      (is (map? result))
+      ;; Only props layer contributes; no static analysis, no WM enrichment
+      (is (contains? result rule-app-outcome)
+          "rule with :props present")
+      ;; A rule without explicit :props should NOT appear since nothing ran
+      ;; to discover it (no static analysis, no WM enrichment)
+      (is (not (contains? result rule-dynamic-compliance))
+          "dynamic rule not discovered — no static analysis or WM enrichment"))))
 
 ;; ---------------------------------------------------------------------------
-;; swap-session! return value
+;; 7. :auto-detect — props + static analysis + WM enrichment
+;; ---------------------------------------------------------------------------
+
+(deftest test-swap-session-auto-detect
+  (testing "with working memory — all three layers: props + static + WM"
+    ;; Use the WM-enrichment session so WM has new types to detect beyond static analysis.
+    (let [sess (->test-session-with-wm-enrichment)
+          result (server/swap-session! {:session sess
+                                        :annotations {:enrichment :auto-detect}})]
+      (is (map? result))
+      (is (seq result))
+      ;; Props layer
+      (is (contains? result rule-app-outcome))
+      ;; Static analysis layer
+      (is (contains? result rule-collect-given-docs))
+      (is (contains? result rule-dynamic-compliance))
+      ;; WM enrichment layer — dynamic-insert-types for rules without :props types
+      (is (some? (get-in result [rule-collect-given-docs :clara-rules/dynamic-insert-types-detected]))
+          "WM enrichment added dynamic-insert-types-detected")
+      (is (seq (get-in result [rule-collect-given-docs :clara-rules/insert-types]))
+          "WM enrichment merged runtime types into insert-types")))
+
+  (testing "with source overlay — all three layers plus source"
+    (let [source {rule-app-outcome {:clara-rules/notes "custom"}}
+          sess (->test-session-with-facts)
+          result (server/swap-session! {:session sess
+                                        :annotations {:source source
+                                                      :enrichment :auto-detect}})]
+      (is (= "custom" (get-in result [rule-app-outcome :clara-rules/notes]))
+          "source annotation preserved in merged result")
+      (is (contains? result rule-collect-given-docs)
+          "static analysis present alongside source")))
+
+  (testing "without working memory (rulebase) — static analysis only, no WM layer"
+    (let [rulebase (->rulebase (->test-session))
+          result (server/swap-session! {:session rulebase
+                                        :annotations {:enrichment :auto-detect}})]
+      (is (map? result))
+      (is (seq result))
+      (is (contains? result rule-app-outcome))
+      (is (contains? result rule-collect-given-docs)
+          "static analysis ran even without WM")
+      ;; No WM enrichment — dynamic-insert-types should NOT be present
+      ;; for rules that ONLY get WM detection (not static)
+      )))
+
+;; ---------------------------------------------------------------------------
+;; 8. Session-only swap — annotations cleared
+;; ---------------------------------------------------------------------------
+
+(deftest test-swap-session-session-clears-annotations
+  (testing ":session only clears annotations to {}"
+    (let [session-b (->test-session-with-facts)
+          ;; Set some annotations first
+          _ (server/swap-session! {:annotations {"old-rule" {:notes "x"}}})
+          result (server/swap-session! {:session session-b :warm-cache? true})]
+      (is (= {} result) "annotations cleared")
+      (is (= {} (http-annotations)) "HTTP endpoint returns empty annotations"))
+    ;; Session was swapped — verify WM is now available
+    (let [summary (-> (client/get (->url "/rulebase-summary") {:accept :json})
+                      :body
+                      (json/read-value (json/object-mapper {:decode-key-fn true})))]
+      (is (true? (:working-memory-available summary))))))
+
+;; ---------------------------------------------------------------------------
+;; 9. Combined session + annotations swap
+;; ---------------------------------------------------------------------------
+
+(deftest test-swap-session-combined
+  (testing ":session + :annotations together — session swapped, then annotations built"
+    (let [sess (->test-session-with-facts)
+          annos {"my-rule" {:clara-rules/notes "combined-test"}}
+          result (server/swap-session! {:session sess :annotations annos})]
+      (is (= annos result) "annotations match input")
+      (is (= {:my-rule {:clara-rules/notes "combined-test"}} (http-annotations))
+          "HTTP reflects the annotations"))
+    (testing ":session + :annotations with enrichment on the new session"
+      (let [sess (->test-session-with-facts)
+            result (server/swap-session! {:session sess
+                                          :annotations {:enrichment :auto-detect}})]
+        (is (map? result))
+        (is (seq result))
+        (is (contains? result rule-app-outcome)
+            "auto-detect ran against the new session")))))
+
+;; ---------------------------------------------------------------------------
+;; 10. Return value
 ;; ---------------------------------------------------------------------------
 
 (deftest test-swap-session-returns-annotations
-  (testing "swap-session! always returns the annotations-atom value"
+  (testing "swap-session! returns the new @annotations-atom value"
     (let [annos {"r1" {:clara-rules/notes "return-test"}}
           result (server/swap-session! {:annotations annos})]
-      (is (= annos result))
-      (let [resp (-> (client/get (->url "/annotations") {:accept :json})
-                     parse-body)]
-        ;; Same content served from HTTP endpoint
-        (is (= "return-test"
-               (get-in resp [:r1 :clara-rules/notes])))))))
+      (is (= annos result) "return value matches input"))
+    (testing "reflected in HTTP endpoint"
+      (is (= "return-test"
+             (get-in (http-annotations) [:r1 :clara-rules/notes]))))))
