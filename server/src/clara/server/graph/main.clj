@@ -35,6 +35,25 @@
         (vec facts)))))
 
 ;; ---------------------------------------------------------------------------
+;; CLI option parsers
+;; ---------------------------------------------------------------------------
+
+(defn- parse-boolean-option
+  "Parse a boolean CLI option value.
+   Accepts \"true\" or \"false\" (case-insensitive); throws on anything else."
+  [s]
+  (try
+    (case (clojure.string/lower-case s)
+      "true"  true
+      "false" false
+      (throw (IllegalArgumentException.
+              (format "Invalid boolean value: \"%s\". Expected \"true\" or \"false\"." s))))
+    (catch Exception e
+      (throw (ex-info (format "Failed to parse boolean option from \"%s\"" s)
+                      {:value s}
+                      e)))))
+
+;; ---------------------------------------------------------------------------
 ;; CLI options
 ;; ---------------------------------------------------------------------------
 
@@ -53,7 +72,7 @@
     :validate [#(< 0 % 65536) "Port must be between 1 and 65535"]]
    [nil "--working-memory-enabled BOOL" "Set to false to disable working-memory routes (rulebase analysis only)."
     :default true
-    :parse-fn #(Boolean/parseBoolean %)]
+    :parse-fn parse-boolean-option]
    [nil "--generate-analysis DIR" "Generate annotations and analysis EDN files to the specified output directory."
     :id :generate-analysis-dir]
    [nil "--load-session-state-fn SYMBOL" "Symbol naming a function to load the session state."
