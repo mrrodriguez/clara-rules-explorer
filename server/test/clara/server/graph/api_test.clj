@@ -28,7 +28,7 @@
 (defn- ->handler
   ([] (->handler (->test-session)))
   ([session]
-   (:handler (api/app (atom session) (atom (loan-doc-annotations session))))))
+   (:handler (api/app (atom session) (atom (loan-doc-annotations session)) true))))
 
 (deftest test-not-found
   (let [handler (->handler)]
@@ -158,7 +158,7 @@
                               :fact-type-fn lhr/fact-type-fn)
         handler (:handler (api/app (atom session)
                                    (atom (ann.merge/merge-layers
-                                          [(ann.merge/props-layer session)]))))]
+                                          [(ann.merge/props-layer session)])) true))]
     (testing "Every fact type (class, keyword, tuple) resolves by its server-issued id"
       (let [items (:fact-types (parse-json (:body (handler (mock/request :get "/v1/fact-types")))))]
         (doseq [{type-name :name type-id :id} items]
@@ -208,7 +208,7 @@
                         (r/fire-rules))
           session-atom (atom session-a)
           annotations-atom (atom (loan-doc-annotations session-a))
-          {:keys [handler]} (api/app session-atom annotations-atom)]
+          {:keys [handler]} (api/app session-atom annotations-atom true)]
       ;; Warm the analysis for session A so the pre-fix stale known-set is non-empty.
       (is (= 200 (:status (handler (mock/request :get "/v1/analysis")))))
       ;; Host application swaps in the new session + its annotations (the documented

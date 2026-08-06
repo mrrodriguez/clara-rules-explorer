@@ -58,21 +58,23 @@
    :working-memory? - When false, working-memory routes return 409 even when
                       a live session is provided (default true)."
   [{:keys [session port working-memory?] :or {port 9999 working-memory? true} :as config}]
-  (reset! config-atom config)
-  (reset! session-atom session)
-  (reload-annotations!)
-  (when-not (core/working-memory-available? session)
-    (println "[server] Working-memory routes disabled: started with a rulebase, not a session"))
-  (when (and (core/working-memory-available? session) (not working-memory?))
-    (println "[server] Working-memory routes disabled by configuration (:working-memory? false)"))
+  (let [wm-available? (core/working-memory-available? session)
+        wm-enabled?  (and wm-available? working-memory?)]
+    (reset! config-atom config)
+    (reset! session-atom session)
+    (reload-annotations!)
+    (when-not wm-available?
+      (println "[server] Working-memory routes disabled: started with a rulebase, not a session"))
+    (when (and wm-available? (not working-memory?))
+      (println "[server] Working-memory routes disabled by configuration (:working-memory? false)"))
 
-  (let [{:keys [handler analysis-cache]} (api/app session-atom annotations-atom)
-        _ (api/warm-analysis-cache! session-atom annotations-atom analysis-cache)
-        final-app (wrap-reload handler)]
-    (when-let [server  @server-instance]
-      (Server/.stop server))
-    (reset! server-instance
-            (jetty/run-jetty final-app {:port port :join? false}))))
+    (let [{:keys [handler analysis-cache]} (api/app session-atom annotations-atom wm-enabled?)
+          _ (api/warm-analysis-cache! session-atom annotations-atom analysis-cache)
+          final-app (wrap-reload handler)]
+      (when-let [server  @server-instance]
+        (Server/.stop server))
+      (reset! server-instance
+              (jetty/run-jetty final-app {:port port :join? false})))))
 
 (defn stop!
   "Stops the explorer server."

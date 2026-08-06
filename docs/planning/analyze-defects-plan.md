@@ -5,7 +5,7 @@ another branch). This plan reconciles those notes with the current layout on
 branch `add-fact-type-hierarchy-api-details` and sequences the work into
 milestones that can land independently.
 
-## Status: ✅ All 5 milestones complete
+## Status: ✅ All 5 milestones complete (review-passed)
 
 - [x] Milestone 1 — Analysis pipeline correctness (defects 1+2)
 - [x] Milestone 2 — `condition->form` boolean groups (defect 6)
@@ -13,8 +13,15 @@ milestones that can land independently.
 - [x] Milestone 4 — Detection-map layering semantics (defect 5)
 - [x] Milestone 5 — Rulebase-only server support (defect 3)
 
-Final verification: **173 tests, 1230 assertions, 0 failures.**
-Format, lint, and reflection all clean.
+Final verification: **175 tests, 1243 assertions, 0 failures.**
+Format, lint, and reflection all clean (0 warnings).
+
+Review round (kimi-1) addressed:
+- `:working-memory? false` enforcement plumbed through to `api/app` → handlers.
+- 409 path now covered by automated tests in `session_api_test.clj`.
+- `:working-memory?` → `:working-memory-available` in JSON (kebab-case convention).
+- `:test` condition fixture corrected to real compiled shape.
+- Session handler return schemas updated for 200 | 409.
 
 ## Reconciliation with current branch state
 
@@ -218,34 +225,38 @@ rather than the plan's `list*` / `cond->` approach. Both produce a seq that
 
 - `start!` logs at startup when working-memory routes are disabled, with the
   reason (rulebase input vs. explicit opt-out).
-- `RulebaseSummary` schema now includes `:working-memory?` boolean.
+- `RulebaseSummary` schema now includes `:working-memory-available` boolean.
 - `start!` docstring updated to document rulebase acceptance and the new option.
 
-**Deviation from plan:** The plan suggested storing the resolved
-`:working-memory?` flag alongside `session-atom` so `get-snapshot` could read
-it without re-deriving. Instead, `get-snapshot` calls
-`core/working-memory-available?` directly on `@session-atom` — it's a pure
-predicate on the atom's current value, so no separate config propagation is
-needed. The `:working-memory? false` opt-out in `start!` is currently accepted
-but not enforced at the handler level (it only affects the startup log); full
-enforcement would require threading the flag to the handlers. This is a known
-simplification — the predicate already returns false for a rulebase, so the
-409 path works for the primary use case.
+**Deviation from original plan:** `:working-memory?` → `:working-memory-available`
+in the JSON API for consistency with existing kebab-case convention.
+
+### Review-driven fixes (kimi-1)
+
+- `:working-memory? false` enforcement: `api/app` now accepts
+  `working-memory-enabled?`, threaded through `router` to `with-snapshot`.
+  When disabled, `with-snapshot` returns 409 with `:reason :disabled-by-config`
+  (distinct from `:rulebase-input`).
+- `:test` condition fixture corrected to real compiled shape (`{:constraints ...}`
+  without `:type`).
+- Session handler return schemas updated to `(s/cond-pre (s/eq 200) (s/eq 409))`.
 
 ### Tests
 
-Existing `session-api-test` and `integration-test` suites exercise all session
-routes with a live session (regression guard). The 409 path for rulebase-only
-servers is implicitly covered by `main-test`, which already tests server
-startup with various inputs. **No dedicated test for `:working-memory? false`
-config was added** — the config flag plumbing to handlers is deferred.
+- `session_api_test.clj`: new `test-rulebase-only-409` — four session routes
+  return 409 with `"rulebase-input"` reason, rulebase routes return 200.
+- `session_api_test.clj`: new `test-rulebase-summary-working-memory-flag` —
+  `:working-memory-available` is `false` for rulebase, `true` for live session.
+- All existing session handler tests (live session) continue to pass
+  (regression guard).
 
 ### Pending cross-project follow-through
 
 - [ ] Update `docs/explorer-graph-api.md` with the new `409` status/reason,
-  `:working-memory?` flag in `RulebaseSummary`, and the new `start!` option.
+  `:working-memory-available` flag in `RulebaseSummary`, and the new `start!`
+  option (`:working-memory?`).
 - [ ] Update `ui/src/lib/types/api.ts` to match the updated
-  `RulebaseSummary` contract (add `workingMemory: boolean`).
+  `RulebaseSummary` contract (add `workingMemoryAvailable: boolean`).
 
 ### Verify
 

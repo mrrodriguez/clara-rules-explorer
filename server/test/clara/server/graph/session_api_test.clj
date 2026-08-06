@@ -1,5 +1,6 @@
 (ns clara.server.graph.session-api-test
   (:require [clara.rules :as r]
+            [clara.rules.engine :as eng]
             [clara.server.graph.api :as api]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
@@ -19,7 +20,7 @@
   (let [session (-> (->test-session)
                     (r/insert (laf/map->Application {:app-id "app-1"}))
                     (r/fire-rules))]
-    (:handler (api/app (atom session) (atom {})))))
+    (:handler (api/app (atom session) (atom {}) true))))
 
 (defn- id-for
   "Given an id→name reverse index (parsed from JSON, so id keys are
@@ -91,3 +92,49 @@
     (testing "Name-based session rule lookup 404s (id-only resolution)"
       (is (= 404 (:status (handler (mock/request :get
                                                  "/v1/session/rules/clara.server.tools.graph.rules.loan-doc-rules.collect-app-req-docs"))))))))
+
+;; ---------------------------------------------------------------------------
+;; Rulebase-only: working-memory routes return 409
+;; ---------------------------------------------------------------------------
+
+(deftest test-rulebase-only-409
+  (let [rulebase (-> (->test-session) eng/components :rulebase)
+        handler (:handler (api/app (atom rulebase) (atom {}) true))]
+
+    (testing "GET /v1/session/fact-types → 409"
+      (let [resp (handler (mock/request :get "/v1/session/fact-types"))]
+        (is (= 409 (:status resp)))
+        (let [body (parse-json (:body resp))]
+          (is (= "rulebase-input" (:reason body)))
+          (is (string? (:error body))))))
+
+    (testing "GET /v1/session-snapshot → 409"
+      (let [resp (handler (mock/request :get "/v1/session-snapshot"))]
+        (is (= 409 (:status resp)))
+        (let [body (parse-json (:body resp))]
+          (is (= "rulebase-input" (:reason body))))))
+
+    (testing "GET /v1/session/rules/:id → 409"
+      (let [resp (handler (mock/request :get "/v1/session/rules/some-rule"))]
+        (is (= 409 (:status resp)))
+        (is (= "rulebase-input" (:reason (parse-json (:body resp)))))))
+
+    (testing "Rulebase routes still 200"
+      (is (= 200 (:status (handler (mock/request :get "/v1/rulebase-summary")))))
+      (is (= 200 (:status (handler (mock/request :get "/v1/analysis"))))))))
+
+(deftest test-rulebase-summary-working-memory-flag
+  (testing "RulebaseSummary :working-memory-available is false for rulebase"
+    (let [rulebase (-> (->test-session) eng/components :rulebase)
+          handler (:handler (api/app (atom rulebase) (atom {}) true))
+          resp (handler (mock/request :get "/v1/rulebase-summary"))
+          body (parse-json (:body resp))]
+      (is (= 200 (:status resp)))
+      (is (false? (:working-memory-available body)))))
+
+  (testing "RulebaseSummary :working-memory-available is true for live session"
+    (let [handler (->handler)
+          resp (handler (mock/request :get "/v1/rulebase-summary"))
+          body (parse-json (:body resp))]
+      (is (= 200 (:status resp)))
+      (is (true? (:working-memory-available body))))))

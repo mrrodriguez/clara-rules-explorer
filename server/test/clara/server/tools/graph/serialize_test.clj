@@ -256,8 +256,7 @@
 
 (deftest test-serialize-lhs-form--test
   (testing ":test condition renders as a leaf"
-    (let [lhs [{:type :test
-                :constraints '[(> ?n 0)]}]
+    (let [lhs [{:constraints '[(> ?n 0)]}]
           form (s/serialize-lhs-form lhs)]
       (is (str/includes? form ">")
           "form must contain the test constraint"))))
