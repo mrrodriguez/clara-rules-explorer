@@ -564,10 +564,10 @@
     x))
 
 (defn ->layer
-  "Coerces `x` to a Layer: a path string is read from disk via `read-layer`;
-   a map is validated as an in-memory layer via `layer`."
+  "Coerces `x` to a Layer: a path string or File is read from disk via
+   `read-layer`; a map is validated as an in-memory layer via `layer`."
   [x]
-  (if (string? x)
+  (if (or (string? x) (instance? java.io.File x))
     (read-layer x)
     (layer x)))
 
@@ -578,14 +578,22 @@
      - A bare rule→annotation map (passes through)
      - A MergedAnnotations value (unwrapped to its `:annotations` payload)
      - A vector of Layer maps (merged via `merge-layers`, with
-       `props-layer` from `session` folded in first as the base).
+       `props-layer` from `session` folded in first as the base)
+     - A string path to a layer file (read via `read-layer` and merged).
 
-   `session` is only needed when `annotations-input` is a vector of layers."
+   `session` is only needed when `annotations-input` is a vector of layers
+   or a string path."
   [annotations-input session]
-  (if (vector? annotations-input)
-    (:annotations
-     (merge-layers
-      (into [(props-layer session)]
-            (map ->layer)
-            annotations-input)))
-    (->bare-annotations annotations-input)))
+  (let [layers (cond
+                 (or (string? annotations-input)
+                     (instance? java.io.File annotations-input))
+                 [annotations-input]
+                 (vector? annotations-input) annotations-input
+                 :else nil)]
+    (if layers
+      (:annotations
+       (merge-layers
+        (into [(props-layer session)]
+              (map ->layer)
+              layers)))
+      (->bare-annotations annotations-input))))

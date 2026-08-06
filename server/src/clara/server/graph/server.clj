@@ -32,8 +32,18 @@
                                 layers)))
 
 (defn- reload-annotations! []
-  (let [{:keys [session layers]} @config-atom]
-    (reset! annotations-atom (load-merged-annotations session layers))))
+  (let [{:keys [session layers annotations]} @config-atom]
+    (reset! annotations-atom
+            (if annotations
+              ;; Explicit annotations were set via swap-session! — preserve
+              ;; them across reload so layer-file edits don't overwrite.
+              (ann.merge/annotations
+               (ann.merge/merge-layers
+                (into [(ann.merge/props-layer session)]
+                      (map ann.merge/->layer)
+                      (or layers []))))
+              ;; No explicit annotations — merge layers + props as usual.
+              (load-merged-annotations session layers)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Runtime session / annotation swap
@@ -45,58 +55,75 @@
           'session-or-rulebase?))
 
 (s/defschema AnnotationsInput
-  "Any of the three valid annotation-input forms:
+  "Any of the valid annotation-input forms:
      - a MergedAnnotations value (from merge-layers)
      - a vector of Layer maps (merged on the fly)
-     - a bare rule->annotation map."
+     - a bare rule->annotation map
+     - a string path to a layer file (read from disk)."
   (s/pred (some-fn ann.merge/merged-annotations?
                    vector?
-                   map?)
+                   map?
+                   string?
+                   #(instance? java.io.File %))
           'annotations-input?))
 
 (s/defschema SwapSessionOpts
-  "Options for `swap-session!`.  At least one of :session or :annotations
-   must be provided."
+  "Options for `swap-session!`.  At least one of :session, :annotations, or
+   :reuse-annotations? must be provided."
   {(s/optional-key :session) SessionOrRulebase
    (s/optional-key :annotations) AnnotationsInput
    (s/optional-key :enrich-from-session?) s/Bool
-   (s/optional-key :warm-cache?) s/Bool})
+   (s/optional-key :warm-cache?) s/Bool
+   (s/optional-key :reuse-annotations?) s/Bool})
 
 (defn swap-session!
   "Hot-swap the running server's session and/or annotations at runtime.
 
-   `opts` is a `SwapSessionOpts` map.  When :session is provided without
-   :annotations, annotations are recomputed from the new session's rule
-   :props merged with the currently configured layers (same effect as
-   POST /v1/annotations/reload but against the new session).
+   `opts` is a `SwapSessionOpts` map:
 
-   Returns the new value of `annotations-atom` (the bare annotations map)."
+     :session — New Clara session (or rulebase). When given without :annotations or
+  :reuse-annotations?, annotations are cleared — old annotations do not necessarily align with a
+  different ruleset.
+
+     :annotations — New annotations. Stored in config-atom so reload-annotations! respects them.
+
+     :reuse-annotations? — When true, keep current annotations as-is across a session swap. Default
+  false.
+
+   Returns the new value of `annotations-atom` (a bare annotations map)."
   [opts]
-  (let [{:keys [session annotations enrich-from-session? warm-cache?]
-         :or {enrich-from-session? false warm-cache? true}}
+  (let [{:keys [session annotations enrich-from-session? warm-cache? reuse-annotations?]
+         :or {enrich-from-session? false warm-cache? true reuse-annotations? false}}
         (s/validate SwapSessionOpts opts)]
-    (when (and (nil? session) (nil? annotations))
+    (when (and (nil? session) (nil? annotations) (not reuse-annotations?))
       (throw (IllegalArgumentException.
-              "swap-session! requires at least one of :session or :annotations")))
+              "swap-session! requires at least one of :session, :annotations, or :reuse-annotations?")))
 
     (let [session-updated? (some? session)]
       ;; 1. Swap the session
       (when session-updated?
-        ;; config-atom keeps the canonical session ref for reload-annotations!
         (swap! config-atom assoc :session session)
         (reset! session-atom session))
 
       ;; 2. Update annotations
       (cond
-        ;; Explicit annotations supplied — coerce and store
+        ;; Explicit annotations given — store in both atoms and in config-atom
+        ;; so reload-annotations! will respect them.
         (some? annotations)
-        (reset! annotations-atom
-                (ann.merge/coerce-to-bare-annotations annotations @session-atom))
+        (let [bare (ann.merge/coerce-to-bare-annotations annotations @session-atom)]
+          (reset! annotations-atom bare)
+          (swap! config-atom assoc :annotations bare))
 
-        ;; Session changed but no annotations given — recompute from new
-        ;; session's rule :props + existing layers
+        ;; Session changed, reuse requested — keep current annotations as-is.
+        (and session-updated? reuse-annotations?)
+        nil
+
+        ;; Session changed, no annotations, no reuse — clear them.  Old
+        ;; annotations do not necessarily align with a different ruleset.
         session-updated?
-        (reload-annotations!))
+        (do
+          (reset! annotations-atom {})
+          (swap! config-atom dissoc :annotations)))
 
       ;; 3. Optionally enrich with session working-memory types
       (when enrich-from-session?

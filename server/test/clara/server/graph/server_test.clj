@@ -9,7 +9,8 @@
             [clj-http.client :as client]
             [jsonista.core :as json]
             [clojure.test :refer [deftest is testing use-fixtures]]
-            [schema.test :as st]))
+            [schema.test :as st]
+            [clojure.java.io :as io]))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
@@ -79,20 +80,22 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-swap-session-session-only
-  (testing "Providing :session swaps the session atom; /v1/rulebase-summary reflects it"
+  (testing "Providing :session swaps the session; annotations are cleared"
     (let [session-b (->test-session-with-facts)
           result (server/swap-session! {:session session-b :warm-cache? true})]
-      ;; swap-session! returns the new annotations map (recomputed from new session)
-      (is (map? result))
-
+      ;; swap-session! returns empty map — annotations cleared
+      (is (= {} result))
       ;; HTTP: the server now sees the swapped-in session with working memory
       (let [summary (-> (client/get (->url "/rulebase-summary") {:accept :json})
                         :body
                         (json/read-value (json/object-mapper {:decode-key-fn true})))]
         (is (true? (:working-memory-available summary))
             "swapped-in session has working memory"))
-
-      ;; Session-snapshot should now return 200 (was 409 before swap for bare session)
+      ;; Annotations endpoint is empty
+      (let [resp (-> (client/get (->url "/annotations") {:accept :json})
+                     parse-body)]
+        (is (= {} resp) "annotations cleared when old ones may not align"))
+      ;; Session-snapshot should now return 200
       (let [snap-resp (client/get (->url "/session-snapshot") {:accept :json})]
         (is (= 200 (:status snap-resp)))))))
 
@@ -129,6 +132,26 @@
                      parse-body)]
         (is (= "merged"
                (get-in resp [:r1 :clara-rules/notes])))))))
+
+;; ---------------------------------------------------------------------------
+;; swap-session! :annotations only — string path / File
+;; ---------------------------------------------------------------------------
+
+(deftest test-swap-session-annotations-file
+  (testing "Providing :annotations as a java.io.File reads and merges"
+    (let [f (io/file (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn"))
+          result (server/swap-session! {:annotations f})]
+      (is (map? result))
+      (is (contains? result
+                     "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"))))
+
+  (testing "Providing :annotations as a string path reads the file"
+    (let [path (some-> (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn")
+                        .getPath)
+          result (server/swap-session! {:annotations path})]
+      (is (map? result))
+      (is (contains? result
+                     "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs")))))
 
 ;; ---------------------------------------------------------------------------
 ;; swap-session! :annotations only — vector of Layers
@@ -180,11 +203,13 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-swap-session-requires-args
-  (testing "swap-session! throws when neither :session nor :annotations provided"
+  (testing "swap-session! throws when none of :session, :annotations, or :reuse-annotations? given"
     (is (thrown? IllegalArgumentException
                  (server/swap-session! {})))
     (is (thrown? IllegalArgumentException
-                 (server/swap-session! {:enrich-from-session? true})))))
+                 (server/swap-session! {:enrich-from-session? true})))
+    (is (thrown? IllegalArgumentException
+                 (server/swap-session! {:warm-cache? false})))))
 
 ;; ---------------------------------------------------------------------------
 ;; swap-session! with rulebase (no working memory)
@@ -205,6 +230,31 @@
       ;; Rulebase routes still work
       (let [resp (client/get (->url "/rulebase-summary") {:accept :json})]
         (is (= 200 (:status resp)))))))
+
+;; ---------------------------------------------------------------------------
+;; swap-session! :reuse-annotations?
+;; ---------------------------------------------------------------------------
+
+(deftest test-swap-session-reuse-annotations
+  (testing ":session with :reuse-annotations? true keeps current annotations"
+    ;; Set some annotations first
+    (let [annos {"keep-me" {:clara-rules/notes "should survive"}}
+          _ (server/swap-session! {:annotations annos})
+          session-b (->test-session-with-facts)
+          result (server/swap-session! {:session session-b
+                                        :reuse-annotations? true})]
+      ;; Annotations survived the session swap
+      (is (= annos result))
+      (let [resp (-> (client/get (->url "/annotations") {:accept :json})
+                     parse-body)]
+        (is (= "should survive"
+               (get-in resp [:keep-me :clara-rules/notes]))))))
+
+  (testing ":reuse-annotations? alone (no session/annotations change) is a no-op"
+    (let [annos {"a" {:clara-rules/notes "x"}}
+          _ (server/swap-session! {:annotations annos})
+          result (server/swap-session! {:reuse-annotations? true})]
+      (is (= annos result)))))
 
 ;; ---------------------------------------------------------------------------
 ;; swap-session! return value
