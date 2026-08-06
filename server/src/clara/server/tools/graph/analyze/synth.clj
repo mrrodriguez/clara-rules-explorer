@@ -60,10 +60,7 @@
                             (ns-refers nsobj))
         refer-groups  (group-by (fn [[_ v]] (var-ns-name v)) refers)
         refer-clauses (mapv (fn [[target kvs]]
-                              (->> kvs
-                                   (map first)
-                                   sort
-                                   (into [target :refer])))
+                              [target :refer (vec (sort (map first kvs)))])
                             refer-groups)]
     (->> (concat alias-clauses refer-clauses)
          (sort-by (comp str first))
@@ -116,10 +113,9 @@
         import-clauses    (build-import-clauses nsobj)
         unmapped-defaults (unmapped-default-imports nsobj)
         refer-clojure-clause (when (or (seq excluded) (seq renamed))
-                               (into [:refer-clojure]
-                                     cat
-                                     [(when (seq excluded) [:exclude excluded])
-                                      (when (seq renamed) [:rename renamed])]))
+                               (concat (list :refer-clojure)
+                                       (when (seq excluded) (list :exclude excluded))
+                                       (when (seq renamed)  (list :rename renamed))))
         require-clause (when (seq require-clauses)
                          (cons :require require-clauses))
         import-clause (when (seq import-clauses)

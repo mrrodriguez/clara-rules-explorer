@@ -1,5 +1,6 @@
 (ns clara.server.graph.session-api-test
   (:require [clara.rules :as r]
+            [clara.rules.engine :as eng]
             [clara.server.graph.api :as api]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
@@ -19,7 +20,7 @@
   (let [session (-> (->test-session)
                     (r/insert (laf/map->Application {:app-id "app-1"}))
                     (r/fire-rules))]
-    (:handler (api/app (atom session) (atom {})))))
+    (:handler (api/app (atom session) (atom {}) true))))
 
 (defn- id-for
   "Given an id→name reverse index (parsed from JSON, so id keys are
@@ -91,3 +92,89 @@
     (testing "Name-based session rule lookup 404s (id-only resolution)"
       (is (= 404 (:status (handler (mock/request :get
                                                  "/v1/session/rules/clara.server.tools.graph.rules.loan-doc-rules.collect-app-req-docs"))))))))
+
+;; ---------------------------------------------------------------------------
+;; Rulebase-only: working-memory routes return 409
+;; ---------------------------------------------------------------------------
+
+(deftest test-rulebase-only-409
+  ;; NOTE: flag=true matches the shipped start! wiring for rulebase input:
+  ;; start! passes the raw :working-memory-enabled flag (default true) and
+  ;; the 409 is attributed dynamically by with-snapshot (:rulebase-input).
+  (let [rulebase (-> (->test-session) eng/components :rulebase)
+        handler (:handler (api/app (atom rulebase) (atom {}) true))]
+
+    (testing "GET /v1/session/fact-types → 409"
+      (let [resp (handler (mock/request :get "/v1/session/fact-types"))]
+        (is (= 409 (:status resp)))
+        (let [body (parse-json (:body resp))]
+          (is (= "rulebase-input" (:reason body)))
+          (is (string? (:error body)) "error should be a string"))))
+
+    (testing "GET /v1/session-snapshot → 409"
+      (let [resp (handler (mock/request :get "/v1/session-snapshot"))]
+        (is (= 409 (:status resp)))
+        (let [body (parse-json (:body resp))]
+          (is (= "rulebase-input" (:reason body))))))
+
+    (testing "GET /v1/session/rules/:id → 409"
+      (let [resp (handler (mock/request :get "/v1/session/rules/some-rule"))]
+        (is (= 409 (:status resp)))
+        (is (= "rulebase-input" (:reason (parse-json (:body resp)))))))
+
+    (testing "Rulebase routes still 200"
+      (is (= 200 (:status (handler (mock/request :get "/v1/rulebase-summary")))))
+      (is (= 200 (:status (handler (mock/request :get "/v1/analysis"))))))))
+
+(deftest test-rulebase-summary-working-memory-flag
+  (testing "RulebaseSummary :working-memory-available is false for rulebase"
+    (let [rulebase (-> (->test-session) eng/components :rulebase)
+          handler (:handler (api/app (atom rulebase) (atom {}) true))
+          resp (handler (mock/request :get "/v1/rulebase-summary"))
+          body (parse-json (:body resp))]
+      (is (= 200 (:status resp)))
+      (is (false? (:working-memory-available body)))))
+
+  (testing "RulebaseSummary :working-memory-available is true for live session"
+    (let [handler (->handler)
+          resp (handler (mock/request :get "/v1/rulebase-summary"))
+          body (parse-json (:body resp))]
+      (is (= 200 (:status resp)))
+      (is (true? (:working-memory-available body)))))
+
+  (testing ":working-memory-available is effective state: false for live session + opt-out"
+    (let [session (-> (->test-session)
+                      (r/insert (laf/map->Application {:app-id "app-1"}))
+                      (r/fire-rules))
+          handler (:handler (api/app (atom session) (atom {}) false))
+          resp (handler (mock/request :get "/v1/rulebase-summary"))
+          body (parse-json (:body resp))]
+      (is (= 200 (:status resp)))
+      (is (false? (:working-memory-available body))
+          "flag reflects whether working-memory routes are served, not mere capability"))))
+
+;; ---------------------------------------------------------------------------
+;; Explicit opt-out: live session + :working-memory-enabled false
+;; ---------------------------------------------------------------------------
+
+(deftest test-working-memory-opt-out-409
+  (let [session (-> (->test-session)
+                    (r/insert (laf/map->Application {:app-id "app-1"}))
+                    (r/fire-rules))
+        handler (:handler (api/app (atom session) (atom {}) false))]
+
+    (testing "session routes 409 with :disabled-by-config despite live session"
+      (doseq [uri ["/v1/session/fact-types"
+                   "/v1/session-snapshot"
+                   "/v1/session/rules/some-rule"
+                   "/v1/session/queries/some-query"
+                   "/v1/session/facts/0"
+                   "/v1/session/fact-types/some-type"]]
+        (let [resp (handler (mock/request :get uri))]
+          (is (= 409 (:status resp)) (str uri " must 409"))
+          (is (= "disabled-by-config" (:reason (parse-json (:body resp))))
+              (str uri " must attribute the cause to the config flag")))))
+
+    (testing "rulebase routes still 200 under opt-out"
+      (is (= 200 (:status (handler (mock/request :get "/v1/rulebase-summary")))))
+      (is (= 200 (:status (handler (mock/request :get "/v1/rules"))))))))

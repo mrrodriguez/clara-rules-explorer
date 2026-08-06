@@ -944,3 +944,59 @@
     (is (apply distinct? ids))
     (is (str/ends-with? (first ids) ":0"))
     (is (str/ends-with? (second ids) ":1"))))
+
+;; ---------------------------------------------------------------------------
+;; Detection-map merge: fact-instance-derived-types survives layering
+;; ---------------------------------------------------------------------------
+
+(deftest test-detection-map--route-a-derived-types-merge-in
+  "Route A from the defect: an incoming derived-types-only layer merges into
+   an existing detection map without destroying its callsites."
+  (let [generated (ann/layer {:id :generated
+                              :annotations
+                              {"a.ns/r" {:clara-rules/dynamic-insert-types-detected
+                                         {:callsites [{:ns-name-sym 'a.ns
+                                                       :source-str "(->fact :a/one)"
+                                                       :status :full}]}}}})
+        enriched  (ann/layer {:id :enriched
+                              :annotations
+                              {"a.ns/r" {:clara-rules/dynamic-insert-types-detected
+                                         {:fact-instance-derived-types ["a/two"]}}}})
+        merged (ann/merge-layers [generated enriched])
+        dm (get-in (ann/annotations merged)
+                   ["a.ns/r" :clara-rules/dynamic-insert-types-detected])]
+    (is (= 1 (count (:callsites dm)))
+        "callsites from the generated layer must survive")
+    (is (= ["a/two"] (:fact-instance-derived-types dm))
+        "derived types from the incoming layer must survive")
+    ;; provenance reports both layers
+    (is (= [:generated :enriched]
+           (get-in merged [:provenance "a.ns/r" :clara-rules/dynamic-insert-types-detected]))
+        "provenance must report both layers as contributors")))
+
+(deftest test-detection-map--route-b-derived-types-survive-alongside-callsites
+  "Route B from the defect: incoming derived types survive alongside the
+   base layer's callsites when both are in the same detection map."
+  (let [generated (ann/layer {:id :generated
+                              :annotations
+                              {"a.ns/r" {:clara-rules/dynamic-insert-types-detected
+                                         {:callsites [{:ns-name-sym 'a.ns
+                                                       :source-str "(->fact :a/one)"
+                                                       :status :full}]}}}})
+        enriched  (ann/layer {:id :enriched
+                              :annotations
+                              {"a.ns/r" {:clara-rules/dynamic-insert-types-detected
+                                         {:callsites [{:ns-name-sym 'a.ns
+                                                       :source-str "(->fact :a/one)"
+                                                       :status :full}]
+                                          :fact-instance-derived-types ["a/two"]}}}})
+        merged (ann/merge-layers [generated enriched])
+        dm (get-in (ann/annotations merged)
+                   ["a.ns/r" :clara-rules/dynamic-insert-types-detected])]
+    (is (= 1 (count (:callsites dm)))
+        "callsites from the base layer must survive")
+    (is (= ["a/two"] (:fact-instance-derived-types dm))
+        "derived types from the incoming layer must survive")
+    (is (= [:generated :enriched]
+           (get-in merged [:provenance "a.ns/r" :clara-rules/dynamic-insert-types-detected]))
+        "provenance must report both layers as contributors")))

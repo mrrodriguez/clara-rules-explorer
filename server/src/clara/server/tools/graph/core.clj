@@ -9,13 +9,17 @@
             [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.nodes :as nodes]
             [clara.server.tools.graph.serialize :as serialize]
-            [clojure.string :as str])
-  (:import [clara.rules.engine LocalSession]))
+            [clojure.string :as str]))
 
 (defn- get-rulebase [session-or-rulebase]
-  (if (instance? LocalSession session-or-rulebase)
+  (if (satisfies? eng/ISession session-or-rulebase)
     (-> session-or-rulebase eng/components :rulebase)
     session-or-rulebase))
+
+(defn working-memory-available?
+  "True when `session-or-rulebase` is a live session and can be snapshotted."
+  [session-or-rulebase]
+  (satisfies? eng/ISession session-or-rulebase))
 
 (defn extract-ancestors-fn
   "Returns the rulebase's ancestors-fn: the wrapped fn from `:get-alphas-fn`

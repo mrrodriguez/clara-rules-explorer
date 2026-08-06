@@ -192,9 +192,10 @@
                        (:callsites b))
           callsites (not-empty (into merged-a b-only))]
       (when callsites
-        ;; non-callsite keys on `a` (e.g. :fact-instance-derived-types from
-        ;; session enrichment) survive the deep merge
+        ;; non-callsite keys from both sides survive the deep merge,
+        ;; with the incoming layer (b) winning over the accumulator (a).
         (merge (dissoc a :callsites :resolution)
+               (dissoc b :callsites :resolution)
                {:callsites callsites
                 :resolution (ann.callsite/aggregate-resolution callsites)})))))
 
@@ -246,7 +247,11 @@
    last declared wins."
   [layer-id props strategy-key merged prov k v]
   (if-not (contains? v :callsites)
-    [(assoc merged k v) (assoc prov k layer-id)]
+    ;; Opaque value without callsites (e.g. session-enrichment channel
+    ;; carrying only :fact-instance-derived-types) — merge into any
+    ;; existing value rather than replacing it wholesale.
+    [(assoc merged k (merge (get merged k) v))
+     (assoc prov k (contributing (get prov k) layer-id))]
     (let [strategy (get props strategy-key :deep)
           merged-dm (if-let [a (get merged k)]
                       (merge-detection-maps layer-id strategy a v)

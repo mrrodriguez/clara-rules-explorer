@@ -212,6 +212,33 @@
       (is (= (set (map (comp strip-volatile :data) (vals (:facts snapshot-1))))
              (set (map (comp strip-volatile :data) (vals (:facts snapshot-2))))) "Fact data set should be identical"))))
 
+(deftest test-deterministic-fact-str--shapes
+  (testing "set of maps does not throw"
+    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :results #{{:a 1}}}))
+        "set of maps must canonicalize without comparator error"))
+
+  (testing "map keyed by a map does not throw"
+    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :by {{:a 1} 1}}))
+        "map keyed by a map must canonicalize without comparator error"))
+
+  (testing "mixed key types does not throw"
+    (is (string? (#'memory/deterministic-fact-str {:a 1 "b" 2}))
+        "mixed key types must canonicalize without class cast"))
+
+  (testing "vector of maps is fine (regression)"
+    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :results [{:a 1}]}))
+        "vector of maps must canonicalize"))
+
+  (testing "determinism: same map in different key orders → identical strings"
+    (is (= (#'memory/deterministic-fact-str {:a 1 :b 2})
+           (#'memory/deterministic-fact-str {:b 2 :a 1}))
+        "key order must not affect the canonical string"))
+
+  (testing "determinism: same set in different element orders → identical strings"
+    (is (= (#'memory/deterministic-fact-str {:s #{1 2 3}})
+           (#'memory/deterministic-fact-str {:s #{3 1 2}}))
+        "set element order must not affect the canonical string")))
+
 (deftest test-accumulator-fact-extraction
   (testing "Accumulator results (like vectors) are not treated as facts"
     (let [app (laf/map->Application {:app-id "app-1"})

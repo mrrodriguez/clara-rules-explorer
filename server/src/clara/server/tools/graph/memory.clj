@@ -10,18 +10,21 @@
 
 (defn- deterministic-fact-str
   "Returns a deterministic pr-str representation of a fact for stable sorting.
-   Recursively sorts maps and sets to guarantee consistent ordering."
+   Uses pr-str-ordered vector forms with ::map / ::set markers instead of
+   sorted-map/sorted-set (which require Comparable keys and fail on sets of
+   maps or maps keyed by maps)."
   [fact]
-  (let [pruned (serialize/prune-fns fact)]
-    (letfn [(canonicalize [x]
-              (cond
-                (map? x) (into (sorted-map)
-                               (map (fn [[k v]] [(canonicalize k) (canonicalize v)]))
-                               x)
-                (set? x) (into (sorted-set) (map canonicalize) x)
-                (sequential? x) (mapv canonicalize x)
-                :else x))]
-      (pr-str (canonicalize pruned)))))
+  (letfn [(canonicalize [x]
+            (cond
+              (map? x) (into [::map]
+                             (sort-by pr-str
+                                      (map (fn [[k v]] [(canonicalize k) (canonicalize v)])
+                                           x)))
+              (set? x) (into [::set]
+                             (sort-by pr-str (map canonicalize x)))
+              (sequential? x) (mapv canonicalize x)
+              :else x))]
+    (pr-str (canonicalize (serialize/prune-fns fact)))))
 
 (defn- extract-match-facts
   "Returns a sequence of actual facts involved in a match, skipping accumulator

@@ -80,7 +80,7 @@
 		"resolution": "full"
 	},
 	"source-rule": false,
-	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[]\n[clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n (= ?app-id app-id)\n (= ?doc-check-status status)]\n[clara.server.tools.graph.rules.loan_app_facts.IdentityCheck\n (= ?app-id app-id)\n (= ?identity-check-status status)]\n[clara.server.tools.graph.rules.loan_app_facts.FraudCheck\n (= ?app-id app-id)\n (= ?fraud-check-status status)]\n",
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[:not\n [clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome\n  (= ?app-id app-id)\n  (= status :approved)]]\n[clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n (= ?app-id app-id)\n (= ?doc-check-status status)]\n[clara.server.tools.graph.rules.loan_app_facts.IdentityCheck\n (= ?app-id app-id)\n (= ?identity-check-status status)]\n[clara.server.tools.graph.rules.loan_app_facts.FraudCheck\n (= ?app-id app-id)\n (= ?fraud-check-status status)]\n",
 	"ns": "clara.server.tools.graph.rules.loan-app-rules",
 	"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?",
 	"lhs-types": [
