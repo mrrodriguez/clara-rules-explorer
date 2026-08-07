@@ -14,7 +14,7 @@ Clara accepts this. `create-get-alphas-fn` routes each fact by
 `(fact-type-fn fact)`; for `nil` that yields `nil`, which matches no alpha
 roots, so the fact matches nothing and is never seen again. Nothing warns. The
 value sits inertly in insertion memory and costs nothing — until something
-tries to *name* it, which is exactly what this project does.
+tries to _name_ it, which is exactly what this project does.
 
 Before the recent nil-safety work, that surfaced as an NPE thrown a long way
 from the cause:
@@ -33,7 +33,7 @@ Cannot invoke "Object.toString()" because "s" is null
 - `route-id*` documents `nil` as equivalent to `""`.
 - Tests: `(= (route-id "") (route-id nil))`, and
   `(serialize-type-ref #{} nil nil)` returns `{:name nil, :id (route-id nil),
-  :known false}` without throwing.
+:known false}` without throwing.
 
 `513387f` — drop-or-substitute at several consumers:
 
@@ -68,7 +68,7 @@ items below are ordered with that first.
 - `facts-from-matches` — token matches, falling back to `[fact]` when the node
   has no accumulator condition or the accumulator result is not a collection
 
-None of the three filters `nil`. `:all-facts` is a key this fork *adds* to the
+None of the three filters `nil`. `:all-facts` is a key this fork _adds_ to the
 inspection result — upstream `clara.tools.inspect/inspect` does not return it —
 so every consumer of that key is exposed to a value upstream consumers never
 see.
@@ -112,6 +112,8 @@ load-bearing.
 Whichever is chosen, this is the decision worth making before the code moves
 into clara-rules, because it becomes a public contract at that point.
 
+DECISION: We should exclude nil and exclude ISystemFact the same way it is done elsewhere.
+
 ---
 
 ## 2. The unknown-fact-type sentinel
@@ -126,26 +128,16 @@ type-name (->> (or raw-type
                (serialize/serialize-fact-type nil))
 ```
 
-Four distinct problems in three lines:
+Three distinct problems in three lines:
 
-**a. The keyword's namespace does not exist.** Every namespace in this project
-is `clara.server.tools.graph.*`; there is no `clara.tools.graph.analyze`. This
-reads as a typo, and nothing catches it because a namespaced keyword is just
-data.
-
-**b. It is a magic literal, used once, that is part of the API surface.** This
+**a. It is a magic literal, used once, that is part of the API surface.** This
 value reaches clients as a fact type `:name`, and its `route-id` becomes a URL
 segment. It should be a named, documented var that both `memory` and any future
 consumer can reference — a client wanting to special-case untyped facts
 currently has to hardcode the string.
 
-**c. `:type` and `:ns` of the same fact now disagree.** The next line is still
-`:ns (ft/raw-type-ns raw-type)` — the *raw* nil, not the substituted sentinel.
-`raw-type-ns` returns nil for nil, so nothing breaks today, but the two lines
-describe different values and only one of them was updated.
-
-**d. It is silent.** The substitution is invisible: no log, no count, no
-attribution. See item 7.
+**b. It is silent.** The substitution is invisible: no log, no count, no
+attribution. See item 7. DECISION: Print a warning for this.
 
 ---
 
@@ -158,18 +150,18 @@ re-introduce.
 
 The codebase currently does all three of:
 
-| Policy | Where |
-| --- | --- |
-| **Drop** | `annotations/resolve-types`, `core/extract-lhs-fact-types`, `core` produced/retract sets, `serialize/serialize-dynamic-callsite` `:resolved-types` |
-| **Substitute** | `memory/build-fact-table` |
-| **Tolerate and propagate** | `serialize/resolve-type` → `serialize-type-ref` (item 4) |
+| Policy                     | Where                                                                                                                                              |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Drop**                   | `annotations/resolve-types`, `core/extract-lhs-fact-types`, `core` produced/retract sets, `serialize/serialize-dynamic-callsite` `:resolved-types` |
+| **Substitute**             | `memory/build-fact-table`                                                                                                                          |
+| **Tolerate and propagate** | `serialize/resolve-type` → `serialize-type-ref` (item 4)                                                                                           |
 
 These are defensible individually and incoherent together. A reasonable rule,
 stated once and referenced from each site:
 
 - **Static analysis drops.** A nil type token carries no information — there is
   no fact behind it, only a failed resolution. Dropping loses nothing.
-- **Working memory substitutes and attributes.** There *is* a real fact object;
+- **Working memory substitutes and attributes.** There _is_ a real fact object;
   dropping it would silently under-report the session's contents. It needs a
   name, and it needs to be traceable back to whatever produced it.
 - **Serialization sees neither.** By the time `serialize-type-ref` runs, nil
@@ -189,7 +181,7 @@ stated once and referenced from each site:
 {:name nil, :id "x-<hash>", :known false}
 ```
 
-`070c010` added a test that *asserts* this shape, which makes it deliberate
+`070c010` added a test that _asserts_ this shape, which makes it deliberate
 rather than accidental — but it means a nullable `:name` is now a supported
 TypeReference, and it flows into `known-set` membership checks, the id indexes
 (item 5), and the JSON API.
@@ -197,6 +189,9 @@ TypeReference, and it flows into `known-set` membership checks, the id indexes
 Worth confirming against the UI's TypeReference model whether `name` is
 declared nullable there. If it is not, this is a wrong answer that reaches the
 client rather than an exception that gets caught.
+
+DECISION: we should not serialize this broken resolve-type structure for the consumer. The type
+should be dropped entirely with a warning printed.
 
 ---
 
@@ -226,6 +221,9 @@ written for. Failing that, the collision message should distinguish `nil` from
 `""` — `format`'s `%s` renders both indistinguishably, so the error text
 currently reads as though the same name collided with itself.
 
+DECISION: we are addressing nils upstream, but we should never try to make a route on nil. we should
+print a warning if it happens and otherwise skip this entry from every needing to get a route-id made.
+
 ---
 
 ## 6. `serialize-lhs` deliberately admits a nil `:type`
@@ -246,6 +244,8 @@ which is the less useful of the two.
 Decide whether a condition with a nil `:type` is legal. If it cannot occur,
 assert it. If it can, normalize it the way item 3 prescribes.
 
+DECISION: only include the :type if there is `some?` value for `:type` (non-nil).
+
 ---
 
 ## 7. Nothing reports what was dropped or substituted
@@ -261,7 +261,7 @@ entry a reader would have to notice and interpret.
 
 The information needed to make this actionable is available at the point of
 substitution. `build-fact-table` already computes `origin-map`, and each fact
-entry gets `:inserted-from` — so the snapshot can say *which rules* produced
+entry gets `:inserted-from` — so the snapshot can say _which rules_ produced
 facts it could not type. Options, roughly in order of cost:
 
 - a `log/warn` once per snapshot build with the count and the distinct
@@ -292,7 +292,7 @@ arguments. Those pin the individual guards. There is no test that:
    `:known false`, and (per item 7) attribution to the inserting rule.
 
 That is the test that would have caught the original defect, and unlike the unit
-tests it protects the *policy* from item 3 rather than one function's argument
+tests it protects the _policy_ from item 3 rather than one function's argument
 handling. Demo rules for this kind of fixture already live under
 `server/test/clara/server/tools/graph/rules/`.
 
