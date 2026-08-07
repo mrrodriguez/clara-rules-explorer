@@ -736,6 +736,76 @@
         (is (re-find #"\(:refer-clojure" src)
             ":refer-clojure clause must be a list form, not a vector")))))
 
+(testing "reconstructed ns source emits declare for interned helpers"
+  (let [ns-sym 'fake.eval-helpers]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/require '[clara.rules :as r]))
+      (eval '(clojure.core/defn ->fact [type data]
+               (clojure.core/with-meta data {:type type})))
+      (eval '(r/defrule fake-helper-rule
+               [java.lang.Object]
+               =>
+               (r/insert! (->fact :demo/alert {:id 1})))))
+    (let [synth-result (synth/synthesize-ns-source
+                        ns-sym
+                        [{:name 'fake-helper-rule
+                          :rhs '((r/insert! (->fact :demo/alert {:id 1})))}]
+                        (fn [_] nil)   ;; no classpath source
+                        identity)
+          source (:source synth-result)]
+      (is (str/includes? source "(declare ->fact)")
+          "synthesized source must emit (declare ->fact) for the ns's own helper")
+      (is (str/includes? source "__clara_explorer_rule_0__")
+          "synthetic snippet def still present")
+        ;; verify the declare precedes snippets
+      (let [decl-pos (str/index-of source "(declare ->fact)")
+            snip-pos (str/index-of source "__clara_explorer_rule_0__")]
+        (is (< decl-pos snip-pos)
+            "(declare …) must appear before synthetic snippet defs")))))
+
+(testing "reconstructed ns: interned helper resolves via :fact-constructors"
+  (let [ns-sym 'fake.eval-helpers-2]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/require '[clara.rules :as r]))
+      (eval '(clojure.core/defn ->fact [type data]
+               (clojure.core/with-meta data {:type type})))
+      (eval '(r/defrule fake-helper-rule-2
+               [java.lang.Object]
+               =>
+               (r/insert! (->fact :demo/alert {:id 1})))))
+    (let [session (r/mk-session ns-sym)
+          annotations (analyze/generate-annotations-from-analysis
+                       {:analysis (analyze/analyze-session-rules
+                                   {:session-or-rulebase session
+                                    :include-ns-prefixes ["fake."]})
+                        :session-or-rulebase session
+                        :fact-constructors
+                        [{:match-fn (fn [sym]
+                                      (= (name sym) "->fact"))
+                          :type-resolver-fn ->fact-type-resolver}]})
+          rule-key 'fake.eval-helpers-2/fake-helper-rule-2
+          detection (:clara-rules/dynamic-insert-types-detected
+                     (ann/get-annotation annotations rule-key))]
+      (is (some? detection)
+          "dynamic-insert-types-detected must be present")
+      (is (= :full (:resolution detection))
+          "resolution must be :full — ->fact callee must be attributed")
+      (let [callsites (:callsites detection)]
+        (is (= 1 (count callsites))
+            "single callsite expected")
+        (let [cs (first callsites)]
+          (is (:constructor-sym cs)
+              (str "callsite must have :constructor-sym, got: " (pr-str cs)))
+          (is (= :full (:status cs))
+              "callsite status must be :full")
+          (let [cid (:callsite-id cs)]
+            (is (str/includes? cid (str ns-sym ":->fact:"))
+                (str "callsite-id must contain the constructor segment, got: " cid)))
+          (is (= [:demo/alert] (:resolved-types cs))
+              "resolved-types must be [:demo/alert]"))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Callsite identity edge cases
 ;; ---------------------------------------------------------------------------
