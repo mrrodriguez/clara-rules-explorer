@@ -9,75 +9,256 @@ Consequence: fact types inserted at runtime (dynamic inserts with
 `compliance-review-result`) and their type-hierarchy linkages disappeared from
 `/v1/fact-types`.
 
-The `swap-session!` path handles this correctly via auto-detect enrichment
-modes (`build-auto-detect-layers` → memory layer → merge).  The gap is that
-`start!` has no way to pass an enrichment mode — it only accepts `:layers`
-(file paths), which map to `:source` with no `:enrichment`.
+The `swap-session!` path has enrichment via auto-detect modes, but `start!`
+only accepts `:layers` (file paths) with no way to specify an enrichment mode.
 
 ## Architecture Principle
 
-**The annotations-atom is the source of truth.**  Whatever the caller puts there
+**The annotations-atom is the source of truth.** Whatever the caller puts there
 (static or pre-enriched with WM-derived types) is what analysis consumes.
-The cache layer is dumb — it uses `@annotations-atom` as-is.  Enrichment is a
+The cache layer is dumb — it uses `@annotations-atom` as-is. Enrichment is a
 caller-level concern, performed via `build-annotations` *before* the
 annotations hit the atom.
 
-Both `start!` and `swap-session!` should use the same `AnnotationsSpec`
-interface for building annotations.  There should not be two parallel
-mechanisms (`:layers` + `reload-annotations!` vs `:annotations` +
-`build-annotations`).
+Both `start!` and `swap-session!` use the same `AnnotationsSpec` interface.
+There is no separate `:layers` mechanism.
 
-## Current flows
+WM enrichment is modeled as a **delta layer** via `analyze/->memory-layer`
+(eb78335). This layer carries only what session enrichment added over the
+accumulated static annotations (props + source + generated), with proper
+provenance so `merge-layers` tracks its contribution correctly. When the
+session contributes nothing new, `->memory-layer` returns nil — no empty
+layer, no provenance noise.
 
-### swap-session! (works correctly)
+## Fixed Flows
 
-```
-swap-session!({:annotations {:enrichment :auto-detect}})
-  → build-annotations(session, annotations-spec, current)
-      → build-auto-detect-annotations
-          → build-auto-detect-layers
-              → props + source + generated + memory  ← WM enrichment here
-          → merge-layers
-      → swap! annotations-atom  (atomic)
-  → cache/warm! → cache/analysis → rulebase-analysis(enriched-annotations)
-```
+Both paths converge on the same `build-annotations` → `build-auto-detect-annotations`
+call chain. There is no separate `:layers` / `load-merged-annotations` path.
 
-### start! (missing enrichment, uses separate `:layers` mechanism)
+### Path A: `start!` with `:annotations {:enrichment :auto-detect}`
 
 ```
-start!({:session s, :layers ["path/to/annos.edn"]})
-  → reload-annotations!
-      → load-merged-annotations  (props + file layers — NO memory layer)
-      → reset! annotations-atom  (non-atomic)
-  → cache/warm! → cache/analysis → rulebase-analysis(static-annotations)
+start!({:session s, :annotations {:enrichment :auto-detect}})
+  │
+  ├─ (reset! config-atom config)
+  ├─ (reset! session-atom s)
+  │
+  └─ (swap! annotations-atom
+         #(build-annotations s {:enrichment :auto-detect} %))
+       │
+       └─ build-annotations(session, annotations-spec, current-annotations)
+            │  ;; Normalizes {:enrichment :auto-detect}
+            │  ;; → {:source nil, :enrichment :auto-detect}
+            │
+            └─ build-auto-detect-annotations(session, nil, :auto-detect)
+                 │
+                 ├─ build-static-layers(session, nil, :auto-detect)
+                 │    └─ [props-layer]   ← no source, auto-detect doesn't
+                 │                        include generated w/o
+                 │                        :auto-detect-from-rulebase
+                 │
+                 ├─ merged-static = merge-layers([props-layer])
+                 ├─ base = annotations(merged-static)
+                 │
+                 ├─ memory-layer = ->memory-layer({:session s, :annotations base})
+                 │    │
+                 │    ├─ base' = normalize-annotations(base)
+                 │    ├─ enriched = enrich-annotations-from-session(s, base')
+                 │    ├─ delta = annotations-delta(base', enriched)
+                 │    │    ;; Only types enrichment added over base
+                 │    │    ;; e.g. AuditTrail, ComplianceReview
+                 │    │
+                 │    └─ delta->layer(:clara.tools.graph.analyze/memory,
+                 │                    {:derived-from "session working memory"},
+                 │                    delta)
+                 │
+                 └─ if memory-layer:
+                      merge-layers([props-layer, memory-layer]) → annotations
+                    else:
+                      annotations(merged-static)
 ```
 
-### Non-atomic atom writes
+### Path B: `start!` with `:annotations {:source "annos.edn" :enrichment :auto-detect}`
 
-Both paths have non-atomic `(reset! annotations-atom (build-annotations ... @annotations-atom))`.
-The deref + reset is a read-then-write race.  Should be `(swap! annotations-atom #(build-annotations ... %))`.
+Same as Path A but `build-static-layers` includes the source layer:
 
-## Solution
+```
+build-static-layers(session, "annos.edn", :auto-detect)
+  └─ [props-layer, source-layer]   ← file re-read from disk
+```
 
-1. **Consolidate `start!` to use `:annotations` only** (same `AnnotationsSpec`
-   as `swap-session!`).  Remove the separate `:layers` / `reload-annotations!`
-   path.
+The memory delta is computed against `props + source`, so the memory layer
+only claims types the sidecar annotations didn't already declare. More
+provenance precision for free.
 
-2. **Fix non-atomic atom writes** everywhere (`swap!` instead of `reset!` + deref).
+### Path C: `swap-session!` with `{:annotations {:enrichment :auto-detect}}`
 
-3. **Add `--annotations` CLI flag** to `main.clj`.  Keep `-l`/`--layer` as a
-   backward-compatible shorthand.
+```
+swap-session!({:session s, :annotations {:enrichment :auto-detect}})
+  │
+  ├─ (swap! config-atom assoc :session s)
+  ├─ (reset! session-atom s)
+  ├─ (reset! analyze-cache-atom {})
+  │
+  └─ (swap! annotations-atom
+         #(build-annotations s {:enrichment :auto-detect} %))
+       │
+       └─ build-annotations(s, {:enrichment :auto-detect}, current)
+            │
+            └─ build-auto-detect-annotations(s, nil, :auto-detect)
+                 │  ... identical to Path A from here ...
+                 │
+                 └─ merge-layers(...) → annotations
+```
 
-4. **Default `demo-run` to `--enrichment auto-detect`**.
+### Path D: `swap-session!` with `{:annotations {:enrichment :auto-detect-from-memory}}`
 
-5. **No changes to `cache.clj` or `build-auto-detect-layers`** — they already
-   work correctly.
+```
+swap-session!({:session s, :annotations {:enrichment :auto-detect-from-memory}})
+  │
+  └─ build-auto-detect-annotations(s, nil, :auto-detect-from-memory)
+       │
+       ├─ build-static-layers(s, nil, :auto-detect-from-memory)
+       │    └─ [props-layer]   ← no source, no generated
+       │                        (:auto-detect-from-memory doesn't include
+       │                         kondo static analysis)
+       │
+       ├─ merged-static = merge-layers([props-layer])
+       ├─ base = annotations(merged-static)
+       │
+       ├─ memory-layer = ->memory-layer({:session s, :annotations base})
+       │    │  ;; When WM not available: memory-layer = nil
+       │    │  ;; (warning printed in build-auto-detect-annotations)
+       │
+       └─ if memory-layer:
+            merge-layers([props-layer, memory-layer]) → annotations
+          else:
+            annotations(merged-static)   ← just props
+```
 
-## Detailed Changes
+### Path E: `start!` without enrichment (backward compat)
+
+```
+start!({:session s, :annotations "path/to/annos.edn"})
+  │  ;; Bare form → normalized to {:source "path/to/annos.edn"},
+  │  ;; enrichment = nil
+  │
+  └─ (swap! annotations-atom
+         #(build-annotations s "path/to/annos.edn" %))
+       │
+       └─ build-annotations(s, "path/to/annos.edn", current)
+            │  ;; Normalizes bare form: {:source "path/to/annos.edn"}
+            │  ;; enrichment = nil → no auto-detect
+            │
+            └─ coerce-to-bare-annotations("path/to/annos.edn", s)
+                 │  ;; Reads file from disk, merges with props-layer
+                 │  ;; No WM enrichment
+                 │
+                 └─ bare annotations (static only)
+```
+
+### Path F: POST `/v1/annotations/reload`
+
+```
+POST /v1/annotations/reload
+  │
+  └─ reload-annotations!
+       │
+       └─ (swap! annotations-atom
+              #(build-annotations session annotations %))
+            │  ;; Uses the annotations spec stored in config-atom
+            │  ;; at server start.  File-backed sources re-read from
+            │  ;; disk; auto-detect modes re-run (kondo + ->memory-layer).
+```
+
+### Summary: which enrichment modes produce which layers
+
+| Mode | props | source | generated (kondo) | memory (`->memory-layer`) |
+|------|-------|--------|-------------------|---------------------------|
+| `nil` / `:none` | ✓ | if given | — | — |
+| `:auto-detect-from-rulebase` | ✓ | if given | ✓ | — |
+| `:auto-detect-from-memory` | ✓ | if given | — | ✓ (when WM available) |
+| `:auto-detect` | ✓ | if given | ✓ | ✓ (when WM available) |
+
+Memory enrichment always goes through `->memory-layer` → delta → layer merge.
+When WM is unavailable, `->memory-layer` returns nil and the mode degrades
+gracefully (e.g. `:auto-detect-from-memory` → just props + source).
+
+## Non-atomic atom writes (fixed)
+
+Every path uses `swap!` to update `annotations-atom`:
+
+```clojure
+;; BEFORE (non-atomic — read-then-write race):
+(let [s @session-atom
+      bare (build-annotations s annotations @annotations-atom)]
+  (reset! annotations-atom bare))    ;; ← @annotations-atom captured above is stale
+
+;; AFTER (atomic):
+(let [s @session-atom]
+  (swap! annotations-atom #(build-annotations s annotations %)))
+```
+
+This matters because `build-annotations` reads `current-annotations` for
+`:reuse` mode. The old pattern could lose a concurrent update.
+
+## Detailed Code Changes
 
 ### 1. `server/src/clara/server/graph/server.clj`
 
-#### a) Update `start!` signature — replace `:layers` with `:annotations`
+#### a) `build-auto-detect-layers` → `build-static-layers`
+
+```clojure
+(defn- build-static-layers
+  "Build the static annotation layers for auto-detect enrichment modes
+   (props, source, generated).  Memory enrichment is handled separately
+   via `analyze/->memory-layer` so it produces a proper delta layer against
+   the accumulated static base."
+  [session source enrichment]
+  (cond-> [(ann.merge/props-layer session)]
+    (some? source)
+    (conj (ann.merge/->layer {:id :source
+                              :annotations (ann.merge/coerce-to-bare-annotations source session)}))
+    (#{:auto-detect-from-rulebase :auto-detect} enrichment)
+    (conj {:id :clara.tools.graph.analyze/generated
+           :annotations (let [analysis (analyze/analyze-session-rules
+                                        {:session-or-rulebase session
+                                         :cache-atom analyze-cache-atom})
+                              generated (analyze/generate-annotations-from-analysis
+                                         {:analysis analysis
+                                          :session-or-rulebase session})]
+                          generated)})))
+```
+
+#### b) `build-auto-detect-annotations` uses `->memory-layer`
+
+```clojure
+(defn- build-auto-detect-annotations
+  "Build annotations for auto-detect enrichment modes.
+
+   Static layers are merged first so the memory delta is computed against
+   the accumulated base — not an empty map.  When the session contributes
+   nothing new, ->memory-layer returns nil and the memory layer is skipped."
+  [session source enrichment]
+  (let [wm? (core/working-memory-available? session)]
+    (when (and (#{:auto-detect-from-memory} enrichment)
+               (not wm?))
+      (println "[server] :auto-detect-from-memory requested but no working memory available — skipping"))
+    (let [static-layers (build-static-layers session source enrichment)
+          merged-static (ann.merge/merge-layers static-layers)
+          base          (ann.merge/annotations merged-static)
+          memory-layer  (when (and wm?
+                                  (#{:auto-detect-from-memory :auto-detect} enrichment))
+                          (analyze/->memory-layer {:session session
+                                                    :annotations base}))]
+      (if memory-layer
+        (-> (conj static-layers memory-layer)
+            ann.merge/merge-layers
+            ann.merge/annotations)
+        (ann.merge/annotations merged-static)))))
+```
+
+#### c) `start!` — `:layers` replaced by `:annotations`
 
 ```clojure
 (defn start!
@@ -85,9 +266,8 @@ The deref + reset is a read-then-write race.  Should be `(swap! annotations-atom
    Options:
    :session       - The Clara session to analyze.
    :annotations   - An AnnotationsSpec (same shape as swap-session!'s
-                    :annotations arg).  May be nil (empty annotations),
-                    a bare form (string path, vector of layers, map), or
-                    a spec map with :source and optional :enrichment.
+                    :annotations arg).  May be nil, a bare form (string,
+                    vector, map), or a spec map with :source/:enrichment.
    :port          - Server port (default 9999).
    :working-memory-enabled - When false, working-memory routes return 409
                              (default true)."
@@ -97,42 +277,16 @@ The deref + reset is a read-then-write race.  Should be `(swap! annotations-atom
   (let [wm-available? (core/working-memory-available? session)]
     (reset! config-atom config)
     (reset! session-atom session)
-
-    ;; Build annotations atomically via swap!
     (swap! annotations-atom #(build-annotations session annotations %))
-
-    (when-not wm-available?
-      (println "[server] Working-memory routes disabled: started with a rulebase, not a session"))
-    (when (and wm-available? (not working-memory-enabled))
-      (println "[server] Working-memory routes disabled by configuration (:working-memory-enabled false)"))
-
-    (let [{:keys [handler cache]} (api/app session-atom annotations-atom working-memory-enabled)
-          _ (reset! cache-atom cache)
-          _ (cache/warm! cache session-atom annotations-atom)
-          final-app (wrap-reload handler)]
-      (when-let [server @server-instance]
-        (Server/.stop server))
-      (reset! server-instance
-              (jetty/run-jetty final-app {:port port :join? false})))))
+    ...))
 ```
 
-#### b) Remove `load-merged-annotations`
+#### d) Remove `load-merged-annotations`
 
-No longer needed — `build-annotations` → `coerce-to-bare-annotations` handles
-file paths, vectors of layers, and enrichment uniformly:
+No longer needed. `build-annotations` → `coerce-to-bare-annotations` handles
+file paths, vectors, and enrichment uniformly.
 
-```clojure
-;; REMOVE:
-;; (defn- load-merged-annotations
-;;   "Folds the rule-:props layer (base) plus the configured `:layers` through
-;;    merge-layers..."
-;;   [session layers]
-;;   (ann.merge/merge-layers (into [(ann.merge/props-layer session)]
-;;                                 (map ann.merge/->layer)
-;;                                 layers)))
-```
-
-#### c) Update `reload-annotations!` — use `swap!` + `build-annotations`
+#### e) `reload-annotations!` — atomic, uses `build-annotations`
 
 ```clojure
 (defn- reload-annotations! []
@@ -140,25 +294,16 @@ file paths, vectors of layers, and enrichment uniformly:
     (swap! annotations-atom #(build-annotations session annotations %))))
 ```
 
-This reads the stored `:annotations` spec from `config-atom`.  File-backed
-sources are re-read from disk on each reload (handled by `coerce-to-bare-annotations`
-inside `build-annotations`).  Auto-detect modes are re-run (kondo analysis,
-WM enrichment) on each reload.
+#### f) `swap-session!` — fix non-atomic pattern
 
-#### d) Fix non-atomic pattern in `swap-session!`
-
-Replace:
 ```clojure
-;; BEFORE (non-atomic):
+;; BEFORE:
 (let [s @session-atom
       bare (build-annotations s annotations @annotations-atom)]
   (reset! annotations-atom bare)
   (swap! config-atom assoc :annotations bare))
-```
 
-With:
-```clojure
-;; AFTER (atomic):
+;; AFTER:
 (let [s @session-atom]
   (swap! annotations-atom #(build-annotations s annotations %))
   (swap! config-atom assoc :annotations @annotations-atom))
@@ -169,105 +314,59 @@ With:
 #### a) Add `--annotations` CLI option
 
 ```clojure
-(def cli-options
-  [["-s" "--session PATH" "Path to serialized Clara session file."]
-   ["-l" "--layer PATH"
-    (str "Path to an EDN annotation layer file.  Repeatable.  Shorthand for"
-         " --annotations '{:source [paths...]}'.")
-    :default []
-    :assoc-fn (fn [m k v] (update m k conj v))]
-   ["-f" "--facts PATH" ...]
-   ["-p" "--port PORT" ...]
-   [nil "--working-memory-enabled BOOL" ...]
-   [nil "--annotations EDN"
-    (str "Annotations spec as inline EDN or path to an EDN file containing"
-         " the spec.  The EDN value must be an AnnotationsSpec map with"
-         " optional :source (bare map, vector of layers, string, or File)"
-         " and :enrichment (:none, :reuse, :auto-detect-from-rulebase,"
-         " :auto-detect-from-memory, :auto-detect)."
-         "  Inline examples:"
-         "  --annotations '{:source \"annos.edn\"}'"
-         "  --annotations '{:source [\"a.edn\" \"b.edn\"] :enrichment :auto-detect}'"
-         "  File path example:"
-         "  --annotations my-spec.edn")
-    :default nil]
-   [nil "--generate-analysis DIR" ...]
-   [nil "--load-session-state-fn SYMBOL" ...]
-   ["-h" "--help" "Print this help."]])
+[nil "--annotations EDN"
+ (str "Annotations spec as inline EDN or path to an EDN file."
+      "  The value must be an AnnotationsSpec map with optional"
+      "  :source and :enrichment."
+      "  Inline:  --annotations '{:source \"a.edn\" :enrichment :auto-detect}'"
+      "  File:    --annotations my-spec.edn")
+ :default nil]
 ```
 
-#### b) Add `parse-annotations-arg` helper
+#### b) `parse-annotations-arg` helper
 
 ```clojure
-(defn- parse-annotations-arg
-  "Parse the --annotations CLI value.  Tries inline EDN first; falls back to
-   reading an EDN file at the given path.  A bare string result from inline
-   EDN parsing is treated as a source file path and wrapped in {:source ...}."
-  [s]
+(defn- parse-annotations-arg [s]
   (try
     (let [parsed (edn/read-string s)]
-      (if (string? parsed)
-        {:source parsed}
-        parsed))
+      (if (string? parsed) {:source parsed} parsed))
     (catch Exception _
-      ;; Not valid EDN — treat as a file path containing an EDN spec
       (edn/read-string (slurp s)))))
 ```
 
-#### c) Update `run-explorer-server` to normalize into annotations spec
+#### c) `run-explorer-server` — normalize into annotations spec
 
 ```clojure
-(defn run-explorer-server [options facts-path]
-  (let [{:keys [session layer port load-session-state-fn
-                working-memory-enabled annotations]} options
-        ;; Build annotations spec: explicit --annotations takes priority,
-        ;; then --layer as shorthand, then nil (empty annotations).
-        annotations-spec (cond
-                           annotations
-                           (parse-annotations-arg annotations)
-                           (seq layer)
-                           {:source layer}
-                           :else
-                           nil)]
-    ...
-    (server/start!
-     {:session loaded-session
-      :port port
-      :annotations annotations-spec
-      :working-memory-enabled working-memory-enabled})
-    ...))
+(let [annotations-spec (cond
+                         annotations (parse-annotations-arg annotations)
+                         (seq layer) {:source layer}
+                         :else       nil)]
+  (server/start! {:session loaded-session
+                  :port port
+                  :annotations annotations-spec
+                  :working-memory-enabled working-memory-enabled}))
 ```
 
 ### 3. `server/dev/clara/server/graph/demo_run.clj`
 
-Default to `--enrichment auto-detect`:
+Default to `--annotations '{:enrichment :auto-detect}'`:
 
 ```clojure
 (defn -main [& args]
-  (let [args (if (some #{"-p" "--port"} args)
-               args
-               (concat args ["-p" "9001"]))
-        ;; Default to auto-detect enrichment so the dep graph includes
-        ;; session-derived fact types (dynamic inserts).
+  (let [args (if (some #{"-p" "--port"} args) args (concat args ["-p" "9001"]))
         args (if (some #{"--annotations" "--enrichment"} args)
                args
-               (concat args ["--annotations"
-                             "{:enrichment :auto-detect}"]))
-        ann-path (some-> (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn")
-                         .getPath)]
+               (concat args ["--annotations" "{:enrichment :auto-detect}"]))
+        ann-path (some-> (io/resource "...") .getPath)]
     (if (some #{"-l" "--layer"} args)
       (apply main/-main args)
       (apply main/-main (concat args ["-l" ann-path])))))
 ```
 
-Note: `-l` + `--annotations` are compatible — `run-explorer-server` gives
-`--annotations` priority over `-l`.  When both are present, `--annotations`
-wins (which is correct — explicit spec overrides shorthand).
+When both `-l` and `--annotations` are present, `run-explorer-server` gives
+`--annotations` priority.
 
 ### 4. `server/Makefile`
-
-Update `demo-run` to include enrichment (redundant with demo-run.clj default,
-but explicit for documentation):
 
 ```makefile
 demo-run:
@@ -276,58 +375,39 @@ demo-run:
 	  -l test-resources/clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn
 ```
 
-### 5. `server/AGENTS.md`
-
-Add atomic swap rule:
+### 5. `server/AGENTS.md` — add atomic swap rule
 
 ```markdown
 ## Atom Concurrency
 
 - **Atomic swaps:** When updating an atom based on its current value, use
-  `swap!` (never `reset!` with `@`).  `(reset! a @(f a))` is a read-then-write
+  `swap!` (never `reset!` with `@`).  `(reset! a (f @a))` is a read-then-write
   race; use `(swap! a f)` instead.
-- **Identity-based cache invalidation:** When multiple atoms form a logical
-  unit (e.g., session + annotations → cache), invalidate the cache by
-  `identical?` reference checks rather than value equality — `reset!` on
-  any input atom changes its identity, naturally invalidating the cache.
 ```
 
 ### 6. Test updates
 
-#### `server/test/clara/server/graph/server_test.clj`
+`server/test/clara/server/graph/server_test.clj`:
 
-- Update `start-server!` helper to use `:annotations` instead of `:layers`:
+```clojure
+(defn- start-server! [session layers]
+  (server/start! {:port *port*
+                  :session session
+                  :annotations (when (seq layers) {:source layers})
+                  :working-memory-enabled true}))
+```
 
-  ```clojure
-  (defn- start-server! [session layers]
-    (server/start! {:port *port*
-                    :session session
-                    :annotations (when (seq layers) {:source layers})
-                    :working-memory-enabled true}))
-  ```
-
-- Add integration test for `start!` with `:annotations {:enrichment :auto-detect}`:
-
-  ```clojure
-  (deftest test-start-with-wm-enrichment
-    (testing "start! with :annotations {:enrichment :auto-detect} includes WM-derived fact types"
-      ;; Start a separate server on a different port with enrichment
-      ;; Verify /v1/fact-types includes dynamically-inserted types
-      ))
-  ```
-
-- Existing swap-session enrichment tests (`test-swap-session-auto-detect-from-memory`,
-  `test-swap-session-auto-detect`) should continue to pass — no changes to
-  swap-session! logic.
+Existing swap-session tests pass unchanged — they exercise the same
+`build-annotations` → `build-auto-detect-annotations` path. The internal
+switch to `->memory-layer` is transparent to callers.
 
 ## Files NOT Changed
 
-- **`cache.clj`** — No changes.  The cache remains dumb; it uses
-  `@annotations-atom` as-is.
-- **`server.clj` `build-auto-detect-layers`** — No changes.  The memory
-  enrichment layer stays here for both `start!` and `swap-session!`.
+- **`cache.clj`** — The cache remains dumb.
 - **`api.clj`** — No changes.
-- **`annotations/merge.clj`** — No changes.
+- **`annotations/merge.clj`** — No changes (delta helpers already in eb78335).
+- **`annotations.clj`** — No changes (delta helpers already in eb78335).
+- **`analyze.clj`** — No changes (`->memory-layer` already in eb78335).
 
 ## Verification Steps
 
@@ -356,7 +436,7 @@ Add atomic swap rule:
              ':compliance-review-result']:
        print(f'{e}: {\"PRESENT\" if e in names else \"MISSING\"}')"
    ```
-   All three should show **PRESENT**.
+   All three → **PRESENT**.
 
 4. **Verify AuditTrail detail has ancestors + inserted-by:**
    ```bash
@@ -365,15 +445,15 @@ Add atomic swap rule:
    Should include `ancestors` (with `known: false`) and `inserted-by-rules`
    pointing to `dynamic-insert-audit-trail`.
 
-5. **Verify backward compat** — `-l` still works without `--annotations`:
+5. **Verify backward compat** — `-l` without `--annotations`:
    ```bash
    clojure -M:demo-run -s demo-data/session.bin -l path/to/annos.edn
    ```
+   Still works (bare source, no enrichment).
 
 6. **Verify demo-data git diff shows additions, not deletions:**
    ```bash
    git diff --stat HEAD -- ui/static/demo-data/
    ```
-   Should add `AuditTrail`, `ComplianceReview`, `compliance-review-result`
-   fact types and restore interface ancestor linkages — **not** the ~783-line
-   removal seen on the current branch.
+   Should **add** `AuditTrail`, `ComplianceReview`, `compliance-review-result`
+   and restore interface ancestor linkages — not the ~783-line removal.
