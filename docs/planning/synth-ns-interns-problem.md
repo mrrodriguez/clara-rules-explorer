@@ -4,7 +4,7 @@
 
 `clara.server.tools.graph.analyze.synth/reconstruct-ns-source` rebuilds an
 `(ns …)` form for namespaces with no source on the classpath. It reconstructs
-everything that comes from *outside* the namespace — requires, aliases, refers,
+everything that comes from _outside_ the namespace — requires, aliases, refers,
 imports, `:refer-clojure` deviations — and nothing that the namespace defines
 itself.
 
@@ -14,7 +14,7 @@ emits no callee for any call to them, and every downstream consumer that keys
 on a resolved callee silently does nothing.
 
 The `:fact-constructors` extension point is the visible casualty. Its `:match-fn`
-is `(fn [fq-var-sym] -> truthy)` — it is only ever consulted when there *is* a
+is `(fn [fq-var-sym] -> truthy)` — it is only ever consulted when there _is_ a
 fully-qualified callee symbol. For a project whose rules build facts through its
 own constructor, in a restored session, there never is one. The one case the
 hook exists to serve is the case it cannot reach.
@@ -77,7 +77,7 @@ No `->fact`. The synthetic rule snippet that follows it —
 ```
 
 Note the empty constructor segment in `:callsite-id` (`:-:`) and the absent
-`:constructor-sym`. The callsite is *detected* — the boundary-argument pass sees
+`:constructor-sym`. The callsite is _detected_ — the boundary-argument pass sees
 an argument to `insert!` — but nothing is attributed to it, so no
 `:fact-constructors` spec is ever offered the chance to claim it.
 
@@ -94,14 +94,14 @@ snippets, so clj-kondo resolves calls to them as `<ns>/<name>`:
 (declare ->fact scrub some-other-helper)
 ```
 
-`declare` is enough — the analysis needs the callee *attributed*, not
+`declare` is enough — the analysis needs the callee _attributed_, not
 type-checked or arity-checked. Points to settle:
 
 1. **Which vars.** Everything in `ns-interns` is the simple answer. The rule and
    query vars are interned too; declaring them is harmless, but consider whether
    it interferes with how productions are located in the analysis.
 2. **Ordering.** Declarations must precede the synthetic `(def
-   __clara_explorer_rule_N__ …)` snippets, which means `synthesize-ns-source`
+__clara_explorer_rule_N__ …)` snippets, which means `synthesize-ns-source`
    composes them, not `reconstruct-ns-source` alone — the latter is documented
    as returning an `(ns …)` form and is used on its own elsewhere.
 3. **Name collisions.** A var interned under a name the ns also excludes from
@@ -121,11 +121,5 @@ be `require`d — those have source, so synth never runs. It needs a namespace
 that exists in the JVM with no backing file, which is what a
 serialize/deserialize cycle produces naturally.
 
-A hermetic fixture: compile one or two small rulesets from **source strings**
-under generated namespace names,
-serialize the session, deserialize it straight back from the in-memory bytes,
-and run the annotation pass over the result. No files, no artifacts to keep in
-the repository, and fast enough for a unit test. Assert that a call to a
-namespace-local constructor arrives with `:constructor-sym` set and its fact
-type resolved — and, as a guard against the fixture silently degrading, that no
-production namespace in it has a source file on the classpath.
+clara.server.tools.graph.analyze-test/test-analyze-session-rules--reconstructed-ns-fallback
+already has a setup for a fully in-memory ns being `eval` so it may be able to similarly simulate this.
