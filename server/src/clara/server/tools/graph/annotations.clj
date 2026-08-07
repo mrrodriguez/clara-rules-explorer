@@ -1,8 +1,8 @@
 (ns clara.server.tools.graph.annotations
-  "Rule-name normalization and per-production annotation lookup for the
-   layered annotation library (see docs/rule-annotations.md).  Handles
-   arbitrary fact types (classes, keywords, symbols) as supported by Clara's
-   pluggable fact-type-fn.
+  "Rule-name normalization, type normalization, per-production annotation
+   lookup, and annotation-map diffing for the layered annotation library
+   (see docs/rule-annotations.md).  Handles arbitrary fact types (classes,
+   keywords, symbols) as supported by Clara's pluggable fact-type-fn.
 
    The rest of the library lives in sibling namespaces:
 
@@ -18,6 +18,19 @@
      rule-name keys to strings: `normalize-rule-name` converts a single key,
      `normalize-annotations` transforms an entire map, and `get-annotation`
      normalizes the lookup key before access.")
+
+(defn type-str
+  "Normalizes a type value to its canonical string form for deduplication
+   across layers that may represent the same logical type as a Class, Symbol,
+   or String."
+  [t]
+  (cond
+    (nil? t) nil
+    (class? t) (.getName ^Class t)
+    (keyword? t) (str (symbol t))
+    (symbol? t) (str t)
+    (string? t) t
+    :else (str t)))
 
 (defn normalize-rule-name
   "Normalizes a rule-name key to its canonical string form.
@@ -110,3 +123,81 @@
         (resolve-type-key :clara-rules/insert-types production-ns)
         (resolve-type-key :clara-rules/retract-types production-ns)
         (update-keys unqualify-keyword))))
+
+;; ---------------------------------------------------------------------------
+;; Annotation delta — what one annotation map adds over another
+;; ---------------------------------------------------------------------------
+
+(def ^:private enrichable-dimensions
+  "The `[types-key detection-key]` pairs that enrichment can contribute to.
+
+  Both type keys merge by `:union` and both detection keys go through
+  `merge/fold-detection-key`, so the delta logic is identical per dimension."
+  [[:clara-rules/insert-types :clara-rules/dynamic-insert-types-detected]
+   [:clara-rules/retract-types :clara-rules/dynamic-retract-types-detected]])
+
+(defn- new-types
+  "Types under `types-key` in `enriched` that `base` did not have.  Compared
+  through `type-str`, the same normalization the merge uses, so a Class and
+  its string form are not counted as different types."
+  [types-key base enriched]
+  (let [known (into #{} (map type-str) (get base types-key))]
+    (into [] (remove #(contains? known (type-str %)))
+          (get enriched types-key))))
+
+(defn- dimension-delta
+  "What enrichment added to one rule in one dimension, or nil if nothing.
+
+  The types key merges by **union** (`merge/fold-key`), so emitting only the
+  new types yields the right merged value *and* a `:provenance` of
+  `[… :working-memory]` — both layers recorded as contributing.
+
+  The detection key is the audit trail of which types came from memory, and
+  it is emitted whenever enrichment produced one.  `merge/fold-detection-key`
+  merges a callsite-less detection map into whatever is already under the key
+  rather than replacing it, and `merge/merge-detection-maps` keeps
+  non-callsite keys from **both** sides, so this layer's
+  `:fact-instance-derived-types` and the generated layer's `:callsites` both
+  survive the fold."
+  [[types-key detection-key] base enriched]
+  (let [added (new-types types-key base enriched)
+        derived (get-in enriched [detection-key :fact-instance-derived-types])]
+    (when (seq added)
+      (cond-> {types-key (vec added)}
+        (seq derived)
+        (assoc detection-key {:fact-instance-derived-types (vec derived)})))))
+
+(defn- rule-delta
+  "What `enriched` added to one rule across every dimension, or nil if
+  nothing.
+
+  Adds one tombstone: `:clara-rules/no-output-types` is an assertion that the
+  rule produces nothing, and observing it produce something disproves it.  An
+  explicit nil erases the key and its provenance (`merge/fold-key`).  Leaving
+  it set would contradict the very types this layer just added, and
+  `core/production-annotation` reads it to suppress sink classification — so
+  a rule proven to insert would still be reported as producing no output."
+  [base enriched]
+  (when-let [delta (not-empty
+                    (into {}
+                          (mapcat #(dimension-delta % base enriched))
+                          enrichable-dimensions))]
+    (cond-> delta
+      (:clara-rules/no-output-types base) (assoc :clara-rules/no-output-types nil))))
+
+(defn annotations-delta
+  "The bare annotations map of only what `extra-annotations` adds over
+  `base-annotations`.  Returns nil when `extra-annotations` contributes
+  nothing new — which is the honest result, rather than a layer restating
+  the base.
+
+  Both inputs are normalized via `normalize-annotations`."
+  [base-annotations extra-annotations]
+  (let [base (normalize-annotations base-annotations)
+        enriched (normalize-annotations extra-annotations)]
+    (not-empty
+     (into (sorted-map)
+           (keep (fn [[rule-name enriched-ann]]
+                   (when-let [delta (rule-delta (get base rule-name) enriched-ann)]
+                     [rule-name delta])))
+           enriched))))

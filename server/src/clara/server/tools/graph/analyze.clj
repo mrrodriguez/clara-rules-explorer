@@ -968,7 +968,7 @@
                        (if dynamic
                          (if (seq truly-new)
                            (let [raw-inserts (:clara-rules/insert-types raw-entry)
-                                 merged      (ann.merge/dedupe-by ann.merge/type-str (into (vec raw-inserts) truly-new))]
+                                 merged      (ann.merge/dedupe-by ann/type-str (into (vec raw-inserts) truly-new))]
                              (-> acc
                                  (assoc-in [p-name :clara-rules/insert-types] merged)
                                  (assoc-in [p-name :clara-rules/dynamic-insert-types-detected
@@ -985,4 +985,25 @@
                    enriched
                    pam)]
     result))
+
+(defn ->memory-layer
+  "Builds a working-memory annotation Layer from a fired Clara session.
+
+  Runs `enrich-annotations-from-session` against `session` and `annotations`,
+  computes the delta of what enrichment added over the base annotations, and
+  wraps it as a validated Layer with id `:clara.tools.graph.analyze/memory`.
+
+  Returns nil when the session contributed nothing new — the honest result
+  for an unfired session, rather than a layer restating the base."
+  [{:keys [session annotations]}]
+  (let [base      (ann/normalize-annotations annotations)
+        enriched  (enrich-annotations-from-session session base)
+        delta     (ann/annotations-delta base enriched)]
+    (when (seq delta)
+      (ann.merge/annotations-delta->layer
+       :clara.tools.graph.analyze/memory
+       {:generated-by "clara-rules-explorer"
+        :derived-from "session working memory"
+        :rule-count (count delta)}
+       delta))))
 

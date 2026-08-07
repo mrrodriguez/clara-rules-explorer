@@ -1,6 +1,6 @@
 (require '[clara.server.tools.graph.analyze :as analyze]
-    '[clara.server.tools.graph.annotations :as ann]
-    '[clara.server.tools.graph.annotations.merge :as ann.merge])
+         '[clara.server.tools.graph.annotations :as ann]
+         '[clara.server.tools.graph.annotations.merge :as ann.merge])
 
 ;; ---------------------------------------------------------------------------
 ;; the working-memory layer
@@ -99,7 +99,7 @@
   map instead would make this layer re-claim every key the generated layer
   already owns, which is exactly the provenance the split exists to preserve."
   [annotations]
-  (ann.merge/layer {:id memory-layer-id
+  (ann.merge/layer {:id :clara.tools.graph.analyze/memory
                     :source {:generated-by "clara-rules-explorer"
                              :derived-from "session working memory"
                              :rule-count (count annotations)}

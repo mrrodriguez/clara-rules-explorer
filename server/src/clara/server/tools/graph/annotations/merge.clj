@@ -199,19 +199,6 @@
                {:callsites callsites
                 :resolution (ann.callsite/aggregate-resolution callsites)})))))
 
-(defn type-str
-  "Normalizes a type value to its canonical string form for deduplication
-   across layers that may represent the same logical type as a Class, Symbol,
-   or String."
-  [t]
-  (cond
-    (nil? t) nil
-    (class? t) (.getName ^Class t)
-    (keyword? t) (str (symbol t))
-    (symbol? t) (str t)
-    (string? t) t
-    :else (str t)))
-
 (defn dedupe-by
   "Like `distinct` but compares by (f x) rather than x itself."
   [f coll]
@@ -228,8 +215,8 @@
    recognized as the same type).  `:replace` takes `b` only."
   [strategy a b]
   (if (= :replace strategy)
-    (dedupe-by type-str b)
-    (dedupe-by type-str (into (vec a) b))))
+    (dedupe-by ann/type-str b)
+    (dedupe-by ann/type-str (into (vec a) b))))
 
 (defn- contributing
   "Adds a layer id to a union/deep-merge origin: keys merged by union record
@@ -414,13 +401,13 @@
   (reduce (fn [ra [_ types-k dm-k]]
             (let [dm (get ra dm-k)
                   a (get ra types-k)
-                  d (dedupe-by type-str
+                  d (dedupe-by ann/type-str
                                (into []
                                      (comp (remove :dangling?)
                                            (mapcat :resolved-types))
                                      (:callsites dm)))
                   final (case mode
-                          :additive (dedupe-by type-str (into (vec a) d))
+                          :additive (dedupe-by ann/type-str (into (vec a) d))
                           ;; 'has a detection map' means has callsites — with
                           ;; no callsites there is nothing to derive from and
                           ;; the authored types stand
@@ -562,6 +549,19 @@
   (if (merged-annotations? x)
     (:annotations x)
     x))
+
+(defn annotations-delta->layer
+  "Wraps an `annotations-delta` result as a validated Layer with the given
+  `id` and `source` provenance info.
+
+  `delta-annotations` holds **only what was added** over the base — see
+  `ann/annotations-delta`.  Carrying the full enriched map instead would make
+  this layer re-claim every key the base already owns, defeating the
+  provenance the split exists to preserve."
+  [id source delta-annotations]
+  (layer {:id id
+          :source source
+          :annotations delta-annotations}))
 
 (defn ->layer
   "Coerces `x` to a Layer: a path string or File is read from disk via
