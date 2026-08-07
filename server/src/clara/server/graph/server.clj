@@ -23,7 +23,7 @@
 (defonce ^:private cache-atom (atom nil))
 
 (defonce ^{:private true
-          :doc "Per-namespace analysis cache shared across `swap-session!` calls.
+           :doc "Per-namespace analysis cache shared across `swap-session!` calls.
                 `analyze-session-rules` caches per-ns results here so repeated annotation
                 builds against the same session avoid re-analyzing rule namespaces.
                 Cleared when the session reference changes identity."}

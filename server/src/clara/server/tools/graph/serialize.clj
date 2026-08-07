@@ -270,15 +270,21 @@
 
       ;; resolve :resolved-types / :fact-type tokens to TypeReferences
     (seq (:resolved-types callsite))
-    (update :resolved-types #(mapv (fn [t] (serialize-type-ref known-set prod-ns t)) %))
+    (update :resolved-types
+            (fn [types]
+              (into []
+                    (comp (remove nil?)
+                          (map #(serialize-type-ref known-set prod-ns %)))
+                    types)))
 
     (:fact-type callsite)
     (assoc :fact-type (serialize-type-ref known-set prod-ns (:fact-type callsite)))
 
     (:fact-type-spec callsite)
-    (update :fact-type-spec #(into {}
-                                   (map (fn [[k v]] [k (if (symbol? v) (str v) v)]))
-                                   %))
+    (update :fact-type-spec
+            #(into {}
+                   (map (fn [[k v]] [k (if (symbol? v) (str v) v)]))
+                   %))
 
     (:constructor-sym callsite)
     (update :constructor-sym #(if (symbol? %) (str %) %))

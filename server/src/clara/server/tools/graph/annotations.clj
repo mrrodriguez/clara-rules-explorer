@@ -64,8 +64,12 @@
   (some-> production :ns-name symbol the-ns))
 
 (defn- resolve-types
+  "Resolves type tokens against production-ns, dropping any that resolve to nil.
+   Nil entries in annotation files (or symbols that fail to resolve) are silently
+   removed — nil is not a meaningful fact type in a Clara session."
   [production-ns unresolved-types]
-  (mapv #(resolve-type-locally production-ns %)
+  (into []
+        (keep #(resolve-type-locally production-ns %))
         unresolved-types))
 
 (defn- unqualify-keyword

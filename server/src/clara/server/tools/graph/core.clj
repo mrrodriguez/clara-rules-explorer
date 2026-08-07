@@ -42,10 +42,11 @@
                     (:and :or :not :exists) (mapcat extract (rest condition))
                     :test        []
                     []))]
-    (->> lhs
-         (mapcat extract)
-         (distinct)
-         (vec))))
+    (into []
+          (comp (mapcat extract)
+                (remove nil?)
+                (distinct))
+          lhs)))
 
 (defn- ->memoized-ancestors
   "Returns a memoized fn mapping a raw fact type to its set of ancestor raw
@@ -260,8 +261,12 @@
         (map (fn [{p-name :name :keys [lhs] :as production}]
                (let [{:keys [insert-types retract-types]} (get production-annotation-map p-name)
                      upstream-types (extract-lhs-fact-types lhs)
-                     retract-set (set retract-types)
-                     produced-types (into retract-set (set insert-types))]
+                     retract-set (into #{}
+                                       (remove nil?)
+                                       retract-types)
+                     produced-types (into retract-set
+                                          (remove nil?)
+                                          insert-types)]
                  [p-name {:consumed-types upstream-types
                           :produced-types produced-types
                           :retract-types retract-set

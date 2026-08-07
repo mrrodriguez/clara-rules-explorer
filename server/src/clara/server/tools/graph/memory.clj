@@ -150,7 +150,9 @@
                            (let [fact (platform/fact-id-unwrap wrapped)
                                  id (get-fact-id fact)
                                  raw-type (get raw-types id)
-                                 type-name (serialize/serialize-fact-type nil raw-type)]
+                                 type-name (->> (or raw-type
+                                                    :clara.tools.graph.analyze/unknown-fact-type)
+                                                (serialize/serialize-fact-type nil))]
                              [id {:id id
                                   :type {:name type-name
                                          :id (serialize/route-id type-name)
