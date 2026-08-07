@@ -238,9 +238,10 @@
         {:keys [production-nodes]} rulebase
         root-facts (for [fact (get-root-facts session)
                          :let [fact-type (fact-type-fn fact)
-                               ancestors (ancestors-fn fact-type)]]
+                               ancestors (ancestors-fn fact-type)]
+                         :when (some? fact-type)]
                      {:fact fact
-                      :fact-types (cons fact-type ancestors)})
+                      :fact-types (cons fact-type (or ancestors ()))})
         rule-nodes (for [{:keys [id production]} production-nodes]
                      [id production])
         rule-facts (for [{:keys [id] :as rule-node} production-nodes
@@ -250,10 +251,11 @@
                          :let [fact-type (fact-type-fn fact)
                                ancestors (ancestors-fn fact-type)
                                bindings (dissoc-gen-bindings bindings)]
-                         :when (fact-visible? fact)]
+                         :when (fact-visible? fact)
+                         :when (some? fact-type)]
                      {:fact fact
                       :rule-id id
                       :bindings bindings
-                      :fact-types (cons fact-type ancestors)})]
+                      :fact-types (cons fact-type (or ancestors ()))})]
     {:rules (into {} rule-nodes)
      :facts (concat root-facts rule-facts)}))

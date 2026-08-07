@@ -26,7 +26,12 @@ of the gateless fork, use the `CLARA_HOME` environment variable (managed via `di
 
 To ensure changes are correctly verified and to maintain development velocity, you MUST follow these steps in order:
 
-1.  **MANDATORY: Iterative Feedback (REPL):** If an nREPL server is available (check with `clj-nrepl-eval --discover-ports`), you MUST use `clj-nrepl-eval` for quick feedback on individual tests. This is the fastest way to work and avoids the overhead of starting a new JVM.
+1.  **MANDATORY: Formatting:** After every code change, run `make format` to
+    auto-format all source files via cljfmt. CI's `format-check` will fail if
+    this is skipped, so formatters that do not guarantee cljfmt compatibility
+    (e.g. clojure-lsp) must be verified against it.
+
+2.  **MANDATORY: Iterative Feedback (REPL):** If an nREPL server is available (check with `clj-nrepl-eval --discover-ports`), you MUST use `clj-nrepl-eval` for quick feedback on individual tests. This is the fastest way to work and avoids the overhead of starting a new JVM.
 
     ```bash
     clj-nrepl-eval -p <PORT> <<'EOF'
@@ -35,7 +40,7 @@ To ensure changes are correctly verified and to maintain development velocity, y
     EOF
     ```
 
-2.  **Targeted Test (CLI):** If no REPL is available, use `clojure.test` directly from the CLI.
+3.  **Targeted Test (CLI):** If no REPL is available, use `clojure.test` directly from the CLI.
 
     ```bash
     clojure -M:test -e "(require '[clojure.test :as t] '<namespace>) (let [result (t/run-tests '<namespace>)] (System/exit (+ (:fail result) (:error result))))"
@@ -43,7 +48,7 @@ To ensure changes are correctly verified and to maintain development velocity, y
 
     _Example:_ `clojure -M:test -e "(require '[clojure.test :as t] 'clara.server.tools.graph.core-test) (t/run-tests 'clara.server.tools.graph.core-test)"`
 
-3.  **Full Suite Verification:** Run the entire project test suite.
+4.  **Full Suite Verification:** Run the entire project test suite.
     ```bash
     make test
     ```

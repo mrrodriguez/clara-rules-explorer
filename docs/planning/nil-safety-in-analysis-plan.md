@@ -1,6 +1,6 @@
 # Nil safety in the analysis pipeline — implementation plan
 
-**Status:** ✅ Complete (Steps 1–7), Step 8 deferred.
+**Status:** ✅ Complete (Steps 1–8), Step 9 deferred.
 
 ---
 
@@ -20,9 +20,13 @@
    information — there is no fact behind it. Drop it, no warning.
 
 4. **Working memory substitutes with attribution.** A real fact object in the
-   session whose `fact-type-fn` returns nil _is_ real — it came from a rule.
-   Give it a name (`:clara.tools.graph.analyze/unknown-fact-type`), print a
-   WARN identifying the inserting rule, and proceed.
+   session whose `fact-type-fn` returns nil _is_ real — it may be a
+   user-inserted root fact or a rule-inserted fact. Give it a name
+   (`:clara.tools.graph.analyze/unknown-fact-type`), print a WARN identifying
+   the inserting rules (empty set means it's a root fact), and proceed. For
+   the `inspect-facts` API surface, silently skip facts whose `fact-type-fn`
+   returns nil — nil is never a meaningful fact type and must not propagate
+   to downstream consumers.
 
 5. **Serialization is a backstop, not a policy.** After the source and
    working-memory fixes, nil should never reach `serialize-type-ref` or
@@ -92,7 +96,8 @@ check in `inspect-facts` with `(fact-visible? fact)`.
 **File:** `server/src/clara/server/tools/graph/memory.clj`
 **Function:** `build-fact-table`
 
-WARN printed when `fact-type-fn` returns nil for a non-nil fact:
+WARN printed when `fact-type-fn` returns nil for any non-nil fact (root or
+rule-inserted):
 
 ```clojure
 _ (when (nil? raw-type)
@@ -107,7 +112,8 @@ _ (when (nil? raw-type)
 ```
 
 `origin-map` was already in scope via function destructuring — no additional
-plumbing needed.
+plumbing needed. An empty `rule-names` set means the fact is a user-inserted
+root fact, not inserted by any rule.
 
 ---
 
@@ -194,7 +200,38 @@ Three new tests covering the full nil-safety surface:
 
 ---
 
-### Step 8 (deferred) — `resolve-types` drop counter
+### Step 8 — Harden `inspect-facts` against nil `fact-type-fn` results ✅
+
+**File:** `server/src/clara/server/vendor/tools/inspect.clj`
+**Function:** `inspect-facts`
+
+Both fact-gathering paths (`root-facts` and `rule-facts`) now guard against
+nil from `fact-type-fn` by skipping facts whose type cannot be determined:
+
+```clojure
+;; root-facts — :when (some? fact-type) added
+root-facts (for [fact (get-root-facts session)
+                 :let [fact-type (fact-type-fn fact)
+                       ancestors (ancestors-fn fact-type)]
+                 :when (some? fact-type)]
+             {:fact fact
+              :fact-types (cons fact-type (or ancestors ()))})
+
+;; rule-facts — :when (some? fact-type) added, :when (fact-visible? fact) retained
+rule-facts (for [...]
+                 :when (fact-visible? fact)
+                 :when (some? fact-type)]
+             {:fact fact
+              :rule-id id
+              :bindings bindings
+              :fact-types (cons fact-type (or ancestors ()))})
+```
+
+Also added `(or ancestors ())` as defense-in-depth — if `ancestors-fn`
+returns nil, it's treated as an empty collection rather than propagating
+nil into the fact-types sequence.
+
+### Step 9 (deferred) — `resolve-types` drop counter
 
 Deferred until proper logging is added. Static analysis drops are expected and
 common — a counter would add noise without a logging framework to route it.
@@ -218,7 +255,7 @@ common — a counter would add noise without a logging framework to route it.
 
 | File | Changes |
 |------|---------|
-| `server/src/clara/server/vendor/tools/inspect.clj` | Steps 1–2: `fact-visible?` helper, filtered source sets, replaced inline check |
+| `server/src/clara/server/vendor/tools/inspect.clj` | Steps 1–2: `fact-visible?` helper, filtered source sets, replaced inline check; Step 8: nil `fact-type-fn` guard in `inspect-facts` |
 | `server/src/clara/server/tools/graph/memory.clj` | Steps 3, 5: WARN on nil `raw-type`, nil-id skip in `build-id-name-index` |
 | `server/src/clara/server/tools/graph/serialize.clj` | Steps 4–6: `serialize-type-ref` backstop, `route-id*` backstop, `some?` guard |
 | `server/test/clara/server/tools/graph/rules/nil_safety_test_rules.clj` | Step 7: new test rules |
