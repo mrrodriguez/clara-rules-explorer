@@ -150,6 +150,15 @@
                            (let [fact (platform/fact-id-unwrap wrapped)
                                  id (get-fact-id fact)
                                  raw-type (get raw-types id)
+                                 _ (when (nil? raw-type)
+                                     (let [rule-names (into #{}
+                                                            (keep :name)
+                                                            (get origin-map id []))]
+                                       (println
+                                        (str "WARN: fact-type-fn returned nil for fact "
+                                             (pr-str (serialize/prune-fns fact))
+                                             " — inserted by rules: " (pr-str rule-names)
+                                             " — substituting :clara.tools.graph.analyze/unknown-fact-type"))))
                                  type-name (->> (or raw-type
                                                     :clara.tools.graph.analyze/unknown-fact-type)
                                                 (serialize/serialize-fact-type nil))]
@@ -225,11 +234,14 @@
   [names]
   (reduce (fn [idx name]
             (let [id (serialize/route-id (str name))]
-              (if-let [existing (get idx id)]
-                (throw (ex-info (format "Session route-id collision: %s and %s both map to %s"
-                                        existing name id)
-                                {:id id :names [existing name]}))
-                (assoc idx id name))))
+              (if (nil? id)
+                ;; route-id warned; skip this entry
+                idx
+                (if-let [existing (get idx id)]
+                  (throw (ex-info (format "Session route-id collision: %s and %s both map to %s"
+                                          existing name id)
+                                  {:id id :names [existing name]}))
+                  (assoc idx id name)))))
           {}
           names))
 

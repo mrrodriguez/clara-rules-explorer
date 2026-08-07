@@ -162,11 +162,8 @@
       (is (= 69 (count (s/route-id long-a))))
       (is (not= (s/route-id long-a) (s/route-id long-b)))))
 
-  (testing "nil is treated as empty — same id the (str nil) callers already produce"
-    (is (= (s/route-id "") (s/route-id nil)))
-    (is (= (s/route-id (str nil)) (s/route-id nil)))
-    (is (str/starts-with? (s/route-id nil) "x-"))
-    (is (re-matches #"[A-Za-z0-9.-]+-[a-z0-9]{8}" (s/route-id nil)))))
+  (testing "nil returns nil — no route-id for nil (upstream should filter)"
+    (is (nil? (s/route-id nil)))))
 
 (deftest test-serialize-type-ref
   (testing "Known flag reflects membership in the known set"
@@ -179,11 +176,8 @@
              ref))
       (is (false? (:known ghost)))))
 
-  (testing "nil type serializes without throwing — :name nil, id defaults like (route-id nil), known false"
-    (let [ref (s/serialize-type-ref #{} nil nil)]
-      (is (nil? (:name ref)))
-      (is (= (s/route-id nil) (:id ref)))
-      (is (false? (:known ref)))))
+  (testing "nil type returns nil — upstream should filter before serialization"
+    (is (nil? (s/serialize-type-ref #{} nil nil))))
 
   (testing "Kind-explicit name with nil ns-name"
     (is (= "symbol[my.ns/foo]" (:name (s/serialize-type-ref #{} nil 'my.ns/foo))))

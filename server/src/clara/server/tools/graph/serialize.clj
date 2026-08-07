@@ -59,11 +59,13 @@
 (defn- route-id*
   "Deterministic URL-safe id for a canonical serialized name: slug of the name
    plus an 8-char base36 SHA-1 suffix.  The id is a pure function of the name,
-   so re-running the analysis never changes existing ids.  nil is treated as
-   \"\" — identical to `(route-id (str nil))`, which the `(str ...)` callers
-   already produce."
+   so re-running the analysis never changes existing ids.  nil returns nil
+   with a WARN — callers should filter nil before reaching this point."
   [s]
-  (str (slug s) "-" (subs (sha1-base36 s) 0 8)))
+  (if (nil? s)
+    (do (println "WARN: route-id* called with nil name — skipping")
+        nil)
+    (str (slug s) "-" (subs (sha1-base36 s) 0 8))))
 
 (def route-id
   "Memoized `route-id*` — the same name recurs in thousands of ProductionDep
@@ -78,9 +80,13 @@
    used to resolve symbol types."
   [known-set prod-ns x]
   (let [name (resolve-type prod-ns x)]
-    {:name name
-     :id (route-id name)
-     :known (contains? known-set name)}))
+    (if (nil? name)
+      (do (println (str "WARN: serialize-type-ref received a nil-resolving type token: "
+                        (pr-str x) " — dropping. prod-ns=" prod-ns))
+          nil)
+      {:name name
+       :id (route-id name)
+       :known (contains? known-set name)})))
 
 (defn serialize-match
   "Serializes raw {:producer-type ... :consumer-type ...} pairs (the
@@ -193,7 +199,7 @@
           (serialize-node [node]
             (if (map? node)
               (cond-> node
-                (contains? node :type) (update :type #(serialize-type-ref known-set prod-ns %))
+                (some? (:type node)) (update :type #(serialize-type-ref known-set prod-ns %))
                 (contains? node :constraints) (update :constraints serialize-forms)
                 (contains? node :args) (update :args serialize-forms))
               node))]

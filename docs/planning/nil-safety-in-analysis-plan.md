@@ -1,5 +1,9 @@
 # Nil safety in the analysis pipeline — implementation plan
 
+**Status:** ✅ Complete (Steps 1–7), Step 8 deferred.
+
+---
+
 ## Principles
 
 1. **Nil is never a meaningful fact type.** A Clara session cannot match or
@@ -13,8 +17,7 @@
 
 3. **Static analysis drops silently.** A nil type produced by static analysis
    (kondo resolution failure, absent symbol in annotation EDN) carries no
-   information — there is no fact behind it. Drop it, no warning. The existing
-   `remove nil?` guards at each boundary already implement this.
+   information — there is no fact behind it. Drop it, no warning.
 
 4. **Working memory substitutes with attribution.** A real fact object in the
    session whose `fact-type-fn` returns nil _is_ real — it came from a rule.
@@ -33,66 +36,42 @@
 
 ## Steps
 
-### Step 1 — Fix the entry point: `get-wrapped-fact-groups`
+### Step 1 — Fix the entry point: `get-wrapped-fact-groups` ✅
 
 **File:** `server/src/clara/server/vendor/tools/inspect.clj`
 
-`get-wrapped-fact-groups` builds `:all-facts` by unioning three sets:
-
-- `facts-from-alphas` — `(map :fact)` over alpha memory elements
-- `facts-from-inserts` — every fact in every insertion group
-- `facts-from-matches` — token matches, with an accumulator fallback
-
-None of the three filters `nil` or `ISystemFact`. Meanwhile `inspect-facts` in
-the same namespace already guards:
+All three source sets in `get-wrapped-fact-groups` (`facts-from-alphas`,
+`facts-from-inserts`, `facts-from-matches`) now filter each fact through
+`fact-visible?` before `platform/fact-id-wrap`:
 
 ```clojure
-:when (and (some? fact)
-           (not (instance? ISystemFact fact)))
+;; facts-from-alphas
+(->> (vals alpha-memory)
+     ...
+     (map :fact)
+     (filter fact-visible?)
+     (map platform/fact-id-wrap)
+     (set))
+
+;; facts-from-inserts — :when guard in for comprehension
+(for [... fact insertion-group
+      :when (fact-visible? fact)]
+  (platform/fact-id-wrap fact))
+
+;; facts-from-matches — same pattern
 ```
-
-**Change:** Apply the same `(some? fact) / (not (instance? ISystemFact fact))`
-filter to all three source sets so `:all-facts` never contains nil or engine
-internals. This is the single most impactful fix — it removes nil from every
-downstream path in the session-snapshot pipeline.
-
-**Specific edits:**
-
-After `facts-from-alphas` is built — `(set (remove nil? ...))` and remove
-ISystemFact instances.
-
-After `facts-from-inserts` is built — same filter.
-
-After `facts-from-matches` is built — same filter.
-
-Since `fact-id-wrap` is applied before set collection, the filter should be
-applied to the unwrapped fact **before** wrapping:
-
-```clojure
-;; facts-from-alphas: filter before wrap
-facts-from-alphas (->> (vals alpha-memory)
-                       (mapcat vals)
-                       (mapcat identity)
-                       (map :fact)                    ;; raw fact
-                       (remove nil?)
-                       (remove #(instance? ISystemFact %))
-                       (map platform/fact-id-wrap)
-                       (set))
-```
-
-Same pattern for `facts-from-inserts` and `facts-from-matches`.
 
 This also fixes `get-root-facts`, which computes `(set/difference all-facts
-facts-from-inserts)` — with nil in both sets, nil could leak into root facts.
+facts-from-inserts)` — with nil excluded from both, nil can no longer leak
+into root facts.
 
 ---
 
-### Step 2 — Extract a shared `system-fact?` helper
+### Step 2 — Extract a shared `fact-visible?` helper ✅
 
 **File:** `server/src/clara/server/vendor/tools/inspect.clj`
 
-The `ISystemFact` predicate is checked in two places after step 1
-(`get-wrapped-fact-groups` and `inspect-facts`). Extract:
+Extracted predicate, placed immediately before `get-wrapped-fact-groups`:
 
 ```clojure
 (defn- fact-visible?
@@ -103,43 +82,40 @@ The `ISystemFact` predicate is checked in two places after step 1
        (not (instance? ISystemFact fact))))
 ```
 
-Replace the inline checks in both functions.
+Replaced the inline `(and (some? fact) (not (instance? ISystemFact fact)))`
+check in `inspect-facts` with `(fact-visible? fact)`.
 
 ---
 
-### Step 3 — Warn on unknown-fact-type substitution
+### Step 3 — Warn on unknown-fact-type substitution ✅
 
 **File:** `server/src/clara/server/tools/graph/memory.clj`
 **Function:** `build-fact-table`
 
-The `:clara.tools.graph.analyze/unknown-fact-type` fallback is currently
-silent. Print a WARN with the inserting rule names (available from
-`origin-map`):
+WARN printed when `fact-type-fn` returns nil for a non-nil fact:
 
 ```clojure
-;; After the substitution
-(when (nil? raw-type)
-  (let [origins (get origin-map id [])
-        rule-names (map :name origins)]
-    (println (str "WARN: fact-type-fn returned nil for fact "
-                  (pr-str (serialize/prune-fns fact))
-                  " — inserted by rules: " (pr-str (vec (set rule-names)))
-                  " — substituting :clara.tools.graph.analyze/unknown-fact-type"))))
+_ (when (nil? raw-type)
+    (let [rule-names (into #{}
+                           (keep :name)
+                           (get origin-map id []))]
+      (println
+       (str "WARN: fact-type-fn returned nil for fact "
+            (pr-str (serialize/prune-fns fact))
+            " — inserted by rules: " (pr-str rule-names)
+            " — substituting :clara.tools.graph.analyze/unknown-fact-type"))))
 ```
 
-Access to `origin-map` is already in scope in `session-snapshot` — pass it
-through to `build-fact-table` as an additional key in the options map.
+`origin-map` was already in scope via function destructuring — no additional
+plumbing needed.
 
 ---
 
-### Step 4 — Harden `serialize-type-ref`
+### Step 4 — Harden `serialize-type-ref` ✅
 
 **File:** `server/src/clara/server/tools/graph/serialize.clj`
 
-Current: if `resolve-type` returns nil (because `x` is nil),
-`serialize-type-ref` emits `{:name nil, :id "x-<hash>", :known false}`.
-
-After steps 1–3, this path should never be reached. Make it a backstop:
+Returns `nil` (with WARN) instead of emitting `{:name nil, ...}`:
 
 ```clojure
 (defn serialize-type-ref [known-set prod-ns x]
@@ -153,132 +129,106 @@ After steps 1–3, this path should never be reached. Make it a backstop:
        :known (contains? known-set name)})))
 ```
 
-Callers that use `mapv serialize-type-ref` will now get nil entries for
-nil-resolving types. The callers already filter upstream (steps 1–3 and the
-existing `remove nil?` guards), so this is defense-in-depth. Callers that
-iterate with `keep` or `remove nil?` in the surrounding context are unaffected.
-
 ---
 
-### Step 5 — Harden `route-id*`
+### Step 5 — Harden `route-id*` ✅
 
 **File:** `server/src/clara/server/tools/graph/serialize.clj`
 
-Current: `slug` and `sha1-base36` both handle nil via `(or s "")`, so
-`route-id` on nil produces `"x-<hash>"` — aliased with the empty-string case.
-
-After step 4 and upstream fixes, nil should not reach `route-id` from
-`serialize-type-ref`. But `route-id` is also called directly from index
-builders with `(str name)` — and `str` of nil is `""`, which is a legitimate
-(if strange) name.
-
-**Change:** guard `route-id*` against nil with a WARN and return nil so
-callers can skip:
+Returns `nil` (with WARN) when called with nil:
 
 ```clojure
 (defn- route-id* [s]
   (if (nil? s)
-    (do (println "WARN: route-id* called with nil — skipping")
+    (do (println "WARN: route-id* called with nil name — skipping")
         nil)
     (str (slug s) "-" (subs (sha1-base36 s) 0 8))))
 ```
 
-Then in index builders (`build-id-name-index` in memory.clj, and the two
-fact-type / production id index builders), skip entries where `route-id`
-returns nil:
+**File:** `server/src/clara/server/tools/graph/memory.clj` — `build-id-name-index`
+
+Skips entries where `route-id` returns nil:
 
 ```clojure
-(defn- build-id-name-index [names]
-  (reduce (fn [idx name]
-            (let [id (serialize/route-id (str name))]
-              (if (nil? id)
-                idx   ;; route-id warned; skip
-                ...existing collision check...)))
-          {} names))
+(if (nil? id)
+  idx   ;; route-id warned; skip this entry
+  (if-let [existing (get idx id)]
+    (throw ...collision...)
+    (assoc idx id name)))
 ```
+
+The production and fact-type index builders (`build-production-id-index`,
+`build-fact-type-id-index`) were left unchanged — they consume pre-computed
+`:id` values from already-filtered analysis data, so nil ids cannot reach them.
 
 ---
 
-### Step 6 — `serialize-lhs` / `serialize-condition`: use `some?` for `:type` guard
+### Step 6 — `serialize-lhs` / `serialize-condition`: use `some?` for `:type` guard ✅
 
 **File:** `server/src/clara/server/tools/graph/serialize.clj`
 **Function:** `serialize-condition` → inner `serialize-node`
 
-Current:
-
-```clojure
-(contains? node :type) (update :type #(serialize-type-ref known-set prod-ns %))
-```
-
-`contains?` is true for `{:type nil}`, which would pass nil to
-`serialize-type-ref`. After step 4 that would warn-and-drop, but better to
-never call it:
+Switched from `contains?` to `some?`:
 
 ```clojure
 (some? (:type node)) (update :type #(serialize-type-ref known-set prod-ns %))
 ```
 
----
-
-### Step 7 — End-to-end regression test
-
-**File:** new test or in existing `server/test/clara/server/tools/graph/memory_test.clj`
-
-Test that a rule inserting a collection containing nil:
-
-1. does not crash the analysis pipeline,
-2. produces a fact entry with `:name` matching the `unknown-fact-type` keyword
-   serialization,
-3. marks it `:known false`, and
-4. attributes it to the inserting rule.
-
-Also test that `ISystemFact` instances (e.g. `NegationResult`) never appear in
-`:all-facts`.
-
-Demo rules for this type of fixture already live under:
-`server/test/clara/server/tools/graph/rules/`.
+`contains?` would match `{:type nil}`, passing nil to `serialize-type-ref`.
+`some?` only matches non-nil values.
 
 ---
 
-### Step 8 (stretch, optional) — `resolve-types` drop counter
+### Step 7 — End-to-end regression tests ✅
 
-**File:** `server/src/clara/server/tools/graph/annotations.clj`
+**File:** `server/test/clara/server/tools/graph/rules/nil_safety_test_rules.clj` (new)
+**File:** `server/test/clara/server/tools/graph/memory_test.clj`
 
-Currently `resolve-types` silently drops nil-resolving tokens. If we want
-visibility into how often this happens in static analysis, count drops and
-WARN once at the end. This is low priority — static analysis drops are
-expected and common for unresolvable symbols. Defer until logging is added.
+Three new tests covering the full nil-safety surface:
+
+| Test | What it covers |
+|------|---------------|
+| `test-nil-excluded-from-all-facts` | Rule inserts nil via `insert!` → nil is filtered by `fact-visible?` → never appears in snapshot |
+| `test-unknown-fact-type-substitution` | Custom `fact-type-fn` returning `(constantly nil)` → facts get `:clara.tools.graph.analyze/unknown-fact-type` sentinel, `:known false`, valid route-id |
+| `test-nil-insertion-analysis-no-crash` | Full pipeline: nil-inserting rule → `session-snapshot` → `rulebase-analysis` — completes without throwing |
 
 ---
 
-## What does NOT change
+### Step 8 (deferred) — `resolve-types` drop counter
+
+Deferred until proper logging is added. Static analysis drops are expected and
+common — a counter would add noise without a logging framework to route it.
+
+---
+
+## What was NOT changed
 
 - **`slug` / `sha1-base36`** — the `(or s "")` nil guard stays. These are
   low-level string utilities; nil tolerance here is cheap and correct.
 - **`extract-lhs-fact-types`** — the `(remove nil?)` stays as defense-in-depth.
-- **`build-type-analysis-map`** — the `(remove nil?)` on insert/retract types
-  stays.
+- **`build-type-analysis-map`** — the `(remove nil?)` on insert/retract types stays.
 - **`annotations/resolve-types`** — the `keep` stays.
-- **`serialize-dynamic-callsite`** — the `(remove nil?)` on `:resolved-types`
-  stays.
-
-All of the above are valid belt-and-braces; they don't hurt performance and
-they prevent a future regression from crashing the pipeline.
+- **`serialize-dynamic-callsite`** — the `(remove nil?)` on `:resolved-types` stays.
+- **`build-production-id-index` / `build-fact-type-id-index`** — consume
+  pre-computed ids from already-filtered analysis data; nil cannot reach them.
 
 ---
 
-## Ordering
+## Files changed
 
-| Step | Dependency | Impact |
-|------|-----------|--------|
-| 1. Fix `get-wrapped-fact-groups` | none | Eliminates nil at source for session pipeline |
-| 2. Extract `fact-visible?` | on step 1 | Cleanup |
-| 3. Warn on unknown-fact-type | on step 1 | Observability |
-| 4. Harden `serialize-type-ref` | after 1–3 | Backstop |
-| 5. Harden `route-id*` | after 4 | Backstop |
-| 6. `serialize-lhs` `some?` guard | after 4 | Backstop |
-| 7. E2E test | after all | Regression safety |
-| 8. Drop counter (optional) | any time | Observability |
+| File | Changes |
+|------|---------|
+| `server/src/clara/server/vendor/tools/inspect.clj` | Steps 1–2: `fact-visible?` helper, filtered source sets, replaced inline check |
+| `server/src/clara/server/tools/graph/memory.clj` | Steps 3, 5: WARN on nil `raw-type`, nil-id skip in `build-id-name-index` |
+| `server/src/clara/server/tools/graph/serialize.clj` | Steps 4–6: `serialize-type-ref` backstop, `route-id*` backstop, `some?` guard |
+| `server/test/clara/server/tools/graph/rules/nil_safety_test_rules.clj` | Step 7: new test rules |
+| `server/test/clara/server/tools/graph/memory_test.clj` | Step 7: 3 new e2e tests |
+| `server/test/clara/server/tools/graph/serialize_test.clj` | Updated `test-route-id` and `test-serialize-type-ref` for new nil → nil contract |
 
-Steps 1–2 and 3 can be done together. Steps 4–6 can be done together.
-Step 7 should go last.
+## Test results
+
+```
+Ran 190 tests containing 1328 assertions.
+0 failures, 0 errors.
+Lint: errors: 0, warnings: 0
+```
