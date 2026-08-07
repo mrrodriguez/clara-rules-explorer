@@ -38,26 +38,30 @@
 
 (defn- slug
   "URL-safe slug of a name: every char outside [A-Za-z0-9.-] replaced by '-',
-   runs collapsed, leading/trailing '-' trimmed, capped at 60 chars."
+   runs collapsed, leading/trailing '-' trimmed, capped at 60 chars.
+   nil (or any name that slugs to empty) yields \"x\"."
   [s]
-  (let [slug (-> s
-                 (str/replace #"[^A-Za-z0-9.-]" "-")
-                 (str/replace #"-+" "-")
-                 (str/replace #"^-|-$" ""))
-        slug (subs slug 0 (min 60 (count slug)))]
-    (if (empty? slug) "x" slug)))
+  (let [slugged (-> (or s "")
+                    (str/replace #"[^A-Za-z0-9.-]" "-")
+                    (str/replace #"-+" "-")
+                    (str/replace #"^-|-$" ""))
+        slugged (subs slugged 0 (min 60 (count slugged)))]
+    (if (empty? slugged) "x" slugged)))
 
 (defn- sha1-base36
-  "Base36 representation of the SHA-1 digest of `s`."
+  "Base36 representation of the SHA-1 digest of `s`; nil treated as \"\"
+   (so a nil name gets the same hash as an empty one)."
   [^String s]
   (let [digest (java.security.MessageDigest/getInstance "SHA-1")
-        bytes (.digest digest (.getBytes s "UTF-8"))]
+        bytes (.digest digest (.getBytes (or s "") "UTF-8"))]
     (.toString (BigInteger. 1 bytes) 36)))
 
 (defn- route-id*
   "Deterministic URL-safe id for a canonical serialized name: slug of the name
    plus an 8-char base36 SHA-1 suffix.  The id is a pure function of the name,
-   so re-running the analysis never changes existing ids."
+   so re-running the analysis never changes existing ids.  nil is treated as
+   \"\" — identical to `(route-id (str nil))`, which the `(str ...)` callers
+   already produce."
   [s]
   (str (slug s) "-" (subs (sha1-base36 s) 0 8)))
 

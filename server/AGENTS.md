@@ -11,7 +11,10 @@ Instead, you MUST use the `context-mode` sandbox tools:
 
 # Local Development & Overrides
 
-This project defaults to the public Maven release of `clara-rules`. To develop against a local fork, use the `CLARA_HOME` environment variable (managed via `direnv`).
+This project builds on the **gateless fork** of clara-rules — `com.github.gateless/clara-rules`
+in `deps.edn` — **not** the upstream `com.cerner/clara-rules` (Cerner, now Oracle). The public
+Maven release of the gateless fork is used by default. To develop against a local checkout
+of the gateless fork, use the `CLARA_HOME` environment variable (managed via `direnv`).
 
 1.  **Terminal:** Use the `clj-local` helper function:
     ```bash
