@@ -32,6 +32,35 @@
     (string? t) t
     :else (str t)))
 
+(defn fq-name->namespace
+  "Extract the namespace portion from a fully-qualified rule name string like
+   \"some.ns/rule-name\".  Returns a symbol, or nil if the name has no
+   namespace segment."
+  [fq-str]
+  (some-> fq-str symbol namespace symbol))
+
+(defn canonical-type-str
+  "Canonical string form of a type value for COMPARISON (merge dedupe,
+   enrichment coverage checks, delta computation).
+
+   Unlike `serialize/resolve-type` — the boundary serializer for display —
+   strings pass through unquoted and keywords lose their colon, so a Class,
+   its `.getName` string, and its source symbol all canonicalize
+   identically.  When `prod-ns` is given, symbols are resolved in that
+   namespace first, so a rule's `AuditTrail` symbol and the
+   `my.ns.AuditTrail` Class compare equal."
+  ([t] (type-str t))
+  ([prod-ns t]
+   (if (symbol? t)
+     (if-let [resolved (and prod-ns (ns-resolve prod-ns t))]
+       (cond
+         (class? resolved) (.getName ^Class resolved)
+         (var? resolved)   (str (symbol (-> resolved meta :ns ns-name str)
+                                        (-> resolved meta :name str)))
+         :else             (str resolved))
+       (str t))
+     (type-str t))))
+
 (defn normalize-rule-name
   "Normalizes a rule-name key to its canonical string form.
    Symbols and keywords are converted to strings; strings pass through."
@@ -137,12 +166,14 @@
    [:clara-rules/retract-types :clara-rules/dynamic-retract-types-detected]])
 
 (defn- new-types
-  "Types under `types-key` in `enriched` that `base` did not have.  Compared
-  through `type-str`, the same normalization the merge uses, so a Class and
-  its string form are not counted as different types."
-  [types-key base enriched]
-  (let [known (into #{} (map type-str) (get base types-key))]
-    (into [] (remove #(contains? known (type-str %)))
+  "Types under `types-key` in `enriched` that `base` did not have.
+   Compared through `canonical-type-str` with the rule's namespace, so a
+   Class, its `.getName` string, and its source symbol all canonicalize
+   identically — same form used during enrichment."
+  [types-key rule-ns base enriched]
+  (let [canon (partial canonical-type-str rule-ns)
+        known (into #{} (map canon) (get base types-key))]
+    (into [] (remove #(contains? known (canon %)))
           (get enriched types-key))))
 
 (defn- dimension-delta
@@ -159,8 +190,8 @@
   non-callsite keys from **both** sides, so this layer's
   `:fact-instance-derived-types` and the generated layer's `:callsites` both
   survive the fold."
-  [[types-key detection-key] base enriched]
-  (let [added (new-types types-key base enriched)
+  [[types-key detection-key] base enriched rule-ns]
+  (let [added (new-types types-key rule-ns base enriched)
         derived (get-in enriched [detection-key :fact-instance-derived-types])]
     (when (seq added)
       (cond-> {types-key (vec added)}
@@ -171,16 +202,20 @@
   "What `enriched` added to one rule across every dimension, or nil if
   nothing.
 
+  `rule-ns` is the rule's namespace (extracted from its FQ name via
+  `fq-name->namespace`), used so symbol types canonicalize the same way
+  they did during enrichment.
+
   Adds one tombstone: `:clara-rules/no-output-types` is an assertion that the
   rule produces nothing, and observing it produce something disproves it.  An
   explicit nil erases the key and its provenance (`merge/fold-key`).  Leaving
   it set would contradict the very types this layer just added, and
   `core/production-annotation` reads it to suppress sink classification — so
   a rule proven to insert would still be reported as producing no output."
-  [base enriched]
+  [base enriched rule-ns]
   (when-let [delta (not-empty
                     (into {}
-                          (mapcat #(dimension-delta % base enriched))
+                          (mapcat #(dimension-delta % base enriched rule-ns))
                           enrichable-dimensions))]
     (cond-> delta
       (:clara-rules/no-output-types base) (assoc :clara-rules/no-output-types nil))))
@@ -198,6 +233,8 @@
     (not-empty
      (into (sorted-map)
            (keep (fn [[rule-name enriched-ann]]
-                   (when-let [delta (rule-delta (get base rule-name) enriched-ann)]
+                   (when-let [delta (rule-delta (get base rule-name)
+                                                enriched-ann
+                                                (fq-name->namespace rule-name))]
                      [rule-name delta])))
            enriched))))

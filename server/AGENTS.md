@@ -9,6 +9,33 @@ Instead, you MUST use the `context-mode` sandbox tools:
 
 **Rationale:** These tools keep raw data in the sandbox and only return indexed summaries or specific answers to the context window.
 
+# Server State Architecture
+
+Server state is consolidated into a single `state-atom` per system instance:
+
+```clojure
+{:session           ;; live Clara session or raw rulebase
+ :annotations-spec  ;; the AnnotationsSpec that produced :annotations
+ :annotations       ;; derived bare annotations
+ :analyze-cache}    ;; per-ns kondo memoization (plain immutable map value)
+```
+
+**Atom discipline:** all mutation entry points are operator-driven (REPL, CLI,
+tests) — never HTTP, so swaps are effectively single-threaded. Transitions are
+pure functions over state values (`transition-start`, `transition-swap`,
+`transition-reload`). If a concurrent mutation path is ever introduced,
+serialize with a lock rather than designing around CAS retries.
+
+- Do NOT add new per-domain atoms. New state keys go into the existing
+  consolidated state map.
+- Mutate via `swap!` — never `(reset! a (f @a))` (race against concurrent
+  swaps).
+- Use the return value of `swap!` rather than dereferencing after mutation
+  (the value may have changed again).
+- Side effects (Jetty start/stop, cache warming, println diagnostics) stay
+  OUTSIDE `swap!` — consume the value returned by `swap!`, never a follow-up
+  deref.
+
 # Local Development & Overrides
 
 This project builds on the **gateless fork** of clara-rules — `com.github.gateless/clara-rules`

@@ -832,12 +832,6 @@
 ;; Helpers for add-auto-detected-annotations / enrich-annotations-from-session
 ;; ---------------------------------------------------------------------------
 
-(defn- annot-type->str
-  "Convert an annotation type value (Class, String, Symbol, etc.) to its
-   canonical string form for comparison with serialized session fact-types."
-  [ns-name type-val]
-  (serialize/resolve-type ns-name type-val))
-
 (defn- rule->session-raw-types
   "Per rule name → set of RAW fact types the rule inserted at runtime, from
    the snapshot's fact-id → raw-type index crossed with each fact's
@@ -853,13 +847,6 @@
                          inserted-from)))
              {}
              (:facts snapshot)))
-
-(defn- fq-name->namespace
-  "Extract the namespace portion from a fully-qualified rule name string like
-   \"some.ns/rule-name\".  Returns a symbol, or nil if the name has no
-   namespace segment."
-  [fq-str]
-  (some-> fq-str symbol namespace symbol))
 
 (defn add-auto-detected-annotations
   "Takes a session-analysis structure (from memory/session-snapshot) and an
@@ -884,16 +871,17 @@
         rule->session-types (rule->session-raw-types session-analysis)
         annotations'
         (reduce-kv (fn [acc rule-fq-str raw-types]
-                     (let [rule-ns (fq-name->namespace rule-fq-str)
+                     (let [rule-ns (ann/fq-name->namespace rule-fq-str)
                            rule-ann (get acc rule-fq-str)
                            existing (get rule-ann :clara-rules/insert-types)
-                           existing-strs (set (map (partial annot-type->str rule-ns)
+                           existing-strs (set (map (partial ann/canonical-type-str rule-ns)
                                                    existing))
-                           serialize-rule-ns (partial annot-type->str rule-ns)
+                           canonical-rule-ns (partial ann/canonical-type-str rule-ns)
+                           display-rule-ns (partial serialize/resolve-type rule-ns)
                            new-types (->> raw-types
-                                          (remove (comp existing-strs serialize-rule-ns))
-                                          (sort-by serialize-rule-ns)
-                                          (mapv serialize-rule-ns))]
+                                          (remove (comp existing-strs canonical-rule-ns))
+                                          (sort-by canonical-rule-ns)
+                                          (mapv display-rule-ns))]
                        (if (seq new-types)
                          (let [existing-dynamic (get rule-ann :clara-rules/dynamic-insert-types-detected)
                                derived-entry    {:fact-instance-derived-types (vec new-types)
@@ -951,10 +939,10 @@
 
         result
         (reduce-kv (fn [acc p-name resolved-ann]
-                     (let [rule-ns      (fq-name->namespace p-name)
-                           serialize-rule-ns (partial annot-type->str rule-ns)
+                     (let [rule-ns      (ann/fq-name->namespace p-name)
+                           canonical-rule-ns (partial ann/canonical-type-str rule-ns)
                            raw-entry    (get acc p-name)
-                           resolved-strs (set (map serialize-rule-ns
+                           resolved-strs (set (map canonical-rule-ns
                                                    (:insert-types resolved-ann)))
                            dynamic      (:dynamic-insert-types-detected resolved-ann)
                            derived-raws (get rule->session-types p-name)
@@ -962,8 +950,8 @@
                            ;; not covered by the fully-merged annotation's
                            ;; insert-types, compared under this rule's own ns.
                            truly-new    (when (seq derived-raws)
-                                          (sort-by serialize-rule-ns
-                                                   (remove (comp resolved-strs serialize-rule-ns)
+                                          (sort-by canonical-rule-ns
+                                                   (remove (comp resolved-strs canonical-rule-ns)
                                                            derived-raws)))]
                        (if dynamic
                          (if (seq truly-new)
@@ -973,7 +961,7 @@
                                  (assoc-in [p-name :clara-rules/insert-types] merged)
                                  (assoc-in [p-name :clara-rules/dynamic-insert-types-detected
                                             :fact-instance-derived-types]
-                                           (mapv serialize-rule-ns truly-new))))
+                                           (mapv (partial serialize/resolve-type rule-ns) truly-new))))
                            ;; No truly-new types from this enrichment pass.
                            ;; Restore the original annotation for this rule to
                            ;; preserve any pre-existing dynamic detection

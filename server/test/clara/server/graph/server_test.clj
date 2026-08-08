@@ -9,9 +9,9 @@
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clj-http.client :as client]
             [jsonista.core :as json]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
-            [schema.test :as st]
-            [clojure.java.io :as io]))
+            [schema.test :as st]))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
@@ -50,11 +50,12 @@
   (-> session eng/components :rulebase))
 
 (defn- start-server!
-  "Starts a server on *port* with the given session and annotations layers."
+  "Starts a server on *port* with the given session and annotation layers.
+   When layers is empty the props layer is still folded in (via {:source []})."
   ([session layers]
    (server/start! {:port *port*
                    :session session
-                   :layers layers
+                   :annotations {:source (vec layers)}
                    :working-memory-enabled true}))
   ([session]
    (start-server! session [])))
@@ -67,14 +68,19 @@
   "A bare session (no facts) for fixture setup."
   (delay (->test-session)))
 
+(def ^:private test-system
+  "The system returned by start-server! — captured so the fixture can stop it."
+  (atom nil))
+
 (defn- server-fixture
   "Start a server once, run tests, then stop."
   [f]
-  (start-server! @test-session)
-  (try
-    (f)
-    (finally
-      (server/stop!))))
+  (let [system (start-server! @test-session)]
+    (reset! test-system system)
+    (try
+      (f)
+      (finally
+        (server/stop! system)))))
 
 (use-fixtures :once st/validate-schemas server-fixture)
 
