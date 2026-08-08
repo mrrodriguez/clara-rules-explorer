@@ -917,60 +917,59 @@
    Returns the enriched annotations map suitable for passing to
    `rulebase-analysis`."
   [session annotations]
-  (let [original     (ann/normalize-annotations annotations)
-        snapshot     (memory/session-snapshot session)
-        enriched     (add-auto-detected-annotations snapshot original)
+  (let [original          (ann/normalize-annotations annotations)
+        snapshot          (memory/session-snapshot session)
+        enriched          (add-auto-detected-annotations snapshot original)
         rule->session-types (rule->session-raw-types snapshot)
-        rulebase     (-> session eng/components :rulebase)
-        productions  (:productions rulebase)
+        rulebase          (-> session eng/components :rulebase)
 
-        pam-annotations
-        (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/props-layer rulebase)
-                                                        (ann.merge/layer {:id :enriched
-                                                                          :annotations enriched})]))
+        merged-annotations
+        (ann.merge/annotations
+         (ann.merge/merge-layers [(ann.merge/props-layer rulebase)
+                                  (ann.merge/layer {:id :enriched
+                                                    :annotations enriched})]))
 
-        pam
+        resolved-annotation-map
         (into {}
-              (for [p productions]
+              (for [p (:productions rulebase)]
                 [(ann/normalize-rule-name (:name p))
-                 (ann/production-annotation pam-annotations p)]))
-
-        result
-        (reduce-kv (fn [acc p-name resolved-ann]
-                     (let [rule-ns      (ann/fq-name->namespace p-name)
-                           resolve-fn   (partial serialize/resolve-type rule-ns)
-                           raw-entry    (get acc p-name)
-                           resolved-strs (set (map resolve-fn
-                                                   (:insert-types resolved-ann)))
-                           dynamic      (:dynamic-insert-types-detected resolved-ann)
-                           derived-raws (get rule->session-types p-name)
-                           ;; Raw session types (never demoted to name strings)
-                           ;; not covered by the fully-merged annotation's
-                           ;; insert-types, compared under this rule's own ns.
-                           truly-new    (when (seq derived-raws)
-                                          (sort-by resolve-fn
-                                                   (remove (comp resolved-strs resolve-fn)
-                                                           derived-raws)))]
-                       (if dynamic
-                         (if (seq truly-new)
-                           (let [raw-inserts (:clara-rules/insert-types raw-entry)
-                                 merged      (ann.merge/dedupe-by resolve-fn (into (vec raw-inserts) truly-new))]
-                             (-> acc
-                                 (assoc-in [p-name :clara-rules/insert-types] merged)
-                                 (assoc-in [p-name :clara-rules/dynamic-insert-types-detected
-                                            :fact-instance-derived-types]
-                                           truly-new)))
-                           ;; No truly-new types from this enrichment pass.
-                           ;; Restore the original annotation for this rule to
-                           ;; preserve any pre-existing dynamic detection
-                           ;; (e.g. :callsites from static analysis).
-                           (if-let [orig (get original p-name)]
-                             (assoc acc p-name orig)
-                             (dissoc acc p-name)))
-                         acc)))
-                   enriched
-                   pam)]
-    result))
+                 (ann/production-annotation merged-annotations p)]))]
+    (reduce-kv (fn [acc rule-name resolved-ann]
+                 (let [rule-ns        (ann/fq-name->namespace rule-name)
+                       resolve-fn     (partial serialize/resolve-type rule-ns)
+                       rule-entry     (get acc rule-name)
+                       declared-strs  (set (map resolve-fn
+                                                (:insert-types resolved-ann)))
+                       detection-info (:dynamic-insert-types-detected resolved-ann)
+                       raw-types      (get rule->session-types rule-name)
+                       ;; Session-derived types not already declared in the
+                       ;; fully-merged annotation's insert-types, compared
+                       ;; under this rule's own ns.
+                       truly-new      (when (seq raw-types)
+                                        (sort-by resolve-fn
+                                                 (remove (comp declared-strs resolve-fn)
+                                                         raw-types)))]
+                   (if detection-info
+                     (if (seq truly-new)
+                       (let [merged (ann.merge/dedupe-by
+                                     resolve-fn
+                                     (into (vec (:clara-rules/insert-types rule-entry))
+                                           truly-new))]
+                         (-> acc
+                             (assoc-in [rule-name :clara-rules/insert-types] merged)
+                             (assoc-in [rule-name :clara-rules/dynamic-insert-types-detected
+                                        :fact-instance-derived-types]
+                                       truly-new)))
+                       ;; No truly-new types from this enrichment pass.
+                       ;; Restore the original annotation for this rule to
+                       ;; preserve any pre-existing dynamic detection
+                       ;; (e.g. :callsites from static analysis).
+                       (if-let [orig (get original rule-name)]
+                         (assoc acc rule-name orig)
+                         (dissoc acc rule-name)))
+                     acc)))
+               enriched
+               resolved-annotation-map)))
 
 (defn ->memory-layer
   "Builds a working-memory annotation Layer from a fired Clara session.

@@ -399,42 +399,61 @@
   [[:insert :clara-rules/insert-types :clara-rules/dynamic-insert-types-detected]
    [:retract :clara-rules/retract-types :clara-rules/dynamic-retract-types-detected]])
 
+(defn- collect-detection-types
+  "Collects the resolved types a detection map contributes: resolved-types
+   from non-dangling callsites, deduplicated.  Returns nil when the detection
+   map has no callsites (contributes nothing)."
+  [resolve-fn det-map]
+  (when-let [callsites (not-empty (:callsites det-map))]
+    (dedupe-by resolve-fn
+               (into []
+                     (comp (remove :dangling?)
+                           (mapcat :resolved-types))
+                     callsites))))
+
+(defn- recompute-detection-resolution
+  "Recomputes :resolution on a detection map from its callsites.
+   Returns the updated map, or nil when the map should be dropped
+   (empty callsites).  Opaque maps without a :callsites key
+   (e.g. session enrichment) pass through unchanged."
+  [det-map]
+  (cond
+    (nil? det-map) nil
+    (not (contains? det-map :callsites)) det-map
+    :else
+    (if-let [callsites (not-empty (:callsites det-map))]
+      (if-let [resolution (ann.callsite/aggregate-resolution callsites)]
+        (assoc det-map :resolution resolution)
+        (dissoc det-map :resolution))
+      ;; empty callsites vector — drop the map
+      nil)))
+
 (defn- derive-rule-annotation
   "Derives one rule's conclusions.  `rule-ns` is the rule's namespace, used
    for type canonicalization so an unqualified symbol, its Class, and a
    qualified sidecar symbol all deduplicate correctly."
   [mode rule-ns rule-ann]
   (let [resolve-fn (partial serialize/resolve-type rule-ns)]
-    (reduce (fn [ra [_ types-k dm-k]]
-              (let [dm (get ra dm-k)
-                    a (get ra types-k)
-                    d (dedupe-by resolve-fn
-                                 (into []
-                                       (comp (remove :dangling?)
-                                             (mapcat :resolved-types))
-                                       (:callsites dm)))
-                    final (case mode
-                            :additive (dedupe-by resolve-fn (into (vec a) d))
-                            ;; 'has a detection map' means has callsites — with
-                            ;; no callsites there is nothing to derive from and
-                            ;; the authored types stand
-                            :from-callsites (if (seq (:callsites dm)) d (vec a)))
-                    ra' (if (seq final)
-                          (assoc ra types-k final)
-                          (dissoc ra types-k))
-                  ;; recompute :resolution; a detection map with an empty
-                  ;; callsites vector carries nothing and is dropped; a map
-                  ;; with no :callsites at all (session enrichment) is opaque
-                    dm' (cond
-                          (nil? dm) nil
-                          (not (contains? dm :callsites)) dm
-                          (seq (:callsites dm)) (if-let [resolution (ann.callsite/aggregate-resolution
-                                                                     (:callsites dm))]
-                                                  (assoc dm :resolution resolution)
-                                                  (dissoc dm :resolution)))]
-                (if dm'
-                  (assoc ra' dm-k dm')
-                  (dissoc ra' dm-k))))
+    (reduce (fn [acc [_ types-key detection-key]]
+              (let [det-map        (get acc detection-key)
+                    authored       (get acc types-key)
+                    discovered     (collect-detection-types resolve-fn det-map)
+                    merged-types   (case mode
+                                     :additive
+                                     (dedupe-by resolve-fn
+                                                (into (vec authored) discovered))
+                                     ;; 'has a detection map' means has callsites — with
+                                     ;; no callsites there is nothing to derive from and
+                                     ;; the authored types stand
+                                     :from-callsites
+                                     (if discovered discovered (vec authored)))
+                    updated        (if (seq merged-types)
+                                     (assoc acc types-key merged-types)
+                                     (dissoc acc types-key))
+                    updated-det    (recompute-detection-resolution det-map)]
+                (if updated-det
+                  (assoc updated detection-key updated-det)
+                  (dissoc updated detection-key))))
             rule-ann
             dimension-derivation-keys)))
 
