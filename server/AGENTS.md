@@ -115,6 +115,29 @@ test time.  When combining with other `:once` fixtures, compose them:
 
 # Documentation
 
+## Annotations Guide
+
+When working on annotation-related code — layer merging, type comparison,
+delta computation, enrichment, sidecar EDN format, or provenance — consult
+the definitive reference:
+
+**`server/docs/rule-annotations.md`**
+
+It covers the full annotation lifecycle: structure, sources (props / generated /
+curated / memory), the layered merge model with provenance, type representation
+(EDN, in-memory, comparison), and the derivation pass that promotes callsite
+types into insert/retract-types.
+
+Key namespaces:
+
+| Namespace | Role |
+|-----------|------|
+| `clara.server.tools.graph.annotations` | Rule-name normalization, per-production lookup, delta computation |
+| `clara.server.tools.graph.annotations.merge` | Layers, merging, provenance, derivation, coercion |
+| `clara.server.tools.graph.annotations.callsite` | Callsite format, identity, id assignment |
+| `clara.server.tools.graph.serialize` | Type serialization for JSON output (`resolve-type`, `serialize-type-ref`) |
+| `clara.server.tools.graph.analyze` | Static analysis, session enrichment, `->memory-layer` |
+
 ## Docstrings
 
 Prefer `s/defschema` over large annotated docstrings for describing the shape

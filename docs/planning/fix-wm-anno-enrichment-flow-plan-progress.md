@@ -177,8 +177,8 @@ required manual `class:`/`keyword:`/`string:` tags to fix.
 The fix: delete `canonical-type-str` entirely.  Comparison sites
 (`new-types`, `add-auto-detected-annotations`,
 `enrich-annotations-from-session`) now use `(partial serialize/resolve-type
-rule-ns)`.  The 1-arity `type-str` remains for `merge.clj` dedup callers
-that need Class/String/Symbol convergence without namespace resolution.
+rule-ns)`.  `ann/type-str` was later removed (Review 2 A3) after merge dedupe
+switched to `serialize/resolve-type` with the rule's namespace.
 
 ---
 
@@ -206,7 +206,7 @@ Addresses: `docs/planning/fix-wm-anno-enrichment-flow-impl-review-2.md`
   `(partial serialize/resolve-type rule-ns)` instead of `ann/type-str`
 - [x] `rule-name` threaded through `fold-layer` → `fold-key` →
   `merge-type-vec` and `derive-conclusions` → `derive-rule-annotation`
-- [x] `ann/type-str` has zero remaining callers (documented for removal)
+- [x] `ann/type-str` removed (no remaining callers)
 - [x] Updated `annotations_merge_test.clj` for kind-discrimination: String
   and Symbol for same class name are now distinct kinds (no conflation);
   Class-vs-Symbol convergence preserved via ns-aware resolution
