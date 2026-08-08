@@ -19,6 +19,7 @@
             DocumentCheck]
            [clara.server.tools.graph.rules.loan_doc_rules
             AllIdCardGivenDocuments
+            ComplianceReview
             StaleDocumentNotice]
            [clara.server.tools.graph.rules.analyze_test_rules
             HiddenHelperRecord
@@ -876,7 +877,7 @@
       (let [crd (get enriched "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
         (is (some? (:clara-rules/dynamic-insert-types-detected crd)))
         (is (= {:fact-instance-derived-types
-                ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"]
+                [AllRequiredDocuments]
                 :resolution :partial}
                (:clara-rules/dynamic-insert-types-detected crd))))
       ;; No insert-types added (that is enrich-annotations-from-session's job)
@@ -918,7 +919,7 @@
                (:clara-rules/insert-types crd))
             "Should add the fact type to insert-types as the raw class — never a phantom string kind (\"...AllRequiredDocuments\" vs ...AllRequiredDocuments)")
         (is (= {:fact-instance-derived-types
-                ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"]
+                [AllRequiredDocuments]
                 :resolution :partial}
                (:clara-rules/dynamic-insert-types-detected crd))
             "Should add dynamic detection")))
@@ -929,7 +930,7 @@
             "The keyword fact type merges as the keyword, not as a serialized string")
         (is (contains? (set (:fact-instance-derived-types
                              (:clara-rules/dynamic-insert-types-detected dc)))
-                       ":loan-doc-rules/document-check-input")
+                       :loan-doc-rules/document-check-input)
             "The derived-type display name is the keyword's serialized form")))
 
     (testing "Does NOT add dynamic detection for rules whose types are already in :props"
@@ -1004,7 +1005,7 @@
         (is (= :partial (:resolution dyn))
             "Resolution should be :partial since session helped but callsites remain unresolved")
         (is (contains? (set (:fact-instance-derived-types dyn))
-                       "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview")
+                       ComplianceReview)
             "Should detect the ComplianceReview type")))))
 
 (deftest test-enrich-annotations-from-session--dedup-against-props

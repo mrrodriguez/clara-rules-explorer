@@ -497,3 +497,52 @@
         ;; Session has working memory from the swap, so WM enrichment should persist.
         (is (some? (get-in result [rule-collect-given-docs :clara-rules/dynamic-insert-types-detected]))
             "WM enrichment present after reload")))))
+
+;; ---------------------------------------------------------------------------
+;; 12. :reuse reload regression — ensures the B1 fix is pinned
+;; ---------------------------------------------------------------------------
+
+(deftest test-reload-reuse-preserves-annotations
+  (testing ":reuse reload keeps current annotations unchanged"
+    (let [annos {"keep-me" {:clara-rules/notes "survives-reload"}}
+          _ (server/swap-session! {:annotations {:enrichment :reuse}})
+          _ (server/swap-session! {:annotations annos})
+          _ (server/swap-session! {:annotations {:enrichment :reuse}})
+          result (server/reload-annotations!)]
+      (is (= annos result)
+          "reload after :reuse swap preserves current annotations"))))
+
+;; ---------------------------------------------------------------------------
+;; 13. File-backed reload — edits to sidecar file are re-read on reload
+;; ---------------------------------------------------------------------------
+
+(deftest test-reload-rereads-file-source
+  (let [sess (->test-session-with-facts)
+        tmp-file (java.io.File/createTempFile "reload-test" ".edn")]
+    (try
+      ;; Write initial annotations to temp file in Layer format
+      (spit tmp-file "{:id :source :annotations {\"test/rule-a\" {:clara-rules/notes \"v1\"}}}")
+
+      (testing "swap with file-backed source"
+        (let [result (server/swap-session! {:session sess
+                                            :annotations
+                                            {:source (.getAbsolutePath tmp-file)
+                                             :enrichment :auto-detect}})]
+          (is (map? result))
+          (is (contains? result "test/rule-a")
+              "rule from sidecar present")
+          (is (= "v1" (get-in result ["test/rule-a" :clara-rules/notes]))
+              "initial annotation notes match")))
+
+      ;; Modify the file on disk
+      (spit tmp-file "{:id :source :annotations {\"test/rule-a\" {:clara-rules/notes \"v2-modified\"}}}")
+
+      (testing "reload re-reads the modified file"
+        (let [result (server/reload-annotations!)]
+          (is (map? result))
+          (is (= "v2-modified"
+                 (get-in result ["test/rule-a" :clara-rules/notes]))
+              "reload picked up the modified notes from disk")))
+
+      (finally
+        (.delete tmp-file)))))

@@ -879,10 +879,10 @@
                            new-types (->> raw-types
                                           (remove (comp existing-strs resolve-fn))
                                           (sort-by resolve-fn)
-                                          (mapv resolve-fn))]
+                                          vec)]
                        (if (seq new-types)
                          (let [existing-dynamic (get rule-ann :clara-rules/dynamic-insert-types-detected)
-                               derived-entry    {:fact-instance-derived-types (vec new-types)
+                               derived-entry    {:fact-instance-derived-types new-types
                                                  :resolution :partial}
                                updated-dynamic  (if existing-dynamic
                                                   (merge existing-dynamic derived-entry)
@@ -959,7 +959,7 @@
                                  (assoc-in [p-name :clara-rules/insert-types] merged)
                                  (assoc-in [p-name :clara-rules/dynamic-insert-types-detected
                                             :fact-instance-derived-types]
-                                           (mapv (partial serialize/resolve-type rule-ns) truly-new))))
+                                           truly-new)))
                            ;; No truly-new types from this enrichment pass.
                            ;; Restore the original annotation for this rule to
                            ;; preserve any pre-existing dynamic detection

@@ -20,20 +20,6 @@
      normalizes the lookup key before access."
   (:require [clara.server.tools.graph.serialize :as serialize]))
 
-(defn type-str
-  "Normalizes a type's concrete representation to a canonical string for
-   deduplication.  A Class, its .getName string, and an unqualified symbol
-   all converge to the same string — different representations of the same
-   logical type canonicalize identically."
-  [t]
-  (cond
-    (nil? t) nil
-    (class? t) (.getName ^Class t)
-    (keyword? t) (str (symbol t))
-    (symbol? t) (str t)
-    (string? t) t
-    :else (str t)))
-
 (defn fq-name->namespace
   "Extract the namespace portion from a fully-qualified rule name string like
    \"some.ns/rule-name\".  Returns a symbol, or nil if the name has no

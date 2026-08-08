@@ -104,39 +104,82 @@
 (def ^:private auto-detect-modes
   #{:auto-detect-from-rulebase :auto-detect-from-memory :auto-detect})
 
-(defn- build-auto-detect-layers
-  "Build the layer vector for auto-detect enrichment modes."
-  [session source enrichment wm? analyze-cache-atom]
-  (cond-> [(ann.merge/props-layer session)]
-    (some? source)
-    (conj (ann.merge/->layer {:id :source
-                              :annotations (ann.merge/coerce-to-bare-annotations source session)}))
-    (#{:auto-detect-from-rulebase :auto-detect} enrichment)
-    (conj {:id :clara.tools.graph.analyze/generated
-           :annotations (let [analysis (analyze/analyze-session-rules
-                                        {:session-or-rulebase session
-                                         :cache-atom analyze-cache-atom})
-                              generated (analyze/generate-annotations-from-analysis
-                                         {:analysis analysis
-                                          :session-or-rulebase session})]
-                          generated)})
-    (and (#{:auto-detect-from-memory :auto-detect} enrichment)
-         wm?)
-    (conj {:id :clara.tools.graph.analyze/memory
-           :annotations (analyze/enrich-annotations-from-session session {})})))
+(defn- ->source-layer
+  "Coerce one source entry to a Layer.  Path strings / Files are read from
+   disk via `read-layer`; bare rule→annotation maps are wrapped as a source
+   layer; MergedAnnotations are unwrapped first."
+  [x]
+  (cond
+    (or (string? x) (instance? File x))
+    (ann.merge/read-layer x)
+
+    (ann.merge/merged-annotations? x)
+    (ann.merge/layer {:id :source :annotations (ann.merge/annotations x)})
+
+    (map? x)
+    ;; A bare rule→annotation map — wrap as a source layer.
+    (ann.merge/layer {:id :source :annotations x})
+
+    :else
+    (throw (IllegalArgumentException.
+            (format "Unsupported source entry type: %s" (pr-str (type x)))))))
+
+(defn- build-static-layers
+  "Build the static annotation layers for auto-detect enrichment modes
+   (props, source, generated).  Memory enrichment is handled separately
+   via `analyze/->memory-layer` so it produces a proper delta layer against
+   the accumulated static base.
+
+   Each source entry becomes its own layer — path strings are read from
+   disk, bare maps are wrapped as source layers, MergedAnnotations are
+   unwrapped.  This preserves per-file `:provenance` and per-callsite
+   `:from-layer` attribution instead of flattening all files into one
+   `:id :source` layer.
+
+   `analyze-cache-atom` is the temporary atom seeded from and committed
+   back to the state map by the calling transition."
+  [session source enrichment analyze-cache-atom]
+  (let [source-layers (when (some? source)
+                        (map ->source-layer
+                             (if (vector? source) source [source])))
+        generated-layer (when (#{:auto-detect-from-rulebase :auto-detect} enrichment)
+                          (let [analysis (analyze/analyze-session-rules
+                                          {:session-or-rulebase session
+                                           :cache-atom analyze-cache-atom})]
+                            (ann.merge/layer
+                             {:id :clara.tools.graph.analyze/generated
+                              :annotations (analyze/generate-annotations-from-analysis
+                                            {:analysis analysis
+                                             :session-or-rulebase session})})))
+        layers (cond-> [(ann.merge/props-layer session)]
+                 (seq source-layers) (into source-layers)
+                 generated-layer (conj generated-layer))]
+    layers))
 
 (defn- build-auto-detect-annotations
-  "Build annotations for :auto-detect-from-rulebase, :auto-detect-from-memory,
-   or :auto-detect enrichment modes."
+  "Build annotations for auto-detect enrichment modes.
+
+   Static layers are merged first so the memory delta is computed against
+   the accumulated base — not an empty map.  When the session contributes
+   nothing new, ->memory-layer returns nil and the memory layer is skipped."
   [session source enrichment analyze-cache-atom]
   (let [wm? (core/working-memory-available? session)]
     (when (and (#{:auto-detect-from-memory :auto-detect} enrichment)
                (not wm?))
-      (println (format "[server] %s requested but no working memory available — skipping WM enrichment"
+      (println (format "[server] %s requested but no working memory available — skipping memory enrichment"
                        enrichment)))
-    (-> (build-auto-detect-layers session source enrichment wm? analyze-cache-atom)
-        ann.merge/merge-layers
-        ann.merge/annotations)))
+    (let [static-layers (build-static-layers session source enrichment analyze-cache-atom)
+          merged-static (ann.merge/merge-layers static-layers)
+          base          (ann.merge/annotations merged-static)
+          memory-layer  (when (and wm?
+                                   (#{:auto-detect-from-memory :auto-detect} enrichment))
+                          (analyze/->memory-layer {:session session
+                                                   :annotations base}))]
+      (if memory-layer
+        (-> (conj static-layers memory-layer)
+            ann.merge/merge-layers
+            ann.merge/annotations)
+        base))))
 
 (defn build-annotations
   "Resolve annotations for `session` from `annotations-spec`.

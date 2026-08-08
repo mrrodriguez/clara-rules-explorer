@@ -10,12 +10,66 @@ Rule annotations support the following qualified keys:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `:clara-rules/insert-types` | vector of symbols | Fact types that may be inserted during the rule's RHS execution. |
-| `:clara-rules/retract-types` | vector of symbols | Fact types that may be retracted during the rule's RHS execution. |
+| `:clara-rules/insert-types` | vector of fact types | Fact types that may be inserted during the rule's RHS execution. See [Type Representation](#type-representation) below. |
+| `:clara-rules/retract-types` | vector of fact types | Fact types that may be retracted during the rule's RHS execution. See [Type Representation](#type-representation) below. |
 | `:clara-rules/no-output-types` | boolean | Set to `true` to declare that the rule has been manually vetted as a pure side-effect (e.g. logging, API calls) with no downstream fact effects. Suppresses "unlinked rule" warnings. |
 | `:clara-rules/notes` | string | Free-form documentation or operational notes about the rule. |
 | `:clara-rules/dynamic-insert-types-detected` | map | Captured callsite info when dynamic insertions are detected (see below). |
 | `:clara-rules/dynamic-retract-types-detected` | map | Captured callsite info when dynamic retractions are detected (see below). |
+
+---
+
+## Type Representation
+
+Fact types in `*-types` annotation keys (`:clara-rules/insert-types`,
+`:clara-rules/retract-types`, `:resolved-types` in callsites) are **raw
+fact-type-fn objects** end-to-end in memory: Classes, keywords, strings,
+vectors, symbols — whatever the session's pluggable `fact-type-fn` returns.
+Display formatting happens only at the serialization boundary (JSON out, EDN
+write).
+
+### In EDN (sidecar files, persisted annotations)
+
+A fact type keeps its EDN literal form.  The one workaround is for Classes:
+Classes have no EDN literal, so they are written as **Class-name symbols**
+(fully qualified or unqualified).
+
+| In-memory fact type | EDN representation                                       |
+| ------------------- | -------------------------------------------------------- |
+| Class instance      | **symbol** (class-name symbol, qualified or unqualified) |
+| String              | string                                                   |
+| Keyword             | keyword                                                  |
+| Vector              | vector                                                   |
+| Symbol (non-class)  | symbol                                                   |
+
+Rules:
+- If a type has no EDN literal form, it does not go in a sidecar.
+- String literals for class names are not a supported convention — use symbols.
+
+### In memory
+
+Compared keys (`:insert-types`, `:retract-types`) carry **raw objects**
+end-to-end; display formatting at the serialization boundary only.
+`:fact-instance-derived-types` in dynamic detection maps also carries raw
+objects — `serialize-dynamic-detection` converts them to strings at the JSON
+boundary.
+
+### Comparison (delta, novelty detection, enrichment coverage)
+
+`serialize/resolve-type` with the rule's namespace:
+
+- **Kind-explicit:** Class → `.getName`; keyword → keeps colon; string →
+  `pr-str`-quoted; unresolved symbol → `symbol[...]` wrapper; vector →
+  `pr-str` (inner kinds preserved).  Distinct kinds never conflate.
+- **Class ↔ class-name-symbol convergence** via two paths: ns-aware import
+  resolution, or the fallback that prints a fully-qualified symbol as its
+  name (which equals `.getName`).
+
+### Merge dedupe
+
+Same canonicalizer as comparison: `serialize/resolve-type` with the rule's
+namespace, derived from the rule-name key at the merge site.  There is **one**
+canonicalization for comparison and dedupe alike.
 
 ---
 

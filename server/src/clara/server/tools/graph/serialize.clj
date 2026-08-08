@@ -316,4 +316,9 @@
   [detection prod-ns known-set]
   (cond-> detection
     (:callsites detection)
-    (update :callsites (fn [callsites] (mapv #(serialize-dynamic-callsite % prod-ns known-set) callsites)))))
+    (update :callsites (fn [callsites] (mapv #(serialize-dynamic-callsite % prod-ns known-set) callsites)))
+
+    (:fact-instance-derived-types detection)
+    (update :fact-instance-derived-types
+            (fn [types]
+              (mapv #(resolve-type prod-ns %) types)))))

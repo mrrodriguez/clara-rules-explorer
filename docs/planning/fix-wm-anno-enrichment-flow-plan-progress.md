@@ -180,6 +180,64 @@ The fix: delete `canonical-type-str` entirely.  Comparison sites
 rule-ns)`.  The 1-arity `type-str` remains for `merge.clj` dedup callers
 that need Class/String/Symbol convergence without namespace resolution.
 
+---
+
+## Review 2 Fixes ✅ COMPLETE
+
+Addresses: `docs/planning/fix-wm-anno-enrichment-flow-impl-review-2.md`
+
+### D1: Memory layer as delta ✅
+- [x] `build-auto-detect-layers` renamed to `build-static-layers` — builds
+  only props + source + generated layers
+- [x] `build-auto-detect-annotations` merges static layers first, then
+  calls `analyze/->memory-layer` against the accumulated base; memory layer
+  is a delta (only what enrichment added), merged as the last layer
+- [x] WM-unavailable path: `->memory-layer` returns nil when session
+  contributes nothing, gracefully skipped
+
+### D2: Per-file source layers ✅
+- [x] `->source-layer` helper: path strings/Files read via `read-layer`,
+  bare maps wrapped as source layers, MergedAnnotations unwrapped
+- [x] Each source entry becomes its own layer preserving per-file
+  `:provenance` and per-callsite `:from-layer` attribution
+
+### A3: ns-aware merge dedupe ✅
+- [x] `merge-type-vec` and `derive-rule-annotation` now use
+  `(partial serialize/resolve-type rule-ns)` instead of `ann/type-str`
+- [x] `rule-name` threaded through `fold-layer` → `fold-key` →
+  `merge-type-vec` and `derive-conclusions` → `derive-rule-annotation`
+- [x] `ann/type-str` has zero remaining callers (documented for removal)
+- [x] Updated `annotations_merge_test.clj` for kind-discrimination: String
+  and Symbol for same class name are now distinct kinds (no conflation);
+  Class-vs-Symbol convergence preserved via ns-aware resolution
+
+### A4: Raw objects in `:fact-instance-derived-types` ✅
+- [x] `add-auto-detected-annotations` stores raw objects (not serialized)
+- [x] `enrich-annotations-from-session` stores raw objects (not serialized)
+- [x] `serialize-dynamic-detection` converts to strings at JSON boundary
+- [x] Updated `analyze_test.clj` expectations to use raw objects
+  (Classes, keywords) instead of strings
+
+### A5: Missing tests ✅
+- [x] `test-reload-reuse-preserves-annotations` — :reuse reload regression
+- [x] `test-reload-rereads-file-source` — file-backed reload re-reads
+  modified file from disk
+
+### A7: Type-representation contract ✅
+- [x] Added to `server/docs/rule-annotations.md`
+
+### A8: Test WARN confirmed pre-existing ✅
+- [x] `WARN: serialize-type-ref received a nil-resolving type token: nil`
+  confirmed present in pre-change suite
+
+### Verification
+```
+198 tests, 1381 assertions: 0 failures, 0 errors
+Lint: 0 errors, 0 warnings
+Reflection check: passed (no warnings)
+Format: all files correct
+```
+
 ### Remaining (from plan)
 - [ ] Demo re-scrape verification:
   - [ ] `make demo-setup && make demo-run`

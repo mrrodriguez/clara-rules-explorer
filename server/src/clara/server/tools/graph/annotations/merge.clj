@@ -15,7 +15,8 @@
             [schema.core :as s]
             [clara.rules.engine :as eng]
             [clara.server.tools.graph.annotations :as ann]
-            [clara.server.tools.graph.annotations.callsite :as ann.callsite]))
+            [clara.server.tools.graph.annotations.callsite :as ann.callsite]
+            [clara.server.tools.graph.serialize :as serialize]))
 
 (def ^:private RuleName s/Str)
 
@@ -210,13 +211,15 @@
              coll)))
 
 (defn- merge-type-vec
-  "Type-vector merge: default union, `a` first, deduplicated by normalized
-   string form (so a Class from props and a Symbol from a sidecar file are
-   recognized as the same type).  `:replace` takes `b` only."
-  [strategy a b]
-  (if (= :replace strategy)
-    (dedupe-by ann/type-str b)
-    (dedupe-by ann/type-str (into (vec a) b))))
+  "Type-vector merge: default union, `a` first, deduplicated by
+   `serialize/resolve-type` under the rule's namespace so an unqualified
+   symbol from :props, its Class, and a qualified sidecar symbol all
+   converge.  `:replace` takes `b` only."
+  [strategy rule-ns a b]
+  (let [resolve-fn (partial serialize/resolve-type rule-ns)]
+    (if (= :replace strategy)
+      (dedupe-by resolve-fn b)
+      (dedupe-by resolve-fn (into (vec a) b)))))
 
 (defn- contributing
   "Adds a layer id to a union/deep-merge origin: keys merged by union record
@@ -252,22 +255,23 @@
 
 (defn- fold-key
   "Folds one key of a layer's rule entry into `[merged-entry provenance-entry]`.
-   `props` is the effective merge-props for this layer and rule."
-  [layer-id props merged prov k v]
+   `props` is the effective merge-props for this layer and rule.
+   `rule-ns` is the rule's namespace for type canonicalization."
+  [layer-id props rule-ns merged prov k v]
   (if (nil? v)
     ;; explicit nil is a tombstone — erase the key and its provenance
     [(dissoc merged k) (dissoc prov k)]
     (case k
       :clara-rules/insert-types
       (let [strategy (get props :insert-types :union)]
-        [(assoc merged k (merge-type-vec strategy (get merged k) v))
+        [(assoc merged k (merge-type-vec strategy rule-ns (get merged k) v))
          (assoc prov k (if (= :replace strategy)
                          layer-id
                          (contributing (get prov k) layer-id)))])
 
       :clara-rules/retract-types
       (let [strategy (get props :retract-types :union)]
-        [(assoc merged k (merge-type-vec strategy (get merged k) v))
+        [(assoc merged k (merge-type-vec strategy rule-ns (get merged k) v))
          (assoc prov k (if (= :replace strategy)
                          layer-id
                          (contributing (get prov k) layer-id)))])
@@ -307,7 +311,7 @@
              props (merge layer-props (:clara-rules/merge-props entry))
              entry' (dissoc entry :clara-rules/merge-props)
              [merged prov] (reduce-kv
-                            (fn [[m p] k v] (fold-key layer-id props m p k v))
+                            (fn [[m p] k v] (fold-key layer-id props (ann/fq-name->namespace rn) m p k v))
                             [(get-in acc [:annotations rn] {})
                              (get-in acc [:provenance rn] {})]
                             entry')]
@@ -396,40 +400,43 @@
    [:retract :clara-rules/retract-types :clara-rules/dynamic-retract-types-detected]])
 
 (defn- derive-rule-annotation
-  "Derives one rule's conclusions.  Returns the derived annotation."
-  [mode rule-ann]
-  (reduce (fn [ra [_ types-k dm-k]]
-            (let [dm (get ra dm-k)
-                  a (get ra types-k)
-                  d (dedupe-by ann/type-str
-                               (into []
-                                     (comp (remove :dangling?)
-                                           (mapcat :resolved-types))
-                                     (:callsites dm)))
-                  final (case mode
-                          :additive (dedupe-by ann/type-str (into (vec a) d))
-                          ;; 'has a detection map' means has callsites — with
-                          ;; no callsites there is nothing to derive from and
-                          ;; the authored types stand
-                          :from-callsites (if (seq (:callsites dm)) d (vec a)))
-                  ra' (if (seq final)
-                        (assoc ra types-k final)
-                        (dissoc ra types-k))
+  "Derives one rule's conclusions.  `rule-ns` is the rule's namespace, used
+   for type canonicalization so an unqualified symbol, its Class, and a
+   qualified sidecar symbol all deduplicate correctly."
+  [mode rule-ns rule-ann]
+  (let [resolve-fn (partial serialize/resolve-type rule-ns)]
+    (reduce (fn [ra [_ types-k dm-k]]
+              (let [dm (get ra dm-k)
+                    a (get ra types-k)
+                    d (dedupe-by resolve-fn
+                                 (into []
+                                       (comp (remove :dangling?)
+                                             (mapcat :resolved-types))
+                                       (:callsites dm)))
+                    final (case mode
+                            :additive (dedupe-by resolve-fn (into (vec a) d))
+                            ;; 'has a detection map' means has callsites — with
+                            ;; no callsites there is nothing to derive from and
+                            ;; the authored types stand
+                            :from-callsites (if (seq (:callsites dm)) d (vec a)))
+                    ra' (if (seq final)
+                          (assoc ra types-k final)
+                          (dissoc ra types-k))
                   ;; recompute :resolution; a detection map with an empty
                   ;; callsites vector carries nothing and is dropped; a map
                   ;; with no :callsites at all (session enrichment) is opaque
-                  dm' (cond
-                        (nil? dm) nil
-                        (not (contains? dm :callsites)) dm
-                        (seq (:callsites dm)) (if-let [resolution (ann.callsite/aggregate-resolution
-                                                                   (:callsites dm))]
-                                                (assoc dm :resolution resolution)
-                                                (dissoc dm :resolution)))]
-              (if dm'
-                (assoc ra' dm-k dm')
-                (dissoc ra' dm-k))))
-          rule-ann
-          dimension-derivation-keys))
+                    dm' (cond
+                          (nil? dm) nil
+                          (not (contains? dm :callsites)) dm
+                          (seq (:callsites dm)) (if-let [resolution (ann.callsite/aggregate-resolution
+                                                                     (:callsites dm))]
+                                                  (assoc dm :resolution resolution)
+                                                  (dissoc dm :resolution)))]
+                (if dm'
+                  (assoc ra' dm-k dm')
+                  (dissoc ra' dm-k))))
+            rule-ann
+            dimension-derivation-keys)))
 
 (defn derive-conclusions
   "Derives rule-level conclusions from merged evidence: dimension
@@ -446,7 +453,9 @@
    (into (sorted-map)
          (map (fn [[rule-name rule-ann]]
                 [(ann/normalize-rule-name rule-name)
-                 (derive-rule-annotation type-derivation rule-ann)]))
+                 (derive-rule-annotation type-derivation
+                                         (ann/fq-name->namespace rule-name)
+                                         rule-ann)]))
          annotations)))
 
 (defn- derive-with-provenance
@@ -455,7 +464,9 @@
   [mode annotations provenance]
   (reduce-kv
    (fn [m rule-name rule-ann]
-     (let [derived (derive-rule-annotation mode rule-ann)
+     (let [derived (derive-rule-annotation mode
+                                           (ann/fq-name->namespace rule-name)
+                                           rule-ann)
            prov (reduce (fn [p [_ types-k _]]
                           (if (= (get rule-ann types-k) (get derived types-k))
                             p
