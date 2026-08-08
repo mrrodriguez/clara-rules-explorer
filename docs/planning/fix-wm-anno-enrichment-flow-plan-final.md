@@ -1,28 +1,14 @@
-# Fix Working-Memory Annotation Enrichment Flow
+# Fix Working-Memory Annotation Enrichment Flow — Implementation Plan
 
-> **Revision 5** — incorporates design review round 3
-> (`fix-wm-anno-enrichment-flow-kimi-review-3.md`): `start-system!`/`start!`
-> split (B1/B2), Path F kondo-cache correction (B3), `getMapping`-based
-> resolution + resolver unification (B4 — factual claim rejected after
-> REPL verification on the pinned Clojure 1.12.4, engineering adopted),
-> transition-start cache commit (B5), boundary validation (G1), per-file
-> source layers (G3), and minors. See [Review 3 Disposition](#review-3-disposition).
->
-> **Revision 4** — incorporates design review round 2
-> (`fix-wm-anno-enrichment-flow-ds-review-2.md`): transition contracts pinned
-> down, `:analyze-cache` threading design decided, nil-spec contract
-> documented. See [Review 2 Disposition](#review-2-disposition).
->
-> **Revision 3** — restructured into two phases. Phase 1 consolidates the
-> server's stateful constructs (decided after design review: fix the state
-> architecture *first*, rather than work around it). Phase 2 is the WM
-> enrichment flow itself, now expressed on the consolidated state.
-> HTTP is now a **read-only** contract: `POST /v1/annotations/reload` is
-> removed; `swap-session!` (in-memory) is the only mutation API.
->
-> Incorporates design review round 1
-> (`fix-wm-anno-enrichment-flow-ds-review-1.md`). See
-> [Review Disposition](#review-disposition) at the end.
+This plan has two phases. **Phase 1** consolidates the server's stateful
+constructs — the state architecture is fixed *first* so the enrichment work
+is not built on workarounds. **Phase 2** is the WM enrichment flow itself,
+expressed on the consolidated state.
+
+HTTP is a **read-only** contract: `POST /v1/annotations/reload` is removed;
+`swap-session!` / `reload-annotations!` (in-memory) are the only mutation
+API. A reload endpoint can be reintroduced later on top of the proven
+in-memory API if a workflow needs it.
 
 ## Problem
 
@@ -48,14 +34,14 @@ holding the cache atom created inside `api/app`), and `analyze-cache-atom`.
 
 The count isn't the problem — the **sharding** is. Session, annotations-spec,
 annotations, and analyze-cache form *one logical unit of state*: they change
-together or they lie. Every defect found in review round 1 was a
+together or they lie. Every defect observed in the enrichment work was a
 shard-synchronization bug, not an enrichment-logic bug:
 
 | Defect | Shard failure |
 |---|---|
-| Review #1: reload degrades after swap | built *result* stored where the *spec* belonged (`config-atom` vs `annotations-atom` confusion) |
-| Review #7: racy deref after swap | `reset!` on one atom, then `@` on it while others change |
-| New issue B: stale kondo analysis after `start!` restart | `analyze-cache-atom` clearing rule lived only in `swap-session!` |
+| Reload degrades after swap | built *result* stored where the *spec* belonged (`config-atom` vs `annotations-atom` confusion) |
+| Racy deref after swap | `reset!` on one atom, then `@` on it while others change |
+| Stale kondo analysis after `start!` restart | `analyze-cache-atom` clearing rule lived only in `swap-session!` |
 | Latent: mismatched cache entries | `cache/get-state` derefs `session-atom` and `annotations-atom` as two separate reads; a mid-swap request can pair session_t+1 with annotations_t and serve/cache it |
 
 Two structural smells reinforce this:
@@ -88,7 +74,7 @@ workarounds.
                     ;; (see "Transition contracts" → analyze-cache design).
 ```
 
-### System handle (returned by `start!`)
+### System handle (returned by `start-system!` / `start!`)
 
 ```clojure
 {:config      ;; validated StartOpts
@@ -101,28 +87,26 @@ workarounds.
 ### Pure transitions — the actual API, trivially unit-testable
 
 ```clojure
-(defn- transition-start  [state config] ...)              ;; State -> State
+(defn- transition-start  [config] ...)                    ;; Config -> State
 (defn- transition-swap   [state {:keys [session annotations]}] ...)
 (defn- transition-reload [state] ...)  ;; re-runs (:annotations-spec state)
 ```
 
 `transition-swap` records the spec as-given (nil for a session-only swap —
-matching the documented "annotations cleared" semantics), clears
+matching the documented "annotations cleared" semantics), reseeds
 `:analyze-cache` when the session identity changes, and derives
 `:annotations` via `build-annotations` (Phase 2). `transition-reload`
 re-derives from the stored spec against the current session — file-backed
-sources re-read from disk, auto-detect modes re-run. Because the transition
-receives the whole immutable state, `:reuse` enrichment stops being a
-cross-atom read entirely.
+sources re-read from disk, the memory layer re-derives. Because the
+transition receives the whole immutable state, `:reuse` enrichment stops
+being a cross-atom read entirely.
 
 ### Transition contracts
-
-Signatures and rules — the foundation Phase 2 builds on (review-2 issue 2):
 
 ```clojure
 (defn- transition-start
   "Config -> State.  Builds fresh state from a VALIDATED StartOpts
-   (schema validation is the shell's job — start! s/validates first).
+   (schema validation is the shell's job — start-system! s/validates first).
    `props-layer` accepts a session or a raw rulebase, so rulebase input
    flows through the same build path unchanged."
   [config]
@@ -152,25 +136,22 @@ Postconditions per key:
 | `:analyze-cache` — **committed** | `@tmp` (startup kondo results retained) | `@tmp` | `@tmp` (≡ seed when nothing new was analyzed) |
 
 All three transitions thread a temporary atom through `build-annotations`
-and commit `@tmp` — **including `transition-start`** (review-3 B5): seeding
-`{}` and committing `@tmp` retains the startup kondo analysis, so the first
+and commit `@tmp` — **including `transition-start`**: seeding `{}` and
+committing `@tmp` retains the startup kondo analysis, so the first
 `reload-annotations!` or annotations-only swap doesn't re-analyze every
 namespace the session just paid for.
 
 **`build-annotations` contract:** accepts `nil` (→ `{}`), an `AnnotationsSpec`
 map, or a bare form. nil is a *designed* input — both boundary schemas use
 `(s/maybe AnnotationsArg)` and session-only swaps rely on nil → `{}` — so it
-is documented on the function rather than guarded in one transition
-(review-2 issue 1: a `transition-reload`-only guard would treat the same nil
-inconsistently across transitions).
+is documented on the function itself.
 
 **`:analyze-cache` design — plain value in the state map, threaded through a
-per-build temporary atom** (review-2 issue 3, option A).
-`analyze-session-rules` requires a mutable `:cache-atom` holding
-`{ns-sym → analysis}` (writes are idempotent `swap! assoc` per namespace).
-The transition creates a temporary atom seeded from the incoming
-`:analyze-cache`, passes it down through `build-annotations`, and commits
-`@tmp` into the new state:
+per-build temporary atom.** `analyze-session-rules` requires a mutable
+`:cache-atom` holding `{ns-sym → analysis}` (writes are idempotent
+`swap! assoc` per namespace). The transition creates a temporary atom seeded
+from the incoming `:analyze-cache`, passes it down through
+`build-annotations`, and commits `@tmp` into the new state:
 
 ```clojure
 (defn- transition-swap [state {:keys [session annotations]}]
@@ -187,36 +168,36 @@ The transition creates a temporary atom seeded from the incoming
      :analyze-cache    @tmp}))
 ```
 
-Why not the alternatives:
+Alternatives considered and rejected:
 
-- **(B) atom stored inside the state map** — a mutable cell inside "pure"
-  state breaks value semantics: transition tests can no longer compare
-  states as plain data, and the state map stops being something you can
-  print, diff, and reason about. The tmp-atom design keeps the committed
-  state a pure value.
-- **(C) atom owned by the system handle** — splits the cache lifecycle out
-  of the transitions, recreating the round-1 issue-B hazard (`start!`
-  forgetting to clear). The reseed rule must live where session identity
-  changes: inside the transitions. The memoization-cell carve-out for the
-  *request* cache still stands — that cell self-invalidates by identity and
-  has no lifecycle rule to own.
+- **Atom stored inside the state map** — a mutable cell inside "pure" state
+  breaks value semantics: transition tests can no longer compare states as
+  plain data, and the state map stops being something you can print, diff,
+  and reason about. The tmp-atom design keeps the committed state a pure
+  value.
+- **Atom owned by the system handle** — splits the cache lifecycle out of
+  the transitions, recreating the "forgot to clear on restart" hazard. The
+  reseed rule must live where session identity changes: inside the
+  transitions. The memoization-cell carve-out for the *request* cache still
+  stands — that cell self-invalidates by identity and has no lifecycle rule
+  to own.
 
 The reseed rule is session-identity-based **only**. Changing the sidecar
 source without changing the session does NOT reseed: kondo analyzes rule
 *sources*, not annotation files, so cached per-ns analyses remain valid.
 
-**Concurrency & purity (user ruling):** all mutation entry points are
-operator-driven — REPL, CLI, tests — never HTTP, so swaps are effectively
-single-threaded and `swap!` CAS retries are not a live concern. We keep
-transitions pure regardless: it makes them unit-testable as plain functions
-over values and keeps reasoning local. If a concurrent mutation path is ever
-introduced, serialize mutations with a lock rather than designing around
-retries. Transitions perform value-deterministic I/O by design — sidecar
-re-reads (reload's whole purpose), kondo analysis (which may materialize
-its bundled config), and diagnostic prints such as the WM-unavailable
-warning (review-3 M4). These are read-only/idempotent from the state's
-perspective. Non-idempotent effects (Jetty start/stop, cache `warm!`) stay
-in the shells as a separation-of-concerns rule, not a retry-safety one.
+**Concurrency & purity:** all mutation entry points are operator-driven —
+REPL, CLI, tests — never HTTP, so swaps are effectively single-threaded and
+`swap!` CAS retries are not a live concern. Transitions are kept pure
+regardless: it makes them unit-testable as plain functions over values and
+keeps reasoning local. If a concurrent mutation path is ever introduced,
+serialize mutations with a lock rather than designing around retries.
+Transitions perform value-deterministic I/O by design — sidecar re-reads
+(reload's whole purpose), kondo analysis (which may materialize its bundled
+config), and diagnostic prints such as the WM-unavailable warning. These are
+read-only/idempotent from the state's perspective. Non-idempotent effects
+(Jetty start/stop, cache `warm!`) stay in the shells as a
+separation-of-concerns rule, not a retry-safety one.
 
 ### Public API — system-first, with a default-system facade
 
@@ -238,17 +219,18 @@ all keep working unchanged. The 2-arity forms plus `start-system!` enable
 isolated per-fixture systems in tests.
 
 Side effects (Jetty start/stop, cache warming, `println` diagnostics) stay
-**outside** the `swap!` as a separation-of-concerns rule (mutations are
-operator-driven and single-threaded — see "Concurrency & purity" above).
-Warming uses the state returned by `swap!`, never a follow-up deref.
+**outside** the `swap!` as a separation-of-concerns rule (see
+"Concurrency & purity" above). Warming uses the state returned by `swap!`,
+never a follow-up deref.
 
-Default-system semantics (review-3 B1/B2 — this supersedes part of review-2
-issue 5's resolution):
+Default-system semantics:
 
 - **Construction and registration are separate operations.** `start-system!`
   is the pure constructor: validate, build state, warm, bind Jetty, return
   the system map. It never touches `default-system` and never stops another
-  system — tests use it for true isolation.
+  system — tests use it for true isolation (a test that went through
+  `start!` would both stop the fixture's Jetty and hijack the default
+  mid-suite).
 - `start!` is the operator entry: if the previous default is bound to the
   **same port**, stop its Jetty **before** binding (same-port restart — the
   dominant REPL/`demo-run` workflow — must stop first or `run-jetty` throws
@@ -259,23 +241,21 @@ issue 5's resolution):
   — capture the earlier `start!` return value or `stop!` it explicitly.
 - `stop!` 0-arity stops the default and resets it to nil; `stop!` 1-arity
   resets the default too when stopping the system that *is* the default
-  (`identical?` check — review-3 G5), so no dangling default points at a
-  stopped system.
+  (`identical?` check), so no dangling default points at a stopped system.
 - 1-arity mutations with no system started fail fast via an explicit
   `require-system` guard ("no explorer system started") instead of NPE-ing
-  on a nil deref (review-3 G6).
+  on a nil deref.
 - **Test pattern:** tests that need isolation call `start-system!` and use
   the 2-arity forms exclusively — the fixture server is never stopped and
-  the default is never hijacked mid-suite. No `:register-as-default?` flag.
-  cognitect test-runner (the `:run-tests` alias) runs namespaces
-  sequentially in one JVM, so fixture/default interplay is deterministic.
+  the default is never hijacked mid-suite. cognitect test-runner (the
+  `:run-tests` alias) runs namespaces sequentially in one JVM, so
+  fixture/default interplay is deterministic.
 
 ### HTTP contract: read-only
 
 - **Remove `wrap-reload` and `POST /v1/annotations/reload`.** The endpoint is
   too limiting (re-derive only, no new state) and redundant once
-  `swap-session!` / `reload-annotations!` work correctly in-memory. It can be
-  reintroduced later on top of a proven in-memory API if a workflow needs it.
+  `swap-session!` / `reload-annotations!` work correctly in-memory.
 - No swap endpoint exists today and none is added. HTTP never mutates server
   state; all mutation goes through the in-memory API.
 - Removal surface: `wrap-reload` + the reload branch in `server.clj`, the
@@ -323,7 +303,7 @@ dumb: no enrichment, no ownership of state.
 3. One request `cache` cell per system (a memoization optimization, not
    domain state).
 
-That is 2N+1 atom *instances* for N running systems (review-3 M8).
+That is 2N+1 atom *instances* for N running systems.
 
 `server-instance`, `config-atom`, `session-atom`, `annotations-atom`,
 `cache-atom` (atom-of-atom), and `analyze-cache-atom` all disappear as
@@ -357,15 +337,15 @@ component variants emerge.
   after a session-only swap it is nil; `transition-reload` from that state
   yields `{}`.
 - `transition-start` retains the startup kondo analysis: after start with
-  an auto-detect mode, `(:analyze-cache state)` is non-empty (review-3 B5).
+  an auto-detect mode, `(:analyze-cache state)` is non-empty.
 - Multi-instance test: two systems from two `start-system!` calls hold
   independent state (drive via 2-arity `swap-session!`; assert no
   cross-talk), and neither call touches `default-system` or stops the
-  other's Jetty (review-3 B1).
+  other's Jetty.
 - Existing `server_test` / `integration_test` pass with only the
-  `start-server!` helper update shown below, via the default-system facade
+  `start-server!` helper update shown in §11, via the default-system facade
   (minus the removed reload-endpoint assertions, which become in-memory
-  `reload-annotations!` assertions) (review-3 M9).
+  `reload-annotations!` assertions).
 
 ---
 
@@ -402,7 +382,7 @@ for display.** `serialize/resolve-type` is the *boundary serializer* (strings
 what the API serves. Comparison/dedup must instead use one shared canonical
 form (`annotations/canonical-type-str`) everywhere: merge dedupe, enrichment
 coverage checks, and delta computation. Mixing the two is what produces
-"truly new" false positives and wasted enrichment work (review issue #6).
+"truly new" false positives and wasted enrichment work.
 
 ## Fixed Flows
 
@@ -422,7 +402,7 @@ start!({:session s, :annotations {:enrichment :auto-detect}})
   │         ├─ :session ← s
   │         ├─ :annotations-spec ← {:enrichment :auto-detect}
   │         ├─ tmp = (atom {})                 ;; analyze-cache seed
-  │         ├─ :analyze-cache ← @tmp           ;; startup kondo retained (B5)
+  │         ├─ :analyze-cache ← @tmp           ;; startup kondo retained
   │         └─ :annotations ← (build-annotations s spec {} tmp)
   │              │
   │              └─ build-auto-detect-annotations(s, tmp, nil, :auto-detect)
@@ -461,7 +441,7 @@ memory layer only claims types the static layers didn't already declare.
 ```
 swap-session!(system, {:session s, :annotations {:enrichment :auto-detect}})
   │
-  ├─ (swap! state-atom transition-swap opts)
+  ├─ (swap! state-atom transition-swap (select-keys opts [:session :annotations]))
   │    │
   │    └─ transition-swap
   │         ├─ :session ← s
@@ -513,13 +493,13 @@ reload-annotations!(system)
        │    ;; (nil after a session-only swap)
        │
        └─ :annotations ← (build-annotations (:session state) spec
-                                            (:annotations state))
+                                            (:annotations state)
+                                            (atom (:analyze-cache state)))
             ;; File-backed sources are re-read from disk and the memory
             ;; layer re-derives via ->memory-layer against the CURRENT
             ;; session.  The generated (kondo) layer rebuilds from the
-            ;; CARRIED-OVER per-ns analyses — kondo does NOT re-run
-            ;; (review-3 B3).  Request-cache invalidation depends on the
-            ;; spec kind (see below).
+            ;; CARRIED-OVER per-ns analyses — kondo does NOT re-run.
+            ;; Request-cache invalidation depends on the spec kind (below).
 ```
 
 **Reload semantics:** reload re-derives the *last effective spec* against the
@@ -530,21 +510,21 @@ it never no-ops on a stale built map. This replaces the removed
 **Cache behavior on reload:** `:analyze-cache` is carried over (session
 unchanged, kondo results still valid) — the generated layer is rebuilt from
 the *cached* per-ns analyses; only file-backed sources and the memory layer
-actually re-read/re-derive (review-3 B3). **Designed limitation:** no
-operator gesture invalidates kondo analysis short of a session swap — if a
-rule namespace is edited and re-loaded under the same session object, reload
-reuses the cached analysis. That is coherent (the session's compiled
-rulebase is equally stale) and refreshing means constructing a new session.
+actually re-read/re-derive. **Designed limitation:** no operator gesture
+invalidates kondo analysis short of a session swap — if a rule namespace is
+edited and re-loaded under the same session object, reload reuses the cached
+analysis. That is coherent (the session's compiled rulebase is equally
+stale) and refreshing means constructing a new session.
 
 For file-backed and auto-detect specs, reload commits a *fresh*
 `:annotations` reference even when the rebuilt value is `=` to the previous
 one, so the identity-based request cache rebuilds on next access and the
-post-swap `warm!` does real work (review-2 issue 7, scoped per review-3
-G2). Two designed paths return the *identical* reference instead: a `:reuse`
-spec with no source returns `current-annotations` — reload of a stored
-`:reuse` spec is a permanent no-op, the coherent reading of "keep what you
-have" — and bare in-memory maps / `MergedAnnotations` sources pass through
-unchanged (nothing on disk could have changed).
+post-swap `warm!` does real work. Two designed paths return the *identical*
+reference instead: a `:reuse` spec with no source returns
+`current-annotations` — reload of a stored `:reuse` spec is a permanent
+no-op, the coherent reading of "keep what you have" — and bare in-memory
+maps / `MergedAnnotations` sources pass through unchanged (nothing on disk
+could have changed).
 
 ### Summary: which enrichment modes produce which layers
 
@@ -585,8 +565,8 @@ build fresh. This is documented on `build-annotations`.)
 
 Phase 1: replace the six defonce atoms with `default-system` + per-system
 `state-atom`; add `transition-start` / `transition-swap` /
-`transition-reload`; restructure `start!` / `stop!` / `swap-session!` around
-them; add `reload-annotations!`; delete `wrap-reload`,
+`transition-reload`; restructure into `start-system!` / `start!` / `stop!` /
+`swap-session!` around them; add `reload-annotations!`; delete `wrap-reload`,
 `load-merged-annotations`, and the old `reload-annotations!` HTTP path.
 
 Phase 2, within the transitions:
@@ -594,8 +574,8 @@ Phase 2, within the transitions:
 #### a) `build-auto-detect-layers` → `build-static-layers`
 
 Renamed (memory no longer built here) and both non-props layers are validated
-through `ann.merge/layer` for consistency (review issue #9 — `->layer` is the
-coercion entry point; `layer` is the direct constructor/validator):
+through `ann.merge/layer` for consistency (`->layer` is the coercion entry
+point; `layer` is the direct constructor/validator):
 
 ```clojure
 (defn- build-static-layers
@@ -625,10 +605,10 @@ to the state map by the calling transition — see "Transition contracts" →
 analyze-cache design. `props-layer` accepts a session or a raw rulebase, so
 rulebase input flows through unchanged.)
 
-**Per-file source layers (review-3 G3):** each source entry becomes its own
-layer via `ann.merge/->layer` (path strings are read from disk; bare maps
-and `MergedAnnotations` pass through the same coercion). This preserves the
-old `:layers` startup semantics — per-file `:provenance` and per-callsite
+**Per-file source layers:** each source entry becomes its own layer via
+`ann.merge/->layer` (path strings are read from disk; bare maps and
+`MergedAnnotations` pass through the same coercion). This preserves the old
+`:layers` startup semantics — per-file `:provenance` and per-callsite
 `:from-layer` attribution — instead of flattening all files into one
 `:id :source` layer, and it eliminates the double `props-layer` fold that
 the coerce path performed. Consequence, chosen deliberately: `merge-layers`
@@ -685,31 +665,29 @@ callers/tests; transitions use the 4-arity to thread the cache):
 
    Boundary validation: a map containing :source or :enrichment is a spec
    and is validated against AnnotationsSpec; a map with neither key is a
-   bare annotations map (the ambiguity is inherent — see review-3 G1)."
+   bare annotations map (the ambiguity is inherent — see below)."
   ([session annotations-spec current-annotations]
    (build-annotations session annotations-spec current-annotations (atom {})))
   ([session annotations-spec current-annotations analyze-cache-atom]
    ...))
 ```
 
-**Boundary validation of spec-shaped maps (review-3 G1):** `AnnotationsArg`'s
-pred is tautological for maps (its final `(map? x)` clause swallows every
-map), so a typo like `{:enrichment :auto-dectect}` passed the boundary and
-only failed at the `case`-throw. Tighten: any map containing `:source` or
-`:enrichment` is `s/validate`d against `AnnotationsSpec` (whose `:enrichment`
-is already the enum — the typo now fails at the boundary with a schema
-error). The validation lives in `build-annotations`' normalization — the
-single choke point both `start!` and `swap-session!` flow through.
+**Boundary validation of spec-shaped maps:** `AnnotationsArg`'s pred is
+tautological for maps (its final `(map? x)` clause swallows every map), so a
+typo like `{:enrichment :auto-dectect}` would pass the boundary and only
+fail at the `case`-throw. Tighten: any map containing `:source` or
+`:enrichment` is `s/validate`d against `AnnotationsSpec` (whose
+`:enrichment` is already the enum — the typo now fails at the boundary with
+a schema error). The validation lives in `build-annotations`' normalization
+— the single choke point both `start!` and `swap-session!` flow through.
 Documented inherent ambiguity: a map with *neither* key (e.g. the typo
 `{:soruce "x.edn"}`) is indistinguishable from a bare annotations map and
-passes through — accepted; disallowing bare maps would break legacy
-callers.
+passes through — accepted; disallowing bare maps would break legacy callers.
 
 Combine the identical `:none`/`nil` branches, enumerate the auto-detect modes
 explicitly, and **throw on unknown enrichment** instead of silently degrading
-to props+source (a typo'd mode like `:auto-dectect` currently falls through
-`case` into the auto-detect default; a bare `case` would throw anyway — the
-explicit throw exists for the actionable message, review-2 issue 8):
+to props+source (a bare `case` would throw anyway; the explicit throw exists
+for the actionable message):
 
 ```clojure
 (case enrichment
@@ -730,11 +708,11 @@ explicit throw exists for the actionable message, review-2 issue 8):
           (format "Unknown :enrichment mode: %s" (pr-str enrichment)))))
 ```
 
-#### d) `start!` — validates, builds a system, no `:layers`
+#### d) `start-system!` / `start!` — validates, builds a system, no `:layers`
 
 ```clojure
 (s/defschema StartOpts
-  "Options for `start!`."
+  "Options for `start-system!` / `start!`."
   {:session SessionOrRulebase
    (s/optional-key :annotations) (s/maybe AnnotationsArg)
    (s/optional-key :port) s/Int
@@ -759,7 +737,7 @@ explicit throw exists for the actionable message, review-2 issue 8):
   (let [config (s/validate StartOpts config)   ;; fail fast at the boundary
         {:keys [session port working-memory-enabled]
          :or {port 9999 working-memory-enabled true}} config
-        state-atom (atom (transition-start config))   ;; VALIDATED config (M7)
+        state-atom (atom (transition-start config))   ;; the VALIDATED config
         {:keys [handler cache]} (api/app state-atom working-memory-enabled)
         _ (cache/warm! cache session (:annotations @state-atom))
         server (jetty/run-jetty handler {:port port :join? false})]
@@ -769,8 +747,8 @@ explicit throw exists for the actionable message, review-2 issue 8):
 (defn start!
   "Operator entry point: like start-system!, plus default-system management.
    Same-port restart stops the previous default's Jetty BEFORE binding
-   (BindException otherwise — review-3 B2); a previous default on a
-   different port keeps running."
+   (BindException otherwise); a previous default on a different port keeps
+   running."
   [config]
   (let [port (:port config 9999)
         prev @default-system]
@@ -784,13 +762,13 @@ explicit throw exists for the actionable message, review-2 issue 8):
   [system]
   (or system
       (throw (IllegalStateException.
-              "no explorer system started — call start! first"))))   ;; G6
+              "no explorer system started — call start! first"))))
 ```
 
 #### e) `swap-session!` — one atomic transition
 
 `SwapSessionOpts` (unchanged from the current codebase; shown for
-completeness, review-2 issue 4):
+completeness):
 
 ```clojure
 (s/defschema SwapSessionOpts
@@ -803,7 +781,7 @@ completeness, review-2 issue 4):
 
 Note: `:warm-cache?` is consumed by the shell only — `transition-swap`
 receives just `{:session :annotations}` (see "Transition contracts").
-Naming discipline through the implementation (review-2 issue 6): locals are
+Naming discipline through the implementation: locals are
 `spec`/`annotations-spec` for the spec and `built`/`annotations` for the
 derived map; the public opts key remains `:annotations`.
 
@@ -820,7 +798,7 @@ derived map; the public opts key remains `:annotations`.
        (throw (IllegalArgumentException.
                "swap-session! requires at least one of :session or :annotations")))
      (let [new-state (swap! (:state-atom system) transition-swap
-                            (select-keys opts [:session :annotations]))]   ;; M1
+                            (select-keys opts [:session :annotations]))]
        (when warm-cache?
          (cache/warm! (:cache system) (:session new-state) (:annotations new-state)))
        (:annotations new-state)))))
@@ -833,8 +811,8 @@ derived map; the public opts key remains `:annotations`.
   "Re-derives annotations from the last effective AnnotationsSpec against the
    current session.  File-backed sources are re-read from disk; the memory
    layer re-derives via ->memory-layer; the generated (kondo) layer rebuilds
-   from the cached per-ns analyses in the state (kondo does not re-run —
-   review-3 B3).  In-memory counterpart to the removed HTTP reload endpoint."
+   from the cached per-ns analyses in the state (kondo does not re-run).
+   In-memory counterpart to the removed HTTP reload endpoint."
   ([] (reload-annotations! (require-system @default-system)))
   ([system]
    (let [new-state (swap! (:state-atom system) transition-reload)]
@@ -856,9 +834,9 @@ as today (no more side-channel atom needed by `server`).
 
 ### 4. `server/src/clara/server/tools/graph/annotations.clj` — shared type canonicalization
 
-Add one canonicalization function used by *all* comparison sites (review
-issue #6). `type-str` stays as the ns-free core; `canonical-type-str` adds
-symbol resolution under a production namespace:
+Add one canonicalization function used by *all* comparison sites. `type-str`
+stays as the ns-free core; `canonical-type-str` adds symbol resolution under
+a production namespace:
 
 ```clojure
 (defn fq-name->namespace
@@ -894,26 +872,22 @@ symbol resolution under a production namespace:
      (type-str t))))
 ```
 
-**Resolution mechanism (review-3 B4):** `Namespace/getMapping` consults both
-interned vars and `:import`ed classes — imported class symbols live in the
-same ns-map lookup path as var symbols. Verified on this repo's pinned
-Clojure 1.12.4: `(ns-resolve ns 'AuditTrail)` returns the Class (it
-delegates to `Compiler/maybeResolveIn`, same table), so the docstring's
-equivalence claim holds; the round-3 review's nil result was not
-reproducible on the pinned runtime. `getMapping` is used directly because
-it is the documented public API rather than a Compiler internal.
+**Resolution mechanism:** `Namespace/getMapping` consults both interned vars
+and `:import`ed classes — imported class symbols live in the same ns-map
+lookup path as var symbols (verified on the pinned Clojure 1.12.4;
+`ns-resolve` also works here, but `getMapping` is the documented public API
+rather than a Compiler internal).
 
-**Resolver unification (review-3 B4, adopted hardening):** the codebase
-otherwise grows three type resolvers with subtly different semantics —
-`annotations/resolve-type-locally` (try/catch-guarded, derefs vars),
-`serialize/resolve-type` (unguarded, display strings), and this one.
-Consolidate behind one shared import-aware resolver in `annotations.clj`
-with one try/catch policy (guard resolution failures, degrade to nil →
-`(str t)`); `canonical-type-str` is "resolve, then canonical string" and
-`serialize/resolve-type` becomes display formatting on top of the same
-resolver. `annotations-delta`'s symbol types, `:props` insertion types, and
-EDN sidecar symbols then all canonicalize through one path. The three
-pinning tests are listed under [Tests](#11-tests).
+**Resolver unification:** the codebase otherwise grows three type resolvers
+with subtly different semantics — `annotations/resolve-type-locally`
+(try/catch-guarded, derefs vars), `serialize/resolve-type` (unguarded,
+display strings), and this one. Consolidate behind one shared import-aware
+resolver in `annotations.clj` with one try/catch policy (guard resolution
+failures, degrade to nil → `(str t)`); `canonical-type-str` is "resolve,
+then canonical string" and `serialize/resolve-type` becomes display
+formatting on top of the same resolver. `:props` insertion types, EDN
+sidecar symbols, and delta symbol types then all canonicalize through one
+path.
 
 `annotations-delta`'s `new-types` gains the rule's namespace (derived from
 the rule name via `fq-name->namespace`) so symbol types canonicalize the same
@@ -951,12 +925,13 @@ types that delta then discards (or vice versa).
 
 `edn/read-string "my-spec.edn"` returns the *symbol* `my-spec.edn` (valid
 EDN), so a naive parse leaks a symbol into `build-annotations` and explodes
-deep inside layer construction (review issue #4). Parse defensively:
+deep inside layer construction. And `edn/read-string` reads only the first
+form, silently ignoring trailing garbage. Parse defensively — exactly one
+form, EOF-checked:
 
 ```clojure
 (defn- read-edn-single
-  "Reads exactly one EDN form from s; trailing garbage is an error
-   (edn/read-string silently ignores it — review-3 M6)."
+  "Reads exactly one EDN form from s; trailing garbage is an error."
   [s]
   (let [r (java.io.PushbackReader. (java.io.StringReader. s))
         form (edn/read {:eof ::eof} r)]
@@ -979,7 +954,7 @@ deep inside layer construction (review issue #4). Parse defensively:
       ;; A bare path (parsed as a symbol/number, or not EDN at all):
       ;; read the file as an EDN spec.
       (if (file-exists? s)
-        (let [content (edn/read-string (slurp s))]
+        (let [content (read-edn-single (slurp s))]
           (if (map? content)
             content
             (throw (IllegalArgumentException.
@@ -992,13 +967,14 @@ deep inside layer construction (review issue #4). Parse defensively:
 
 #### c) `run-explorer-server` — `-l` and `--annotations` compose
 
-Rather than one flag silently discarding the other (review issues #2 and #5),
-the two compose predictably: `-l` supplies the spec's `:source` when the spec
-doesn't declare one; when both declare a source, the spec wins with a
-warning:
+Rather than one flag silently discarding the other, the two compose
+predictably: `-l` supplies the spec's `:source` when the spec doesn't declare
+one; when both declare a source, the spec wins with a warning. The existing
+warn-and-skip tolerance for missing `-l` files is preserved (a missing layer
+file warns and is skipped; a malformed spec is still fail-fast):
 
 ```clojure
-(let [layer (into []   ;; preserve the existing warn-and-skip tolerance (G4)
+(let [layer (into []   ;; preserve the existing warn-and-skip tolerance
                    (keep (fn [f]
                            (if (file-exists? f)
                              f
@@ -1024,22 +1000,22 @@ warning:
                   :working-memory-enabled working-memory-enabled}))
 ```
 
-`{:source ["a.edn" "b.edn"]}` is valid — `coerce-to-bare-annotations` maps
-`->layer` over vector entries, and `->layer` reads path strings from disk.
+`{:source ["a.edn" "b.edn"]}` is valid — each entry becomes its own layer
+via `ann.merge/->layer` in `build-static-layers`, which reads path strings
+from disk.
 
 ### 7. `server/dev/clara/server/graph/demo_run.clj`
 
 Inject the default `--annotations` (enrichment only) and keep the existing
 `-l` default for the curated sidecar — the composition logic in
 `run-explorer-server` merges them into
-`{:source [ann-path] :enrichment :auto-detect}`. No dead `--enrichment`
-check (review issue #3); the resource path is real:
+`{:source [ann-path] :enrichment :auto-detect}`. Flag detection must
+recognize both the separate-token and `--flag=value` forms (otherwise an
+equals-form flag slips past and a duplicate default gets injected):
 
 ```clojure
 (defn- flag-present?
-  "True when args contain FLAG as a separate token or in --flag=value form
-   (review-3 M5 — the = form would otherwise slip past and get a duplicate
-   injected)."
+  "True when args contain FLAG as a separate token or in --flag=value form."
   [args & flags]
   (some (fn [a]
           (some #(or (= a %) (str/starts-with? a (str % "="))) flags))
@@ -1116,8 +1092,8 @@ block; replace with an in-memory `(server/reload-annotations!)` call followed
 by `GET /v1/annotations` to prove the HTTP surface reflects in-memory
 mutation.
 
-**New Phase 2 test cases** (review issue #8 — the fix must not rest on the
-e2e demo scrape alone):
+**New Phase 2 test cases** (the fix must not rest on the e2e demo scrape
+alone):
 
 1. `test-build-annotations-auto-detect-with-memory` — call
    `build-annotations` (via `transition-start` or directly) with a fired
@@ -1129,7 +1105,7 @@ e2e demo scrape alone):
    shows WM-derived types. Uses `start-system!` (never touches
    `default-system`, never stops another system's Jetty) plus 2-arity
    mutations, so it neither disturbs the shared fixture server nor hijacks
-   the default mid-suite (review-3 B1).
+   the default mid-suite.
 3. `test-reload-after-session-only-swap` — start with
    `{:source path :enrichment :auto-detect}`, swap session-only (spec → nil),
    then in-memory `reload-annotations!` → `{}` (reload reproduces the swap).
@@ -1141,20 +1117,20 @@ e2e demo scrape alone):
 5. `test-build-annotations-unknown-enrichment` — `{:enrichment :auto-dectect}`
    fails fast: a spec-shaped map is validated against `AnnotationsSpec` at
    the `build-annotations` choke point (enum violation → schema error), with
-   the `case`-throw as the second line of defense (review-3 G1).
+   the `case`-throw as the second line of defense.
 6. `test-canonical-type-str-resolution` — (i) an unqualified record-class
    symbol in `:props` (`AuditTrail`) canonicalizes identically to its Class
    under the rule's prod-ns; (ii) qualified symbols as stored in EDN
    sidecars match the Class's `.getName`; (iii) an unloaded namespace
    (`find-ns` → nil) degrades to `(str t)` — pinned behavior for
    `main -s session.bin` runs that deserialize without rule namespaces
-   loaded (review-3 B4).
+   loaded.
 
 ## Files NOT Changed
 
 - **`annotations/merge.clj`** — No changes (`layer`, `annotations-delta->layer`
   already in place).
-- **`serialize.clj`** — *Small* change (review-3 B4 resolver unification):
+- **`serialize.clj`** — *Small* change (resolver unification, §4):
   `resolve-type` stays the boundary serializer for display, but its
   resolution logic is reimplemented on top of the shared import-aware
   resolver in `annotations.clj` instead of its own unguarded fallback.
@@ -1224,73 +1200,3 @@ e2e demo scrape alone):
    ```
    Should **add** `AuditTrail`, `ComplianceReview`, `compliance-review-result`
    and restore interface ancestor linkages — not the ~783-line removal.
-
-## Review Disposition
-
-How each round-1 review issue was resolved (revisions 2–3):
-
-| # | Issue | Resolution |
-|---|-------|------------|
-| 1 | Reload breaks after swap (result stored as spec) | **Adopted, simplified, then subsumed by Phase 1.** The state map's `:annotations-spec` always holds the *spec* (principle 3), written only by pure transitions. One coherent state value — no shadow keys, no cross-atom discipline to maintain. |
-| 2 | demo-run drops curated annotations | **Adopted via composition.** `-l` and `--annotations` compose: `-l` fills the spec's `:source` when absent. Makefile/demo_run keep both flags; nothing is discarded. |
-| 3 | `--enrichment` dead code + placeholder path | **Adopted.** Check removed; real resource path used; default injection is a single `--annotations` flag. |
-| 4 | `parse-annotations-arg` symbol bug | **Adopted with sharper semantics.** Non-map/non-string EDN parses are treated as file paths; file content must be a spec map; clear `IllegalArgumentException` otherwise. |
-| 5 | Silent `--layer` discard | **Adopted.** Warning printed when the spec's own `:source` wins over `-l`. |
-| 6 | Type normalization inconsistency | **Adopted (option B, sharpened).** New `annotations/canonical-type-str` is the single comparison form (ns-aware for symbols); `resolve-type` remains display-only. `annotations.clj` and `analyze.clj` move out of "Files NOT Changed". |
-| 7 | Racy deref after swap | **Subsumed by Phase 1.** Single `swap!` per mutation; warming uses the `swap!` return value. |
-| 8 | No unit tests for start! + WM | **Adopted.** Five new Phase 2 cases plus pure-transition Phase 1 tests. |
-| 9 | `->layer` vs `layer` | **Adopted.** `layer` constructor used directly; generated layer now validated too. |
-| 10 | `current-annotations` only used by `:reuse` | **Documented** on `build-annotations`; arg kept (needed by `:reuse`). |
-| 11 | `:layers` fully gone from config | Confirmed; completed by Phase 1 (no config-atom at all). |
-| — | `:none`/`nil` duplicate branches | Combined into one `case` branch. |
-
-Additional issues found during review incorporation (not in the review):
-
-| # | Issue | Resolution |
-|---|-------|------------|
-| A | Unknown `:enrichment` (e.g. typo `:auto-dectect`) falls through `case` into the auto-detect default and silently yields props+source | `case` enumerates modes explicitly; default throws. |
-| B | `start!` never cleared `analyze-cache-atom` despite its docstring ("cleared when the session reference changes identity") — stale kondo analysis across restarts | Subsumed by Phase 1: analyze-cache lives in the state map; transitions own its lifecycle for both `start!` and swaps. |
-| C | `start!` had no schema validation of `:annotations`; bad input exploded deep in `merge-layers` | New `StartOpts` schema validated at the boundary. |
-| D | WM-unavailable warning only fired for `:auto-detect-from-memory`, not `:auto-detect` | Warning covers both. |
-| E | Reload didn't warm the cache | HTTP reload removed (read-only contract); in-memory `reload-annotations!` warms from the `swap!` return value. |
-| F | Six-atom sharding: every round-1 defect was a shard-synchronization bug; `cache-atom` atom-of-atom side channel; test suites share global state | **Phase 1**: one state atom per system + pure transitions + system handle; Integrant-shaped but library-free (decision recorded in Phase 1). |
-| G | `POST /v1/annotations/reload` too limiting as the only HTTP mutation | **Removed.** HTTP is read-only; `swap-session!` / `reload-annotations!` in-memory are the mutation API. Endpoint can return later on top of the proven in-memory API. |
-
-## Review 2 Disposition
-
-How each round-2 issue was resolved (revision 4). Two recommendations were
-rejected/corrected — see issues 1 and 5, and the reseed-rule correction
-under issue 2.
-
-| # | Issue | Resolution |
-|---|-------|------------|
-| 1 | nil spec path through `build-annotations` is accidental | **Rejected (B), adopted (A).** nil is a designed input, not an accident: both boundary schemas use `(s/maybe AnnotationsArg)`, `build-annotations` explicitly normalizes nil, and session-only swaps already rely on nil → `{}`. A `transition-reload`-only guard would treat the same nil inconsistently across transitions. Fixed by documenting nil on the function's contract. |
-| 2 | Transition signatures/contracts undefined | **Adopted** — "Transition contracts" subsection with signatures, per-key postconditions, purity rules. Two corrections to the review: the reseed rule is session-identity-based *only* (the review's `transition-swap` remark about clearing on sidecar change contradicts its own correct `transition-reload` reasoning — kondo analyzes rule sources, not annotation files); and `props-layer` was verified to accept a raw rulebase, so no special-casing needed. `:warm-cache?` excluded from transitions (shell concern). |
-| 3 | `:analyze-cache` atom vs value (blocking) | **Adopted (A) with the mechanism the review was missing**: a per-build *temporary* atom seeded from the incoming state value, committed via `@tmp` — no signature side-channels, no shared mutable cell. (B) rejected: mutable cell in the state map breaks value semantics/testability. (C) rejected: splits the reseed rule out of the transitions, recreating round-1 issue B's hazard class. Verified against `analyze-session-rules`' actual protocol (`{ns-sym → analysis}`, idempotent writes, defaults to a fresh atom). |
-| 4 | `SwapSessionOpts` schema undefined | **Adopted** — schema now shown in the plan (it already existed in the codebase; the plan had failed to include it). |
-| 5 | `default-system` race in concurrent tests | **Adopted as documentation, flag rejected.** `:register-as-default?` is API surface for a test-only concern. Added the recommended test pattern (capture the `start!` handle, use 2-arity forms), last-`start!`-wins semantics, `stop!` resetting the default, and fail-fast on mutations with no system started. |
-| 6 | `annotations` overloaded (spec vs map) | **Adopted as implementation note** — naming discipline stated on `swap-session!`: `spec`/`annotations-spec` vs `built`/`annotations` for locals; public opts key `:annotations` unchanged. |
-| 7 | Reload always re-warms | **Confirmed intended** — reload commits a fresh reference by design; noted explicitly on Path F. |
-| 8 | `case` exhaustiveness | **Confirmed** — bare `case` throws regardless; the explicit throw exists for message quality (`pr-str` of the offending value). |
-| — | Concurrency (user ruling) | Mutations are operator-driven (REPL/CLI/tests), never HTTP ⇒ effectively single-threaded; no CAS-retry engineering. Transition purity retained for testability and local reasoning, not retry-safety. Future concurrency → a lock, not retry-tolerant design. |
-
-## Review 3 Disposition
-
-How each round-3 finding was resolved (revision 5). B4's factual claim was
-verified against the repo's pinned Clojure and rejected (engineering
-hardening adopted); B1/B2 supersede part of review-2 issue 5's resolution.
-
-| # | Finding | Resolution |
-|---|---------|------------|
-| B1 | Unconditional default-Jetty stop contradicts multi-instance, breaks test #2 | **Adopted via the constructor/registration split (option b) + port-collision rule.** `start-system!` never touches `default-system` or other systems; `start!` = stop same-port previous default → `start-system!` → register. Beyond the review's argument: any always-register variant of (a) would also let test #2 *hijack the default*, breaking the fixture's later 1-arity calls — only the split fixes both. |
-| B2 | Stop-after-bind ordering regresses same-port restart | **Adopted.** `start!` stops the previous default's Jetty before `run-jetty` (matches current code); folded into the port-collision rule. |
-| B3 | Path F "kondo re-runs" is false; no invalidation gesture | **Adopted as documentation.** Path F corrected: the generated layer rebuilds from *cached* per-ns analyses; file sources and the memory layer re-read/re-derive. Designed limitation stated: no kondo-invalidation gesture short of a session swap — coherent because a stale session's compiled rulebase is equally stale. No new opt. |
-| B4 | `canonical-type-str` claim "demonstrably false" (`ns-resolve` ignores imports) | **Factual claim rejected — verified.** On the repo's pinned Clojure 1.12.4, `ns-resolve` delegates to `Compiler/maybeResolveIn` and DOES resolve `:import`ed classes (imported class symbols live in the same ns-map lookup as vars): `(ns-resolve ns 'AuditTrail)` returns the Class. Reproduced against this repo's own rule namespaces. **Engineering adopted**: resolve via `Namespace/getMapping` (documented public API, not a Compiler internal), unify the three drifting resolvers (`resolve-type-locally` / `serialize/resolve-type` / `canonical-type-str`) behind one import-aware helper with one try/catch policy, and add the three pinning tests (unqualified `:props` symbol, qualified EDN symbol, unloaded-ns degradation). |
-| B5 | `transition-start` discards startup kondo analysis | **Adopted.** All transitions thread a tmp atom and commit `@tmp`; the postcondition table now distinguishes seed from committed value; Path A updated. |
-| G1 | `AnnotationsArg` pred tautological for maps | **Adopted.** Spec-shaped maps (containing `:source`/`:enrichment`) are `s/validate`d against `AnnotationsSpec` at the `build-annotations` choke point — typo'd enum values now fail at the boundary. Bare-map ambiguity (`{:soruce ...}`) documented as inherent and accepted. |
-| G2 | "Fresh reference" claim false for `:reuse` / in-memory sources | **Adopted.** Claim scoped to file-backed and auto-detect specs; `:reuse`-spec reload documented as a permanent no-op ("keep what you have"); bare maps/`MergedAnnotations` pass through by reference. |
-| G3 | Vector source flattens per-file provenance; dup-id behavior change | **Adopted per-file layers.** `build-static-layers` maps `ann.merge/->layer` over each source entry — per-file `:provenance`/`:from-layer` preserved (old `:layers` semantics), double `props-layer` fold eliminated, `merge-layers` dup-`:id` strictness restored as deliberate fail-fast. Documented. |
-| G4 | Missing `-l` file tolerance dropped | **Adopted.** Existing warn-and-skip preserved at the CLI composition layer; malformed specs remain fail-fast. |
-| G5 | `stop!` 1-arity leaves a dangling default | **Adopted.** Resets `default-system` when `(identical? system @default-system)`. |
-| G6 | Fail-fast not in the sketches | **Adopted.** `require-system` guard shown in both 1-arity mutation sketches. |
-| M1–M9 | Minors | **All adopted**: `select-keys` into `transition-swap`; cognitect test-runner cited (was "kaocha"); 4-arity calls in Path A/B/D diagrams; purity restated (value-deterministic reads + diagnostic prints inside transitions, non-idempotent writes in shells); `--flag=` detection in demo_run; EDN trailing-garbage check via `PushbackReader`; validated config passed to `transition-start`; "three kinds, 2N+1 instances"; "pass with only the helper update". |
