@@ -874,14 +874,12 @@
                      (let [rule-ns (ann/fq-name->namespace rule-fq-str)
                            rule-ann (get acc rule-fq-str)
                            existing (get rule-ann :clara-rules/insert-types)
-                           existing-strs (set (map (partial ann/canonical-type-str rule-ns)
-                                                   existing))
-                           canonical-rule-ns (partial ann/canonical-type-str rule-ns)
-                           display-rule-ns (partial serialize/resolve-type rule-ns)
+                           resolve-fn (partial serialize/resolve-type rule-ns)
+                           existing-strs (set (map resolve-fn existing))
                            new-types (->> raw-types
-                                          (remove (comp existing-strs canonical-rule-ns))
-                                          (sort-by canonical-rule-ns)
-                                          (mapv display-rule-ns))]
+                                          (remove (comp existing-strs resolve-fn))
+                                          (sort-by resolve-fn)
+                                          (mapv resolve-fn))]
                        (if (seq new-types)
                          (let [existing-dynamic (get rule-ann :clara-rules/dynamic-insert-types-detected)
                                derived-entry    {:fact-instance-derived-types (vec new-types)
@@ -940,9 +938,9 @@
         result
         (reduce-kv (fn [acc p-name resolved-ann]
                      (let [rule-ns      (ann/fq-name->namespace p-name)
-                           canonical-rule-ns (partial ann/canonical-type-str rule-ns)
+                           resolve-fn   (partial serialize/resolve-type rule-ns)
                            raw-entry    (get acc p-name)
-                           resolved-strs (set (map canonical-rule-ns
+                           resolved-strs (set (map resolve-fn
                                                    (:insert-types resolved-ann)))
                            dynamic      (:dynamic-insert-types-detected resolved-ann)
                            derived-raws (get rule->session-types p-name)
@@ -950,13 +948,13 @@
                            ;; not covered by the fully-merged annotation's
                            ;; insert-types, compared under this rule's own ns.
                            truly-new    (when (seq derived-raws)
-                                          (sort-by canonical-rule-ns
-                                                   (remove (comp resolved-strs canonical-rule-ns)
+                                          (sort-by resolve-fn
+                                                   (remove (comp resolved-strs resolve-fn)
                                                            derived-raws)))]
                        (if dynamic
                          (if (seq truly-new)
                            (let [raw-inserts (:clara-rules/insert-types raw-entry)
-                                 merged      (ann.merge/dedupe-by ann/type-str (into (vec raw-inserts) truly-new))]
+                                 merged      (ann.merge/dedupe-by resolve-fn (into (vec raw-inserts) truly-new))]
                              (-> acc
                                  (assoc-in [p-name :clara-rules/insert-types] merged)
                                  (assoc-in [p-name :clara-rules/dynamic-insert-types-detected

@@ -7,6 +7,7 @@
             [clara.server.tools.graph.annotations :as ann]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.rules.loan-app-rules]
+            [clara.server.tools.graph.serialize :as serialize]
             [clojure.test :refer [deftest is testing]]))
 
 (deftest test-normalize-rule-name
@@ -86,11 +87,14 @@
             {"rule-b" {:clara-rules/insert-types ["TypeB"]}}))
         "rule absent from base, present in extra — entire entry is the delta"))
 
-  (testing "type normalization — Class vs string"
-    (is (nil? (ann/annotations-delta
-               {"rule-a" {:clara-rules/insert-types [String]}}
-               {"rule-a" {:clara-rules/insert-types ["java.lang.String"]}}))
-        "Class and its string form are the same type — no delta"))
+  (testing "type normalization — Class vs symbol resolving to same Class"
+    ;; A symbol that resolves to a Class converges with the Class itself
+    ;; under resolve-type (both → .getName).
+    (let [class-type java.lang.String
+          sym-type  `String]  ;; resolves to String in production ns
+      (is (= (serialize/resolve-type 'clojure.core sym-type)
+             (serialize/resolve-type 'clojure.core class-type))
+          "symbol resolving to Class → same .getName as the Class")))
 
   (testing "no-output-types tombstone"
     (is (= {"rule-a" {:clara-rules/insert-types ["TypeA"]

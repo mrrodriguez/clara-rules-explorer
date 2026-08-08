@@ -1,6 +1,6 @@
 (ns clara.server.tools.graph.annotations
-  "Rule-name normalization, type normalization, per-production annotation
-   lookup, and annotation-map diffing for the layered annotation library
+  "Rule-name normalization, per-production annotation lookup, and
+   annotation-map diffing for the layered annotation library
    (see docs/rule-annotations.md).  Handles arbitrary fact types (classes,
    keywords, symbols) as supported by Clara's pluggable fact-type-fn.
 
@@ -17,12 +17,14 @@
      All public functions that touch annotation maps normalize top-level
      rule-name keys to strings: `normalize-rule-name` converts a single key,
      `normalize-annotations` transforms an entire map, and `get-annotation`
-     normalizes the lookup key before access.")
+     normalizes the lookup key before access."
+  (:require [clara.server.tools.graph.serialize :as serialize]))
 
 (defn type-str
-  "Normalizes a type value to its canonical string form for deduplication
-   across layers that may represent the same logical type as a Class, Symbol,
-   or String."
+  "Normalizes a type's concrete representation to a canonical string for
+   deduplication.  A Class, its .getName string, and an unqualified symbol
+   all converge to the same string — different representations of the same
+   logical type canonicalize identically."
   [t]
   (cond
     (nil? t) nil
@@ -38,28 +40,6 @@
    namespace segment."
   [fq-str]
   (some-> fq-str symbol namespace symbol))
-
-(defn canonical-type-str
-  "Canonical string form of a type value for COMPARISON (merge dedupe,
-   enrichment coverage checks, delta computation).
-
-   Unlike `serialize/resolve-type` — the boundary serializer for display —
-   strings pass through unquoted and keywords lose their colon, so a Class,
-   its `.getName` string, and its source symbol all canonicalize
-   identically.  When `prod-ns` is given, symbols are resolved in that
-   namespace first, so a rule's `AuditTrail` symbol and the
-   `my.ns.AuditTrail` Class compare equal."
-  ([t] (type-str t))
-  ([prod-ns t]
-   (if (symbol? t)
-     (if-let [resolved (and prod-ns (ns-resolve prod-ns t))]
-       (cond
-         (class? resolved) (.getName ^Class resolved)
-         (var? resolved)   (str (symbol (-> resolved meta :ns ns-name str)
-                                        (-> resolved meta :name str)))
-         :else             (str resolved))
-       (str t))
-     (type-str t))))
 
 (defn normalize-rule-name
   "Normalizes a rule-name key to its canonical string form.
@@ -167,13 +147,14 @@
 
 (defn- new-types
   "Types under `types-key` in `enriched` that `base` did not have.
-   Compared through `canonical-type-str` with the rule's namespace, so a
-   Class, its `.getName` string, and its source symbol all canonicalize
-   identically — same form used during enrichment."
+   Comparison uses `serialize/resolve-type` which is kind-explicit:
+   keywords (with colon), strings (quoted), and classes (.getName) never
+   collide, and symbols are resolved against the rule's namespace so a
+   source symbol and its Class converge."
   [types-key rule-ns base enriched]
-  (let [canon (partial canonical-type-str rule-ns)
-        known (into #{} (map canon) (get base types-key))]
-    (into [] (remove #(contains? known (canon %)))
+  (let [resolve-fn (partial serialize/resolve-type rule-ns)
+        known (into #{} (map resolve-fn) (get base types-key))]
+    (into [] (remove #(contains? known (resolve-fn %)))
           (get enriched types-key))))
 
 (defn- dimension-delta

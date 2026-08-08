@@ -356,3 +356,144 @@
     (testing "reflected in HTTP endpoint"
       (is (= "return-test"
              (get-in (http-annotations) [:r1 :clara-rules/notes]))))))
+
+;; ---------------------------------------------------------------------------
+;; Unknown enrichment mode throws
+;; ---------------------------------------------------------------------------
+
+(deftest test-build-annotations-unknown-enrichment
+  (testing "unknown enumeration value throws (schema validation catches it first)"
+    (let [sess (->test-session)]
+      ;; Schema validation catches unknown enum values before the case throw.
+      (is (thrown? Exception
+                   (server/build-annotations sess
+                                             {:enrichment :auto-dectect}
+                                             nil))
+          "typo in enrichment mode throws")))
+  (testing "completely bogus enrichment also throws"
+    (let [sess (->test-session)]
+      (is (thrown? Exception
+                   (server/build-annotations sess
+                                             {:enrichment :some-future-mode}
+                                             nil))
+          "totally unknown enrichment mode throws"))))
+
+;; ---------------------------------------------------------------------------
+;; build-annotations with :auto-detect and working memory
+;; ---------------------------------------------------------------------------
+
+(deftest test-build-annotations-auto-detect-with-memory
+  (testing "with :auto-detect — WM enrichment detected"
+    (let [sess (->test-session-with-wm-enrichment)
+          result (server/build-annotations sess
+                                           {:enrichment :auto-detect}
+                                           nil)]
+      (is (map? result))
+      (is (seq result) "non-empty annotations")
+      (is (contains? result rule-collect-given-docs)
+          "rule discovered by static analysis")
+      ;; WM enrichment should add dynamic-insert-types for rules that
+      ;; only get insertions at runtime.
+      (is (some? (get-in result [rule-collect-given-docs :clara-rules/dynamic-insert-types-detected]))
+          "WM enrichment detected runtime insert types")
+      (is (seq (get-in result [rule-collect-given-docs :clara-rules/insert-types]))
+          "WM enrichment merged runtime types into insert-types")))
+
+  (testing "with :auto-detect-from-memory — WM enrichment only (no static analysis)"
+    (let [sess (->test-session-with-wm-enrichment)
+          result (server/build-annotations sess
+                                           {:enrichment :auto-detect-from-memory}
+                                           nil)]
+      (is (map? result))
+      ;; Props layer always present
+      (is (contains? result rule-app-outcome)
+          "rule with explicit :props always present")
+      ;; collect-app-given-docs has no :props insert-types but fires at runtime;
+      ;; WM enrichment detects the runtime insertions.
+      (is (some? (get-in result [rule-collect-given-docs :clara-rules/dynamic-insert-types-detected]))
+          "WM enrichment detected runtime-only insert types")))
+
+  (testing "without WM (rulebase only) — :auto-detect still runs static analysis"
+    (let [rulebase (->rulebase (->test-session))
+          result (server/build-annotations rulebase
+                                           {:enrichment :auto-detect}
+                                           nil)]
+      (is (map? result))
+      (is (seq result) "non-empty — static analysis runs even without WM")
+      (is (contains? result rule-collect-given-docs)
+          "static analysis found rules"))))
+
+;; ---------------------------------------------------------------------------
+;; start-system! with :auto-detect enrichment
+;; ---------------------------------------------------------------------------
+
+(deftest test-start-auto-detect-enrichment
+  (let [port 19004
+        sess (->test-session-with-wm-enrichment)
+        system (server/start-system!
+                {:port port
+                 :session sess
+                 :annotations {:enrichment :auto-detect}
+                 :working-memory-enabled true})]
+    (try
+      (testing "state atom reflects WM enrichment"
+        (let [{:keys [annotations]} @(:state-atom system)]
+          (is (map? annotations))
+          (is (seq annotations))
+          (is (contains? annotations rule-app-outcome)
+              "rule with :props always present")
+          (is (contains? annotations rule-collect-given-docs)
+              "rule discovered by static analysis")
+          (is (some? (get-in annotations [rule-collect-given-docs :clara-rules/dynamic-insert-types-detected]))
+              "WM enrichment detected runtime insert types")
+          (is (contains? annotations rule-dynamic-compliance)
+              "dynamic insertion rule captured by static analysis")))
+
+      (testing "annotations via HTTP match state atom"
+        (let [url (fn [path] (format "http://localhost:%s/v1%s" port path))
+              resp (client/get (url "/annotations") {:accept :json})
+              http-annos (json/read-value (:body resp)
+                                          (json/object-mapper {:decode-key-fn identity}))]
+          (is (map? http-annos))
+          (is (contains? http-annos rule-app-outcome)
+              "HTTP annotations include props rules")))
+      (finally
+        (server/stop! system)))))
+
+;; ---------------------------------------------------------------------------
+;; Reload semantics
+;; ---------------------------------------------------------------------------
+
+(deftest test-reload-after-session-only-swap
+  (let [sess (->test-session-with-facts)
+        _ (server/swap-session! {:session sess
+                                 :annotations {:enrichment :auto-detect}})]
+    (testing "session-only swap clears annotations"
+      (let [result (server/swap-session! {:session (->test-session)})]
+        (is (= {} result) "session-only swap clears annotations to {}")))
+
+    (testing "reload after session-only swap re-derives from nil spec → {}"
+      (let [result (server/reload-annotations!)]
+        (is (= {} result) "reload with nil spec returns {}")
+        (is (= {} (http-annotations)) "HTTP reflects empty annotations")))))
+
+(deftest test-reload-after-swap-with-spec
+  (let [sess (->test-session-with-facts)
+        spec {:enrichment :auto-detect}]
+    (testing "swap with auto-detect enrichment"
+      (let [result (server/swap-session! {:session sess
+                                          :annotations spec})]
+        (is (map? result))
+        (is (seq result))
+        (is (contains? result rule-collect-given-docs)
+            "static analysis present after swap")))
+
+    (testing "reload re-derives same enriched annotations from stored spec"
+      (let [result (server/reload-annotations!)]
+        (is (map? result))
+        (is (seq result) "non-empty after reload")
+        (is (contains? result rule-collect-given-docs)
+            "static analysis still present after reload")
+        ;; Session has working memory from the swap, so WM enrichment should persist.
+        (is (some? (get-in result [rule-collect-given-docs :clara-rules/dynamic-insert-types-detected]))
+            "WM enrichment present after reload")))))

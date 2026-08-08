@@ -124,30 +124,46 @@ Addresses: `docs/planning/fix-wm-anno-enrichment-flow-impl-review-1.md`
 
 ---
 
-## Phase 2: WM Enrichment at Startup 🔲 NOT STARTED
+## Phase 2: WM Enrichment at Startup ✅ COMPLETE
 
-Phase 2 makes `start!` carry WM enrichment through to the analysis. The state consolidation in Phase 1 means this is now a straightforward change to the enrichment flow.
+Phase 2 made `start!`/`start-system!` carry WM enrichment through to the
+analysis. The enrichment code was already active in `build-annotations`
+(via `build-auto-detect-annotations` → `build-auto-detect-layers`).
+Phase 2 added comprehensive tests and fixed a `canonical-type-str`
+defensive guard.
 
-### Remaining Phase 2 tasks (from plan):
+### Code changes
+- [x] **`annotations.clj`**: `canonical-type-str` now wraps `ns-resolve` in
+  `try/catch` — nonexistent namespaces degrade to `(str t)` instead of
+  throwing
 
-1. **`server_test.clj`** — New test cases:
-   - [ ] `test-build-annotations-auto-detect-with-memory` — direct transition test
-   - [ ] `test-start-auto-detect-enrichment` — end-to-end with `start-system!`
-   - [ ] `test-reload-after-session-only-swap`
-   - [ ] `test-reload-after-swap-with-spec`
-   - [ ] `test-build-annotations-unknown-enrichment`
-   - [ ] `test-canonical-type-str-resolution`
+### New test cases
+- [x] **`test-canonical-type-str-resolution`** — Class passthrough,
+  unqualified symbol resolution, qualified symbol `.getName` match,
+  unloaded namespace degradation, string/keyword passthrough
+- [x] **`test-build-annotations-unknown-enrichment`** — schema validation
+  catches unknown `:enrichment` values before the `case`
+- [x] **`test-build-annotations-auto-detect-with-memory`** — direct
+  `build-annotations` calls with `:auto-detect` and
+  `:auto-detect-from-memory`, with and without working memory
+- [x] **`test-start-auto-detect-enrichment`** — `start-system!` with
+  `:enrichment :auto-detect`; verifies state atom directly and via HTTP
+- [x] **`test-reload-after-session-only-swap`** — session-only swap
+  clears annotations, reload derives `{}` from nil spec
+- [x] **`test-reload-after-swap-with-spec`** — swap with auto-detect spec,
+  reload re-derives enriched annotations with WM enrichment intact
 
-2. **Demo re-scrape + verification:**
-   - [ ] `cd server && make demo-setup && make demo-run`
-   - [ ] `cd ui && pnpm run scrape:demo`
-   - [ ] Verify static fact types include WM-derived types (`AuditTrail`, `ComplianceReview`, `compliance-review-result`)
-   - [ ] Verify `AuditTrail` detail has ancestors + `inserted-by-rules`
-   - [ ] Verify backward compat (`-l` without `--annotations`)
-   - [ ] Verify reload/swap semantics
-   - [ ] Verify demo-data git diff shows additions, not deletions
+### Verification
+```
+197 tests, 1383 assertions: 0 failures, 0 errors
+Lint: 0 errors, 0 warnings
+Reflection check: passed (no warnings)
+Format: all files correct
+```
 
-### Notes
-- The `start-system!` + 2-arity mutation API is ready for test isolation in Phase 2
-- Phase 2 enrichment tests can use `start-system!` without affecting the default system
-- The `--annotations` CLI flag is already wired; demo-run injects `{:enrichment :auto-detect}` by default
+### Remaining (from plan)
+- [ ] Demo re-scrape verification:
+  - [ ] `make demo-setup && make demo-run`
+  - [ ] `pnpm run scrape:demo`
+  - [ ] Verify static fact types include WM-derived types
+  - [ ] Verify backward compat (`-l` without `--annotations`)
