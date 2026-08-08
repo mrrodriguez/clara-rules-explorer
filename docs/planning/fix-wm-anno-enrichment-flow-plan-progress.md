@@ -129,18 +129,14 @@ Addresses: `docs/planning/fix-wm-anno-enrichment-flow-impl-review-1.md`
 Phase 2 made `start!`/`start-system!` carry WM enrichment through to the
 analysis. The enrichment code was already active in `build-annotations`
 (via `build-auto-detect-annotations` → `build-auto-detect-layers`).
-Phase 2 added comprehensive tests and fixed a `canonical-type-str`
-defensive guard.
+Phase 2 added comprehensive tests and eliminated the redundant
+`canonical-type-str` function (see deviation rationale below).
 
 ### Code changes
-- [x] **`annotations.clj`**: `canonical-type-str` now wraps `ns-resolve` in
-  `try/catch` — nonexistent namespaces degrade to `(str t)` instead of
-  throwing
+- [x] **`annotations.clj`**: Deleted `canonical-type-str`; added `serialize`
+  require; `new-types` now uses `serialize/resolve-type` for comparison
 
 ### New test cases
-- [x] **`test-canonical-type-str-resolution`** — Class passthrough,
-  unqualified symbol resolution, qualified symbol `.getName` match,
-  unloaded namespace degradation, string/keyword passthrough
 - [x] **`test-build-annotations-unknown-enrichment`** — schema validation
   catches unknown `:enrichment` values before the `case`
 - [x] **`test-build-annotations-auto-detect-with-memory`** — direct
@@ -160,6 +156,29 @@ Lint: 0 errors, 0 warnings
 Reflection check: passed (no warnings)
 Format: all files correct
 ```
+
+### Plan deviation: `canonical-type-str` deleted, `resolve-type` used instead
+
+The plan (§4, "Resolver unification") called for a new `canonical-type-str`
+function separate from `serialize/resolve-type`, on the rationale that the
+latter was a "boundary serializer for display" with artifacts (quotes,
+colons, `symbol[...]` wrappers) that must be stripped for comparison.
+
+This turned out to be backwards.  Those artifacts ARE kind-discriminators:
+colon-prefixed keywords, `pr-str`-quoted strings, and `symbol[...]`-wrapped
+unresolved symbols never collide.  Stripping them (as `canonical-type-str`
+did) CREATED collisions (`:thing` vs `"thing"` both → `"thing"`) that then
+required manual `class:`/`keyword:`/`string:` tags to fix.
+
+`resolve-type` already handled everything needed:
+- Symbol resolution (converges `AuditTrail` symbol and its Class)
+- Kind discrimination (keyword colon, string quotes, symbol wrapper)
+
+The fix: delete `canonical-type-str` entirely.  Comparison sites
+(`new-types`, `add-auto-detected-annotations`,
+`enrich-annotations-from-session`) now use `(partial serialize/resolve-type
+rule-ns)`.  The 1-arity `type-str` remains for `merge.clj` dedup callers
+that need Class/String/Symbol convergence without namespace resolution.
 
 ### Remaining (from plan)
 - [ ] Demo re-scrape verification:
