@@ -9,9 +9,39 @@ Instead, you MUST use the `context-mode` sandbox tools:
 
 **Rationale:** These tools keep raw data in the sandbox and only return indexed summaries or specific answers to the context window.
 
+# Server State Architecture
+
+Server state is consolidated into a single `state-atom` per system instance:
+
+```clojure
+{:session           ;; live Clara session or raw rulebase
+ :annotations-spec  ;; the AnnotationsSpec that produced :annotations
+ :annotations       ;; derived bare annotations
+ :analyze-cache}    ;; per-ns kondo memoization (plain immutable map value)
+```
+
+**Atom discipline:** all mutation entry points are operator-driven (REPL, CLI,
+tests) — never HTTP, so swaps are effectively single-threaded. Transitions are
+pure functions over state values (`transition-start`, `transition-swap`,
+`transition-reload`). If a concurrent mutation path is ever introduced,
+serialize with a lock rather than designing around CAS retries.
+
+- Do NOT add new per-domain atoms. New state keys go into the existing
+  consolidated state map.
+- Mutate via `swap!` — never `(reset! a (f @a))` (race against concurrent
+  swaps).
+- Use the return value of `swap!` rather than dereferencing after mutation
+  (the value may have changed again).
+- Side effects (Jetty start/stop, cache warming, println diagnostics) stay
+  OUTSIDE `swap!` — consume the value returned by `swap!`, never a follow-up
+  deref.
+
 # Local Development & Overrides
 
-This project defaults to the public Maven release of `clara-rules`. To develop against a local fork, use the `CLARA_HOME` environment variable (managed via `direnv`).
+This project builds on the **gateless fork** of clara-rules — `com.github.gateless/clara-rules`
+in `deps.edn` — **not** the upstream `com.cerner/clara-rules` (Cerner, now Oracle). The public
+Maven release of the gateless fork is used by default. To develop against a local checkout
+of the gateless fork, use the `CLARA_HOME` environment variable (managed via `direnv`).
 
 1.  **Terminal:** Use the `clj-local` helper function:
     ```bash
@@ -23,7 +53,13 @@ This project defaults to the public Maven release of `clara-rules`. To develop a
 
 To ensure changes are correctly verified and to maintain development velocity, you MUST follow these steps in order:
 
-1.  **MANDATORY: Iterative Feedback (REPL):** If an nREPL server is available (check with `clj-nrepl-eval --discover-ports`), you MUST use `clj-nrepl-eval` for quick feedback on individual tests. This is the fastest way to work and avoids the overhead of starting a new JVM.
+1.  **MANDATORY: Formatting:** After every code change, run `make format` to
+    auto-format all source files via cljfmt. CI's `format-check` will fail if
+    this is skipped, so formatters that do not guarantee cljfmt compatibility
+    (e.g. clojure-lsp) must be verified against it.
+
+2.  **MANDATORY: Iterative Feedback (REPL):** If an nREPL server is available (check with `clj-nrepl-eval --discover-ports`), you MUST use `clj-nrepl-eval` for quick feedback on individual tests. This is the fastest way to work and avoids the overhead of starting a new JVM.
+
     ```bash
     clj-nrepl-eval -p <PORT> <<'EOF'
     (require '[clara.server.tools.graph.core-test] :reload)
@@ -31,13 +67,15 @@ To ensure changes are correctly verified and to maintain development velocity, y
     EOF
     ```
 
-2.  **Targeted Test (CLI):** If no REPL is available, use `clojure.test` directly from the CLI.
+3.  **Targeted Test (CLI):** If no REPL is available, use `clojure.test` directly from the CLI.
+
     ```bash
     clojure -M:test -e "(require '[clojure.test :as t] '<namespace>) (let [result (t/run-tests '<namespace>)] (System/exit (+ (:fail result) (:error result))))"
     ```
-    *Example:* `clojure -M:test -e "(require '[clojure.test :as t] 'clara.server.tools.graph.core-test) (t/run-tests 'clara.server.tools.graph.core-test)"`
 
-3.  **Full Suite Verification:** Run the entire project test suite.
+    _Example:_ `clojure -M:test -e "(require '[clojure.test :as t] 'clara.server.tools.graph.core-test) (t/run-tests 'clara.server.tools.graph.core-test)"`
+
+4.  **Full Suite Verification:** Run the entire project test suite.
     ```bash
     make test
     ```
@@ -47,10 +85,12 @@ To ensure changes are correctly verified and to maintain development velocity, y
 To ensure code quality and adherence to Clojure standards, use `clj-kondo`:
 
 1.  **Targeted Linting:** Lint specific files or directories for quick feedback during development.
+
     ```bash
     clojure -M:lint --lint <file-or-dir>
     ```
-    *Example:* `clojure -M:lint --lint src/clara/server/tools/graph/`
+
+    _Example:_ `clojure -M:lint --lint src/clara/server/tools/graph/`
 
 2.  **Full Project Linting:** Run the full project linting.
     ```bash
@@ -59,4 +99,26 @@ To ensure code quality and adherence to Clojure standards, use `clj-kondo`:
 
 # Schema Libraries
 
-This project uses `plumatic/schema` and NOT `malli`. This is due to its tight integration with `clara-rules` which itself uses `plumatic/schema`. Do not attempt to migrate or use `malli` in this project.
+### Schema Validation
+
+**All test namespaces MUST** enable `schema.test/validate-schemas` via a `:once`
+fixture:
+
+```clojure
+(:require ... [schema.test :as st])
+(use-fixtures :once st/validate-schemas)
+```
+
+This catches schema violations in `s/defn`-annotated handler return values at
+test time.  When combining with other `:once` fixtures, compose them:
+`(use-fixtures :once st/validate-schemas other-fixture)`.
+
+# Documentation
+
+## Docstrings
+
+Prefer `s/defschema` over large annotated docstrings for describing the shape
+of map arguments and return values.  A schema is compile-time verifiable,
+self-documenting, and stays in sync with code changes.  Use docstrings for
+*why*, not *what* — keep them concise (1-3 lines).  Reserve long-form
+commentary for architecture docs in `docs/`.

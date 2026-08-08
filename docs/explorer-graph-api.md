@@ -491,9 +491,8 @@ Returns the currently loaded merged annotations (a `MergedAnnotations` value wit
 }
 ```
 
-#### `POST /v1/annotations/reload`
-
-Re-reads file-backed annotation layers from disk. In-memory layers are kept as-is. Idempotent. Returns the new `MergedAnnotations` value (same shape as `GET`).
+HTTP is read-only — all mutation goes through the in-memory
+`swap-session!` / `reload-annotations!` API in `clara.server.graph.server`.
 
 ---
 

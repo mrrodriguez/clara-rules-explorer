@@ -17,6 +17,19 @@
   (:require [clojure.string :as str]))
 
 ;; ---------------------------------------------------------------------------
+;; helpers
+;; ---------------------------------------------------------------------------
+
+(defn- non-production-interns
+  "Returns the sorted list of symbols interned in the namespace `ns-sym`
+   that are not in `production-names`."
+  [ns-sym production-names]
+  (->> (ns-interns (the-ns ns-sym))
+       keys
+       (remove production-names)
+       sort))
+
+;; ---------------------------------------------------------------------------
 ;; reconstruct-ns-source helpers
 ;; ---------------------------------------------------------------------------
 
@@ -144,9 +157,17 @@
              :offset base-source-line-count
              :tag->production {tag-sym production-local-name-sym}}`."
   [ns-sym productions base-source-fn normalize-key-fn]
-  (let [base-source (or (base-source-fn ns-sym)
+  (let [real-source (base-source-fn ns-sym)
+        base-source (or real-source
                         (reconstruct-ns-source ns-sym))
-        offset (count (str/split-lines base-source))
+        prod-names (into #{} (map (comp symbol name normalize-key-fn :name))
+                         productions)
+        declare-form (when (nil? real-source)
+                       (let [helpers (non-production-interns ns-sym prod-names)]
+                         (when (seq helpers)
+                           (str "(declare " (str/join " " helpers) ")\n"))))
+        extended-source (str base-source (or declare-form ""))
+        offset (count (str/split-lines extended-source))
         snippets (map-indexed
                   (fn [idx production]
                     (let [tag (symbol (str "__clara_explorer_rule_" idx "__"))
@@ -158,6 +179,6 @@
                        :local-name local-name
                        :form (format "(def %s (fn [] %s))" tag rhs-str)}))
                   productions)]
-    {:source (str base-source "\n" (str/join "\n" (map :form snippets)) "\n")
+    {:source (str extended-source "\n" (str/join "\n" (map :form snippets)) "\n")
      :offset offset
      :tag->production (into {} (map (juxt :tag :local-name)) snippets)}))

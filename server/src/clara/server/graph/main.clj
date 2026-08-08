@@ -7,6 +7,7 @@
             [clojure.data.fressian :as fres]
             [clojure.string :as str]
             [clojure.java.io :as io]
+            [clojure.edn :as edn]
             [clojure.tools.cli :refer [parse-opts]]
             [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
@@ -69,6 +70,12 @@
    [nil "--working-memory-enabled BOOL" "Set to false to disable working-memory routes (rulebase analysis only)."
     :default true
     :parse-fn parse-boolean-option]
+   [nil "--annotations EDN"
+    (str "Annotations spec as inline EDN or a path to an EDN file containing one."
+         "  Inline:  --annotations '{:source \"a.edn\" :enrichment :auto-detect}'"
+         "  File:    --annotations my-spec.edn"
+         "  When the spec has no :source, any -l/--layer flags supply it.")
+    :default nil]
    [nil "--generate-analysis DIR" "Generate annotations and analysis EDN files to the specified output directory."
     :id :generate-analysis-dir]
    [nil "--load-session-state-fn SYMBOL" "Symbol naming a function to load the session state."
@@ -119,6 +126,40 @@
                  (not (file-exists? facts-path)))
           {:error (format "Error: facts file not found: %s  (use --facts to specify a different path)" facts-path)}
           {:facts-path facts-path})))))
+
+(defn- read-edn-single
+  "Reads exactly one EDN form from s; trailing garbage is an error."
+  [s]
+  (let [r (java.io.PushbackReader. (java.io.StringReader. s))
+        form (edn/read {:eof ::eof} r)]
+    (when-not (identical? ::eof (edn/read {:eof ::eof} r))
+      (throw (IllegalArgumentException.
+              (format "Trailing data after EDN form: %s" (pr-str s)))))
+    form))
+
+(defn- parse-annotations-arg
+  "Parses the --annotations value: inline EDN (a spec map, or a bare string
+   treated as {:source s}), or a path to an EDN file containing a spec.
+   Anything else is an error."
+  [s]
+  (let [parsed (try (read-edn-single s)
+                    (catch Exception _ ::not-edn))]
+    (cond
+      (map? parsed)    parsed
+      (string? parsed) {:source parsed}
+      :else
+      ;; A bare path (parsed as a symbol/number, or not EDN at all):
+      ;; read the file as an EDN spec.
+      (if (file-exists? s)
+        (let [content (read-edn-single (slurp s))]
+          (if (map? content)
+            content
+            (throw (IllegalArgumentException.
+                    (format "Invalid --annotations file %s: expected an AnnotationsSpec map, got %s"
+                            s (pr-str content))))))
+        (throw (IllegalArgumentException.
+                (format "Invalid --annotations: %s (not a valid EDN spec map or an existing file)"
+                        s)))))))
 
 (defn- resolve-fn [x]
   (cond
@@ -213,20 +254,39 @@
 (defn run-explorer-server
   "Starts the explorer server with the given options."
   [options facts-path]
-  (let [{:keys [session layer port load-session-state-fn working-memory-enabled]} options]
+  (let [{:keys [session layer port load-session-state-fn working-memory-enabled annotations]} options
+        ;; Preserve the existing warn-and-skip tolerance for missing -l files
+        layer' (into []
+                     (keep (fn [f]
+                             (if (file-exists? f)
+                               f
+                               (println (format "Warning: layer file not found, skipping: %s" f)))))
+                     layer)
+        spec (some-> annotations parse-annotations-arg)
+        annotations-spec
+        (cond
+          (and spec (nil? (:source spec)) (seq layer'))
+          (assoc spec :source (vec layer'))        ;; -l becomes the spec's source
+
+          (and spec (some? (:source spec)) (seq layer'))
+          (do (println (format "Warning: --annotations :source takes priority; --layer values ignored: %s"
+                               (pr-str layer')))
+              spec)
+
+          spec          spec
+          (seq layer')  {:source (vec layer')}
+          :else         nil)]
     (println (format "Loading session from: %s" session))
     (when (or (not load-session-state-fn) (file-exists? facts-path))
       (println (format "Loading facts from:   %s" facts-path)))
-    (doseq [layer-path layer]
-      (if (file-exists? layer-path)
-        (println (format "Loading annotation layer: %s" layer-path))
-        (println (format "Warning: annotation layer file not found: %s" layer-path))))
+    (doseq [layer-path layer']
+      (println (format "Loading annotation layer: %s" layer-path)))
     (let [loaded-session (load-session-state session facts-path load-session-state-fn)]
       (println (format "Session deserialized. Starting server on port %s ..." port))
       (server/start!
        {:session loaded-session
         :port port
-        :layers (into [] (filter file-exists?) layer)
+        :annotations annotations-spec
         ;; nil when absent — start!'s :or default (true) applies
         :working-memory-enabled working-memory-enabled})
       (println (format "Clara Graph Server running at http://localhost:%s" port))

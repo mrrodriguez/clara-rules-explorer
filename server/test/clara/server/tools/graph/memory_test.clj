@@ -7,6 +7,7 @@
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
+            [clara.server.tools.graph.rules.nil-safety-test-rules]
             [clojure.test :refer [deftest is testing]]))
 
 (defn- ->test-session
@@ -339,3 +340,64 @@
         (when-let [analysis-type (get analysis-types type-name)]
           (is (= (:id analysis-type) type-id)
               (str "session id for " type-name " matches the analysis id")))))))
+
+(deftest test-nil-excluded-from-all-facts
+  (testing "Nil facts inserted via insert-all! are excluded from :all-facts by fact-visible?"
+    (let [fact (clara.server.tools.graph.rules.nil-safety-test-rules/->NilSafetyFact "f1")
+          session (-> (r/mk-session 'clara.server.tools.graph.rules.nil-safety-test-rules)
+                      (r/insert fact)
+                      (r/fire-rules))
+          snapshot (memory/session-snapshot session)
+          facts (:facts snapshot)]
+
+      ;; Snapshot builds without throwing
+      (is (map? snapshot))
+      (is (seq facts) "Snapshot should contain the triggering fact")
+
+      ;; Nil should not appear — it was filtered at get-wrapped-fact-groups
+      (let [nil-facts (filterv (fn [[_id f]]
+                                 (nil? (:data f)))
+                               facts)]
+        (is (empty? nil-facts)
+            "Nil facts should be excluded from the snapshot")))))
+
+(deftest test-unknown-fact-type-substitution
+  (testing "fact-type-fn returning nil for a non-nil fact — substitutes unknown-fact-type"
+    (let [fact (clara.server.tools.graph.rules.nil-safety-test-rules/->NilSafetyFact "f1")
+          ;; Custom fact-type-fn that returns nil for everything
+          nil-ft-fn (constantly nil)
+          session (-> (r/mk-session 'clara.server.tools.graph.rules.nil-safety-test-rules
+                                    :fact-type-fn nil-ft-fn)
+                      (r/insert fact)
+                      (r/fire-rules))
+          snapshot (memory/session-snapshot session)
+          facts (:facts snapshot)]
+
+      (is (map? snapshot))
+      (is (seq facts) "Snapshot should contain the fact")
+
+      ;; The fact should get the unknown-fact-type sentinel
+      (is (every? (fn [[_id f]]
+                    (= (get-in f [:type :name])
+                       ":clara.tools.graph.analyze/unknown-fact-type"))
+                  facts)
+          "All facts should have unknown-fact-type since fact-type-fn returns nil")
+
+      (let [[_id f] (first facts)]
+        (is (false? (get-in f [:type :known]))
+            "Unknown type should be known: false")
+        (is (some? (get-in f [:type :id]))
+            "Should have a deterministically generated route-id")))))
+
+(deftest test-nil-insertion-analysis-no-crash
+  (testing "Full pipeline: rule that inserts nil → analysis does not crash"
+    (let [fact (clara.server.tools.graph.rules.nil-safety-test-rules/->NilSafetyFact "f1")
+          session (-> (r/mk-session 'clara.server.tools.graph.rules.nil-safety-test-rules)
+                      (r/insert fact)
+                      (r/fire-rules))
+          analysis (core/rulebase-analysis
+                    session
+                    (ann.merge/merge-layers [(ann.merge/props-layer session)]))]
+      (is (map? analysis))
+      (is (contains? analysis :rules))
+      (is (contains? analysis :fact-types)))))

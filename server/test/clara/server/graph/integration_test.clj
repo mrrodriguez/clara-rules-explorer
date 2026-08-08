@@ -111,7 +111,7 @@
               layers [loan-doc-annotations-path]}} opts]
     (server/start! {:port *port*
                     :session (session-fn session-opts)
-                    :layers layers})))
+                    :annotations {:source (vec layers)}})))
 
 (defn with-server
   "Runs `f` with a server up (see `start-server!` for the session options),
@@ -221,10 +221,6 @@
       :body
       json/read-value))
 
-(defn post-annotations-reload []
-  (-> (client/post (->url "/annotations/reload") {:accept :json})
-      :status))
-
 ;; ---------------------------------------------------------------------------
 ;; Tests — loan-doc-rules + loan-app-rules session
 ;; ---------------------------------------------------------------------------
@@ -282,11 +278,15 @@
 (deftest test-loan-doc-annotations-endpoints
   (with-server
     (fn []
-      (testing "Annotations retrieval and reload"
-        (let [annotations (get-annotations)
-              annotations-reload (post-annotations-reload)]
-          (is (some? annotations))
-          (is (= 200 annotations-reload)))))))
+      (testing "Annotations retrieval and in-memory reload"
+        (let [annotations (get-annotations)]
+          (is (some? annotations)))
+        ;; In-memory reload should succeed and return annotations
+        (let [result (server/reload-annotations!)]
+          (is (map? result)))
+        ;; HTTP endpoint reflects the reload
+        (let [annotations-after (get-annotations)]
+          (is (some? annotations-after)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Tests — loan-hierarchy-rules session

@@ -199,19 +199,6 @@
                {:callsites callsites
                 :resolution (ann.callsite/aggregate-resolution callsites)})))))
 
-(defn type-str
-  "Normalizes a type value to its canonical string form for deduplication
-   across layers that may represent the same logical type as a Class, Symbol,
-   or String."
-  [t]
-  (cond
-    (nil? t) nil
-    (class? t) (.getName ^Class t)
-    (keyword? t) (str (symbol t))
-    (symbol? t) (str t)
-    (string? t) t
-    :else (str t)))
-
 (defn dedupe-by
   "Like `distinct` but compares by (f x) rather than x itself."
   [f coll]
@@ -228,8 +215,8 @@
    recognized as the same type).  `:replace` takes `b` only."
   [strategy a b]
   (if (= :replace strategy)
-    (dedupe-by type-str b)
-    (dedupe-by type-str (into (vec a) b))))
+    (dedupe-by ann/type-str b)
+    (dedupe-by ann/type-str (into (vec a) b))))
 
 (defn- contributing
   "Adds a layer id to a union/deep-merge origin: keys merged by union record
@@ -414,13 +401,13 @@
   (reduce (fn [ra [_ types-k dm-k]]
             (let [dm (get ra dm-k)
                   a (get ra types-k)
-                  d (dedupe-by type-str
+                  d (dedupe-by ann/type-str
                                (into []
                                      (comp (remove :dangling?)
                                            (mapcat :resolved-types))
                                      (:callsites dm)))
                   final (case mode
-                          :additive (dedupe-by type-str (into (vec a) d))
+                          :additive (dedupe-by ann/type-str (into (vec a) d))
                           ;; 'has a detection map' means has callsites — with
                           ;; no callsites there is nothing to derive from and
                           ;; the authored types stand
@@ -538,3 +525,75 @@
   ([merged] (:provenance merged))
   ([merged rule-name]
    (get (:provenance merged) (ann/normalize-rule-name rule-name))))
+
+;; ---------------------------------------------------------------------------
+;; MergedAnnotations type predicate and coercion
+;; ---------------------------------------------------------------------------
+
+(defn merged-annotations?
+  "True when `x` is a MergedAnnotations value — a map with both
+   `:annotations` and `:provenance` keys.  Key membership is tested with
+   `some` because bare maps may have string keys and `contains?` throws
+   ClassCastException on those."
+  [x]
+  (boolean
+   (and (map? x)
+        (some #{:annotations} (keys x))
+        (some #{:provenance} (keys x)))))
+
+(defn ->bare-annotations
+  "Unwraps a MergedAnnotations to its bare rule→annotation map; bare maps
+   pass through unchanged.  Use at coercion boundaries where either form
+   may arrive."
+  [x]
+  (if (merged-annotations? x)
+    (:annotations x)
+    x))
+
+(defn annotations-delta->layer
+  "Wraps an `annotations-delta` result as a validated Layer with the given
+  `id` and `source` provenance info.
+
+  `delta-annotations` holds **only what was added** over the base — see
+  `ann/annotations-delta`.  Carrying the full enriched map instead would make
+  this layer re-claim every key the base already owns, defeating the
+  provenance the split exists to preserve."
+  [id source delta-annotations]
+  (layer {:id id
+          :source source
+          :annotations delta-annotations}))
+
+(defn ->layer
+  "Coerces `x` to a Layer: a path string or File is read from disk via
+   `read-layer`; a map is validated as an in-memory layer via `layer`."
+  [x]
+  (if (or (string? x) (instance? java.io.File x))
+    (read-layer x)
+    (layer x)))
+
+(defn coerce-to-bare-annotations
+  "Coerces an annotations input to a bare rule→annotation map.
+
+   `annotations-input` may be:
+     - A bare rule→annotation map (passes through)
+     - A MergedAnnotations value (unwrapped to its `:annotations` payload)
+     - A vector of Layer maps (merged via `merge-layers`, with
+       `props-layer` from `session` folded in first as the base)
+     - A string path to a layer file (read via `read-layer` and merged).
+
+   `session` is only needed when `annotations-input` is a vector of layers
+   or a string path."
+  [annotations-input session]
+  (let [layers (cond
+                 (or (string? annotations-input)
+                     (instance? java.io.File annotations-input))
+                 [annotations-input]
+                 (vector? annotations-input) annotations-input
+                 :else nil)]
+    (if layers
+      (:annotations
+       (merge-layers
+        (into [(props-layer session)]
+              (map ->layer)
+              layers)))
+      (->bare-annotations annotations-input))))

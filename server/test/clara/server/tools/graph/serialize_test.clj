@@ -160,7 +160,10 @@
     (let [long-a (apply str (repeat 80 \a))
           long-b (str long-a "b")]
       (is (= 69 (count (s/route-id long-a))))
-      (is (not= (s/route-id long-a) (s/route-id long-b))))))
+      (is (not= (s/route-id long-a) (s/route-id long-b)))))
+
+  (testing "nil returns nil — no route-id for nil (upstream should filter)"
+    (is (nil? (s/route-id nil)))))
 
 (deftest test-serialize-type-ref
   (testing "Known flag reflects membership in the known set"
@@ -172,6 +175,9 @@
               :known true}
              ref))
       (is (false? (:known ghost)))))
+
+  (testing "nil type returns nil — upstream should filter before serialization"
+    (is (nil? (s/serialize-type-ref #{} nil nil))))
 
   (testing "Kind-explicit name with nil ns-name"
     (is (= "symbol[my.ns/foo]" (:name (s/serialize-type-ref #{} nil 'my.ns/foo))))
