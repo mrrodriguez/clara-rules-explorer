@@ -6,10 +6,10 @@ organized separately — do not mix tooling or conventions between them.
 
 ## Project Layout
 
-| Directory | Language | Toolchain | Test runner |
-|-----------|----------|-----------|-------------|
-| `server/` | Clojure (tools.deps) | `make` | `make test` |
-| `ui/`     | TypeScript + Svelte 5 | `pnpm`  | `pnpm run test` |
+| Directory | Language              | Toolchain | Test runner     |
+| --------- | --------------------- | --------- | --------------- |
+| `server/` | Clojure (tools.deps)  | `make`    | `make test`     |
+| `ui/`     | TypeScript + Svelte 5 | `pnpm`    | `pnpm run test` |
 
 ---
 
@@ -42,13 +42,14 @@ Annotation maps (loaded from EDN sidecar files, generated from kondo analysis,
 or enriched from session data) use **string keys** for rule names — never symbols.
 The normalization layer lives in `server/src/clara/server/tools/graph/annotations.clj`:
 
-| Function | Purpose |
-|---|---|
-| `normalize-rule-name` | Normalize a single key to its canonical string form |
+| Function                | Purpose                                                         |
+| ----------------------- | --------------------------------------------------------------- |
+| `normalize-rule-name`   | Normalize a single key to its canonical string form             |
 | `normalize-annotations` | Normalize all top-level keys to strings; returns a `sorted-map` |
-| `get-annotation` | Canonical accessor — normalizes the lookup key, then `get`s |
+| `get-annotation`        | Canonical accessor — normalizes the lookup key, then `get`s     |
 
 **Rules:**
+
 1. Every boundary that reads, writes, or receives annotations from outside must
    normalize: `load-sidecar`, `write-annotations!`, `generate-annotations-from-analysis`,
    `add-auto-detected-annotations`, `enrich-annotations-from-session`, `merge-annotations`.
@@ -89,9 +90,10 @@ or modify clara-rules source code, resolve it in this order:
    echo "$CLARA_HOME"   # e.g. /Users/mrrodriguez/Projects/gateless/clara-rules
    ```
 2. **Maven cache fallback** — if `CLARA_HOME` is unset, look in
-   `~/.m2/repository` for clara-rules artifacts
-   (`~/.m2/repository/com/cerner/clara-rules*`). Note: this yields jars, not
-   source — check for `-sources.jar` files if you need actual source.
+   `~/.m2/repository` for clara-rules artifacts. This project depends on the
+   **gateless fork** (`com.github.gateless/clara-rules`, see `server/deps.edn`),
+   so look under `~/.m2/repository/com/github/gateless/clara-rules*` — **not**
+   upstream `com/cerner/clara-rules` (Cerner/Oracle).
 3. **Ask the user** — if neither is available, ask the user where their
    clara-rules checkout lives before guessing.
 

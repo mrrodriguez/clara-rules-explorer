@@ -38,28 +38,34 @@
 
 (defn- slug
   "URL-safe slug of a name: every char outside [A-Za-z0-9.-] replaced by '-',
-   runs collapsed, leading/trailing '-' trimmed, capped at 60 chars."
+   runs collapsed, leading/trailing '-' trimmed, capped at 60 chars.
+   nil (or any name that slugs to empty) yields \"x\"."
   [s]
-  (let [slug (-> s
-                 (str/replace #"[^A-Za-z0-9.-]" "-")
-                 (str/replace #"-+" "-")
-                 (str/replace #"^-|-$" ""))
-        slug (subs slug 0 (min 60 (count slug)))]
-    (if (empty? slug) "x" slug)))
+  (let [slugged (-> (or s "")
+                    (str/replace #"[^A-Za-z0-9.-]" "-")
+                    (str/replace #"-+" "-")
+                    (str/replace #"^-|-$" ""))
+        slugged (subs slugged 0 (min 60 (count slugged)))]
+    (if (empty? slugged) "x" slugged)))
 
 (defn- sha1-base36
-  "Base36 representation of the SHA-1 digest of `s`."
+  "Base36 representation of the SHA-1 digest of `s`; nil treated as \"\"
+   (so a nil name gets the same hash as an empty one)."
   [^String s]
   (let [digest (java.security.MessageDigest/getInstance "SHA-1")
-        bytes (.digest digest (.getBytes s "UTF-8"))]
+        bytes (.digest digest (.getBytes (or s "") "UTF-8"))]
     (.toString (BigInteger. 1 bytes) 36)))
 
 (defn- route-id*
   "Deterministic URL-safe id for a canonical serialized name: slug of the name
    plus an 8-char base36 SHA-1 suffix.  The id is a pure function of the name,
-   so re-running the analysis never changes existing ids."
+   so re-running the analysis never changes existing ids.  nil returns nil
+   with a WARN — callers should filter nil before reaching this point."
   [s]
-  (str (slug s) "-" (subs (sha1-base36 s) 0 8)))
+  (if (nil? s)
+    (do (println "WARN: route-id* called with nil name — skipping")
+        nil)
+    (str (slug s) "-" (subs (sha1-base36 s) 0 8))))
 
 (def route-id
   "Memoized `route-id*` — the same name recurs in thousands of ProductionDep
@@ -74,9 +80,13 @@
    used to resolve symbol types."
   [known-set prod-ns x]
   (let [name (resolve-type prod-ns x)]
-    {:name name
-     :id (route-id name)
-     :known (contains? known-set name)}))
+    (if (nil? name)
+      (do (println (str "WARN: serialize-type-ref received a nil-resolving type token: "
+                        (pr-str x) " — dropping. prod-ns=" prod-ns))
+          nil)
+      {:name name
+       :id (route-id name)
+       :known (contains? known-set name)})))
 
 (defn serialize-match
   "Serializes raw {:producer-type ... :consumer-type ...} pairs (the
@@ -189,7 +199,7 @@
           (serialize-node [node]
             (if (map? node)
               (cond-> node
-                (contains? node :type) (update :type #(serialize-type-ref known-set prod-ns %))
+                (some? (:type node)) (update :type #(serialize-type-ref known-set prod-ns %))
                 (contains? node :constraints) (update :constraints serialize-forms)
                 (contains? node :args) (update :args serialize-forms))
               node))]
@@ -266,15 +276,21 @@
 
       ;; resolve :resolved-types / :fact-type tokens to TypeReferences
     (seq (:resolved-types callsite))
-    (update :resolved-types #(mapv (fn [t] (serialize-type-ref known-set prod-ns t)) %))
+    (update :resolved-types
+            (fn [types]
+              (into []
+                    (comp (remove nil?)
+                          (map #(serialize-type-ref known-set prod-ns %)))
+                    types)))
 
     (:fact-type callsite)
     (assoc :fact-type (serialize-type-ref known-set prod-ns (:fact-type callsite)))
 
     (:fact-type-spec callsite)
-    (update :fact-type-spec #(into {}
-                                   (map (fn [[k v]] [k (if (symbol? v) (str v) v)]))
-                                   %))
+    (update :fact-type-spec
+            #(into {}
+                   (map (fn [[k v]] [k (if (symbol? v) (str v) v)]))
+                   %))
 
     (:constructor-sym callsite)
     (update :constructor-sym #(if (symbol? %) (str %) %))
@@ -300,4 +316,9 @@
   [detection prod-ns known-set]
   (cond-> detection
     (:callsites detection)
-    (update :callsites (fn [callsites] (mapv #(serialize-dynamic-callsite % prod-ns known-set) callsites)))))
+    (update :callsites (fn [callsites] (mapv #(serialize-dynamic-callsite % prod-ns known-set) callsites)))
+
+    (:fact-instance-derived-types detection)
+    (update :fact-instance-derived-types
+            (fn [types]
+              (mapv #(resolve-type prod-ns %) types)))))

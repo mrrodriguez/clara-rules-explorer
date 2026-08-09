@@ -19,6 +19,7 @@
             DocumentCheck]
            [clara.server.tools.graph.rules.loan_doc_rules
             AllIdCardGivenDocuments
+            ComplianceReview
             StaleDocumentNotice]
            [clara.server.tools.graph.rules.analyze_test_rules
             HiddenHelperRecord
@@ -736,6 +737,76 @@
         (is (re-find #"\(:refer-clojure" src)
             ":refer-clojure clause must be a list form, not a vector")))))
 
+(testing "reconstructed ns source emits declare for interned helpers"
+  (let [ns-sym 'fake.eval-helpers]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/require '[clara.rules :as r]))
+      (eval '(clojure.core/defn ->fact [type data]
+               (clojure.core/with-meta data {:type type})))
+      (eval '(r/defrule fake-helper-rule
+               [java.lang.Object]
+               =>
+               (r/insert! (->fact :demo/alert {:id 1})))))
+    (let [synth-result (synth/synthesize-ns-source
+                        ns-sym
+                        [{:name 'fake-helper-rule
+                          :rhs '((r/insert! (->fact :demo/alert {:id 1})))}]
+                        (fn [_] nil)   ;; no classpath source
+                        identity)
+          source (:source synth-result)]
+      (is (str/includes? source "(declare ->fact)")
+          "synthesized source must emit (declare ->fact) for the ns's own helper")
+      (is (str/includes? source "__clara_explorer_rule_0__")
+          "synthetic snippet def still present")
+        ;; verify the declare precedes snippets
+      (let [decl-pos (str/index-of source "(declare ->fact)")
+            snip-pos (str/index-of source "__clara_explorer_rule_0__")]
+        (is (< decl-pos snip-pos)
+            "(declare …) must appear before synthetic snippet defs")))))
+
+(testing "reconstructed ns: interned helper resolves via :fact-constructors"
+  (let [ns-sym 'fake.eval-helpers-2]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/require '[clara.rules :as r]))
+      (eval '(clojure.core/defn ->fact [type data]
+               (clojure.core/with-meta data {:type type})))
+      (eval '(r/defrule fake-helper-rule-2
+               [java.lang.Object]
+               =>
+               (r/insert! (->fact :demo/alert {:id 1})))))
+    (let [session (r/mk-session ns-sym)
+          annotations (analyze/generate-annotations-from-analysis
+                       {:analysis (analyze/analyze-session-rules
+                                   {:session-or-rulebase session
+                                    :include-ns-prefixes ["fake."]})
+                        :session-or-rulebase session
+                        :fact-constructors
+                        [{:match-fn (fn [sym]
+                                      (= (name sym) "->fact"))
+                          :type-resolver-fn ->fact-type-resolver}]})
+          rule-key 'fake.eval-helpers-2/fake-helper-rule-2
+          detection (:clara-rules/dynamic-insert-types-detected
+                     (ann/get-annotation annotations rule-key))]
+      (is (some? detection)
+          "dynamic-insert-types-detected must be present")
+      (is (= :full (:resolution detection))
+          "resolution must be :full — ->fact callee must be attributed")
+      (let [callsites (:callsites detection)]
+        (is (= 1 (count callsites))
+            "single callsite expected")
+        (let [cs (first callsites)]
+          (is (:constructor-sym cs)
+              (str "callsite must have :constructor-sym, got: " (pr-str cs)))
+          (is (= :full (:status cs))
+              "callsite status must be :full")
+          (let [cid (:callsite-id cs)]
+            (is (str/includes? cid (str ns-sym ":->fact:"))
+                (str "callsite-id must contain the constructor segment, got: " cid)))
+          (is (= [:demo/alert] (:resolved-types cs))
+              "resolved-types must be [:demo/alert]"))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Callsite identity edge cases
 ;; ---------------------------------------------------------------------------
@@ -806,7 +877,7 @@
       (let [crd (get enriched "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
         (is (some? (:clara-rules/dynamic-insert-types-detected crd)))
         (is (= {:fact-instance-derived-types
-                ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"]
+                [AllRequiredDocuments]
                 :resolution :partial}
                (:clara-rules/dynamic-insert-types-detected crd))))
       ;; No insert-types added (that is enrich-annotations-from-session's job)
@@ -848,7 +919,7 @@
                (:clara-rules/insert-types crd))
             "Should add the fact type to insert-types as the raw class — never a phantom string kind (\"...AllRequiredDocuments\" vs ...AllRequiredDocuments)")
         (is (= {:fact-instance-derived-types
-                ["clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments"]
+                [AllRequiredDocuments]
                 :resolution :partial}
                (:clara-rules/dynamic-insert-types-detected crd))
             "Should add dynamic detection")))
@@ -859,7 +930,7 @@
             "The keyword fact type merges as the keyword, not as a serialized string")
         (is (contains? (set (:fact-instance-derived-types
                              (:clara-rules/dynamic-insert-types-detected dc)))
-                       ":loan-doc-rules/document-check-input")
+                       :loan-doc-rules/document-check-input)
             "The derived-type display name is the keyword's serialized form")))
 
     (testing "Does NOT add dynamic detection for rules whose types are already in :props"
@@ -934,7 +1005,7 @@
         (is (= :partial (:resolution dyn))
             "Resolution should be :partial since session helped but callsites remain unresolved")
         (is (contains? (set (:fact-instance-derived-types dyn))
-                       "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview")
+                       ComplianceReview)
             "Should detect the ComplianceReview type")))))
 
 (deftest test-enrich-annotations-from-session--dedup-against-props

@@ -130,8 +130,17 @@
              {insertion [{:rule rule
                           :explanation (first (to-explanations session [token]))}]}))))
 
+(defn- fact-visible?
+  "True when fact is a user-visible fact: non-nil and not an engine internal
+   (ISystemFact like NegationResult)."
+  [fact]
+  (and (some? fact)
+       (not (instance? ISystemFact fact))))
+
 (defn- get-wrapped-fact-groups
-  "Returns a map of grouped categories of fact wrappers found in the `session` memory."
+  "Returns a map of grouped categories of fact wrappers found in the `session` memory.
+   Nil and ISystemFact instances are excluded from all categories — same filter
+   as `inspect-facts`."
   [session]
   (let [{:keys [rulebase memory]} (eng/components session)
         {:keys [alpha-memory]} memory
@@ -140,12 +149,14 @@
                                (mapcat vals)
                                (mapcat identity)
                                (map :fact)
+                               (filter fact-visible?)
                                (map platform/fact-id-wrap)
                                (set))
         facts-from-inserts (->> (for [rule-node production-nodes
                                       token (keys (mem/get-insertions-all memory rule-node))
                                       insertion-group (mem/get-insertions memory rule-node token)
-                                      fact insertion-group]
+                                      fact insertion-group
+                                      :when (fact-visible? fact)]
                                   (platform/fact-id-wrap fact))
                                 (set))
         facts-from-matches (->> (for [rule-node production-nodes
@@ -156,7 +167,8 @@
                                                     (eng/token->matching-elements node memory token))]
                                       fact (if (and (some? accum) (coll? accum))
                                              accum
-                                             [fact])]
+                                             [fact])
+                                      :when (fact-visible? fact)]
                                   (platform/fact-id-wrap fact))
                                 (set))
         all-facts (set/union facts-from-alphas facts-from-inserts facts-from-matches)]
@@ -226,9 +238,10 @@
         {:keys [production-nodes]} rulebase
         root-facts (for [fact (get-root-facts session)
                          :let [fact-type (fact-type-fn fact)
-                               ancestors (ancestors-fn fact-type)]]
+                               ancestors (ancestors-fn fact-type)]
+                         :when (some? fact-type)]
                      {:fact fact
-                      :fact-types (cons fact-type ancestors)})
+                      :fact-types (cons fact-type (or ancestors ()))})
         rule-nodes (for [{:keys [id production]} production-nodes]
                      [id production])
         rule-facts (for [{:keys [id] :as rule-node} production-nodes
@@ -238,11 +251,11 @@
                          :let [fact-type (fact-type-fn fact)
                                ancestors (ancestors-fn fact-type)
                                bindings (dissoc-gen-bindings bindings)]
-                         :when (and (some? fact)
-                                    (not (instance? ISystemFact fact)))]
+                         :when (fact-visible? fact)
+                         :when (some? fact-type)]
                      {:fact fact
                       :rule-id id
                       :bindings bindings
-                      :fact-types (cons fact-type ancestors)})]
+                      :fact-types (cons fact-type (or ancestors ()))})]
     {:rules (into {} rule-nodes)
      :facts (concat root-facts rule-facts)}))

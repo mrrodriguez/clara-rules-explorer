@@ -273,23 +273,23 @@
 
   (testing "deduplicates across representations: Class vs Symbol for same logical type"
     (let [base (ann/layer {:id :base
-                           :annotations {"rule/a" #:clara-rules{:insert-types [java.lang.String]}}})
+                           :annotations {"clojure.core/rule-a" #:clara-rules{:insert-types [java.lang.String]}}})
           overlay (ann/layer {:id :overlay
-                              :annotations {"rule/a" #:clara-rules{:insert-types ['java.lang.String]}}})
-          rule (get (ann/annotations (ann/merge-layers [base overlay])) "rule/a")]
+                              :annotations {"clojure.core/rule-a" #:clara-rules{:insert-types ['java.lang.String]}}})
+          rule (get (ann/annotations (ann/merge-layers [base overlay])) "clojure.core/rule-a")]
       (is (= 1 (count (:clara-rules/insert-types rule)))
           "Class from props and Symbol from sidecar should merge to one")
       (is (class? (first (:clara-rules/insert-types rule)))
           "first layer's representation wins")))
 
-  (testing "deduplicates across representations: String vs Symbol for same logical type"
+  (testing "kind discrimination: String and Symbol are distinct fact types (no conflation)"
     (let [base (ann/layer {:id :base
-                           :annotations {"rule/a" #:clara-rules{:insert-types ["java.lang.String"]}}})
+                           :annotations {"clojure.core/rule-a" #:clara-rules{:insert-types ["java.lang.String"]}}})
           overlay (ann/layer {:id :overlay
-                              :annotations {"rule/a" #:clara-rules{:insert-types ['java.lang.String]}}})
-          rule (get (ann/annotations (ann/merge-layers [base overlay])) "rule/a")]
-      (is (= 1 (count (:clara-rules/insert-types rule)))
-          "String from enrichment and Symbol from sidecar should merge to one"))))
+                              :annotations {"clojure.core/rule-a" #:clara-rules{:insert-types ['java.lang.String]}}})
+          rule (get (ann/annotations (ann/merge-layers [base overlay])) "clojure.core/rule-a")]
+      (is (= 2 (count (:clara-rules/insert-types rule)))
+          "String literal and class-name Symbol are distinct fact-type kinds"))))
 
 (deftest notes-append-strategy
   (let [base (ann/layer {:id :base
@@ -759,7 +759,7 @@
     (testing ":additive deduplicates when authored and derived are the same logical type"
       (let [layer' (ann/layer {:id :l2
                                :annotations
-                               {"rule/d"
+                               {"clojure.core/rule-d"
                                 #:clara-rules{:insert-types ['java.lang.String]
                                               :dynamic-insert-types-detected
                                               {:callsites
@@ -768,9 +768,9 @@
                                                  :ns-name-sym 'some.ns
                                                  :filename "some/ns.clj"
                                                  :status :full
-                                                 :resolved-types ["java.lang.String"]}]}}}})
+                                                 :resolved-types [java.lang.String]}]}}}})
             rules (ann/annotations (ann/merge-layers [layer'] {:type-derivation :additive}))]
-        (is (= 1 (count (:clara-rules/insert-types (get rules "rule/d"))))
+        (is (= 1 (count (:clara-rules/insert-types (get rules "clojure.core/rule-d"))))
             "Symbol from authored and String from callsite should deduplicate to one")))))
 
 (deftest downgrading-a-wrong-callsite

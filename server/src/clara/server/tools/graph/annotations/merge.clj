@@ -15,7 +15,8 @@
             [schema.core :as s]
             [clara.rules.engine :as eng]
             [clara.server.tools.graph.annotations :as ann]
-            [clara.server.tools.graph.annotations.callsite :as ann.callsite]))
+            [clara.server.tools.graph.annotations.callsite :as ann.callsite]
+            [clara.server.tools.graph.serialize :as serialize]))
 
 (def ^:private RuleName s/Str)
 
@@ -199,19 +200,6 @@
                {:callsites callsites
                 :resolution (ann.callsite/aggregate-resolution callsites)})))))
 
-(defn type-str
-  "Normalizes a type value to its canonical string form for deduplication
-   across layers that may represent the same logical type as a Class, Symbol,
-   or String."
-  [t]
-  (cond
-    (nil? t) nil
-    (class? t) (.getName ^Class t)
-    (keyword? t) (str (symbol t))
-    (symbol? t) (str t)
-    (string? t) t
-    :else (str t)))
-
 (defn dedupe-by
   "Like `distinct` but compares by (f x) rather than x itself."
   [f coll]
@@ -223,13 +211,15 @@
              coll)))
 
 (defn- merge-type-vec
-  "Type-vector merge: default union, `a` first, deduplicated by normalized
-   string form (so a Class from props and a Symbol from a sidecar file are
-   recognized as the same type).  `:replace` takes `b` only."
-  [strategy a b]
-  (if (= :replace strategy)
-    (dedupe-by type-str b)
-    (dedupe-by type-str (into (vec a) b))))
+  "Type-vector merge: default union, `a` first, deduplicated by
+   `serialize/resolve-type` under the rule's namespace so an unqualified
+   symbol from :props, its Class, and a qualified sidecar symbol all
+   converge.  `:replace` takes `b` only."
+  [strategy rule-ns a b]
+  (let [resolve-fn (partial serialize/resolve-type rule-ns)]
+    (if (= :replace strategy)
+      (dedupe-by resolve-fn b)
+      (dedupe-by resolve-fn (into (vec a) b)))))
 
 (defn- contributing
   "Adds a layer id to a union/deep-merge origin: keys merged by union record
@@ -265,22 +255,23 @@
 
 (defn- fold-key
   "Folds one key of a layer's rule entry into `[merged-entry provenance-entry]`.
-   `props` is the effective merge-props for this layer and rule."
-  [layer-id props merged prov k v]
+   `props` is the effective merge-props for this layer and rule.
+   `rule-ns` is the rule's namespace for type canonicalization."
+  [layer-id props rule-ns merged prov k v]
   (if (nil? v)
     ;; explicit nil is a tombstone — erase the key and its provenance
     [(dissoc merged k) (dissoc prov k)]
     (case k
       :clara-rules/insert-types
       (let [strategy (get props :insert-types :union)]
-        [(assoc merged k (merge-type-vec strategy (get merged k) v))
+        [(assoc merged k (merge-type-vec strategy rule-ns (get merged k) v))
          (assoc prov k (if (= :replace strategy)
                          layer-id
                          (contributing (get prov k) layer-id)))])
 
       :clara-rules/retract-types
       (let [strategy (get props :retract-types :union)]
-        [(assoc merged k (merge-type-vec strategy (get merged k) v))
+        [(assoc merged k (merge-type-vec strategy rule-ns (get merged k) v))
          (assoc prov k (if (= :replace strategy)
                          layer-id
                          (contributing (get prov k) layer-id)))])
@@ -320,7 +311,7 @@
              props (merge layer-props (:clara-rules/merge-props entry))
              entry' (dissoc entry :clara-rules/merge-props)
              [merged prov] (reduce-kv
-                            (fn [[m p] k v] (fold-key layer-id props m p k v))
+                            (fn [[m p] k v] (fold-key layer-id props (ann/fq-name->namespace rn) m p k v))
                             [(get-in acc [:annotations rn] {})
                              (get-in acc [:provenance rn] {})]
                             entry')]
@@ -408,41 +399,63 @@
   [[:insert :clara-rules/insert-types :clara-rules/dynamic-insert-types-detected]
    [:retract :clara-rules/retract-types :clara-rules/dynamic-retract-types-detected]])
 
+(defn- collect-detection-types
+  "Collects the resolved types a detection map contributes: resolved-types
+   from non-dangling callsites, deduplicated.  Returns nil when the detection
+   map has no callsites (contributes nothing)."
+  [resolve-fn det-map]
+  (when-let [callsites (not-empty (:callsites det-map))]
+    (dedupe-by resolve-fn
+               (into []
+                     (comp (remove :dangling?)
+                           (mapcat :resolved-types))
+                     callsites))))
+
+(defn- recompute-detection-resolution
+  "Recomputes :resolution on a detection map from its callsites.
+   Returns the updated map, or nil when the map should be dropped
+   (empty callsites).  Opaque maps without a :callsites key
+   (e.g. session enrichment) pass through unchanged."
+  [det-map]
+  (cond
+    (nil? det-map) nil
+    (not (contains? det-map :callsites)) det-map
+    :else
+    (if-let [callsites (not-empty (:callsites det-map))]
+      (if-let [resolution (ann.callsite/aggregate-resolution callsites)]
+        (assoc det-map :resolution resolution)
+        (dissoc det-map :resolution))
+      ;; empty callsites vector — drop the map
+      nil)))
+
 (defn- derive-rule-annotation
-  "Derives one rule's conclusions.  Returns the derived annotation."
-  [mode rule-ann]
-  (reduce (fn [ra [_ types-k dm-k]]
-            (let [dm (get ra dm-k)
-                  a (get ra types-k)
-                  d (dedupe-by type-str
-                               (into []
-                                     (comp (remove :dangling?)
-                                           (mapcat :resolved-types))
-                                     (:callsites dm)))
-                  final (case mode
-                          :additive (dedupe-by type-str (into (vec a) d))
-                          ;; 'has a detection map' means has callsites — with
-                          ;; no callsites there is nothing to derive from and
-                          ;; the authored types stand
-                          :from-callsites (if (seq (:callsites dm)) d (vec a)))
-                  ra' (if (seq final)
-                        (assoc ra types-k final)
-                        (dissoc ra types-k))
-                  ;; recompute :resolution; a detection map with an empty
-                  ;; callsites vector carries nothing and is dropped; a map
-                  ;; with no :callsites at all (session enrichment) is opaque
-                  dm' (cond
-                        (nil? dm) nil
-                        (not (contains? dm :callsites)) dm
-                        (seq (:callsites dm)) (if-let [resolution (ann.callsite/aggregate-resolution
-                                                                   (:callsites dm))]
-                                                (assoc dm :resolution resolution)
-                                                (dissoc dm :resolution)))]
-              (if dm'
-                (assoc ra' dm-k dm')
-                (dissoc ra' dm-k))))
-          rule-ann
-          dimension-derivation-keys))
+  "Derives one rule's conclusions.  `rule-ns` is the rule's namespace, used
+   for type canonicalization so an unqualified symbol, its Class, and a
+   qualified sidecar symbol all deduplicate correctly."
+  [mode rule-ns rule-ann]
+  (let [resolve-fn (partial serialize/resolve-type rule-ns)]
+    (reduce (fn [acc [_ types-key detection-key]]
+              (let [det-map        (get acc detection-key)
+                    authored       (get acc types-key)
+                    discovered     (collect-detection-types resolve-fn det-map)
+                    merged-types   (case mode
+                                     :additive
+                                     (dedupe-by resolve-fn
+                                                (into (vec authored) discovered))
+                                     ;; 'has a detection map' means has callsites — with
+                                     ;; no callsites there is nothing to derive from and
+                                     ;; the authored types stand
+                                     :from-callsites
+                                     (if discovered discovered (vec authored)))
+                    updated        (if (seq merged-types)
+                                     (assoc acc types-key merged-types)
+                                     (dissoc acc types-key))
+                    updated-det    (recompute-detection-resolution det-map)]
+                (if updated-det
+                  (assoc updated detection-key updated-det)
+                  (dissoc updated detection-key))))
+            rule-ann
+            dimension-derivation-keys)))
 
 (defn derive-conclusions
   "Derives rule-level conclusions from merged evidence: dimension
@@ -459,7 +472,9 @@
    (into (sorted-map)
          (map (fn [[rule-name rule-ann]]
                 [(ann/normalize-rule-name rule-name)
-                 (derive-rule-annotation type-derivation rule-ann)]))
+                 (derive-rule-annotation type-derivation
+                                         (ann/fq-name->namespace rule-name)
+                                         rule-ann)]))
          annotations)))
 
 (defn- derive-with-provenance
@@ -468,7 +483,9 @@
   [mode annotations provenance]
   (reduce-kv
    (fn [m rule-name rule-ann]
-     (let [derived (derive-rule-annotation mode rule-ann)
+     (let [derived (derive-rule-annotation mode
+                                           (ann/fq-name->namespace rule-name)
+                                           rule-ann)
            prov (reduce (fn [p [_ types-k _]]
                           (if (= (get rule-ann types-k) (get derived types-k))
                             p
@@ -538,3 +555,75 @@
   ([merged] (:provenance merged))
   ([merged rule-name]
    (get (:provenance merged) (ann/normalize-rule-name rule-name))))
+
+;; ---------------------------------------------------------------------------
+;; MergedAnnotations type predicate and coercion
+;; ---------------------------------------------------------------------------
+
+(defn merged-annotations?
+  "True when `x` is a MergedAnnotations value — a map with both
+   `:annotations` and `:provenance` keys.  Key membership is tested with
+   `some` because bare maps may have string keys and `contains?` throws
+   ClassCastException on those."
+  [x]
+  (boolean
+   (and (map? x)
+        (some #{:annotations} (keys x))
+        (some #{:provenance} (keys x)))))
+
+(defn ->bare-annotations
+  "Unwraps a MergedAnnotations to its bare rule→annotation map; bare maps
+   pass through unchanged.  Use at coercion boundaries where either form
+   may arrive."
+  [x]
+  (if (merged-annotations? x)
+    (:annotations x)
+    x))
+
+(defn annotations-delta->layer
+  "Wraps an `annotations-delta` result as a validated Layer with the given
+  `id` and `source` provenance info.
+
+  `delta-annotations` holds **only what was added** over the base — see
+  `ann/annotations-delta`.  Carrying the full enriched map instead would make
+  this layer re-claim every key the base already owns, defeating the
+  provenance the split exists to preserve."
+  [id source delta-annotations]
+  (layer {:id id
+          :source source
+          :annotations delta-annotations}))
+
+(defn ->layer
+  "Coerces `x` to a Layer: a path string or File is read from disk via
+   `read-layer`; a map is validated as an in-memory layer via `layer`."
+  [x]
+  (if (or (string? x) (instance? java.io.File x))
+    (read-layer x)
+    (layer x)))
+
+(defn coerce-to-bare-annotations
+  "Coerces an annotations input to a bare rule→annotation map.
+
+   `annotations-input` may be:
+     - A bare rule→annotation map (passes through)
+     - A MergedAnnotations value (unwrapped to its `:annotations` payload)
+     - A vector of Layer maps (merged via `merge-layers`, with
+       `props-layer` from `session` folded in first as the base)
+     - A string path to a layer file (read via `read-layer` and merged).
+
+   `session` is only needed when `annotations-input` is a vector of layers
+   or a string path."
+  [annotations-input session]
+  (let [layers (cond
+                 (or (string? annotations-input)
+                     (instance? java.io.File annotations-input))
+                 [annotations-input]
+                 (vector? annotations-input) annotations-input
+                 :else nil)]
+    (if layers
+      (:annotations
+       (merge-layers
+        (into [(props-layer session)]
+              (map ->layer)
+              layers)))
+      (->bare-annotations annotations-input))))

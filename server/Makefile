@@ -11,7 +11,9 @@ demo-setup:
 
 # Start the demo explorer server (loan-app rules session) on port 9001.
 demo-run:
-	clojure -M:demo-run -s demo-data/session.bin -l test-resources/clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn
+	clojure -M:demo-run -s demo-data/session.bin \
+	  --annotations '{:enrichment :auto-detect}' \
+	  -l test-resources/clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn
 
 # Start the loan-hierarchy-rules explorer server (keyword hierarchy, tuple
 # fact types) on port 9201 — used by the hierarchy e2e project and for

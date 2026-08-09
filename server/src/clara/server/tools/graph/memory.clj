@@ -150,7 +150,18 @@
                            (let [fact (platform/fact-id-unwrap wrapped)
                                  id (get-fact-id fact)
                                  raw-type (get raw-types id)
-                                 type-name (serialize/serialize-fact-type nil raw-type)]
+                                 _ (when (nil? raw-type)
+                                     (let [rule-names (into #{}
+                                                            (keep :name)
+                                                            (get origin-map id []))]
+                                       (println
+                                        (str "WARN: fact-type-fn returned nil for fact "
+                                             (pr-str (serialize/prune-fns fact))
+                                             " — inserted by rules: " (pr-str rule-names)
+                                             " — substituting :clara.tools.graph.analyze/unknown-fact-type"))))
+                                 type-name (->> (or raw-type
+                                                    :clara.tools.graph.analyze/unknown-fact-type)
+                                                (serialize/serialize-fact-type nil))]
                              [id {:id id
                                   :type {:name type-name
                                          :id (serialize/route-id type-name)
@@ -223,11 +234,14 @@
   [names]
   (reduce (fn [idx name]
             (let [id (serialize/route-id (str name))]
-              (if-let [existing (get idx id)]
-                (throw (ex-info (format "Session route-id collision: %s and %s both map to %s"
-                                        existing name id)
-                                {:id id :names [existing name]}))
-                (assoc idx id name))))
+              (if (nil? id)
+                ;; route-id warned; skip this entry
+                idx
+                (if-let [existing (get idx id)]
+                  (throw (ex-info (format "Session route-id collision: %s and %s both map to %s"
+                                          existing name id)
+                                  {:id id :names [existing name]}))
+                  (assoc idx id name)))))
           {}
           names))
 
@@ -351,6 +365,15 @@
       :fact-type-id-index (build-id-name-index (keys fact-type-index))
       :rule-id-index      (build-id-name-index (keys rule-match-index))
       :query-id-index     (build-id-name-index (keys query-match-index))})))
+
+(defn session-snapshot-from-analysis
+  "Returns a working-memory snapshot like `session-snapshot`, deriving the
+   known-type set from the static `rulebase-analysis` result so TypeReference
+   `:known` flags are honest membership checks against the analysis.
+   Returns nil when `session` has no working memory (rulebase only)."
+  [session analysis]
+  (when (core/working-memory-available? session)
+    (session-snapshot session (-> analysis :fact-types keys set))))
 
 (defn get-session-rule-activity
   "Returns a unified activity map for a rule: {:matches [...] :inserted-facts [...]}"

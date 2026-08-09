@@ -28,7 +28,9 @@
 (defn- ->handler
   ([] (->handler (->test-session)))
   ([session]
-   (:handler (api/app (atom session) (atom (loan-doc-annotations session)) true))))
+   (:handler (api/app (atom {:session session
+                             :annotations (loan-doc-annotations session)})
+                      true))))
 
 (deftest test-not-found
   (let [handler (->handler)]
@@ -156,9 +158,10 @@
 (deftest test-v1-fact-type-id-lookups
   (let [session (r/mk-session 'clara.server.tools.graph.rules.loan-hierarchy-rules
                               :fact-type-fn lhr/fact-type-fn)
-        handler (:handler (api/app (atom session)
-                                   (atom (ann.merge/merge-layers
-                                          [(ann.merge/props-layer session)])) true))]
+        handler (:handler (api/app (atom {:session session
+                                          :annotations (ann.merge/merge-layers
+                                                        [(ann.merge/props-layer session)])})
+                                   true))]
     (testing "Every fact type (class, keyword, tuple) resolves by its server-issued id"
       (let [items (:fact-types (parse-json (:body (handler (mock/request :get "/v1/fact-types")))))]
         (doseq [{type-name :name type-id :id} items]
@@ -206,15 +209,13 @@
                         (r/insert (clara.server.tools.graph.rules.loan_hierarchy_rules.LoanApplication. "app-2" :pending))
                         (r/insert (clara.server.tools.graph.rules.loan_app_facts.Application. "app-1"))
                         (r/fire-rules))
-          session-atom (atom session-a)
-          annotations-atom (atom (loan-doc-annotations session-a))
-          {:keys [handler]} (api/app session-atom annotations-atom true)]
+          state-atom (atom {:session session-a :annotations (loan-doc-annotations session-a)})
+          {:keys [handler]} (api/app state-atom true)]
       ;; Warm the analysis for session A so the pre-fix stale known-set is non-empty.
       (is (= 200 (:status (handler (mock/request :get "/v1/analysis")))))
       ;; Host application swaps in the new session + its annotations (the documented
       ;; atom-swap feature).
-      (reset! session-atom session-b)
-      (reset! annotations-atom (loan-doc-annotations session-b))
+      (swap! state-atom assoc :session session-b :annotations (loan-doc-annotations session-b))
       (let [snapshot (parse-json (:body (handler (mock/request :get "/v1/session-snapshot"))))
             facts (vals (:facts snapshot))
             app-fact (some #(when (= loan-app-application (get-in % [:type :name])) %) facts)

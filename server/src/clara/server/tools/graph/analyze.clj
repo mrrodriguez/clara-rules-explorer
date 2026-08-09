@@ -832,12 +832,6 @@
 ;; Helpers for add-auto-detected-annotations / enrich-annotations-from-session
 ;; ---------------------------------------------------------------------------
 
-(defn- annot-type->str
-  "Convert an annotation type value (Class, String, Symbol, etc.) to its
-   canonical string form for comparison with serialized session fact-types."
-  [ns-name type-val]
-  (serialize/resolve-type ns-name type-val))
-
 (defn- rule->session-raw-types
   "Per rule name → set of RAW fact types the rule inserted at runtime, from
    the snapshot's fact-id → raw-type index crossed with each fact's
@@ -853,13 +847,6 @@
                          inserted-from)))
              {}
              (:facts snapshot)))
-
-(defn- fq-name->namespace
-  "Extract the namespace portion from a fully-qualified rule name string like
-   \"some.ns/rule-name\".  Returns a symbol, or nil if the name has no
-   namespace segment."
-  [fq-str]
-  (some-> fq-str symbol namespace symbol))
 
 (defn add-auto-detected-annotations
   "Takes a session-analysis structure (from memory/session-snapshot) and an
@@ -884,19 +871,18 @@
         rule->session-types (rule->session-raw-types session-analysis)
         annotations'
         (reduce-kv (fn [acc rule-fq-str raw-types]
-                     (let [rule-ns (fq-name->namespace rule-fq-str)
+                     (let [rule-ns (ann/fq-name->namespace rule-fq-str)
                            rule-ann (get acc rule-fq-str)
                            existing (get rule-ann :clara-rules/insert-types)
-                           existing-strs (set (map (partial annot-type->str rule-ns)
-                                                   existing))
-                           serialize-rule-ns (partial annot-type->str rule-ns)
+                           resolve-fn (partial serialize/resolve-type rule-ns)
+                           existing-strs (set (map resolve-fn existing))
                            new-types (->> raw-types
-                                          (remove (comp existing-strs serialize-rule-ns))
-                                          (sort-by serialize-rule-ns)
-                                          (mapv serialize-rule-ns))]
+                                          (remove (comp existing-strs resolve-fn))
+                                          (sort-by resolve-fn)
+                                          vec)]
                        (if (seq new-types)
                          (let [existing-dynamic (get rule-ann :clara-rules/dynamic-insert-types-detected)
-                               derived-entry    {:fact-instance-derived-types (vec new-types)
+                               derived-entry    {:fact-instance-derived-types new-types
                                                  :resolution :partial}
                                updated-dynamic  (if existing-dynamic
                                                   (merge existing-dynamic derived-entry)
@@ -931,58 +917,78 @@
    Returns the enriched annotations map suitable for passing to
    `rulebase-analysis`."
   [session annotations]
-  (let [original     (ann/normalize-annotations annotations)
-        snapshot     (memory/session-snapshot session)
-        enriched     (add-auto-detected-annotations snapshot original)
+  (let [original          (ann/normalize-annotations annotations)
+        snapshot          (memory/session-snapshot session)
+        enriched          (add-auto-detected-annotations snapshot original)
         rule->session-types (rule->session-raw-types snapshot)
-        rulebase     (-> session eng/components :rulebase)
-        productions  (:productions rulebase)
+        rulebase          (-> session eng/components :rulebase)
 
-        pam-annotations
-        (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/props-layer rulebase)
-                                                        (ann.merge/layer {:id :enriched
-                                                                          :annotations enriched})]))
+        merged-annotations
+        (ann.merge/annotations
+         (ann.merge/merge-layers [(ann.merge/props-layer rulebase)
+                                  (ann.merge/layer {:id :enriched
+                                                    :annotations enriched})]))
 
-        pam
+        resolved-annotation-map
         (into {}
-              (for [p productions]
+              (for [p (:productions rulebase)]
                 [(ann/normalize-rule-name (:name p))
-                 (ann/production-annotation pam-annotations p)]))
+                 (ann/production-annotation merged-annotations p)]))]
+    (reduce-kv (fn [acc rule-name resolved-ann]
+                 (let [rule-ns        (ann/fq-name->namespace rule-name)
+                       resolve-fn     (partial serialize/resolve-type rule-ns)
+                       rule-entry     (get acc rule-name)
+                       declared-strs  (set (map resolve-fn
+                                                (:insert-types resolved-ann)))
+                       detection-info (:dynamic-insert-types-detected resolved-ann)
+                       raw-types      (get rule->session-types rule-name)
+                       ;; Session-derived types not already declared in the
+                       ;; fully-merged annotation's insert-types, compared
+                       ;; under this rule's own ns.
+                       truly-new      (when (seq raw-types)
+                                        (sort-by resolve-fn
+                                                 (remove (comp declared-strs resolve-fn)
+                                                         raw-types)))]
+                   (if detection-info
+                     (if (seq truly-new)
+                       (let [merged (ann.merge/dedupe-by
+                                     resolve-fn
+                                     (into (vec (:clara-rules/insert-types rule-entry))
+                                           truly-new))]
+                         (-> acc
+                             (assoc-in [rule-name :clara-rules/insert-types] merged)
+                             (assoc-in [rule-name :clara-rules/dynamic-insert-types-detected
+                                        :fact-instance-derived-types]
+                                       truly-new)))
+                       ;; No truly-new types from this enrichment pass.
+                       ;; Restore the original annotation for this rule to
+                       ;; preserve any pre-existing dynamic detection
+                       ;; (e.g. :callsites from static analysis).
+                       (if-let [orig (get original rule-name)]
+                         (assoc acc rule-name orig)
+                         (dissoc acc rule-name)))
+                     acc)))
+               enriched
+               resolved-annotation-map)))
 
-        result
-        (reduce-kv (fn [acc p-name resolved-ann]
-                     (let [rule-ns      (fq-name->namespace p-name)
-                           serialize-rule-ns (partial annot-type->str rule-ns)
-                           raw-entry    (get acc p-name)
-                           resolved-strs (set (map serialize-rule-ns
-                                                   (:insert-types resolved-ann)))
-                           dynamic      (:dynamic-insert-types-detected resolved-ann)
-                           derived-raws (get rule->session-types p-name)
-                           ;; Raw session types (never demoted to name strings)
-                           ;; not covered by the fully-merged annotation's
-                           ;; insert-types, compared under this rule's own ns.
-                           truly-new    (when (seq derived-raws)
-                                          (sort-by serialize-rule-ns
-                                                   (remove (comp resolved-strs serialize-rule-ns)
-                                                           derived-raws)))]
-                       (if dynamic
-                         (if (seq truly-new)
-                           (let [raw-inserts (:clara-rules/insert-types raw-entry)
-                                 merged      (ann.merge/dedupe-by ann.merge/type-str (into (vec raw-inserts) truly-new))]
-                             (-> acc
-                                 (assoc-in [p-name :clara-rules/insert-types] merged)
-                                 (assoc-in [p-name :clara-rules/dynamic-insert-types-detected
-                                            :fact-instance-derived-types]
-                                           (mapv serialize-rule-ns truly-new))))
-                           ;; No truly-new types from this enrichment pass.
-                           ;; Restore the original annotation for this rule to
-                           ;; preserve any pre-existing dynamic detection
-                           ;; (e.g. :callsites from static analysis).
-                           (if-let [orig (get original p-name)]
-                             (assoc acc p-name orig)
-                             (dissoc acc p-name)))
-                         acc)))
-                   enriched
-                   pam)]
-    result))
+(defn ->memory-layer
+  "Builds a working-memory annotation Layer from a fired Clara session.
+
+  Runs `enrich-annotations-from-session` against `session` and `annotations`,
+  computes the delta of what enrichment added over the base annotations, and
+  wraps it as a validated Layer with id `:clara.tools.graph.analyze/memory`.
+
+  Returns nil when the session contributed nothing new — the honest result
+  for an unfired session, rather than a layer restating the base."
+  [{:keys [session annotations]}]
+  (let [base      (ann/normalize-annotations annotations)
+        enriched  (enrich-annotations-from-session session base)
+        delta     (ann/annotations-delta base enriched)]
+    (when (seq delta)
+      (ann.merge/annotations-delta->layer
+       :clara.tools.graph.analyze/memory
+       {:generated-by "clara-rules-explorer"
+        :derived-from "session working memory"
+        :rule-count (count delta)}
+       delta))))
 

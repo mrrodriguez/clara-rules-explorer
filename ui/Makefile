@@ -5,7 +5,7 @@
 # bare `pnpm test:e2e` does not: the serialized demo session
 # (server/demo-data/session.bin, gitignored), the e2e production SPA build,
 # and installed deps.
-.PHONY: test test-unit test-e2e deps demo-setup e2e-build check lint format format-check clean e2e-stop
+.PHONY: test test-unit test-e2e deps demo-setup demo-scrape demo-preview e2e-build check lint format format-check clean e2e-stop
 
 SHELL := /bin/bash
 
@@ -41,6 +41,12 @@ $(DEMO_SESSION):
 demo-setup:
 	$(MAKE) -C $(SERVER_DIR) demo-setup
 
+demo-scrape: deps
+	pnpm run scrape:demo
+
+demo-preview:
+	pnpm preview
+
 # Build the e2e SPA only when missing.  Use `make e2e-build` to regenerate
 # unconditionally (e.g. after source changes).
 $(E2E_BUILD_SENTINEL):
@@ -56,7 +62,7 @@ test-unit: node_modules
 	pnpm exec vitest --passWithNoTests --run
 
 test-e2e: node_modules $(DEMO_SESSION) $(E2E_BUILD_SENTINEL)
-	pnpm run test:e2e
+	pnpm exec playwright test $(if $(PROJECT),--project=$(PROJECT))
 
 check: node_modules
 	pnpm run check

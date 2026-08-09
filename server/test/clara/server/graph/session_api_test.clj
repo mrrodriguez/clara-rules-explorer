@@ -20,7 +20,7 @@
   (let [session (-> (->test-session)
                     (r/insert (laf/map->Application {:app-id "app-1"}))
                     (r/fire-rules))]
-    (:handler (api/app (atom session) (atom {}) true))))
+    (:handler (api/app (atom {:session session :annotations {}}) true))))
 
 (defn- id-for
   "Given an id→name reverse index (parsed from JSON, so id keys are
@@ -102,7 +102,7 @@
   ;; start! passes the raw :working-memory-enabled flag (default true) and
   ;; the 409 is attributed dynamically by with-snapshot (:rulebase-input).
   (let [rulebase (-> (->test-session) eng/components :rulebase)
-        handler (:handler (api/app (atom rulebase) (atom {}) true))]
+        handler (:handler (api/app (atom {:session rulebase :annotations {}}) true))]
 
     (testing "GET /v1/session/fact-types → 409"
       (let [resp (handler (mock/request :get "/v1/session/fact-types"))]
@@ -129,7 +129,7 @@
 (deftest test-rulebase-summary-working-memory-flag
   (testing "RulebaseSummary :working-memory-available is false for rulebase"
     (let [rulebase (-> (->test-session) eng/components :rulebase)
-          handler (:handler (api/app (atom rulebase) (atom {}) true))
+          handler (:handler (api/app (atom {:session rulebase :annotations {}}) true))
           resp (handler (mock/request :get "/v1/rulebase-summary"))
           body (parse-json (:body resp))]
       (is (= 200 (:status resp)))
@@ -146,7 +146,7 @@
     (let [session (-> (->test-session)
                       (r/insert (laf/map->Application {:app-id "app-1"}))
                       (r/fire-rules))
-          handler (:handler (api/app (atom session) (atom {}) false))
+          handler (:handler (api/app (atom {:session session :annotations {}}) false))
           resp (handler (mock/request :get "/v1/rulebase-summary"))
           body (parse-json (:body resp))]
       (is (= 200 (:status resp)))
@@ -161,7 +161,7 @@
   (let [session (-> (->test-session)
                     (r/insert (laf/map->Application {:app-id "app-1"}))
                     (r/fire-rules))
-        handler (:handler (api/app (atom session) (atom {}) false))]
+        handler (:handler (api/app (atom {:session session :annotations {}}) false))]
 
     (testing "session routes 409 with :disabled-by-config despite live session"
       (doseq [uri ["/v1/session/fact-types"
