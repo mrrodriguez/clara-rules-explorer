@@ -218,18 +218,21 @@
      (case enrichment
        :reuse
        (if (some? source)
-         (ann.merge/coerce-to-bare-annotations source session)
-         current-annotations)
+         (-> session
+             (build-static-layers source nil analyze-cache-atom)
+             ann.merge/merge-layers
+             ann.merge/annotations)
+         (if (some? current-annotations)
+           current-annotations
+           (-> session
+               ann.merge/props-layer
+               ann.merge/annotations)))
 
-       :none
-       (if (some? source)
-         (ann.merge/coerce-to-bare-annotations source session)
-         {})
-
-       nil
-       (if (some? source)
-         (ann.merge/coerce-to-bare-annotations source session)
-         {})
+       (:none nil)
+       (-> session
+           (build-static-layers source nil analyze-cache-atom)
+           ann.merge/merge-layers
+           ann.merge/annotations)
 
        ;; Auto-detect modes — explicit enumeration with fail-fast for unknown values.
        (:auto-detect-from-rulebase :auto-detect-from-memory :auto-detect)

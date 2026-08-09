@@ -125,12 +125,17 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-swap-session-legacy-bare-map
-  (testing "bare map -> {:source map}, enrichment nil -> source as-is"
+  (testing "bare map -> {:source map}, enrichment nil -> source overlays on props layer"
     (let [annos {"some-rule" {:clara-rules/notes "hello"}}
           result (server/swap-session! {:annotations annos})]
-      (is (= annos result) "returned annotations match input")
-      (is (= {:some-rule {:clara-rules/notes "hello"}} (http-annotations))
-          "HTTP endpoint reflects the annotations"))))
+      (is (map? result))
+      (is (contains? result "some-rule") "source rule present")
+      (is (= "hello" (get-in result ["some-rule" :clara-rules/notes]))
+          "source annotation preserved")
+      ;; Props layer is always the base — rules with :clara-rules/insert-types
+      ;; in their defrule metadata appear alongside the source annotations.
+      (is (contains? result rule-app-outcome)
+          "rule with explicit :props :clara-rules/insert-types present from props layer"))))
 
 (deftest test-swap-session-legacy-file-source
   (let [res-path "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn"
@@ -151,18 +156,28 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-swap-session-no-enrichment
-  (testing "explicit :none with source returns source as-is"
+  (testing "explicit :none with source — source overlays on props layer (no auto-detection)"
     (let [annos {"r" {:notes "x"}}
           result (server/swap-session! {:annotations {:source annos :enrichment :none}})]
-      (is (= annos result))))
-  (testing ":none without source clears to {}"
+      (is (contains? result "r") "source rule present")
+      (is (= "x" (get-in result ["r" :notes])) "source annotation preserved")
+      ;; :none skips auto-detection (kondo, memory) but the props layer
+      ;; is always the base — it carries intrinsic rule metadata.
+      (is (contains? result rule-app-outcome)
+          "rule with explicit :props present from props layer")))
+  (testing ":none without source — props layer only (no source, no auto-detection)"
     (let [result (server/swap-session! {:annotations {:enrichment :none}})]
-      (is (= {} result))
-      (is (= {} (http-annotations)))))
-  (testing "nil enrichment (implicit) without source clears to {}"
+      (is (contains? result rule-app-outcome)
+          "rule with :props present from props layer")
+      (is (not (contains? result rule-collect-given-docs))
+          "static-analysis rule absent when :none skips auto-detection")))
+  (testing "nil enrichment (implicit) without source — props layer only"
     (let [result (server/swap-session! {:session (->test-session)
                                         :annotations nil})]
-      (is (= {} result) "nil annotations-spec clears annotations"))))
+      (is (contains? result rule-app-outcome)
+          "rule with :props present from props layer (nil spec → props only)")
+      (is (not (contains? result rule-collect-given-docs))
+          "static-analysis rule absent when no enrichment configured"))))
 
 ;; ---------------------------------------------------------------------------
 ;; 4. :reuse — keep current, source takes priority
@@ -173,12 +188,20 @@
     (let [current {"keep-me" {:clara-rules/notes "survives"}}
           _ (server/swap-session! {:annotations current})
           result (server/swap-session! {:annotations {:enrichment :reuse}})]
-      (is (= current result))))
-  (testing ":reuse with source — source takes priority over current"
+      (is (contains? result "keep-me") "source rule present")
+      (is (= "survives" (get-in result ["keep-me" :clara-rules/notes]))
+          "source annotation preserved")
+      ;; Props layer was set by initial swap and carried forward by :reuse.
+      (is (contains? result rule-app-outcome)
+          "props layer present (set by initial bare-map swap)")))
+  (testing ":reuse with source — source takes priority over current, props layer is always the base"
     (let [_ (server/swap-session! {:annotations {"existing" {:notes "old"}}})
           source {"override" {:notes "wins"}}
           result (server/swap-session! {:annotations {:source source :enrichment :reuse}})]
-      (is (= source result) "source alone, no merge with existing"))))
+      (is (contains? result "override") "source rule present")
+      (is (= "wins" (get-in result ["override" :notes])) "source annotation preserved")
+      (is (contains? result rule-app-outcome)
+          "rule with :props present from props layer"))))
 
 ;; ---------------------------------------------------------------------------
 ;; 5. :auto-detect-from-rulebase — props + static analysis
@@ -310,13 +333,15 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-swap-session-session-clears-annotations
-  (testing ":session only clears annotations to {}"
+  (testing ":session only — nil annotations-spec → props layer only"
     (let [session-b (->test-session-with-facts)
           ;; Set some annotations first
           _ (server/swap-session! {:annotations {"old-rule" {:notes "x"}}})
           result (server/swap-session! {:session session-b :warm-cache? true})]
-      (is (= {} result) "annotations cleared")
-      (is (= {} (http-annotations)) "HTTP endpoint returns empty annotations"))
+      (is (contains? result rule-app-outcome)
+          "rule with :props present from props layer")
+      (is (not (contains? result "old-rule"))
+          "previous bare-map annotations cleared"))
     ;; Session was swapped — verify WM is now available
     (let [summary (-> (client/get (->url "/rulebase-summary") {:accept :json})
                       :body
@@ -332,27 +357,33 @@
     (let [sess (->test-session-with-facts)
           annos {"my-rule" {:clara-rules/notes "combined-test"}}
           result (server/swap-session! {:session sess :annotations annos})]
-      (is (= annos result) "annotations match input")
-      (is (= {:my-rule {:clara-rules/notes "combined-test"}} (http-annotations))
-          "HTTP reflects the annotations"))
-    (testing ":session + :annotations with enrichment on the new session"
-      (let [sess (->test-session-with-facts)
-            result (server/swap-session! {:session sess
-                                          :annotations {:enrichment :auto-detect}})]
-        (is (map? result))
-        (is (seq result))
-        (is (contains? result rule-app-outcome)
-            "auto-detect ran against the new session")))))
+      (is (contains? result "my-rule") "source rule present")
+      (is (= "combined-test" (get-in result ["my-rule" :clara-rules/notes]))
+          "source annotation preserved")
+      (is (contains? result rule-app-outcome)
+          "rule with :props present from props layer")))
+  (testing ":session + :annotations with enrichment on the new session"
+    (let [sess (->test-session-with-facts)
+          result (server/swap-session! {:session sess
+                                        :annotations {:enrichment :auto-detect}})]
+      (is (map? result))
+      (is (seq result))
+      (is (contains? result rule-app-outcome)
+          "auto-detect ran against the new session"))))
 
 ;; ---------------------------------------------------------------------------
 ;; 10. Return value
 ;; ---------------------------------------------------------------------------
 
 (deftest test-swap-session-returns-annotations
-  (testing "swap-session! returns the new @annotations-atom value"
+  (testing "swap-session! returns the new annotations value (source + props layer)"
     (let [annos {"r1" {:clara-rules/notes "return-test"}}
           result (server/swap-session! {:annotations annos})]
-      (is (= annos result) "return value matches input"))
+      (is (contains? result "r1") "source rule present")
+      (is (= "return-test" (get-in result ["r1" :clara-rules/notes]))
+          "source annotation preserved")
+      (is (contains? result rule-app-outcome)
+          "rule with :props present from props layer"))
     (testing "reflected in HTTP endpoint"
       (is (= "return-test"
              (get-in (http-annotations) [:r1 :clara-rules/notes]))))))
@@ -468,14 +499,19 @@
   (let [sess (->test-session-with-facts)
         _ (server/swap-session! {:session sess
                                  :annotations {:enrichment :auto-detect}})]
-    (testing "session-only swap clears annotations"
+    (testing "session-only swap — nil annotations-spec → props layer only"
       (let [result (server/swap-session! {:session (->test-session)})]
-        (is (= {} result) "session-only swap clears annotations to {}")))
+        (is (contains? result rule-app-outcome)
+            "rule with :props present from props layer")
+        (is (not (contains? result rule-collect-given-docs))
+            "static-analysis rule absent — nil spec skips auto-detection")))
 
-    (testing "reload after session-only swap re-derives from nil spec → {}"
+    (testing "reload after session-only swap re-derives from nil spec → props only"
       (let [result (server/reload-annotations!)]
-        (is (= {} result) "reload with nil spec returns {}")
-        (is (= {} (http-annotations)) "HTTP reflects empty annotations")))))
+        (is (contains? result rule-app-outcome)
+            "rule with :props present after reload")
+        (is (not (contains? result rule-collect-given-docs))
+            "static-analysis rule absent after reload")))))
 
 (deftest test-reload-after-swap-with-spec
   (let [sess (->test-session-with-facts)
@@ -509,8 +545,11 @@
           _ (server/swap-session! {:annotations annos})
           _ (server/swap-session! {:annotations {:enrichment :reuse}})
           result (server/reload-annotations!)]
-      (is (= annos result)
-          "reload after :reuse swap preserves current annotations"))))
+      (is (contains? result "keep-me") "source rule present")
+      (is (= "survives-reload" (get-in result ["keep-me" :clara-rules/notes]))
+          "source annotation preserved")
+      (is (contains? result rule-app-outcome)
+          "rule with :props present from props layer"))))
 
 ;; ---------------------------------------------------------------------------
 ;; 13. File-backed reload — edits to sidecar file are re-read on reload
