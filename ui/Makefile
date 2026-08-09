@@ -62,7 +62,7 @@ test-unit: node_modules
 	pnpm exec vitest --passWithNoTests --run
 
 test-e2e: node_modules $(DEMO_SESSION) $(E2E_BUILD_SENTINEL)
-	pnpm run test:e2e
+	pnpm exec playwright test $(if $(PROJECT),--project=$(PROJECT))
 
 check: node_modules
 	pnpm run check
