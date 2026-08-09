@@ -30,8 +30,8 @@
 				"status": "none"
 			}
 		],
-		"resolution": "partial",
-		"fact-instance-derived-types": [":extract-doc-meta"]
+		"fact-instance-derived-types": [":extract-doc-meta"],
+		"resolution": "none"
 	},
 	"source-rule": true,
 	"lhs-form": "",

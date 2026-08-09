@@ -8,8 +8,8 @@
 				"status": "none"
 			}
 		],
-		"resolution": "partial",
-		"fact-instance-derived-types": [":compliance-review-result"]
+		"fact-instance-derived-types": [":compliance-review-result"],
+		"resolution": "none"
 	},
 	"source-rule": false,
 	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n (= ?app-id app-id)\n (= status :pass)]\n",

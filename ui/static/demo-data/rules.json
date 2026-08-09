@@ -10,8 +10,8 @@
 						"status": "none"
 					}
 				],
-				"resolution": "partial",
-				"fact-instance-derived-types": [":extract-doc-meta"]
+				"fact-instance-derived-types": [":extract-doc-meta"],
+				"resolution": "none"
 			},
 			"source-rule": true,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
@@ -358,10 +358,10 @@
 						"status": "none"
 					}
 				],
-				"resolution": "partial",
 				"fact-instance-derived-types": [
 					"clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"
-				]
+				],
+				"resolution": "none"
 			},
 			"source-rule": false,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
@@ -395,8 +395,8 @@
 						"status": "none"
 					}
 				],
-				"resolution": "partial",
-				"fact-instance-derived-types": [":compliance-review-result"]
+				"fact-instance-derived-types": [":compliance-review-result"],
+				"resolution": "none"
 			},
 			"source-rule": false,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
@@ -471,8 +471,8 @@
 						"status": "none"
 					}
 				],
-				"resolution": "partial",
-				"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"]
+				"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"],
+				"resolution": "none"
 			},
 			"source-rule": false,
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
