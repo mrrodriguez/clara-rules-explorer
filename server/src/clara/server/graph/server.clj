@@ -136,13 +136,19 @@
    `:from-layer` attribution instead of flattening all files into one
    `:id :source` layer.
 
+   When a source layer already carries :id :clara.tools.graph.analyze/generated
+   (e.g. a pre-computed kondo analysis saved as a static sidecar), the
+   live-generated layer is skipped — the explicit source takes precedence.
+
    `analyze-cache-atom` is the temporary atom seeded from and committed
    back to the state map by the calling transition."
   [session source enrichment analyze-cache-atom]
   (let [source-layers (when (some? source)
                         (map ->source-layer
                              (if (vector? source) source [source])))
-        generated-layer (when (#{:auto-detect-from-rulebase :auto-detect} enrichment)
+        source-ids (into #{} (map :id) source-layers)
+        generated-layer (when (and (#{:auto-detect-from-rulebase :auto-detect} enrichment)
+                                   (not (contains? source-ids :clara.tools.graph.analyze/generated)))
                           (let [analysis (analyze/analyze-session-rules
                                           {:session-or-rulebase session
                                            :cache-atom analyze-cache-atom})]
