@@ -1,28 +1,14 @@
-(ns clara.server.tools.graph.rules.chain-helpers
+(ns clara.server.tools.graph.rules.perf-gen-helpers
   "Helpers for generating large, linear rule chains for performance testing.
 
-   Each generated rule in a chain of length N consumes a fact produced by
-   the previous rule and produces a fact consumed by the next, forming a
-   linear dependency graph.
+   Each generated rule in a chain of length N consumes a fact produced by the previous rule and
+  produces a fact consumed by the next, forming a linear dependency graph.
 
-   Facts are keywords (`:chain/step-1`, `:chain/step-2`, …) and the RHS
-   of each rule calls a custom fact constructor (`->step-fact`) — a
-   deliberate dynamic call site — to simulate environments where static
-   analysis cannot trivially resolve produced fact types.
+   Facts are keywords (`:chain/step-1`, `:chain/step-2`, …) and the RHS of each rule calls a custom
+  fact constructor (`->step-fact`) — a deliberate dynamic call site — to simulate environments where
+  static analysis cannot trivially resolve produced fact types.
 
-   Usage:
-
-     (require '[clara.server.tools.graph.rules.chain-helpers :as chain]
-              '[clara.rules :as r])
-
-     ;; Build a session with a 1000-rule chain:
-     (let [session (chain/build-chain-session 1000)]
-       (-> session
-           (r/insert (with-meta {:seed true} {:type :chain/seed}))
-           (r/fire-rules)))
-
-     ;; Or get the production maps for manual session construction:
-     (clara.rules/mk-session (chain/build-chain-rules 1000))"
+  See `comment` blocks below for usage."
   (:require
    #_{:clj-kondo/ignore [:unused-namespace]}
    [clara.rules :as r]
@@ -73,7 +59,7 @@
                 consume-type (if (zero? i) :chain/seed step-key)]
             {:name (str "chain-rule-" i)
              :doc (str "Chain rule " i ": " (pr-str consume-type) " → " (pr-str next-step-key))
-             :ns-name 'clara.server.tools.graph.rules.chain-helpers
+             :ns-name 'clara.server.tools.graph.rules.perf-gen-helpers
              :lhs [{:type consume-type
                     :constraints []}]
              :rhs (list 'r/insert! (list '->step-fact next-step-key))}))
@@ -111,7 +97,7 @@
   []
   {:name "chain-all-steps"
    :doc "Query matching all chain step facts via the common :chain/step parent."
-   :ns-name 'clara.server.tools.graph.rules.chain-helpers
+   :ns-name 'clara.server.tools.graph.rules.perf-gen-helpers
    :lhs [{:type chain-parent
           :constraints [(list '= '?step 'this)]}]
    :params #{}})
@@ -132,3 +118,15 @@
                           [(build-chain-query)
                            (build-chain-hierarchy n)]
                           options)))
+
+(comment
+  ;; Build a session with a 1000-rule chain:
+  (let [session (build-chain-session 1000)
+        fired (-> session
+                  (r/insert (with-meta {:seed true} {:type :chain/seed}))
+                  (r/fire-rules))]
+    {:session fired
+     :query-result (r/query fired build-chain-query)})
+
+;; Or get the production maps for manual session construction:
+  (r/mk-session (build-chain-rules 1000)))
