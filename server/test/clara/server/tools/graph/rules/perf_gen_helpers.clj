@@ -10,9 +10,7 @@
 
   See `comment` blocks below for usage."
   (:require
-   #_{:clj-kondo/ignore [:unused-namespace]}
-   [clara.rules :as r]
-   [clara.rules.compiler :as com]))
+   [clara.rules :as r]))
 
 ;; ---------------------------------------------------------------------------
 ;; Custom fact constructor
@@ -86,21 +84,10 @@
 ;; Query
 ;; -------------------------------------------------------------------
 
-(defn build-chain-query
-  "Build a query production map that matches all chain step facts
-   via the common `:chain/step` parent type.
-
-   Call the query with no arguments to retrieve all step facts
-   that have been inserted:
-
-     (r/query session chain-all-steps)"
+(r/defquery chain-all-steps
+  "Query matching all chain step facts via the common :chain/step parent."
   []
-  {:name "chain-all-steps"
-   :doc "Query matching all chain step facts via the common :chain/step parent."
-   :ns-name 'clara.server.tools.graph.rules.perf-gen-helpers
-   :lhs [{:type chain-parent
-          :constraints [(list '= '?step 'this)]}]
-   :params #{}})
+  [?step <- :chain/step])
 
 ;; -------------------------------------------------------------------
 ;; Session
@@ -110,23 +97,23 @@
   "Build a Clara session from N chain rules, a step-type hierarchy,
    and a query over the common parent type.
 
-   Convenience wrapper around build-chain-rules + build-chain-query +
-   build-chain-hierarchy + mk-session.  Accepts the same keyword
-   options as clara.rules/mk-session (e.g. :cache false)."
+   Convenience wrapper around build-chain-rules + build-chain-hierarchy +
+   mk-session, including the chain-all-steps defquery.  Accepts the same
+   keyword options as clara.rules/mk-session (e.g. :cache false)."
   [n & options]
-  (com/mk-session (concat (build-chain-rules n)
-                          [(build-chain-query)
-                           (build-chain-hierarchy n)]
-                          options)))
+  (r/mk-session (concat (build-chain-rules n)
+                        [(var chain-all-steps)
+                         (build-chain-hierarchy n)]
+                        options)))
 
-(comment
-  ;; Build a session with a 1000-rule chain:
-  (let [session (build-chain-session 1000)
+(defn run-rules [n]
+  (let [session (build-chain-session n)
         fired (-> session
                   (r/insert (with-meta {:seed true} {:type :chain/seed}))
                   (r/fire-rules))]
     {:session fired
-     :query-result (r/query fired build-chain-query)})
+     :query-result (r/query fired chain-all-steps)}))
 
-;; Or get the production maps for manual session construction:
-  (r/mk-session (build-chain-rules 1000)))
+(comment
+  ;; Build a session with a 1000-rule chain:
+  (def result (run-rules 1000)))
