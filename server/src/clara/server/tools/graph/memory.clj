@@ -115,18 +115,11 @@
          (reduce-kv add-fact-id-matches {}))))
 
 (defn- insertion-id+rule-pairs
-  "`([fact-id rule] …)`, one pair per INSERTION, from `inspect`'s `:insertions`.
+  "`([fact-id rule] …)`, one pair per insertion in `inspect`'s `:insertions`.
 
-  `:insertions` is the per-rule view of the same memory `:fact->explanations`
-  inverts. The inverted map is keyed by the fact, so equal-but-distinct facts
-  collapse into one entry: whichever instance became the key absorbs every
-  rule's explanations, the other instances resolve to no rule at all, and which
-  instance wins depends on the tie order in `sort-facts`. Reading insertions
-  per-rule keeps each one attached to the instance actually inserted, which is
-  the instance `get-id` can identify.
-
-  Facts with no id are dropped — `get-id` only knows facts that reached the
-  fact table."
+  Reads the per-rule insertion view so each pair is attached to the instance
+  actually inserted. Facts with no id are dropped — `get-id` only knows facts
+  that reached the fact table."
   [insertions get-id]
   (for [[rule rule-insertions] insertions
         {:keys [fact]} rule-insertions
@@ -283,11 +276,9 @@
 (defn- build-rule-match-index
   "`{production-name {:matches [...] :inserted-facts [...]}}`.
 
-  Built off `:insertions` rather than `:fact->explanations` so each rule is
-  credited with the instances it actually inserted — see
-  `insertion-id+rule-pairs`. The fact-table lookup still `keep`s rather than
-  `map`s: `:inserted-facts` is a `[SessionFact]` in the API, and a fact the
-  table cannot describe has to be absent from it, not present as nil."
+  Reads inserted-fact attribution from `:insertions` via
+  `insertion-id+rule-pairs`. The fact-table lookup uses `keep` so a fact the
+  table cannot describe is absent from `:inserted-facts`, not present as nil."
   [rule-matches
    insertions
    fact-table

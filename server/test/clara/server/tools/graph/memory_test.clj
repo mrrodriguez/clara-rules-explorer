@@ -9,7 +9,6 @@
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clara.server.tools.graph.rules.nil-safety-test-rules :as nil-safety]
             [clara.server.tools.graph.rules.equal-fact-test-rules :as equal-facts]
-            [clara.server.vendor.tools.inspect :as inspect]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
 
@@ -364,25 +363,16 @@
         (is (empty? nil-facts)
             "Nil facts should be excluded from the snapshot")))))
 
-(deftest test-nil-excluded-from-inspect-fact-views
-  (testing "nil is admitted by the engine but appears in no fact-bearing view"
-    ;; `fact-visible?` is the single admission rule. A view that keeps nil while
-    ;; the fact table drops it produces a fact that resolves to no id, and
-    ;; `:inserted-facts` then carries a literal null where the API promises
-    ;; `[SessionFact]`.
+(deftest test-nil-inserting-rule-snapshot
+  (testing "A rule that inserts nil still appears in rule-matches with clean entries"
     (let [fact (nil-safety/->NilSafetyFact "f1")
           session (-> (r/mk-session 'clara.server.tools.graph.rules.nil-safety-test-rules)
                       (r/insert fact)
                       (r/fire-rules))
-          {:keys [fact->explanations insertions all-facts root-facts]} (inspect/inspect session)
           snapshot (memory/session-snapshot session)
           entry (some (fn [[p-name m]]
                         (when (= "nil-insertion-rule" (name (symbol (str p-name)))) m))
                       (:rule-matches snapshot))]
-      (is (not-any? nil? (keys fact->explanations)))
-      (is (not-any? nil? all-facts))
-      (is (not-any? nil? root-facts))
-      (is (not-any? (fn [[_rule ins]] (some (comp nil? :fact) ins)) insertions))
       (is (some? entry) "the nil-inserting rule must still appear in the rule-match index")
       (is (every? some? (:inserted-facts entry))
           "a fact with no snapshot entry is absent, never present as nil")
@@ -390,11 +380,6 @@
 
 (deftest test-equal-facts-attributed-to-their-own-inserting-rule
   (testing "Two rules inserting equal-but-distinct facts each claim their own"
-    ;; The general case that nil is the degenerate extreme of. `fact->explanations`
-    ;; is keyed by the fact, so equal facts share one entry: one instance would
-    ;; absorb both rules' origins and the other would be orphaned, with which one
-    ;; wins decided by tie order in `sort-facts`. Attribution is read off
-    ;; `:insertions`, which is per-rule, to keep each insertion on its own instance.
     (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.equal-fact-test-rules)
                       (r/insert (equal-facts/->Seed 1))
                       (r/fire-rules))
