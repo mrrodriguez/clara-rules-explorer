@@ -114,23 +114,47 @@
          (group-by first)
          (reduce-kv add-fact-id-matches {}))))
 
+(defn- insertion-id+rule-pairs
+  "`([fact-id rule] …)`, one pair per INSERTION, from `inspect`'s `:insertions`.
+
+  `:insertions` is the per-rule view of the same memory `:fact->explanations`
+  inverts. The inverted map is keyed by the fact, so equal-but-distinct facts
+  collapse into one entry: whichever instance became the key absorbs every
+  rule's explanations, the other instances resolve to no rule at all, and which
+  instance wins depends on the tie order in `sort-facts`. Reading insertions
+  per-rule keeps each one attached to the instance actually inserted, which is
+  the instance `get-id` can identify.
+
+  Facts with no id are dropped — `get-id` only knows facts that reached the
+  fact table."
+  [insertions get-id]
+  (for [[rule rule-insertions] insertions
+        {:keys [fact]} rule-insertions
+        :let [id (get-id fact)]
+        :when id]
+    [id rule]))
+
+(defn- ->origin
+  [{p-name :name p-ns-name :ns-name}]
+  {:name p-name
+   :id (serialize/route-id (str p-name))
+   :ns (str p-ns-name)
+   :type "rule"})
+
 (defn- build-origin-map
-  [fact->explanations get-id production-order-key-fn]
-  (letfn [(explanations->origins [explanations]
-            (->> explanations
-                 (map :rule)
-                 (map (fn [{p-name :name p-ns-name :ns-name}]
-                        {:name p-name
-                         :id (serialize/route-id (str p-name))
-                         :ns (str p-ns-name)
-                         :type "rule"}))
-                 distinct
-                 (sort-by production-order-key-fn)
-                 vec))]
-    (into {}
-          (map (juxt (comp get-id first)
-                     (comp explanations->origins second)))
-          fact->explanations)))
+  "`{fact-id [origin …]}` — the rules that inserted each fact."
+  [insertions get-id production-order-key-fn]
+  (->> (insertion-id+rule-pairs insertions get-id)
+       (reduce (fn [acc [id rule]]
+                 (update acc id (fnil conj []) rule))
+               {})
+       (reduce-kv (fn [acc id rules]
+                    (assoc acc id (->> rules
+                                       (map ->origin)
+                                       distinct
+                                       (sort-by production-order-key-fn)
+                                       vec)))
+                  {})))
 
 (defn- build-fact-table
   [{:keys [sorted-facts
@@ -257,24 +281,30 @@
      (assoc fact-entry :data (serialize/prune-fns bindings)))))
 
 (defn- build-rule-match-index
+  "`{production-name {:matches [...] :inserted-facts [...]}}`.
+
+  Built off `:insertions` rather than `:fact->explanations` so each rule is
+  credited with the instances it actually inserted — see
+  `insertion-id+rule-pairs`. The fact-table lookup still `keep`s rather than
+  `map`s: `:inserted-facts` is a `[SessionFact]` in the API, and a fact the
+  table cannot describe has to be absent from it, not present as nil."
   [rule-matches
-   fact->explanations
+   insertions
    fact-table
    get-fact-id]
   (let [rule-to-inserted-fact-ids
-        (->> (for [[fact explanations] fact->explanations
-                   {:keys [rule]} explanations]
-               [(:name rule) (get-fact-id fact)])
-             (group-by first)
-             (reduce-kv (fn [m p-name name-id-pairs]
+        (->> (insertion-id+rule-pairs insertions get-fact-id)
+             (group-by (comp :name second))
+             (reduce-kv (fn [m p-name pairs]
                           (assoc m p-name
                                  (into []
-                                       (comp (map second) (distinct))
-                                       name-id-pairs)))
+                                       (comp (map first) (distinct))
+                                       pairs)))
                         {}))
 
         p-name->inserted-facts (fn [p-name]
-                                 (mapv #(get fact-table %)
+                                 (into []
+                                       (keep #(get fact-table %))
                                        (get rule-to-inserted-fact-ids p-name)))]
 
     (into {}
@@ -307,7 +337,7 @@
   ([session]
    (session-snapshot session #{}))
   ([session known-set]
-   (let [{:keys [root-facts fact->explanations query-matches rule-matches] :as inspection}
+   (let [{:keys [root-facts insertions query-matches rule-matches] :as inspection}
          (inspect/inspect session)
 
          {:keys [get-alphas-fn rulebase]} (eng/components session)
@@ -326,7 +356,7 @@
          used-by-index (build-used-by-index inspection
                                             get-fact-id
                                             production-order-key-fn)
-         origin-map (build-origin-map fact->explanations
+         origin-map (build-origin-map insertions
                                       get-fact-id
                                       production-order-key-fn)
 
@@ -340,7 +370,7 @@
          fact-type-index (build-fact-type-index (:facts fact-table)
                                                 production-order-key-fn)
          rule-match-index (build-rule-match-index rule-matches
-                                                  fact->explanations
+                                                  insertions
                                                   (:facts fact-table)
                                                   get-fact-id)
          query-match-index (build-query-match-index query-matches

@@ -116,7 +116,33 @@
                     (to-explanations session (map #(-> % :activation :token) v))]))
             grouped-info))))
 
+(defn- fact-visible?
+  "True when fact is a user-visible fact: non-nil and not an engine internal
+   (ISystemFact like NegationResult).
+
+   This is the single admission rule for every fact-bearing key of `inspect`
+   (`:all-facts`, `:root-facts`, `:insertions`, `:fact->explanations`) and for
+   `inspect-facts`. Applying it in some of them and not others is what lets a
+   fact exist in one view and not another, and consumers that join the views —
+   `graph.memory` keys a fact table off `:all-facts` and reads origins out of
+   `:insertions` — then resolve a fact to nothing.
+
+   `nil` in particular is admitted by the engine (`(insert! nil)` is legal) but
+   cannot be represented downstream: it is a singleton, so every nil in a
+   session is `identical?` to every other, and no identity- or value-keyed index
+   can tell two of them apart or give them distinct ids. A `:fact-type-fn` that
+   maps nil to a real type does make nil match alpha nodes and drive rules — the
+   engine handles that — but it does not make N nils distinguishable, so the
+   honest reporting of them is none rather than one aliased ghost."
+  [fact]
+  (and (some? fact)
+       (not (instance? ISystemFact fact))))
+
 (defn gen-fact->explanations
+  "`{fact [{:rule … :explanation …}]}`.
+
+  Keyed by the fact, so equal facts share one entry no matter how many rules
+  inserted them — use `:insertions` where per-insertion identity matters."
   [session]
   (let [{:keys [memory rulebase]} (eng/components session)
         {:keys [production-nodes]} rulebase
@@ -126,16 +152,10 @@
            (for [[rule rule-node] rule-to-rule-node
                  token (keys (mem/get-insertions-all memory rule-node))
                  insertion-group (mem/get-insertions memory rule-node token)
-                 insertion insertion-group]
+                 insertion insertion-group
+                 :when (fact-visible? insertion)]
              {insertion [{:rule rule
                           :explanation (first (to-explanations session [token]))}]}))))
-
-(defn- fact-visible?
-  "True when fact is a user-visible fact: non-nil and not an engine internal
-   (ISystemFact like NegationResult)."
-  [fact]
-  (and (some? fact)
-       (not (instance? ISystemFact fact))))
 
 (defn- get-wrapped-fact-groups
   "Returns a map of grouped categories of fact wrappers found in the `session` memory.
@@ -213,7 +233,8 @@
                           [rule
                            (for [token (keys (mem/get-insertions-all memory rule-node))
                                  insertion-group (get (mem/get-insertions-all memory rule-node) token)
-                                 insertion insertion-group]
+                                 insertion insertion-group
+                                 :when (fact-visible? insertion)]
                              {:explanation (first (to-explanations session [token])) :fact insertion})])
                         (into {}))
         fact-explanations (into {} (gen-fact->explanations session))
