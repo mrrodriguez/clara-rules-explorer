@@ -129,6 +129,36 @@ options:
 The function splits by looking for the first keyword: everything before it
 is a source, everything after becomes `(apply hash-map ...)`.
 
+**Runtime rule/query generation:** `clara.rules/defrule` and `defquery` are
+compile-time macros. When rules or queries need to be generated at runtime
+(e.g. in tests, performance harnesses, or dynamic rule loading), construct
+the production maps directly as plain Clojure maps and pass them to
+`mk-session` instead of trying to invoke the macros:
+
+```clojure
+;; DON'T — macros expand at compile time, can't be used to generate at runtime:
+;; (defrule my-rule ...)   ; only works when written literally in source
+
+;; DO — build production maps directly:
+{:name    "my-ns/my-rule"          ;; string or symbol; the rule's fq name
+ :ns-name 'my.ns                    ;; namespace symbol
+ :doc     "what this rule does"
+ :lhs     [{:type SomeFact :constraints []}]
+ :rhs     '(clara.rules/insert! (->SomeOtherFact ...))}
+```
+
+The `:lhs` is a vector of condition maps (each with `:type` and
+`:constraints`). The `:rhs` is a quoted s-expression — the same body you'd
+write inside a `defrule` macro. Queries follow the same pattern with
+`:params`, `:lhs`, and a `:type` of `:query`. See
+`server/test/clara/server/tools/graph/rules/perf_gen_helpers.clj` for a
+working example (`build-chain-rules`, `build-chain-session`).
+
+When a single static query is needed alongside dynamically generated rules,
+use `defquery` at compile time and reference it by var via `(var my-query)`
+in the `mk-session` sources — both production maps and var references work
+interchangeably.
+
 # Documentation
 
 ## Annotations Guide
