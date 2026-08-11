@@ -8,7 +8,7 @@
   fact constructor (`->step-fact`) — a deliberate dynamic call site — to simulate environments where
   static analysis cannot trivially resolve produced fact types.
 
-  See `comment` blocks below for usage."
+  See `clara.server.tools.graph.perf-test` for usage."
   (:require
    [clara.rules :as r]))
 
@@ -41,6 +41,9 @@
 ;; Rule generation
 ;; ---------------------------------------------------------------------------
 
+(def ^:private this-ns-name
+  (ns-name *ns*))
+
 (defn build-chain-rules
   "Generate N production maps forming a linear chain.
 
@@ -55,7 +58,7 @@
           (let [step-key (step-kw i)
                 next-step-key (step-kw (inc i))
                 consume-type (if (zero? i) :chain/seed step-key)]
-            {:name (str "chain-rule-" i)
+            {:name (symbol (name this-ns-name) (str "chain-rule-" i))
              :doc (str "Chain rule " i ": " (pr-str consume-type) " → " (pr-str next-step-key))
              :ns-name 'clara.server.tools.graph.rules.perf-gen-helpers
              :lhs [{:type consume-type
@@ -113,7 +116,3 @@
                   (r/fire-rules))]
     {:session fired
      :query-result (r/query fired chain-all-steps)}))
-
-(comment
-  ;; Build a session with a 1000-rule chain:
-  (def result (run-rules 1000)))
