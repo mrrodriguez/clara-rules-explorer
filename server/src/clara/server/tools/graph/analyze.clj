@@ -182,10 +182,11 @@
                                  (map (comp u/var-usage-caller :usage)))
                            traced-args)
         fallback-vars (when-not (= :none dynamic-type-fallback-resolution)
-                        (into []
-                              (comp (filter #(contains? reachable %))
-                                    (remove handled-vars))
-                              (sort-by str (keys inserter-type-map))))]
+                        (->> reachable
+                             (filter #(contains? inserter-type-map %))
+                             (remove handled-vars)
+                             (sort-by str)
+                             vec))]
     (when (seq fallback-vars)
       (heuristic-fallback-callsites
        {:fallback-vars fallback-vars
@@ -196,39 +197,35 @@
 (defn- extract-insert-types
   "Determines the fact types a rule inserts or retracts via `target-fns`.
 
-   Caller-driven resolution always runs first and is never displaced:
-   constructor-of-interest callsites (when :fact-constructors is supplied)
-   are resolved via their matched `:type-resolver-fn`, then every remaining
-   boundary-call argument form goes through the runtime resolution chain
-   (`analyze.callsite`) and the optional `:callsite-resolver-fn`.
+   Caller-driven resolution always runs first and is never displaced: constructor-of-interest
+  callsites (when :fact-constructors is supplied) are resolved via their matched
+  `:type-resolver-fn`, then every remaining boundary-call argument form goes through the runtime
+  resolution chain (`analyze.callsite`) and the optional `:callsite-resolver-fn`.
 
-   The record-ctor scan (`inserter-type-map`) is a *heuristic fallback*,
-   applied per direct-inserter var: a var's scan types are credited only when
-   no caller-driven path accounted for any of that var's boundary arguments.
-   The scan is name-shape based and subtree-wide — it cannot tell an argument
-   expression apart from an unrelated call in the same body — so it must never
-   override explicit registration (see
-   docs/defect-spurious-defrecord-ctor-types-resolved.md).  Fallback types are
-   emitted as callsites labeled `:via {:source :record-ctor-scan}`; the
-   `:dynamic-type-fallback-resolution` option controls whether the fallback
-   runs at all and the index's type filter scopes what it may credit.
+   The record-ctor scan (`inserter-type-map`) is a *heuristic fallback*, applied per direct-inserter
+  var: a var's scan types are credited only when no caller-driven path accounted for any of that
+  var's boundary arguments. The scan is name-shape based and subtree-wide — it cannot tell an
+  argument expression apart from an unrelated call in the same body — so it must never override
+  explicit registration. Fallback types are emitted as callsites labeled `:via {:source
+  :record-ctor-scan}`; the `:dynamic-type-fallback-resolution` option controls whether the fallback
+  runs at all and the index's type filter scopes what it may credit.
 
-   Boundary usages are found via the `:usages-by-callee` index — the merged
-   `:var-usages` vector is never scanned per rule (that scan made generation
-   quadratic in rules × usages at real-world scale).
+   Boundary usages are found via the `:usages-by-callee` index — the merged `:var-usages` vector is
+  never scanned per rule (that scan makes generation quadratic in rules × usages at).
 
    Returns {:resolved-types #{…} :dynamic-forms …}."
-  [reachable target-fns {:keys [usages-by-callee inserter-type-map
+  [reachable target-fns {:keys [inserter-type-map
                                 constructor-callsite-map graph
+                                boundary-usages-by-caller
                                 dynamic-type-fallback-resolution] :as ctx}]
   (let [boundary-usages
         (into []
-              (comp (mapcat #(get usages-by-callee %))
+              (comp (mapcat #(get boundary-usages-by-caller %))
                     (filter (fn [usage]
                               (let [caller (u/var-usage-caller usage)]
-                                (and (contains? reachable caller)
+                                (and (contains? target-fns (u/var-usage-callee usage))
                                      (not (contains? target-fns caller)))))))
-              target-fns)]
+              reachable)]
     (if (empty? boundary-usages)
       {:resolved-types #{}
        :dynamic-forms nil}
@@ -239,9 +236,10 @@
             ;; specific mechanism, and it decides which arguments the generic
             ;; path still needs to look at.
             ctor-inserter-vars (when constructor-callsite-map
-                                 (into []
-                                       (filter #(contains? reachable %))
-                                       (sort-by str (keys constructor-callsite-map))))
+                                 (->> reachable
+                                      (filter #(contains? constructor-callsite-map %))
+                                      (sort-by str)
+                                      vec))
             ctor-result (when (seq ctor-inserter-vars)
                           (let [scoped-map (select-keys constructor-callsite-map ctor-inserter-vars)]
                             (callsite/resolve-constructor-callsites

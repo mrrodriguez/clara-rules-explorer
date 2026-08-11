@@ -20,6 +20,7 @@
    Nothing here is rule-specific; per-rule work starts from the
    `AnalysisIndex`."
   (:require [clojure.set :as set]
+            [clojure.string :as str]
             [schema.core :as s]
             [clara.server.tools.graph.analyze.utils :as u]
             [clara.server.tools.graph.analyze.kondo :as kondo]
@@ -314,10 +315,29 @@
         constructor-callsite-map (when (seq fact-constructors)
                                    (build-constructor-callsite-map
                                     (direct-callers graph boundary-fns)
-                                    usages-by-caller reachable-set fact-constructors))]
+                                    usages-by-caller reachable-set fact-constructors))
+        all-boundary-fns (into insert-fns retract-fns)
+        boundary-usages-by-caller (reduce
+                                   (fn [m u]
+                                     (if (contains? all-boundary-fns
+                                                    (u/var-usage-callee u))
+                                       (let [caller (u/var-usage-caller u)]
+                                         (update m caller (fnil conj []) u))
+                                       m))
+                                   {}
+                                   usages)
+        get-lines (let [lines-cache (atom {})]
+                    (fn [ns-sym filename]
+                      (let [k (or ns-sym filename)]
+                        (or (get @lines-cache k)
+                            (when-let [source (get-source ns-sym filename)]
+                              (let [ls (str/split-lines source)]
+                                (swap! lines-cache assoc k ls)
+                                ls))))))]
     {:graph graph
      :usages-by-caller usages-by-caller
      :usages-by-callee usages-by-callee
+     :boundary-usages-by-caller boundary-usages-by-caller
      :local-usages-by-name local-usages-by-name
      :locals-by-id locals-by-id
      :reachable-set reachable-set
@@ -327,6 +347,7 @@
      :retractor-type-map retractor-type-map
      :constructor-callsite-map constructor-callsite-map
      :get-source get-source
-     :read-ctor-form (memoize kondo/read-ctor-form)
+     :get-lines get-lines
+     :read-ctor-form (memoize (fn [ctor-usage] (kondo/read-ctor-form ctor-usage get-source get-lines)))
      :resolve-record-type resolve-record-type
      :productions-by-name productions-by-name}))
