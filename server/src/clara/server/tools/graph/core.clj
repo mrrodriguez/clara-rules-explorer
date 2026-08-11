@@ -378,15 +378,10 @@
     x
     {:annotations (or x {}) :provenance {}}))
 
-(defn rulebase-analysis
-  "Analyzes a rulebase against merged annotations.  `annotations` is either
-   a MergedAnnotations value (annotations/merge-layers output — annotations
-   and provenance are both used) or a bare rule→annotation map.
-
-   Form printing for LHS/RHS serialization is controlled by the dynamic var
-   `serialize/*form-printer*` (defaults to `serialize/default-form-printer`,
-   i.e. clojure.pprint).  Callers who do not need pretty-printed sub-forms
-   can bind it to `pr-str` or another cheap (fn [form] String)."
+(defn- rulebase-analysis*
+  "Implementation of `rulebase-analysis`.  Callers go through the public
+   multi-arity `rulebase-analysis`, which manages the `*form-printer*`
+   dynamic binding."
   [session-or-rulebase annotations]
   (let [{:keys [productions id-to-node] :as rulebase} (get-rulebase session-or-rulebase)
 
@@ -437,6 +432,24 @@
     (assoc analysis
            :fact-type-id-index (ft/build-fact-type-id-index analysis)
            :production-id-index (build-production-id-index analysis))))
+
+(defn rulebase-analysis
+  "Analyzes a rulebase against merged annotations.  `annotations` is either
+   a MergedAnnotations value (annotations/merge-layers output — annotations
+   and provenance are both used) or a bare rule→annotation map.
+
+   `opts` is an optional map:
+   - `:form-printer` — (fn [form] String) for serializing LHS/RHS forms.
+     Defaults to `serialize/default-form-printer` (clojure.pprint).
+     Pass `pr-str` for a cheap non-pretty-printing alternative."
+  ([session-or-rulebase annotations]
+   (rulebase-analysis session-or-rulebase annotations nil))
+  ([session-or-rulebase annotations opts]
+   (let [form-printer (:form-printer opts)]
+     (if form-printer
+       (binding [serialize/*form-printer* form-printer]
+         (rulebase-analysis* session-or-rulebase annotations))
+       (rulebase-analysis* session-or-rulebase annotations)))))
 
 (defn rulebase-summary
   "Returns a high-level summary of the rulebase counts using kebab-case keys."
