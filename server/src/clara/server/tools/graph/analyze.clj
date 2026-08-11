@@ -25,7 +25,7 @@
      (analyze-session-rules
        {:session-or-rulebase session
         :config-dir \"my-kondo-config\"})"
-  (:require [clj-kondo.core :as kondo]
+  (:require [clj-kondo.core :as kondo-core]
             [clojure.string :as str]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -33,6 +33,7 @@
             [clara.server.tools.graph.analyze.callsite :as callsite]
             [clara.server.tools.graph.analyze.alias :as alias]
             [clara.server.tools.graph.analyze.utils :as u]
+            [clara.server.tools.graph.analyze.kondo :as kondo]
             [clara.server.tools.graph.analyze.index :as index]
             [clara.server.tools.graph.analyze.synth :as synth]
             [clara.server.tools.graph.serialize :as serialize]
@@ -85,7 +86,7 @@
 
 (defn- materialize-bundled-kondo-config!
   "Copies the bundled clj-kondo config from classpath resources into a fresh
-   temp directory and returns its absolute path, suitable for `kondo/run!`
+   temp directory and returns its absolute path, suitable for `kondo-core/run!`
    `:config-dir`. Returns nil if the bundled config is not on the classpath.
 
    Materialization is required because resources may live inside a jar, which
@@ -109,7 +110,7 @@
 
 (defn- analyze-source-code [source-code resource-path config-dir]
   (with-in-str source-code
-    (kondo/run!
+    (kondo-core/run!
      (cond-> {:lint ["-"]
               :lang :clj
               :filename resource-path
@@ -562,15 +563,37 @@
             (swap! cache assoc k source)
             source))))))
 
+(defn- build-lines-loader
+  "Returns a (fn [ns-sym filename] -> lines-vec) that caches str/split-lines
+   by the same key as get-source.  Source strings are fetched via get-source
+   (already memoized by ns-sym)."
+  [get-source]
+  (let [cache (atom {})]
+    (fn [ns-sym filename]
+      (let [k (or ns-sym filename)]
+        (or (get @cache k)
+            (when-let [source (get-source ns-sym filename)]
+              (let [ls (str/split-lines source)]
+                (swap! cache assoc k ls)
+                ls)))))))
+
 (defn- build-infer-ctx
   "Builds the context map passed to `infer-annotation-for-var`: the shared
    `index/AnalysisIndex` plus the caller-supplied resolution hooks, the
-   var-alias linkage, and the heuristic-fallback mode."
-  [index callsite-resolver-fn alias-by-rule dynamic-type-fallback-resolution]
-  (assoc index
-         :callsite-resolver-fn callsite-resolver-fn
-         :alias-by-rule alias-by-rule
-         :dynamic-type-fallback-resolution dynamic-type-fallback-resolution))
+   var-alias linkage, the heuristic-fallback mode, and source-reading helpers.
+
+   `build-lines-loader` creates a memoized `get-lines` from `get-source`;
+   `read-ctor-form` is a closure over `get-lines` for reading constructor
+   forms by kondo usage position."
+  [{:keys [index callsite-resolver-fn alias-by-rule fallback-mode get-source]}]
+  (let [get-lines (build-lines-loader get-source)
+        read-ctor-form (fn [ctor-usage] (kondo/read-ctor-form ctor-usage get-lines))]
+    (assoc index
+           :get-lines get-lines
+           :read-ctor-form read-ctor-form
+           :callsite-resolver-fn callsite-resolver-fn
+           :alias-by-rule alias-by-rule
+           :dynamic-type-fallback-resolution fallback-mode)))
 
 (s/defschema FactConstructorSpec
   "One constructor of interest for `:fact-constructors`.
@@ -734,10 +757,12 @@
                 :fallback-mode fallback-mode})
         project-vars (keys (:graph index))
         var-seq (or effective-filter project-vars)
-        infer-ctx (build-infer-ctx index
-                                   callsite-resolver-fn
-                                   alias-by-rule
-                                   fallback-mode)
+        infer-ctx (build-infer-ctx
+                   {:index index
+                    :callsite-resolver-fn callsite-resolver-fn
+                    :alias-by-rule alias-by-rule
+                    :fallback-mode fallback-mode
+                    :get-source get-source})
         annotations
         (into {}
               (keep (fn [v]

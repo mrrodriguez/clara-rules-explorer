@@ -181,7 +181,7 @@
    its traced form is the constructor call.
 
    Returns `[TracedArg …]`."
-  [usages {:keys [get-source get-lines alias-context-for] :as ctx}]
+  [usages {:keys [get-lines alias-context-for] :as ctx}]
   (into []
         (comp (mapcat (fn [usage]
                         (let [alias-ctx (when alias-context-for
@@ -194,7 +194,7 @@
                                     :alias-context alias-ctx
                                     :traced form
                                     :traced-binding binding}))
-                               (or (kondo/read-boundary-args usage get-source get-lines) '())))))
+                               (or (kondo/read-boundary-args usage get-lines) '())))))
               (map-indexed (fn [i ta] (assoc ta :idx i))))
         usages))
 
@@ -409,12 +409,11 @@
 
    nil means no boundary argument demonstrably reaches this constructor: the
    constructor call is not on an insert path out of this rule."
-  [ctor-usage intermediates traced-args sibling-usages get-source get-lines]
+  [ctor-usage intermediates traced-args sibling-usages get-lines]
   (some #(when (arg-reaches-ctor? {:traced-arg %
                                    :ctor-usage ctor-usage
                                    :intermediates intermediates
                                    :sibling-usages sibling-usages
-                                   :get-source get-source
                                    :get-lines get-lines})
            %)
         traced-args))
@@ -427,13 +426,13 @@
    *and* the type-resolver returns a type; nil when the constructor is
    unreachable, unowned, or unresolved (the argument then falls through to
    the boundary path instead of being reported twice)."
-  [{:keys [ctor-match inserter-var graph get-source get-lines read-ctor-form cfg-base candidates siblings]}]
+  [{:keys [ctor-match inserter-var graph get-lines read-ctor-form cfg-base candidates siblings]}]
   (let [{:keys [usage type-resolver-fn]} ctor-match
         ctor-usage usage
         path (ctor-call-path graph inserter-var ctor-usage)
         ctor-form (read-ctor-form ctor-usage)
         owner (owning-arg ctor-usage (set (rest path))
-                          candidates siblings get-source get-lines)]
+                          candidates siblings get-lines)]
     (when owner
       (let [entry (resolve-ctor-callsite
                    (assoc cfg-base
@@ -452,7 +451,7 @@
    `constructor-ctr-map` — an `index/CtorCallsiteMap`
      ({inserter-var -> [CtorUsageMatch …]} from `index/build-analysis-index`),
      scoped to this rule var.
-   `ctx` — must contain :get-source, :read-ctor-form (memoized), :graph,
+   `ctx` — must contain :get-lines, :read-ctor-form, :graph,
      :direction, :rule, :usages-by-caller.
 
    A constructor is emitted only when some boundary argument is shown to reach
@@ -466,7 +465,7 @@
    every boundary argument a constructor accounted for.  Those must not also go
    through `resolve-boundary-callsites`, or the same insert would be reported
    twice (see `analyze/extract-insert-types`)."
-  [traced-args constructor-ctr-map {:keys [get-source get-lines read-ctor-form graph direction rule
+  [traced-args constructor-ctr-map {:keys [get-lines read-ctor-form graph direction rule
                                            usages-by-caller]}]
   (let [args-by-caller (group-by #(u/fq-sym (:from (:usage %)) (:from-var (:usage %)))
                                  traced-args)
@@ -482,7 +481,6 @@
                                  {:ctor-match %
                                   :inserter-var inserter-var
                                   :graph graph
-                                  :get-source get-source
                                   :get-lines get-lines
                                   :read-ctor-form read-ctor-form
                                   :cfg-base cfg-base

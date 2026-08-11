@@ -38,7 +38,7 @@
 (defn read-boundary-args
   "Reads the argument forms of the boundary call (`insert!`/`retract!`/…) described
    by a kondo `:var-usage`.  Returns a (possibly empty) sequence of forms."
-  [{:keys [row end-row col end-col from filename] :as _usage} _get-source get-lines]
+  [{:keys [row end-row col end-col from filename] :as _usage} get-lines]
   (let [lines (get-lines from filename)
         call-str (source-text-at lines
                                  row
@@ -97,7 +97,7 @@
   "The constructor call form as written, read from source at the usage's span.
    Public: the index memoizes it per run (shared ctor-usages are re-read once
    per rule otherwise)."
-  [ctor-usage _get-source get-lines]
+  [ctor-usage get-lines]
   (let [lines (get-lines (:from ctor-usage) (:filename ctor-usage))]
     (when-let [call-str (source-text-at lines
                                         (:row ctor-usage) (:col ctor-usage)

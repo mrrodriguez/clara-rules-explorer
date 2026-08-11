@@ -20,10 +20,8 @@
    Nothing here is rule-specific; per-rule work starts from the
    `AnalysisIndex`."
   (:require [clojure.set :as set]
-            [clojure.string :as str]
             [schema.core :as s]
             [clara.server.tools.graph.analyze.utils :as u]
-            [clara.server.tools.graph.analyze.kondo :as kondo]
             [clara.server.tools.graph.analyze.ctor :as ctor]))
 
 (def insert-fns
@@ -71,8 +69,6 @@
    are schematized with `s/=>`; their shapes:
 
    * `:get-source`          - (fn [ns-sym filename] -> source-str-or-nil)
-   * `:read-ctor-form`      - (fn [ctor-usage get-source] -> call-form-or-nil),
-                              memoized per run
    * `:resolve-record-type` - (fn [ns-sym class-sym] -> fq-class-name-sym-or-nil),
                               memoized per run (live-ns lookups + class loads)
 
@@ -96,7 +92,6 @@
    :retractor-type-map    {s/Symbol {s/Symbol {:usage u/KondoVarUsage}}}
    :constructor-callsite-map (s/maybe CtorCallsiteMap)
    :get-source            (s/=> s/Any s/Any s/Any)
-   :read-ctor-form        (s/=> s/Any s/Any s/Any)
    :resolve-record-type   (s/=> s/Any s/Any s/Any)
    :productions-by-name   {s/Symbol s/Any}})
 
@@ -325,15 +320,7 @@
                                          (update m caller (fnil conj []) u))
                                        m))
                                    {}
-                                   usages)
-        get-lines (let [lines-cache (atom {})]
-                    (fn [ns-sym filename]
-                      (let [k (or ns-sym filename)]
-                        (or (get @lines-cache k)
-                            (when-let [source (get-source ns-sym filename)]
-                              (let [ls (str/split-lines source)]
-                                (swap! lines-cache assoc k ls)
-                                ls))))))]
+                                   usages)]
     {:graph graph
      :usages-by-caller usages-by-caller
      :usages-by-callee usages-by-callee
@@ -347,7 +334,5 @@
      :retractor-type-map retractor-type-map
      :constructor-callsite-map constructor-callsite-map
      :get-source get-source
-     :get-lines get-lines
-     :read-ctor-form (memoize (fn [ctor-usage] (kondo/read-ctor-form ctor-usage get-source get-lines)))
      :resolve-record-type resolve-record-type
      :productions-by-name productions-by-name}))
