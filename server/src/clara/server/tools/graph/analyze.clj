@@ -871,7 +871,8 @@
         rule->session-types (rule->session-raw-types session-analysis)
         annotations'
         (reduce-kv (fn [acc rule-fq-str raw-types]
-                     (let [rule-ns (ann/fq-name->namespace rule-fq-str)
+                     (let [rule-fq-str (str rule-fq-str)
+                           rule-ns (ann/fq-name->namespace rule-fq-str)
                            rule-ann (get acc rule-fq-str)
                            existing (get rule-ann :clara-rules/insert-types)
                            resolve-fn (partial serialize/resolve-type rule-ns)

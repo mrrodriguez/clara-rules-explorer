@@ -58,7 +58,9 @@
           (let [step-key (step-kw i)
                 next-step-key (step-kw (inc i))
                 consume-type (if (zero? i) :chain/seed step-key)]
-            {:name (symbol (name this-ns-name) (str "chain-rule-" i))
+            {:name (-> (name this-ns-name)
+                       (symbol (str "chain-rule-" i))
+                       str)
              :doc (str "Chain rule " i ": " (pr-str consume-type) " → " (pr-str next-step-key))
              :ns-name 'clara.server.tools.graph.rules.perf-gen-helpers
              :lhs [{:type consume-type
