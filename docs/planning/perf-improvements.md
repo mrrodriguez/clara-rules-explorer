@@ -103,35 +103,52 @@ layout algorithm. Options, in increasing order of behavior change:
 artifacts in the tens of megabytes this dominates everything else in a persist
 step.
 
-Printing the `slim`med analysis of the subject session:
+Writing the ~19 MB `slim`med analysis of the subject session, to a
+`BufferedWriter` in every case:
 
-| writer | time | output size |
-| --- | --- | --- |
-| `clojure.pprint/pprint` | 27.6s | 19.2M chars |
-| `fipp.edn/pprint` | 2.8s | 39.4M chars |
-| `pr-str` | 0.23s | 18.2M chars (one line) |
+| writer | time | bytes | lines | mean indent | max indent |
+| --- | --- | --- | --- | --- | --- |
+| `clojure.pprint/pprint` | 23.9s | 19.2M | 274,816 | 3.7 | 9 |
+| `clojure.pprint`, miser off | 23.8s | 19.2M | 274,816 | 3.7 | 9 |
+| `fipp.edn/pprint` | 2.7s | 39.4M | 208,455 | 102.0 | 210 |
+| `puget` | 5.6s | 39.4M | 208,455 | 102.0 | 210 |
+| **fipp + `[:nest 1]` visitor** | **1.7s** | **18.9M** | 203,468 | **3.6** | **9** |
+| `pr-str` | 0.23s | 18.2M | 1 | — | — |
 
-All three round-trip to `=` values through `clojure.edn/read-string`, and none
-leak metadata when written under `*print-meta* false`.
+All round-trip to `=` values through `clojure.edn/read`, and none leak metadata
+when written under `*print-meta* false`.
 
-The trade is real in both directions, which is the argument for not picking one:
+Two findings worth carrying:
 
-- `fipp` is ~10x faster but ~2x larger, because it breaks groups all-or-nothing
-  where `clojure.pprint` fills lines. Output size is nearly insensitive to
-  `:width` — widening from 72 to 240 changed it by under 3%.
-- `pr-str` is ~120x faster and the smallest, but a single line is useless if the
-  artifact is reviewed as a diff.
+- **Stock `fipp` doubles the file, and it is all leading whitespace.**
+  `fipp.edn/pretty-coll` lays a broken collection out under `[:align]`, which
+  indents every entry to the column where the first one started. Under a long
+  map key that column is deep — for an analysis keyed by fully-qualified
+  production names it averages 102 columns of leading space per line. Output
+  size is nearly insensitive to `:width`: widening 72 → 240 changed it under 3%,
+  because the indent is driven by key length, not by the budget. `puget`
+  inherits the same layout and is 2x slower than fipp on top of it.
+- **Swapping that one `[:align]` for `[:nest 1]` is strictly better than
+  `clojure.pprint` on every axis** — 13.7x faster, marginally smaller, and the
+  same indentation discipline (mean 3.6, max 9). It needs an `IVisitor` that
+  delegates scalars to fipp's own `EdnPrinter` and renders collections with
+  `[:group open [:nest 1 (interpose sep elems)] close]`; about 25 lines.
 
-Which of those matters depends entirely on what the consumer does with the file.
-A caller committing artifacts to git and reviewing them as diffs wants the
-compact fill layout; a caller regenerating on every run and feeding the result
-to a machine wants speed.
+`clojure.pprint`'s cost is the pretty writer itself, not its layout choices:
+disabling miser mode (`*print-miser-width* nil`) changed nothing measurable.
+
+So the choice is not "pretty and slow versus fast and ugly" — the fast option can
+match the current layout. What genuinely varies between callers is whether the
+artifact is diff-reviewed at all: one feeding files to a machine would rather
+have `pr-str`.
 
 ### Suggested API shape
 
-Do not hardcode `fipp` or anything else — take the printer as an option and
-default to today's behavior, so nothing changes for existing callers and no new
-dependency is introduced:
+Do not hardcode `fipp` or anything else, even though the `[:nest 1]` variant
+wins on the subject data — the right layout still depends on what the consumer
+does with the file. Take the printer as an option and default to today's
+behavior, so nothing changes for existing callers and no new dependency is
+introduced:
 
 - `annotations.merge/write-layer!` — accept an opts map carrying a printer fn
   `(fn [value writer] ...)`, defaulting to `clojure.pprint/pprint`. This is the
@@ -194,5 +211,12 @@ opt-in if it is done at all.
 | --- | --- | --- |
 | Invert `build-dep-graph` | library | ~7s per analysis |
 | Injectable form printer in `serialize.clj` | library + caller | up to ~4s per analysis |
-| Injectable printer in `write-layer!` | library + caller | ~25s per large artifact |
+| Injectable printer in `write-layer!` | library + caller | ~22s per large artifact |
 | Document purity, return the merged value analyzed | library + caller | ~15s per redundant call avoided |
+
+The last two are the ones a caller can act on today without waiting on the
+library: a downstream consumer took a 124s pipeline to 64s by holding the
+analysis as a `(delay, merge-it-is-of)` pair — so it is built once instead of
+three times — and by routing its own artifact writes through the `[:nest 1]`
+fipp visitor. The `write-layer!` share of its persist is the part it still
+cannot reach.
