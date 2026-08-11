@@ -57,19 +57,22 @@ don't need pretty-printed sub-forms can bind it to a cheap printer (e.g.,
 **Implementation notes:**
 
 `serialize/*form-printer*` is a `^:dynamic` var defaulting to
-`default-form-printer` (`with-out-str` + `pp/pprint`). All four serialize
-functions (`serialize-condition`, `serialize-lhs`, `serialize-lhs-form`,
-`serialize-rhs-form`) read it directly — no arity changes, no opts threading.
-
-Callers override via `binding`:
+`default-form-printer` (`with-out-str` + `pp/pprint`). The public API —
+`rulebase-analysis` — accepts an explicit `:form-printer` opt and manages
+the `binding` internally:
 ```clojure
-(binding [serialize/*form-printer* pr-str]
-  (rulebase-analysis session annotations))
+;; Default (clojure.pprint)
+(rulebase-analysis session annotations)
+
+;; Cheap single-line printer
+(rulebase-analysis session annotations {:form-printer pr-str})
 ```
 
-`fipp/fipp` is in `:test` extra-deps (not `:dev` — `:dev` combines with
-`:test` when both are active, so no need to duplicate). A dedicated test in
-`serialize_test.clj` demonstrates `binding` to fipp and pr-str.
+The dynamic var is an implementation detail of `serialize.clj`; callers do
+not bind it directly.
+
+`fipp/fipp` is in `:test` extra-deps. A dedicated test in
+`serialize_test.clj` demonstrates `binding` overrides with fipp and pr-str.
 
 ## Step 2: Artifact writing — make printer the caller's choice
 

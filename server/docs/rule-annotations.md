@@ -640,6 +640,13 @@ To get the same output as `--generate-analysis` (annotations + full rulebase ana
   (spit "analysis.edn"    (with-out-str (pprint/pprint full))))
 ```
 
+For large rulebases the LHS/RHS form pretty-printing inside
+`rulebase-analysis` can be slow.  Pass `:form-printer pr-str` to skip it:
+
+```clojure
+(core/rulebase-analysis my-session annotations {:form-printer pr-str})
+```
+
 #### 4. Start the explorer UI from a live session
 
 ```clojure
