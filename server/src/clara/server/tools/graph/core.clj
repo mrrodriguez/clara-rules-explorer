@@ -159,7 +159,9 @@
   annotations/merge-layers).  `ctx` is the shared analysis context map
   (annotations, dep-graph, production-map, type-analysis-map,
   ancestors-set-fn, known-set; see `rulebase-analysis`).  `known-set` is the
-  analysis's serialized fact-type names, used for TypeReference `known` flags."
+  analysis's serialized fact-type names, used for TypeReference `known` flags.
+
+  Form printing is controlled by the dynamic var `serialize/*form-printer*`."
   [{p-name :name :as production}
    {:keys [annotations dep-graph production-map known-set] :as ctx}]
   (let [ann (ann/production-annotation annotations production)
@@ -288,40 +290,47 @@
           (concat (vals (:rules analysis))
                   (vals (:queries analysis)))))
 
+(defn- build-consumers-by-type
+  "Returns a map: consumed-type -> #{consumer-name ...}
+   for every consumer in `type-analysis-map` that has at least one consumed type."
+  [type-analysis-map]
+  (let [idx (volatile! {})]
+    (doseq [[consumer-name {:keys [consumed-types]}] type-analysis-map
+            ct consumed-types]
+      (vswap! idx update ct (fnil conj #{}) consumer-name))
+    @idx))
+
 (defn build-dep-graph
   "Builds the production dependency graph: {production-name {:upstream #{...}
    :downstream #{...}}} where an edge producer → consumer exists when some
    produced type of the producer satisfies some consumed type of the consumer
-   directly or via the ancestors-fn hierarchy."
+   directly or via the ancestors-fn hierarchy.
+
+   The algorithm is linear in (produced types × hierarchy depth) plus the
+   edges actually emitted: it builds a consumers-by-type index, then for each
+   producer walks the ancestor chain of each produced type to find consumers,
+   rather than evaluating every producer-consumer pair O(n²)."
   [type-analysis-map ancestors-set-fn]
-  (letfn [(some-type-consumed? [produced-types consumed-types]
-            (->> produced-types
-                 (some (fn [pt]
-                         (some (fn [ct] (downstream? ancestors-set-fn pt ct))
-                               consumed-types)))
-                 boolean))
-
-          (add-dep-graph-entry [graph [producer-name consumer-name]]
-            (-> graph
-                (update-in [producer-name :downstream]
-                           (fnil conj #{})
-                           consumer-name)
-                (update-in [consumer-name :upstream]
-                           (fnil conj #{})
-                           producer-name)))]
-
-    (let [producer-consumer-pairs
-          (for [[p-name1 {produced-types1 :produced-types}] type-analysis-map
-                [p-name2 {consumed-types2 :consumed-types}] type-analysis-map
-                :when (and (not= p-name1 p-name2)
-                           (seq produced-types1)
-                           (seq consumed-types2)
-                           (some-type-consumed? produced-types1 consumed-types2))]
-            [p-name1 p-name2])
-
-          graph (reduce add-dep-graph-entry {} producer-consumer-pairs)]
-
-      graph)))
+  (let [consumers-by-type (build-consumers-by-type type-analysis-map)
+        graph (volatile! {})]
+    (doseq [[producer-name {:keys [produced-types]}] type-analysis-map
+            :when (seq produced-types)
+            pt produced-types
+            :let [consumers (reduce into #{}
+                                    (keep consumers-by-type
+                                          (cons pt (ancestors-set-fn pt))))]
+            consumer-name consumers
+            :when (not= producer-name consumer-name)]
+      (vswap! graph
+              (fn [g]
+                (-> g
+                    (update-in [producer-name :downstream]
+                               (fnil conj #{})
+                               consumer-name)
+                    (update-in [consumer-name :upstream]
+                               (fnil conj #{})
+                               producer-name)))))
+    @graph))
 
 (defn- build-production-map
   "Builds name to production map for the `productions` while maintaining the insertion order."
@@ -369,10 +378,10 @@
     x
     {:annotations (or x {}) :provenance {}}))
 
-(defn rulebase-analysis
-  "Analyzes a rulebase against merged annotations.  `annotations` is either
-   a MergedAnnotations value (annotations/merge-layers output — annotations
-   and provenance are both used) or a bare rule→annotation map."
+(defn- rulebase-analysis*
+  "Implementation of `rulebase-analysis`.  Callers go through the public
+   multi-arity `rulebase-analysis`, which manages the `*form-printer*`
+   dynamic binding."
   [session-or-rulebase annotations]
   (let [{:keys [productions id-to-node] :as rulebase} (get-rulebase session-or-rulebase)
 
@@ -419,10 +428,36 @@
                   :fact-types fact-types
                   :nodes nodes
                   :dep-graph dep-graph
-                  :unresolved (vec unresolved)}]
+                  :unresolved (vec unresolved)
+                  :merged-annotations annotations}]
     (assoc analysis
            :fact-type-id-index (ft/build-fact-type-id-index analysis)
            :production-id-index (build-production-id-index analysis))))
+
+(defn rulebase-analysis
+  "Analyzes a rulebase against merged annotations.  `annotations` is either
+   a MergedAnnotations value (annotations/merge-layers output — annotations
+   and provenance are both used) or a bare rule→annotation map.
+
+   This function is pure: the result depends only on the rulebase and the
+   annotations argument.  It touches no working memory and no mutable state,
+   so callers may safely cache the result keyed on (rulebase, annotations).
+   The analysis map includes `:merged-annotations` — the normalized
+   annotations used for computation — so a caller holding a cached analysis
+   can test validity: `(= (:merged-annotations cached) current-annotations)`.
+
+   `opts` is an optional map:
+   - `:form-printer` — (fn [form] String) for serializing LHS/RHS forms.
+     Defaults to `serialize/default-form-printer` (clojure.pprint).
+     Pass `pr-str` for a cheap non-pretty-printing alternative."
+  ([session-or-rulebase annotations]
+   (rulebase-analysis session-or-rulebase annotations nil))
+  ([session-or-rulebase annotations opts]
+   (let [form-printer (:form-printer opts)]
+     (if form-printer
+       (binding [serialize/*form-printer* form-printer]
+         (rulebase-analysis* session-or-rulebase annotations))
+       (rulebase-analysis* session-or-rulebase annotations)))))
 
 (defn rulebase-summary
   "Returns a high-level summary of the rulebase counts using kebab-case keys."
@@ -451,11 +486,11 @@
         (vals (:queries analysis))))
 
 (defn analysis-result
-  "Returns the analysis map stripped of internal reverse indexes
-   (`:fact-type-id-index`, `:production-id-index`) that are only needed by
-   detail-by-id handlers.  Suitable for serialization to consumers that
-   should not depend on those implementation details."
+  "Returns the analysis map stripped of internal implementation details
+   (`:fact-type-id-index`, `:production-id-index`, `:merged-annotations`).
+   Suitable for serialization to external consumers (e.g. the HTTP API)
+   that should not depend on those details."
   [analysis]
-  (dissoc analysis :fact-type-id-index :production-id-index))
+  (dissoc analysis :fact-type-id-index :production-id-index :merged-annotations))
 
 

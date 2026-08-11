@@ -377,6 +377,36 @@
       (finally
         (io/delete-file path :silently)))))
 
+(deftest write-layer-edn-printer-opt
+  (let [layer (ann/layer {:id :test
+                          :annotations {"a" {:ns "test" :insert-types [:Foo :Bar]}}})
+        pr-str-printer (fn [v ^java.io.Writer w] (.write w (pr-str v)))]
+    (testing "default printer produces multi-line (pretty-printed) output"
+      (let [path (io/file (System/getProperty "java.io.tmpdir")
+                          (str "anno-default-" (System/nanoTime) ".edn"))]
+        (try
+          (ann/write-layer! path layer)
+          (let [written (slurp path)]
+            (is (str/includes? written "\n")
+                "default pprint printer produces multi-line output"))
+          (finally
+            (io/delete-file path :silently)))))
+    (testing ":pr-str printer produces compact single-line output"
+      (let [path (io/file (System/getProperty "java.io.tmpdir")
+                          (str "anno-prstr-" (System/nanoTime) ".edn"))]
+        (try
+          (ann/write-layer! path layer {:edn-printer pr-str-printer})
+          (let [written (slurp path)]
+            (is (not (str/includes? written "\n"))
+                "pr-str printer produces single-line output")
+            ;; Round-trips through EDN read
+            (is (= {:id :test
+                    :source (str path)
+                    :annotations {"a" {:ns "test" :insert-types [:Foo :Bar]}}}
+                   (ann/read-layer path))))
+          (finally
+            (io/delete-file path :silently)))))))
+
 ;; ---------------------------------------------------------------------------
 ;; §4.4 — callsite identity (phase 3)
 ;; ---------------------------------------------------------------------------
