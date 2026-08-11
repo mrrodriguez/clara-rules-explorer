@@ -106,14 +106,38 @@
                      (edn/read (java.io.PushbackReader. r))
                      m))))))
 
-(defn write-layer!
-  "Writes a Layer as pretty-printed EDN.  `*print-meta*` is bound false:
-   reader metadata from synthesized analysis snippets must not leak into
-   artifacts."
+(def ^:dynamic *edn-printer*
+  "Dynamic EDN printer for artifact writing.  (fn [value writer] ...)
+   Defaults to clojure.pprint/pprint.  Callers who do not need pretty-printed
+   output can bind this to `(fn [v w] (.write ^java.io.Writer w (pr-str v)))`
+   for compact single-line EDN, or to `fipp.edn/pprint` for faster
+   pretty-printing at the cost of larger output."
+  pp/pprint)
+
+(defn- write-layer!*
+  "Writes a Layer as EDN using the current `*edn-printer*`.
+   `*print-meta*` is bound false: reader metadata from synthesized analysis
+   snippets must not leak into artifacts."
   [path layer]
   (with-open [w (io/writer path)]
     (binding [*print-meta* false]
-      (pp/pprint layer w))))
+      (*edn-printer* layer w))))
+
+(defn write-layer!
+  "Writes a Layer as EDN.  `*print-meta*` is bound false: reader metadata
+   from synthesized analysis snippets must not leak into artifacts.
+
+   `opts` is an optional map:
+   - `:edn-printer` — (fn [value writer] ...) for EDN output.
+     Defaults to `clojure.pprint/pprint`.  Pass `(fn [v w] (.write w (pr-str v)))`
+     for compact single-line output, or `fipp.edn/pprint` for faster pretty-printing."
+  ([path layer]
+   (write-layer! path layer nil))
+  ([path layer opts]
+   (if-let [printer (:edn-printer opts)]
+     (binding [*edn-printer* printer]
+       (write-layer!* path layer))
+     (write-layer!* path layer))))
 
 (defn props-layer
   "The rule-:props layer: annotations authored on the rule form itself, read

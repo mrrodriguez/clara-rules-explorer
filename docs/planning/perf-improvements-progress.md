@@ -76,7 +76,39 @@ not bind it directly.
 
 ## Step 2: Artifact writing — make printer the caller's choice
 
-**Status:** NOT STARTED
+**Status:** ✅ DONE
+
+**Plan:** Make the EDN artifact printer injectable in `annotations.merge/write-layer!`
+and `graph.main`'s analysis output, so callers can swap `clojure.pprint/pprint`
+for a faster alternative (e.g., `pr-str` for ~120x speedup on large artifacts, or
+`fipp.edn/pprint` for ~10x with multi-line output).
+
+**Implementation:**
+- [x] Add `^:dynamic *edn-printer*` to `annotations/merge.clj` defaulting to `pp/pprint`
+- [x] `write-layer!` accepts an opts map with `:edn-printer` key `(fn [value writer] ...)`
+- [x] `graph.main`'s `run-generate-analysis` threads the printer to both `write-layer!` and the analysis `spit`
+- [x] Add `--edn-printer pprint|pr-str` CLI flag to `graph.main`
+- [x] Add `write-layer-edn-printer-opt` test verifying default (multi-line) vs `:pr-str` (compact)
+- [x] Verify: `make test` passes (202 tests, 0 failures)
+- [x] Verify: `make lint` clean (0 errors, 0 warnings)
+
+**Implementation notes:**
+
+`ann.merge/*edn-printer*` is a `^:dynamic` var defaulting to `clojure.pprint/pprint`.
+`write-layer!` accepts an explicit `:edn-printer` opt and manages the `binding`
+internally:
+```clojure
+;; Default (clojure.pprint)
+(write-layer! path layer)
+
+;; Compact single-line
+(write-layer! path layer {:edn-printer (fn [v w] (.write w (pr-str v)))})
+```
+
+The CLI exposes this via `--edn-printer pprint|pr-str`.  The dynamic var is an
+implementation detail; callers use the explicit opt.
+
+No new production dependency is introduced — `fipp` remains a test-only dep.
 
 ## Step 3: `rulebase-analysis` is pure — document and return cache key
 

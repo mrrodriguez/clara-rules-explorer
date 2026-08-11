@@ -76,6 +76,10 @@
          "  File:    --annotations my-spec.edn"
          "  When the spec has no :source, any -l/--layer flags supply it.")
     :default nil]
+   [nil "--edn-printer PRINTER" "EDN printer for artifact output: pprint (default) or pr-str."
+    :default :pprint
+    :parse-fn keyword
+    :validate [#{:pprint :pr-str} "Must be pprint or pr-str"]]
    [nil "--generate-analysis DIR" "Generate annotations and analysis EDN files to the specified output directory."
     :id :generate-analysis-dir]
    [nil "--load-session-state-fn SYMBOL" "Symbol naming a function to load the session state."
@@ -188,13 +192,22 @@
              mem-serializer (->FressianFactReader facts-stream)]
          (d/deserialize-session-state session-serializer mem-serializer))))))
 
+(defn- edn-printer-for
+  "Returns the EDN printer fn for the given keyword.
+   :pprint → clojure.pprint/pprint  (default, multi-line)
+   :pr-str → pr-str-wrapping writer  (compact, single-line)"
+  [kw]
+  (case kw
+    :pr-str (fn [v ^java.io.Writer w] (.write w (pr-str v)))
+    pprint/pprint))
+
 (defn- run-generate-analysis
   "Generates annotations and static analysis artifacts, writing them to the
    specified output directory.
 
    Annotations are auto-discovered from the session's rule namespaces via
    clj-kondo, with the session rulebase as the source of truth for rules."
-  [{:keys [session facts load-session-state-fn generate-analysis-dir] :as options}]
+  [{:keys [session facts load-session-state-fn generate-analysis-dir edn-printer] :as options}]
   (when-not session
     (println "Error: --session is required with --generate-analysis")
     (exit 1))
@@ -202,7 +215,8 @@
     (println (format "Error: session file not found: %s" session))
     (exit 1))
 
-  (let [facts-path (resolve-facts-path session facts)]
+  (let [edn-printer (edn-printer-for edn-printer)
+        facts-path (resolve-facts-path session facts)]
     (when (and (not load-session-state-fn)
                (not (file-exists? facts-path)))
       (println (format "Error: facts file not found: %s  (use --facts to specify a different path)"
@@ -243,12 +257,12 @@
             annotations-path (str generate-analysis-dir "/annotations.edn")
             analysis-path (str generate-analysis-dir "/analysis.edn")]
 
-        (ann.merge/write-layer! annotations-path generated-layer)
+        (ann.merge/write-layer! annotations-path generated-layer {:edn-printer edn-printer})
         (println (format "Annotations written to: %s" annotations-path))
 
         (spit analysis-path
               (with-out-str
-                (pprint/pprint analysis)))
+                (edn-printer analysis *out*)))
         (println (format "Analysis written to: %s" analysis-path))))))
 
 (defn run-explorer-server
@@ -309,6 +323,7 @@
      -l, --layer PATH        EDN annotation layer file (repeatable).
      -f, --facts PATH        Serialized facts file (default: <session>.facts).
      -p, --port PORT         Server port (default: 9999).
+     --edn-printer PRINTER  EDN printer for artifacts: pprint (default) or pr-str.
      --load-session-state-fn SYMBOL  Symbol naming a function to load the session state.
      -h, --help"
   [& args]
