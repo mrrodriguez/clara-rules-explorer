@@ -94,9 +94,7 @@
       nil)))
 
 (defn read-ctor-form
-  "The constructor call form as written, read from source at the usage's span.
-   Public: the index memoizes it per run (shared ctor-usages are re-read once
-   per rule otherwise)."
+  "The constructor call form as written, read from source at the usage's span."
   [ctor-usage get-lines]
   (let [lines (get-lines (:from ctor-usage) (:filename ctor-usage))]
     (when-let [call-str (source-text-at lines

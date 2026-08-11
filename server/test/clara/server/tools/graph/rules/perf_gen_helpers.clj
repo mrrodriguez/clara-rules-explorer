@@ -62,7 +62,7 @@
                        (symbol (str "chain-rule-" i))
                        str)
              :doc (str "Chain rule " i ": " (pr-str consume-type) " → " (pr-str next-step-key))
-             :ns-name 'clara.server.tools.graph.rules.perf-gen-helpers
+             :ns-name this-ns-name
              :lhs [{:type consume-type
                     :constraints []}]
              :rhs (list 'r/insert! (list '->step-fact next-step-key))}))
@@ -104,7 +104,7 @@
 
    Convenience wrapper around build-chain-rules + build-chain-hierarchy +
    mk-session, including the chain-all-steps defquery.  Accepts the same
-   keyword options as clara.rules/mk-session (e.g. :cache false)."
+   trailing key-value option pairs as clara.rules/mk-session (e.g. :cache false)."
   [n & options]
   (r/mk-session (concat (build-chain-rules n)
                         [(var chain-all-steps)

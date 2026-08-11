@@ -113,6 +113,22 @@ This catches schema violations in `s/defn`-annotated handler return values at
 test time.  When combining with other `:once` fixtures, compose them:
 `(use-fixtures :once st/validate-schemas other-fixture)`.
 
+# Clara Rules API
+
+**`clara.rules/mk-session`** takes a single variadic sequence of sources and
+options:
+
+```clojure
+;; Sources come first (productions, queries, hierarchies), followed by
+;; key-value option pairs — NOT a map:
+(r/mk-session production-1 production-2
+              :cache false
+              :activation-group-sort-fn my-sort-fn)
+```
+
+The function splits by looking for the first keyword: everything before it
+is a source, everything after becomes `(apply hash-map ...)`.
+
 # Documentation
 
 ## Annotations Guide
