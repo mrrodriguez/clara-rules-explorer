@@ -1,6 +1,6 @@
 # Nil safety in the analysis pipeline — implementation plan
 
-**Status:** ✅ Complete (Steps 1–8), Step 9 deferred.
+**Status:** ✅ Complete (Steps 1–2b, 3–8), Step 9 deferred.
 
 ---
 
@@ -88,6 +88,37 @@ Extracted predicate, placed immediately before `get-wrapped-fact-groups`:
 
 Replaced the inline `(and (some? fact) (not (instance? ISystemFact fact)))`
 check in `inspect-facts` with `(fact-visible? fact)`.
+
+---
+
+### Step 2b — Apply it to the remaining fact-bearing keys of `inspect` ✅
+
+**File:** `server/src/clara/server/vendor/tools/inspect.clj`
+
+`fact-visible?` governs every key of `inspect` that carries facts, not only the
+ones feeding `get-wrapped-fact-groups`. `gen-fact->explanations` and
+`:insertions` are the other two; both now carry the same `:when` guard, and
+`gen-fact->explanations` moved below the predicate.
+
+Without them, Principle 2 fails in the specific way it warns about: nil reaches
+`graph.memory`, which keys a fact table off `:all-facts` (filtered) and reads
+insertions out of the unfiltered views. The nil resolves to no id, and
+`:inserted-facts` carries a literal `null` inside the API's `[SessionFact]` —
+`GET /v1/session/rules/:id` serves it and the UI dereferences it.
+
+**Attribution, not just nil.** `fact->explanations` is keyed by the fact, so
+equal-but-distinct facts share one entry: two rules inserting `(->Derived
+"same")` both get credited with whichever instance became the key, the other
+instance is orphaned with no origins, and which one wins follows tie order in
+`sort-facts`. nil is the degenerate case of this — every nil is `identical?` to
+every other, so no index can tell two apart or give them distinct ids. A
+`:fact-type-fn` mapping nil to a real type does let nil match alpha nodes and
+drive rules, but it does not make N nils distinguishable.
+
+`graph.memory` therefore reads attribution from `:insertions` — the same memory
+un-inverted, one entry per insertion with identity intact — via
+`insertion-id+rule-pairs`, shared by `build-origin-map` and
+`build-rule-match-index`.
 
 ---
 
@@ -197,6 +228,8 @@ Three new tests covering the full nil-safety surface:
 | `test-nil-excluded-from-all-facts` | Rule inserts nil via `insert!` → nil is filtered by `fact-visible?` → never appears in snapshot |
 | `test-unknown-fact-type-substitution` | Custom `fact-type-fn` returning `(constantly nil)` → facts get `:clara.tools.graph.analyze/unknown-fact-type` sentinel, `:known false`, valid route-id |
 | `test-nil-insertion-analysis-no-crash` | Full pipeline: nil-inserting rule → `session-snapshot` → `rulebase-analysis` — completes without throwing |
+| `test-nil-excluded-from-inspect-fact-views` | Step 2b: nil absent from `:all-facts`, `:root-facts`, `:insertions`, `:fact->explanations`, and from `:inserted-facts` |
+| `test-equal-facts-attributed-to-their-own-inserting-rule` | Step 2b: two rules inserting equal facts each claim their own instance; none shared, none orphaned |
 
 ---
 
@@ -255,8 +288,8 @@ common — a counter would add noise without a logging framework to route it.
 
 | File | Changes |
 |------|---------|
-| `server/src/clara/server/vendor/tools/inspect.clj` | Steps 1–2: `fact-visible?` helper, filtered source sets, replaced inline check; Step 8: nil `fact-type-fn` guard in `inspect-facts` |
-| `server/src/clara/server/tools/graph/memory.clj` | Steps 3, 5: WARN on nil `raw-type`, nil-id skip in `build-id-name-index` |
+| `server/src/clara/server/vendor/tools/inspect.clj` | Steps 1–2: `fact-visible?` helper, filtered source sets, replaced inline check; Step 2b: same guard on `gen-fact->explanations` and `:insertions`; Step 8: nil `fact-type-fn` guard in `inspect-facts` |
+| `server/src/clara/server/tools/graph/memory.clj` | Steps 3, 5: WARN on nil `raw-type`, nil-id skip in `build-id-name-index`; Step 2b: `insertion-id+rule-pairs`, attribution read from `:insertions` |
 | `server/src/clara/server/tools/graph/serialize.clj` | Steps 4–6: `serialize-type-ref` backstop, `route-id*` backstop, `some?` guard |
 | `server/test/clara/server/tools/graph/rules/nil_safety_test_rules.clj` | Step 7: new test rules |
 | `server/test/clara/server/tools/graph/memory_test.clj` | Step 7: 3 new e2e tests |
@@ -265,7 +298,7 @@ common — a counter would add noise without a logging framework to route it.
 ## Test results
 
 ```
-Ran 190 tests containing 1328 assertions.
+Ran 200 tests containing 1407 assertions.
 0 failures, 0 errors.
 Lint: errors: 0, warnings: 0
 ```

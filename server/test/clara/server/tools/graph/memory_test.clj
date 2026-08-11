@@ -7,7 +7,9 @@
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
-            [clara.server.tools.graph.rules.nil-safety-test-rules]
+            [clara.server.tools.graph.rules.nil-safety-test-rules :as nil-safety]
+            [clara.server.tools.graph.rules.equal-fact-test-rules :as equal-facts]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
 
 (defn- ->test-session
@@ -343,7 +345,7 @@
 
 (deftest test-nil-excluded-from-all-facts
   (testing "Nil facts inserted via insert-all! are excluded from :all-facts by fact-visible?"
-    (let [fact (clara.server.tools.graph.rules.nil-safety-test-rules/->NilSafetyFact "f1")
+    (let [fact (nil-safety/->NilSafetyFact "f1")
           session (-> (r/mk-session 'clara.server.tools.graph.rules.nil-safety-test-rules)
                       (r/insert fact)
                       (r/fire-rules))
@@ -361,9 +363,50 @@
         (is (empty? nil-facts)
             "Nil facts should be excluded from the snapshot")))))
 
+(deftest test-nil-inserting-rule-snapshot
+  (testing "A rule that inserts nil still appears in rule-matches with clean entries"
+    (let [fact (nil-safety/->NilSafetyFact "f1")
+          session (-> (r/mk-session 'clara.server.tools.graph.rules.nil-safety-test-rules)
+                      (r/insert fact)
+                      (r/fire-rules))
+          snapshot (memory/session-snapshot session)
+          entry (some (fn [[p-name m]]
+                        (when (= "nil-insertion-rule" (name (symbol (str p-name)))) m))
+                      (:rule-matches snapshot))]
+      (is (some? entry) "the nil-inserting rule must still appear in the rule-match index")
+      (is (every? some? (:inserted-facts entry))
+          "a fact with no snapshot entry is absent, never present as nil")
+      (is (every? some? (:matches entry))))))
+
+(deftest test-equal-facts-attributed-to-their-own-inserting-rule
+  (testing "Two rules inserting equal-but-distinct facts each claim their own"
+    (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.equal-fact-test-rules)
+                      (r/insert (equal-facts/->Seed 1))
+                      (r/fire-rules))
+          snapshot (memory/session-snapshot session)
+          derived (->> (:facts snapshot)
+                       (filter (fn [[_id f]]
+                                 (str/includes? (get-in f [:type :name]) "Derived"))))
+          derived-ids (set (map key derived))
+          claimed (into {}
+                        (map (fn [[p-name m]]
+                               [(name (symbol (str p-name))) (mapv :id (:inserted-facts m))]))
+                        (:rule-matches snapshot))
+          claimed-ids (mapcat val claimed)]
+
+      (is (= 2 (count derived-ids)) "both equal facts are distinct in the snapshot")
+      (is (= (sort claimed-ids) (distinct (sort claimed-ids)))
+          "no fact is claimed by more than one rule")
+      (is (= derived-ids (set claimed-ids))
+          "and no fact is orphaned")
+
+      (testing "the same holds for :inserted-from on the facts themselves"
+        (is (every? (fn [[_id f]] (= 1 (count (:inserted-from f)))) derived)
+            "each fact names exactly the rule that inserted it")))))
+
 (deftest test-unknown-fact-type-substitution
   (testing "fact-type-fn returning nil for a non-nil fact — substitutes unknown-fact-type"
-    (let [fact (clara.server.tools.graph.rules.nil-safety-test-rules/->NilSafetyFact "f1")
+    (let [fact (nil-safety/->NilSafetyFact "f1")
           ;; Custom fact-type-fn that returns nil for everything
           nil-ft-fn (constantly nil)
           session (-> (r/mk-session 'clara.server.tools.graph.rules.nil-safety-test-rules
@@ -391,7 +434,7 @@
 
 (deftest test-nil-insertion-analysis-no-crash
   (testing "Full pipeline: rule that inserts nil → analysis does not crash"
-    (let [fact (clara.server.tools.graph.rules.nil-safety-test-rules/->NilSafetyFact "f1")
+    (let [fact (nil-safety/->NilSafetyFact "f1")
           session (-> (r/mk-session 'clara.server.tools.graph.rules.nil-safety-test-rules)
                       (r/insert fact)
                       (r/fire-rules))
