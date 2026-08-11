@@ -428,7 +428,8 @@
                   :fact-types fact-types
                   :nodes nodes
                   :dep-graph dep-graph
-                  :unresolved (vec unresolved)}]
+                  :unresolved (vec unresolved)
+                  :merged-annotations annotations}]
     (assoc analysis
            :fact-type-id-index (ft/build-fact-type-id-index analysis)
            :production-id-index (build-production-id-index analysis))))
@@ -437,6 +438,13 @@
   "Analyzes a rulebase against merged annotations.  `annotations` is either
    a MergedAnnotations value (annotations/merge-layers output — annotations
    and provenance are both used) or a bare rule→annotation map.
+
+   This function is pure: the result depends only on the rulebase and the
+   annotations argument.  It touches no working memory and no mutable state,
+   so callers may safely cache the result keyed on (rulebase, annotations).
+   The analysis map includes `:merged-annotations` — the normalized
+   annotations used for computation — so a caller holding a cached analysis
+   can test validity: `(= (:merged-annotations cached) current-annotations)`.
 
    `opts` is an optional map:
    - `:form-printer` — (fn [form] String) for serializing LHS/RHS forms.
@@ -478,11 +486,11 @@
         (vals (:queries analysis))))
 
 (defn analysis-result
-  "Returns the analysis map stripped of internal reverse indexes
-   (`:fact-type-id-index`, `:production-id-index`) that are only needed by
-   detail-by-id handlers.  Suitable for serialization to consumers that
-   should not depend on those implementation details."
+  "Returns the analysis map stripped of internal implementation details
+   (`:fact-type-id-index`, `:production-id-index`, `:merged-annotations`).
+   Suitable for serialization to external consumers (e.g. the HTTP API)
+   that should not depend on those details."
   [analysis]
-  (dissoc analysis :fact-type-id-index :production-id-index))
+  (dissoc analysis :fact-type-id-index :production-id-index :merged-annotations))
 
 

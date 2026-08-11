@@ -112,4 +112,28 @@ No new production dependency is introduced — `fipp` remains a test-only dep.
 
 ## Step 3: `rulebase-analysis` is pure — document and return cache key
 
-**Status:** NOT STARTED
+**Status:** ✅ DONE
+
+**Plan:** Document the purity contract in `rulebase-analysis`'s docstring so
+callers know caching is safe, and return `:merged-annotations` in the analysis
+map so a caller holding a cached analysis can test validity.
+
+**Implementation:**
+- [x] `rulebase-analysis` docstring states purity: result depends only on rulebase + annotations, no working memory or mutable state touched
+- [x] `:merged-annotations` key added to the analysis map — the normalized annotations actually used for computation
+- [x] `analysis-result` strips `:merged-annotations` so it does not leak over the HTTP API
+- [x] Verify: `make test` passes (202 tests, 0 failures)
+- [x] Verify: `make lint` clean (0 errors, 0 warnings)
+
+**Implementation notes:**
+
+The analysis map now carries `:merged-annotations` — the normalized annotations
+map post-`coerce-annotations-arg`.  `=` on this value is ~10ms even for 8.6 MB
+annotations, so it is cheap enough to use as a cache-key equality check:
+```clojure
+(when (= (:merged-annotations cached-analysis) current-annotations)
+  cached-analysis)
+```
+`analysis-result` (the HTTP API sanitizer) strips `:merged-annotations` along
+with `:fact-type-id-index` and `:production-id-index`, so it is available only
+to programmatic callers who hold the raw analysis map.
