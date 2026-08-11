@@ -15,7 +15,8 @@
 
   :test {:extra-paths ["test" "test-resources"]
          :extra-deps {ring/ring-mock {:mvn/version "0.6.2"}
-                      clj-http/clj-http {:mvn/version "3.13.1"}}}
+                      clj-http/clj-http {:mvn/version "3.13.1"}
+                      fipp/fipp {:mvn/version "0.6.29"}}}
 
   :dev {:extra-paths ["dev" "test-resources"]
         :extra-deps {vvvvalvalval/scope-capture {:mvn/version "0.3.3"}

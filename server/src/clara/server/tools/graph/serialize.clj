@@ -8,6 +8,18 @@
    [clara.rules.schema :as schema])
   (:import [java.math BigInteger]))
 
+(defn default-form-printer
+  "Default form printer: pretty-prints a form to a string using clojure.pprint."
+  ^String [form]
+  (with-out-str (pp/pprint form)))
+
+(def ^:dynamic *form-printer*
+  "Dynamic form printer for LHS/RHS serialization.  Defaults to
+   `default-form-printer` (clojure.pprint).  Callers who do not need
+   pretty-printed sub-forms can bind this to `pr-str` or another cheap
+   (fn [form] String) for a substantial speedup on large rulebases."
+  default-form-printer)
+
 (defn resolve-type
   "Resolves a raw fact type (Class, keyword, symbol, string, tuple, map, ...) to its
    kind-explicit string representation for JSON.  The kind is self-describing
@@ -185,16 +197,17 @@
   "Serializes a single condition, including pretty-printing its constraints and
    args and converting its `:type` (raw fact type) into a TypeReference.
    `prod-ns` is the production's namespace, used to resolve symbol types;
-   `known-set` is the analysis's serialized fact-type names."
+   `known-set` is the analysis's serialized fact-type names.
+
+   Form printing is controlled by the dynamic var `*form-printer*`
+   (defaults to `default-form-printer`)."
   [condition prod-ns known-set]
-  (letfn [(serialize-form [form]
-            (with-out-str (pp/pprint form)))
-          (serialize-forms [forms]
-            ;; `pp/pprint` adds the newline after the last form so do not include it trailing
-            ;; in this `format` call.
+  (letfn [(serialize-forms [forms]
+            ;; The printer adds the newline after the last form so do not
+            ;; include it trailing in this `format` call.
             (format "[\n%s]"
                     (->> forms
-                         (map serialize-form)
+                         (map *form-printer*)
                          (str/join \newline))))
           (serialize-node [node]
             (if (map? node)
@@ -209,7 +222,9 @@
   "Serializes the LHS of a rule.  Condition `:type` values are raw fact types
    here — callers must apply `prune-fns` to the RESULT (not beforehand) so the
    types are still Classes/keywords when `serialize-condition` converts them
-   to TypeReferences."
+   to TypeReferences.
+
+   Form printing is controlled by the dynamic var `*form-printer*`."
   [lhs prod-ns known-set]
   (mapv #(serialize-condition % prod-ns known-set) lhs))
 
@@ -237,16 +252,21 @@
              (into (or (:constraints condition) []))))))
 
 (defn serialize-lhs-form
-  "Pretty-prints the full LHS as a single Clojure code string."
+  "Pretty-prints the full LHS as a single Clojure code string.
+
+   Form printing is controlled by the dynamic var `*form-printer*`."
   [lhs]
   (->> lhs
        (map condition->form)
-       (map (fn [form] (with-out-str (pp/pprint form))))
+       (map *form-printer*)
        str/join))
 
 (defn serialize-rhs-form
+  "Pretty-prints the RHS form as a string.
+
+   Form printing is controlled by the dynamic var `*form-printer*`."
   [rhs-form]
-  (with-out-str (pp/pprint rhs-form)))
+  (*form-printer* rhs-form))
 
 (defn remove-nil-vals
   "Returns the map `m` with all entries whose value is nil removed."
