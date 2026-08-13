@@ -217,29 +217,29 @@
 
 (deftest test-deterministic-fact-str--shapes
   (testing "set of maps does not throw"
-    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :results #{{:a 1}}}))
+    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :results #{{:a 1}}} serialize/prune-fns))
         "set of maps must canonicalize without comparator error"))
 
   (testing "map keyed by a map does not throw"
-    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :by {{:a 1} 1}}))
+    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :by {{:a 1} 1}} serialize/prune-fns))
         "map keyed by a map must canonicalize without comparator error"))
 
   (testing "mixed key types does not throw"
-    (is (string? (#'memory/deterministic-fact-str {:a 1 "b" 2}))
+    (is (string? (#'memory/deterministic-fact-str {:a 1 "b" 2} serialize/prune-fns))
         "mixed key types must canonicalize without class cast"))
 
   (testing "vector of maps is fine (regression)"
-    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :results [{:a 1}]}))
+    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :results [{:a 1}]} serialize/prune-fns))
         "vector of maps must canonicalize"))
 
   (testing "determinism: same map in different key orders → identical strings"
-    (is (= (#'memory/deterministic-fact-str {:a 1 :b 2})
-           (#'memory/deterministic-fact-str {:b 2 :a 1}))
+    (is (= (#'memory/deterministic-fact-str {:a 1 :b 2} serialize/prune-fns)
+           (#'memory/deterministic-fact-str {:b 2 :a 1} serialize/prune-fns))
         "key order must not affect the canonical string"))
 
   (testing "determinism: same set in different element orders → identical strings"
-    (is (= (#'memory/deterministic-fact-str {:s #{1 2 3}})
-           (#'memory/deterministic-fact-str {:s #{3 1 2}}))
+    (is (= (#'memory/deterministic-fact-str {:s #{1 2 3}} serialize/prune-fns)
+           (#'memory/deterministic-fact-str {:s #{3 1 2}} serialize/prune-fns))
         "set element order must not affect the canonical string")))
 
 (deftest test-accumulator-fact-extraction

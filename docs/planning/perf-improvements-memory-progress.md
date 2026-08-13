@@ -20,7 +20,7 @@ Scratch/measurement scripts live under `server/target/tmp/` (gitignored via the 
 
 - [x] **Fix 1** — Schwartzian transform in `sort-facts`
 - [x] **Fix 2** — decorate-sort-undecorate in `deterministic-fact-str`
-- [ ] **Fix 3** — identity-memoized `prune-fns` (callstack-scoped)
+- [x] **Fix 3** — identity-memoized `prune-fns` (callstack-scoped)
 - [ ] **Fix 4** — `enrich-annotations-from-session` fast path
 
 ---
@@ -94,3 +94,51 @@ Fix 1 + Fix 2 are complete and green. **Awaiting review before Fix 3.**
 ### Stopping point
 
 Perf harness is ready to measure memory-heavy snapshots. **Awaiting review before Fix 3.**
+
+---
+
+## Step 3 — Fix 3: identity-memoized `prune-fns` (callstack-scoped) ✅
+
+**Files:**
+- `server/src/clara/server/tools/graph/serialize.clj`
+- `server/src/clara/server/tools/graph/memory.clj`
+
+### Changes
+
+- `serialize.clj`: split `prune-fns` into a private recursive core `prune-fns*`
+  that takes a `^java.util.IdentityHashMap` memo and recurses through it, plus:
+  - `prune-fns` — unchanged public one-shot wrapper (fresh memo per call).
+  - `memoizing-prune-fns` — returns a `(fn [x] -> pruned)` memoized by object
+    identity within the returned fn's scope.
+- `memory.clj`: `session-snapshot` creates `prune-fn (serialize/memoizing-prune-fns)`
+  once and threads it through `sort-facts` → `deterministic-fact-str`
+  (single arity, `[fact prune-fn]`), `build-fact-table`,
+  `explanations->fact-match-data`, `build-rule-match-index`, and
+  `build-query-match-index`.
+
+**Memo lifetime (per your requirement):** the memo lives only in
+`session-snapshot`'s `let` bindings — no `defonce`/atom/global state. It is
+released when `session-snapshot` returns, so repeated enrich/snapshot calls
+share nothing and cannot leak.
+
+### Verification
+
+- `make test` → **202 tests, 1422 assertions, 0 failures, 0 errors**.
+- `make lint` → 0 errors, 0 warnings; `make reflection-check` → clean;
+  `cljfmt check` on both edited files → clean.
+- `deterministic-fact-str` is a single arity `[fact prune-fn]` (fact first — no
+  default-overload). `memory_test`'s determinism tests were updated to pass
+  `serialize/prune-fns` explicitly.
+
+### Timing
+
+- `session-snapshot` (5 chain + 4000 heavy bulk facts): **~297 ms**
+  (end-to-end, after Fix 1+2+3).
+- `prune-fns` 3 passes over 5000 shared nested facts:
+  - no shared memo: ~79.5 ms
+  - shared memo:    ~19.8 ms (**~4× faster**) — quantifies the dedup.
+
+### Stopping point
+
+Fix 3 is complete and green. **Awaiting review before Fix 4**
+(`enrich-annotations-from-session` fast path).

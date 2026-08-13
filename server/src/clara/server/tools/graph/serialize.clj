@@ -123,37 +123,59 @@
   [production-ns-name x]
   (resolve-type production-ns-name x))
 
+(defn- prune-fns*
+  "Recursive core of `prune-fns`, memoized by object identity in `memo` so a
+   substructure reached more than once is walked only once.  Returns the
+   pruned value for `x`."
+  [^java.util.IdentityHashMap memo x]
+  (if (.containsKey memo x)
+    (.get memo x)
+    (let [result
+          (cond
+            (record? x) (reduce-kv (fn [m k v] (assoc m k (prune-fns* memo v)))
+                                   {}
+                                   x)
+            (map? x) (reduce-kv (fn [m k v] (assoc m k (prune-fns* memo v)))
+                                (empty x)
+                                x)
+            ;; seq-like things or list will insert items to the head, which will reverse the order with
+            ;; `into`. This avoids that.
+            (or (list? x)
+                (and (sequential? x)
+                     (not (vector? x)))) (into (empty x)
+                                               (map #(prune-fns* memo %))
+                                               (reverse x))
+            ;; Do not preserve type here, it could be a lazy seq and we'd get reversed order. If it is not
+            ;; covered by the seq-like checks above, use a vector.
+            (sequential? x) (into []
+                                  (map #(prune-fns* memo %))
+                                  x)
+            (coll? x) (into (empty x)
+                            (map #(prune-fns* memo %))
+                            x)
+            (keyword? x) x
+            (symbol? x) x
+            (class? x) (.getName ^Class x)
+            (ifn? x) (str x)
+            :else x)]
+      (.put memo x result)
+      result)))
+
 (defn prune-fns
   "Recursively walks a data structure and replaces items that implement IFn
    with a string placeholder or their symbol if available."
   [x]
-  (cond
-    (record? x) (reduce-kv (fn [m k v] (assoc m k (prune-fns v)))
-                           {}
-                           x)
-    (map? x) (reduce-kv (fn [m k v] (assoc m k (prune-fns v)))
-                        (empty x)
-                        x)
-    ;; seq-like things or list will insert items to the head, which will reverse the order with
-    ;; `into`. This avoids that.
-    (or (list? x)
-        (and (sequential? x)
-             (not (vector? x)))) (into (empty x)
-                                       (map prune-fns)
-                                       (reverse x))
-    ;; Do not preserve type here, it could be a lazy seq and we'd get reversed order. If it is not
-    ;; covered by the seq-like checks above, use a vector.
-    (sequential? x) (into []
-                          (map prune-fns)
-                          x)
-    (coll? x) (into (empty x)
-                    (map prune-fns)
-                    x)
-    (keyword? x) x
-    (symbol? x) x
-    (class? x) (.getName ^Class x)
-    (ifn? x) (str x)
-    :else x))
+  (prune-fns* (java.util.IdentityHashMap.) x))
+
+(defn memoizing-prune-fns
+  "Returns a `(fn [x] -> pruned)` that memoizes by object identity within the
+   returned fn's scope.  Use where the same fact or substructure is pruned more
+   than once in a single operation (e.g. a session snapshot).  The memo is
+   released with the returned fn — callers must not retain it beyond the
+   enclosing operation."
+  []
+  (let [memo (java.util.IdentityHashMap.)]
+    (fn [x] (prune-fns* memo x))))
 
 (defn stringify-map-keys
   "Recursively converts keyword keys in a map to their string names.

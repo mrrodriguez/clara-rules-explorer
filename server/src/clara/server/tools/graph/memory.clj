@@ -20,10 +20,11 @@
 
 (defn- deterministic-fact-str
   "Returns a deterministic pr-str representation of a fact for stable sorting.
-   Uses pr-str-ordered vector forms with ::map / ::set markers instead of
-   sorted-map/sorted-set (which require Comparable keys and fail on sets of
-   maps or maps keyed by maps)."
-  [fact]
+   `prune-fn` strips functions/classes from the fact first (see
+   `serialize/prune-fns`).  Uses pr-str-ordered vector forms with ::map / ::set
+   markers instead of sorted-map/sorted-set (which require Comparable keys and
+   fail on sets of maps or maps keyed by maps)."
+  [fact prune-fn]
   (letfn [(canonicalize [x]
             (cond
               (map? x) (into [::map]
@@ -33,7 +34,7 @@
                              (sort-by-pr-str (map canonicalize x)))
               (sequential? x) (mapv canonicalize x)
               :else x))]
-    (pr-str (canonicalize (serialize/prune-fns fact)))))
+    (pr-str (canonicalize (prune-fn fact)))))
 
 (defn- extract-match-facts
   "Returns a sequence of actual facts involved in a match, skipping accumulator
@@ -64,14 +65,14 @@
         productions))
 
 (defn- sort-facts
-  [facts fact-type-fn fact-type-order]
+  [facts fact-type-fn fact-type-order prune-fn]
   (->> facts
        (map (fn [wrapped]
               (let [fact (platform/fact-id-unwrap wrapped)
                     ft (fact-type-fn fact)]
                 [[(get fact-type-order ft Integer/MAX_VALUE)
                   (str ft)
-                  (deterministic-fact-str fact)]
+                  (deterministic-fact-str fact prune-fn)]
                  wrapped])))
        (sort-by first)
        (map second)))
@@ -168,7 +169,8 @@
            get-fact-id
            origin-map
            used-by-index
-           known-set]}]
+           known-set
+           prune-fn]}]
   (let [raw-types (reduce (fn [acc wrapped]
                             (let [fact (platform/fact-id-unwrap wrapped)]
                               (assoc acc (get-fact-id fact) (fact-type-fn fact))))
@@ -185,7 +187,7 @@
                                                             (get origin-map id []))]
                                        (println
                                         (str "WARN: fact-type-fn returned nil for fact "
-                                             (pr-str (serialize/prune-fns fact))
+                                             (pr-str (prune-fn fact))
                                              " — inserted by rules: " (pr-str rule-names)
                                              " — substituting :clara.tools.graph.analyze/unknown-fact-type"))))
                                  type-name (->> (or raw-type
@@ -204,7 +206,7 @@
                                          ;; serve.
                                          :known (contains? known-set type-name)}
                                   :ns (ft/raw-type-ns raw-type)
-                                  :data (serialize/prune-fns fact)
+                                  :data (prune-fn fact)
                                   :is-root (boolean (some #(identical? fact %) root-facts))
                                   :inserted-from (get origin-map id [])
                                   :used-by (get used-by-index id [])}])))
@@ -275,7 +277,7 @@
           names))
 
 (defn- explanations->fact-match-data
-  [explanations fact-table get-fact-id]
+  [explanations fact-table get-fact-id prune-fn]
   (vec
    (for [{:keys [bindings matches]} explanations
          match matches
@@ -283,7 +285,7 @@
          :let [id (get-fact-id fact)]
          :when id
          :let [fact-entry (get fact-table id)]]
-     (assoc fact-entry :data (serialize/prune-fns bindings)))))
+     (assoc fact-entry :data (prune-fn bindings)))))
 
 (defn- build-rule-match-index
   "`{production-name {:matches [...] :inserted-facts [...]}}`.
@@ -294,7 +296,8 @@
   [rule-matches
    insertions
    fact-table
-   get-fact-id]
+   get-fact-id
+   prune-fn]
   (let [rule-to-inserted-fact-ids
         (->> (insertion-id+rule-pairs insertions get-fact-id)
              (group-by (comp :name second))
@@ -314,19 +317,22 @@
           (map (fn [[{p-name :name :as _rule} explanations]]
                  [p-name {:matches (explanations->fact-match-data explanations
                                                                   fact-table
-                                                                  get-fact-id)
+                                                                  get-fact-id
+                                                                  prune-fn)
                           :inserted-facts (p-name->inserted-facts p-name)}]))
           rule-matches)))
 
 (defn- build-query-match-index
   [query-matches
    fact-table
-   get-fact-id]
+   get-fact-id
+   prune-fn]
   (into {}
         (map (fn [[{p-name :name} explanations]]
                [p-name {:matches (explanations->fact-match-data explanations
                                                                 fact-table
-                                                                get-fact-id)}]))
+                                                                get-fact-id
+                                                                prune-fn)}]))
         query-matches))
 
 (defn session-snapshot
@@ -350,7 +356,8 @@
          fact-type-order (get-fact-type-order rulebase)
 
          all-facts-wrapped (get-all-facts-wrapped inspection)
-         sorted-facts (sort-facts all-facts-wrapped fact-type-fn fact-type-order)
+         prune-fn (serialize/memoizing-prune-fns)
+         sorted-facts (sort-facts all-facts-wrapped fact-type-fn fact-type-order prune-fn)
          id-map (build-id-map sorted-facts)
          get-fact-id (fn get-fact-id [fact] (.get ^java.util.IdentityHashMap id-map fact))
 
@@ -369,16 +376,19 @@
                                        :get-fact-id get-fact-id
                                        :origin-map origin-map
                                        :used-by-index used-by-index
-                                       :known-set known-set})
+                                       :known-set known-set
+                                       :prune-fn prune-fn})
          fact-type-index (build-fact-type-index (:facts fact-table)
                                                 production-order-key-fn)
          rule-match-index (build-rule-match-index rule-matches
                                                   insertions
                                                   (:facts fact-table)
-                                                  get-fact-id)
+                                                  get-fact-id
+                                                  prune-fn)
          query-match-index (build-query-match-index query-matches
                                                     (:facts fact-table)
-                                                    get-fact-id)]
+                                                    get-fact-id
+                                                    prune-fn)]
      {:fact-types        fact-type-index
       :facts             (:facts fact-table)
       ;; Internal fact-id → raw type index for the annotation-enrichment
