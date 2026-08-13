@@ -2,6 +2,7 @@
   (:require
    [clara.server.tools.graph.analyze :as analyze]
    [clara.server.tools.graph.core :as core]
+   [clara.server.tools.graph.memory :as memory]
    [clara.server.tools.graph.rules.perf-gen-helpers :as pgh]))
 
 (def ^:private ->step-fact-sym
@@ -25,8 +26,25 @@
 (defonce state-atom
   (atom {}))
 
-(defn run-session! [n-chain]
-  (reset! state-atom {:run-rules-result (time (pgh/run-rules (long n-chain)))})
+(defn run-session!
+  "Builds and fires an `n-chain` rule chain. When `n-bulk-facts` is positive,
+   inserts that many heavy bulk facts into working memory for snapshot-load
+   testing."
+  ([n-chain]
+   (run-session! n-chain 0))
+  ([n-chain n-bulk-facts]
+   (reset! state-atom {:run-rules-result (time (pgh/run-rules (long n-chain)
+                                                              (long n-bulk-facts)))})
+   ::done))
+
+(defn run-session-snapshot!
+  "Times `memory/session-snapshot` on the current run-rules session."
+  []
+  (swap! state-atom
+         (fn [{:keys [run-rules-result] :as state}]
+           (assoc state
+                  :session-snapshot
+                  (time (memory/session-snapshot (:session run-rules-result))))))
   ::done)
 
 (defn run-analyze-session-rules!

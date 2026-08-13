@@ -37,6 +37,20 @@
   {:pre [(keyword? step-kw)]}
   (with-meta {:step step-kw} {:type step-kw}))
 
+(defn bulk-fact
+  "A heavier, nested fact for memory-snapshot load testing. Includes a set,
+   nested maps, vectors, and a function value so `deterministic-fact-str`
+   (canonicalization + sorting) and `serialize/prune-fns` both have real work
+   to do during a snapshot."
+  [i]
+  (with-meta {:bulk-id i
+              :tags #{:bulk/a :bulk/b :bulk/c :bulk/d :bulk/e}
+              :nested (mapv (fn [j] {:k (* i j) :s (str "v" i "-" j)}) (range 8))
+              :lookup {:x {:y {:z i}}}
+              :nums (vec (range 15))
+              :handler inc}
+    {:type :bulk/fact}))
+
 ;; ---------------------------------------------------------------------------
 ;; Rule generation
 ;; ---------------------------------------------------------------------------
@@ -94,27 +108,45 @@
   []
   [?step <- :chain/step])
 
+(r/defquery all-bulk-facts
+  "Query matching all bulk facts via their common :bulk/fact type, so they are
+   retained in working memory for snapshot-load testing."
+  []
+  [?f <- :bulk/fact])
+
 ;; -------------------------------------------------------------------
 ;; Session
 ;; -------------------------------------------------------------------
 
 (defn build-chain-session
   "Build a Clara session from N chain rules, a step-type hierarchy,
-   and a query over the common parent type.
+   the chain-all-steps query, and the all-bulk-facts query.
 
    Convenience wrapper around build-chain-rules + build-chain-hierarchy +
-   mk-session, including the chain-all-steps defquery.  Accepts the same
-   trailing key-value option pairs as clara.rules/mk-session (e.g. :cache false)."
+   mk-session, including the chain-all-steps and all-bulk-facts defqueries.
+   Accepts the same trailing key-value option pairs as clara.rules/mk-session
+   (e.g. :cache false)."
   [n & options]
   (r/mk-session (concat (build-chain-rules n)
                         [(var chain-all-steps)
+                         (var all-bulk-facts)
                          (build-chain-hierarchy n)]
                         options)))
 
-(defn run-rules [n]
-  (let [session (build-chain-session n)
-        fired (-> session
-                  (r/insert (with-meta {:seed true} {:type :chain/seed}))
-                  (r/fire-rules))]
-    {:session fired
-     :query-result (r/query fired chain-all-steps)}))
+(defn run-rules
+  "Builds and fires a chain of `n-chain` rules. When `n-bulk-facts` is
+   positive, also inserts that many heavy `bulk-fact`s into working memory
+   (each retained by the `all-bulk-facts` query) to simulate a memory-heavy
+   session snapshot."
+  ([n-chain]
+   (run-rules n-chain 0))
+  ([n-chain n-bulk-facts]
+   (let [session (build-chain-session n-chain)
+         bulk-facts (mapv bulk-fact (range (long n-bulk-facts)))
+         fired (-> session
+                   (r/insert (with-meta {:seed true} {:type :chain/seed}))
+                   (r/insert-all bulk-facts)
+                   (r/fire-rules))]
+     {:session fired
+      :query-result (r/query fired chain-all-steps)
+      :bulk-fact-count (long n-bulk-facts)})))

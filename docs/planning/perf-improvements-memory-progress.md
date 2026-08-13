@@ -6,10 +6,13 @@ Tracking implementation of
 Order of work (priority order):
 
 1. **P0 — Fix 1 + Fix 2:** Schwartzian transform in `sort-facts` + decorate-sort-undecorate in `deterministic-fact-str`/`canonicalize`. (targets the ~23s `sort-facts`)
-2. **P1 — Fix 3:** identity-memoized `prune-fns`, scoped to the snapshot callstack only (no cross-call retention).
-3. **P1 — Fix 4:** `enrich-annotations-from-session` fast path (pre-normalized `production-annotation`, dedup `rule->session-raw-types`).
+2. **Perf harness:** bulk-fact load option (supports measuring Fix 3/4 on memory-heavy snapshots).
+3. **P1 — Fix 3:** identity-memoized `prune-fns`, scoped to the snapshot callstack only (no cross-call retention).
+4. **P1 — Fix 4:** `enrich-annotations-from-session` fast path (pre-normalized `production-annotation`, dedup `rule->session-raw-types`).
 
-Stopping points for review: after each P0/P1 step completes + tests/checks pass + a timing measurement.
+Stopping points for review: after each step completes + tests/checks pass + a timing measurement.
+
+Scratch/measurement scripts live under `server/target/tmp/` (gitignored via the root `target` pattern).
 
 ---
 
@@ -57,3 +60,37 @@ Stopping points for review: after each P0/P1 step completes + tests/checks pass 
 ### Stopping point
 
 Fix 1 + Fix 2 are complete and green. **Awaiting review before Fix 3.**
+
+---
+
+## Step 2 — Perf harness: bulk-fact load option ✅
+
+**Files:**
+- `server/test/clara/server/tools/graph/rules/perf_gen_helpers.clj`
+- `server/test/clara/server/tools/graph/perf_test.clj`
+
+### Changes
+
+- Added `bulk-fact` — a heavier, nested map fact (set + nested maps + vectors +
+  a function value) with `{:type :bulk/fact}` metadata, so `deterministic-fact-str`
+  (canonicalization/sorting) and `prune-fns` both do real work per fact.
+- Added `r/defquery all-bulk-facts` matching `:bulk/fact`, so inserted bulk facts
+  are retained in working memory (a query-only alpha node is sufficient — verified).
+- `build-chain-session` now includes `(var all-bulk-facts)`.
+- `run-rules` gains a 2-arity: `(run-rules n-chain n-bulk-facts)` inserts
+  `n-bulk-facts` via `r/insert-all` before `fire-rules`; returns `:bulk-fact-count`.
+- `perf-test/run-session!` gains a 2-arity mirroring `run-rules`.
+- Added `perf-test/run-session-snapshot!` to time `memory/session-snapshot`
+  directly (the 24s observation) without the enrich path.
+
+### Verification
+
+- `(perf-test/run-session! 10 500)` → 511 facts in snapshot
+  (500 `:bulk/fact` + 10 chain steps + 1 seed) — bulk facts retained via the query.
+- `make test` → **202 tests, 1422 assertions, 0 failures, 0 errors**.
+- `make lint` → 0 errors, 0 warnings.
+- `cljfmt check` on both edited files → clean (ran `cljfmt fix` once for the new code).
+
+### Stopping point
+
+Perf harness is ready to measure memory-heavy snapshots. **Awaiting review before Fix 3.**
