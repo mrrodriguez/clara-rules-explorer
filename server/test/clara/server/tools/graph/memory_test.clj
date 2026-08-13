@@ -9,6 +9,7 @@
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clara.server.tools.graph.rules.nil-safety-test-rules :as nil-safety]
             [clara.server.tools.graph.rules.equal-fact-test-rules :as equal-facts]
+            [clara.server.tools.graph.rules.match-uniqueness-test-rules :as mu]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [schema.test :as st]))
@@ -136,30 +137,35 @@
       (is (seq (:inserted-facts rule-info)) "Rule should have inserted facts")
       (is (every? :id (:inserted-facts rule-info)) "Inserted facts should have IDs")
       (is (vector? (:matches rule-info)) "Rule should have matches vector")
-      ;; Matches are flattened SessionFact entries (one per fact-id)
+      ;; Matches are FactMatch entries — {:fact SessionFact :bindings [...]}
       (when-let [match (first (:matches rule-info))]
-        (is (int? (:id match)) "Match entry should have integer :id")
-        (is (map? (:type match)) "Match entry :type is a TypeReference")
-        (is (string? (get-in match [:type :name])))
-        (is (false? (get-in match [:type :known]))
-            "Session facts default to known: false without a known-set — the honest flag is computed against the analysis's fact-type names")
-        (is (map? (:data match)) "Match entry should have :data (bindings)")
-        (is (contains? match :is-root) "Match entry should have :is-root")
-        (is (vector? (:inserted-from match)) "Match entry should have :inserted-from")
-        (is (vector? (:used-by match)) "Match entry should have :used-by"))
+        (is (map? (:fact match)) "Match entry should carry a :fact SessionFact")
+        (is (vector? (:bindings match)) "Match entry should carry a :bindings vector")
+        (let [fact (:fact match)]
+          (is (int? (:id fact)) "Match fact should have integer :id")
+          (is (map? (:type fact)) "Match fact :type is a TypeReference")
+          (is (string? (get-in fact [:type :name])))
+          (is (false? (get-in fact [:type :known]))
+              "Session facts default to known: false without a known-set — the honest flag is computed against the analysis's fact-type names")
+          (is (map? (:data fact)) "Match fact should have :data (the fact's own value)")
+          (is (contains? fact :is-root) "Match fact should have :is-root")
+          (is (vector? (:inserted-from fact)) "Match fact should have :inserted-from")
+          (is (vector? (:used-by fact)) "Match fact should have :used-by")))
 
       ;; 2. Verify Query Activity
       (let [query-name "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"
             query-info (get-in snapshot [:query-matches query-name])]
         (is (some? query-info) "Query info should exist in query-matches")
         (is (vector? (:matches query-info)) "Query should have matches vector")
-        ;; Query matches are also SessionFact entries
+        ;; Query matches are also FactMatch entries
         (when-let [qmatch (first (:matches query-info))]
-          (is (int? (:id qmatch)) "Query match entry should have integer :id")
-          (is (map? (:type qmatch)) "Query match entry :type is a TypeReference")
-          (is (string? (get-in qmatch [:type :name])))
-          (is (map? (:data qmatch)) "Query match entry should have :data (bindings)"))))))
-
+          (is (map? (:fact qmatch)) "Query match entry should carry a :fact SessionFact")
+          (is (vector? (:bindings qmatch)) "Query match entry should carry a :bindings vector")
+          (let [fact (:fact qmatch)]
+            (is (int? (:id fact)) "Query match fact should have integer :id")
+            (is (map? (:type fact)) "Query match fact :type is a TypeReference")
+            (is (string? (get-in fact [:type :name])))
+            (is (map? (:data fact)) "Query match fact should have :data (the fact's own value)")))))))
 (deftest test-multi-fact-match-flattening
   (testing "Multi-fact rule matches are flattened to one SessionFact entry per fact-id"
     (let [app (laf/map->Application {:app-id "app-1"})
@@ -177,21 +183,127 @@
       (is (some? rule-info) "app-has-all-required-docs should exist in rule-matches")
       (is (= 2 (count matches))
           "Should have 2 match entries (Application + document-check-input), not 1 with fact-ids")
-      (is (every? #(contains? % :id) matches) "Every match entry should have :id")
-      (is (every? #(contains? % :type) matches) "Every match entry should have :type")
-      (is (every? #(contains? % :data) matches) "Every match entry should have :data")
-      (is (every? #(contains? % :is-root) matches) "Every match entry should have :is-root")
-      (is (every? #(contains? % :inserted-from) matches) "Every match entry should have :inserted-from")
-      (is (every? #(contains? % :used-by) matches) "Every match entry should have :used-by")
+      (is (every? #(contains? (:fact %) :id) matches) "Every match fact should have :id")
+      (is (every? #(contains? (:fact %) :type) matches) "Every match fact should have :type")
+      (is (every? #(contains? (:fact %) :data) matches) "Every match fact should have :data")
+      (is (every? #(contains? (:fact %) :is-root) matches) "Every match fact should have :is-root")
+      (is (every? #(contains? (:fact %) :inserted-from) matches) "Every match fact should have :inserted-from")
+      (is (every? #(contains? (:fact %) :used-by) matches) "Every match fact should have :used-by")
       ;; Verify types match the actual facts
-      (let [types (set (map (comp :name :type) matches))]
+      (let [types (set (map (comp :name :type :fact) matches))]
         (is (contains? types "clara.server.tools.graph.rules.loan_app_facts.Application")
             "Should include Application fact")
         (is (contains? types ":loan-doc-rules/document-check-input")
             "Should include document-check-input fact"))
-      ;; Verify all match entries share the same bindings data
-      (let [bindings (map :data matches)]
+      ;; Verify all match entries share the same single binding set
+      (is (every? #(= 1 (count (:bindings %))) matches)
+          "Every match fact should carry exactly one binding set")
+      (let [bindings (map (comp first :bindings) matches)]
         (is (apply = bindings) "All match entries should share identical bindings")))))
+
+;; ---------------------------------------------------------------------------
+;; Match uniqueness — FactMatch shape (one row per fact, N binding sets)
+;; ---------------------------------------------------------------------------
+
+(defn- ->match-uniqueness-snapshot
+  []
+  (-> (r/mk-session 'clara.server.tools.graph.rules.match-uniqueness-test-rules)
+      (r/insert (mu/->Config "c1") (mu/->Item "a") (mu/->Item "b") (mu/->Item nil))
+      (r/fire-rules)
+      (memory/session-snapshot)))
+
+(defn- mu-rule-matches
+  [snapshot short-name]
+  (get-in snapshot [:rule-matches
+                    (str "clara.server.tools.graph.rules.match-uniqueness-test-rules/" short-name)
+                    :matches]))
+
+(def ^:private mu-item-type-name
+  "clara.server.tools.graph.rules.match_uniqueness_test_rules.Item")
+
+(def ^:private mu-config-type-name
+  "clara.server.tools.graph.rules.match_uniqueness_test_rules.Config")
+
+(deftest test-match-uniqueness-case-a
+  (testing "One fact satisfying two conditions of one activation yields one row with one binding set"
+    (let [snapshot (->match-uniqueness-snapshot)
+          matches (mu-rule-matches snapshot "overlapping-conditions")
+          item-matches (filter #(= mu-item-type-name (get-in % [:fact :type :name])) matches)]
+      (is (= 3 (count item-matches)) "all three items appear, once each")
+      (is (= [1 2 3] (mapv (comp :id :fact) item-matches)) "rows are sorted by fact id")
+      (is (every? #(= 1 (count (:bindings %))) item-matches)
+          "each item carries exactly one binding set")
+      ;; The tagged items satisfied both accumulator conditions; their
+      ;; duplicate (fact, bindings) pairs collapsed to one binding set.
+      (let [bindings (map (comp first :bindings) item-matches)]
+        (is (apply = bindings) "all items share the one activation's binding set")
+        (is (= #{"a" "b"} (set (map :tag (:?tagged (first bindings)))))
+            "?tagged accumulates the two tagged items")
+        (is (= #{"a" "b" nil} (set (map :tag (:?all (first bindings)))))
+            "?all accumulates all three items")))))
+
+(deftest test-match-uniqueness-case-b
+  (testing "One fact across N activations yields one row with N binding sets, none lost"
+    (let [snapshot (->match-uniqueness-snapshot)
+          matches (mu-rule-matches snapshot "pairwise")
+          config-match (first (filter #(= mu-config-type-name (get-in % [:fact :type :name])) matches))]
+      (is (some? config-match) "config appears in the pairwise matches")
+      (is (= 3 (count (:bindings config-match)))
+          "config appears once with three binding sets")
+      (is (= #{"a" "b" nil}
+             (set (map #(get-in % [:?item :tag]) (:bindings config-match))))
+          "every activation's binding set is retained")
+      (is (= "c1" (get-in config-match [:fact :data :name]))
+          ":data is the fact's own value, not bindings"))))
+
+(deftest test-match-uniqueness-combined
+  (testing "A fact duplicated within and across activations appears once with distinct binding sets"
+    (let [snapshot (->match-uniqueness-snapshot)
+          matches (mu-rule-matches snapshot "combined")
+          config-match (first (filter #(= mu-config-type-name (get-in % [:fact :type :name])) matches))]
+      (is (some? config-match))
+      (is (= 3 (count (:bindings config-match)))
+          "within-activation duplicates collapsed; the three activation bindings remain")
+      (is (= #{"a" "b" nil}
+             (set (map #(get-in % [:?item :tag]) (:bindings config-match))))
+          "no activation lost")
+      (is (= 3 (count (distinct (:bindings config-match))))
+          "binding sets are distinct"))))
+
+(deftest test-match-uniqueness-distinct-ids
+  (testing "Match fact ids are distinct over every rule and query in a fixture session"
+    (let [snapshot (->match-uniqueness-snapshot)]
+      (doseq [[p-name {:keys [matches]}] (:rule-matches snapshot)]
+        (is (= (count matches) (count (distinct (map (comp :id :fact) matches))))
+            (str "rule " p-name " has distinct match fact ids")))
+      (doseq [[p-name {:keys [matches]}] (:query-matches snapshot)]
+        (is (= (count matches) (count (distinct (map (comp :id :fact) matches))))
+            (str "query " p-name " has distinct match fact ids")))
+      ;; The query mirrors pairwise: Config appears once with three binding sets.
+      (let [query-matches (get-in snapshot [:query-matches
+                                            "clara.server.tools.graph.rules.match-uniqueness-test-rules/find-pairs"
+                                            :matches])
+            config-match (first (filter #(= mu-config-type-name (get-in % [:fact :type :name])) query-matches))]
+        (is (some? config-match) "find-pairs query has a Config match")
+        (is (= 3 (count (:bindings config-match)))
+            "queries get the same group-and-collect treatment as rules")))))
+
+(deftest test-match-uniqueness-ordering-stability
+  (testing "Match rows and binding sets are ordered deterministically across identical sessions"
+    (let [build (fn []
+                  (-> (r/mk-session 'clara.server.tools.graph.rules.match-uniqueness-test-rules)
+                      (r/insert (mu/->Config "c1") (mu/->Item "a") (mu/->Item "b") (mu/->Item nil))
+                      (r/fire-rules)
+                      (memory/session-snapshot)))
+          s1 (build)
+          s2 (build)
+          ;; `:inserted-facts` order for equal facts is not part of this
+          ;; contract (see equal-fact fixtures); assert only the match shape.
+          matches-only (fn [snap]
+                         {:rule-matches (update-vals (:rule-matches snap) :matches)
+                          :query-matches (:query-matches snap)})]
+      (is (= (matches-only s1) (matches-only s2))
+          "match rows and binding sets are byte-identical across identical sessions"))))
 
 (deftest test-stable-deterministic-fact-ids
   (testing "Fact IDs are stable and deterministic based on sort criteria"

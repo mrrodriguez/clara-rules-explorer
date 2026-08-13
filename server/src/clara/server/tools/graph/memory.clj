@@ -277,15 +277,33 @@
           names))
 
 (defn- explanations->fact-match-data
+  "`[{:fact SessionFact :bindings [binding-map …]}]` — one entry per matched
+   fact, carrying every distinct binding set it matched under.  A fact that
+   satisfies several conditions of one activation (duplicate pairs) or several
+   activations (distinct bindings) appears once; ids the fact table cannot
+   describe are dropped, matching `:inserted-facts`.
+
+   Rows are sorted by fact id; binding sets by a deterministic string of the
+   pruned binding map, so snapshots are byte-stable across identical sessions."
   [explanations fact-table get-fact-id prune-fn]
-  (vec
-   (for [{:keys [bindings matches]} explanations
-         match matches
-         fact (extract-match-facts match)
-         :let [id (get-fact-id fact)]
-         :when id
-         :let [fact-entry (get fact-table id)]]
-     (assoc fact-entry :data (prune-fn bindings)))))
+  (let [binding-sets (volatile! {})]
+    (doseq [{:keys [bindings matches]} explanations
+            match matches
+            fact (extract-match-facts match)
+            :let [id (get-fact-id fact)]
+            :when id]
+      (vswap! binding-sets update id (fnil conj #{}) (prune-fn bindings)))
+    (->> @binding-sets
+         (keep (fn [[id binding-set]]
+                 (when-let [fact (get fact-table id)]
+                   {:fact fact
+                    :bindings (->> binding-set
+                                   (map (fn [bs] [(deterministic-fact-str bs prune-fn) bs]))
+                                   (sort-by first)
+                                   (map second)
+                                   vec)})))
+         (sort-by (comp :id :fact))
+         vec)))
 
 (defn- build-rule-match-index
   "`{production-name {:matches [...] :inserted-facts [...]}}`.
@@ -431,34 +449,25 @@
             (assoc-in fact [:type :known]
                       (contains? known-set (get-in fact [:type :name]))))
           (stamp-facts [facts] (mapv stamp facts))
-          (stamp-roles [roles]
-            (mapv (fn [role] (update role :facts stamp-facts)) roles))]
+          (stamp-match [match] (update match :fact stamp))
+          (stamp-matches [matches] (mapv stamp-match matches))
+          (stamp-role [role] (update role :facts stamp-facts))
+          (stamp-roles [roles] (mapv stamp-role roles))]
     (-> snapshot
-        (update :facts
-                (fn [facts]
-                  (reduce-kv (fn [m id fact] (assoc m id (stamp fact))) {} facts)))
-        (update :rule-matches
+        (update :facts update-vals stamp)
+        (update :rule-matches update-vals
                 (fn [rm]
-                  (reduce-kv
-                   (fn [m k {:keys [matches inserted-facts]}]
-                     (assoc m k {:matches (stamp-facts matches)
-                                 :inserted-facts (stamp-facts inserted-facts)}))
-                   {} rm)))
-        (update :query-matches
+                  (-> rm
+                      (update :matches stamp-matches)
+                      (update :inserted-facts stamp-facts))))
+        (update :query-matches update-vals
                 (fn [qm]
-                  (reduce-kv
-                   (fn [m k {:keys [matches]}]
-                     (assoc m k {:matches (stamp-facts matches)}))
-                   {} qm)))
-        (update :fact-types
-                (fn [ft]
-                  (reduce-kv
-                   (fn [m type-name entry]
-                     (assoc m type-name
-                            (-> entry
-                                (update :inserted-from stamp-roles)
-                                (update :used-by stamp-roles))))
-                   {} ft))))))
+                  (update qm :matches stamp-matches)))
+        (update :fact-types update-vals
+                (fn [entry]
+                  (-> entry
+                      (update :inserted-from stamp-roles)
+                      (update :used-by stamp-roles)))))))
 
 (defn get-session-rule-activity
   "Returns a unified activity map for a rule: {:matches [...] :inserted-facts [...]}"
