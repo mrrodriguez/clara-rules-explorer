@@ -8,6 +8,16 @@
             [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.serialize :as serialize]))
 
+(defn- sort-by-pr-str
+  "Sorts `coll` by the pr-str of each element, computing pr-str once per
+   element (decorate-sort-undecorate) rather than once per comparison as
+   `sort-by` would."
+  [coll]
+  (->> coll
+       (map (fn [x] [(pr-str x) x]))
+       (sort-by first)
+       (map second)))
+
 (defn- deterministic-fact-str
   "Returns a deterministic pr-str representation of a fact for stable sorting.
    Uses pr-str-ordered vector forms with ::map / ::set markers instead of
@@ -17,11 +27,10 @@
   (letfn [(canonicalize [x]
             (cond
               (map? x) (into [::map]
-                             (sort-by pr-str
-                                      (map (fn [[k v]] [(canonicalize k) (canonicalize v)])
-                                           x)))
+                             (sort-by-pr-str
+                              (map (fn [[k v]] [(canonicalize k) (canonicalize v)]) x)))
               (set? x) (into [::set]
-                             (sort-by pr-str (map canonicalize x)))
+                             (sort-by-pr-str (map canonicalize x)))
               (sequential? x) (mapv canonicalize x)
               :else x))]
     (pr-str (canonicalize (serialize/prune-fns fact)))))
@@ -56,13 +65,16 @@
 
 (defn- sort-facts
   [facts fact-type-fn fact-type-order]
-  (sort-by (fn [wrapped]
-             (let [fact (platform/fact-id-unwrap wrapped)
-                   ft (fact-type-fn fact)]
-               [(get fact-type-order ft Integer/MAX_VALUE)
-                (str ft)
-                (deterministic-fact-str fact)]))
-           facts))
+  (->> facts
+       (map (fn [wrapped]
+              (let [fact (platform/fact-id-unwrap wrapped)
+                    ft (fact-type-fn fact)]
+                [[(get fact-type-order ft Integer/MAX_VALUE)
+                  (str ft)
+                  (deterministic-fact-str fact)]
+                 wrapped])))
+       (sort-by first)
+       (map second)))
 
 (defn- build-id-map [sorted-facts]
   (let [id-map (java.util.IdentityHashMap.)]
