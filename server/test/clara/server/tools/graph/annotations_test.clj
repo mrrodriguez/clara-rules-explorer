@@ -52,12 +52,7 @@
                              production)))))
     (testing "absent type keys stay absent (no empty vectors)"
       (is (= {}
-             (ann/production-annotation {"user/my-rule" {}} production))))
-    (testing "rule-name lookup is normalized"
-      (is (= [:TypeA]
-             (:insert-types (ann/production-annotation
-                             {'user/my-rule #:clara-rules{:insert-types [:TypeA]}}
-                             production)))))))
+             (ann/production-annotation {"user/my-rule" {}} production))))))
 
 (deftest test-annotations-delta
   (testing "new type added over base"

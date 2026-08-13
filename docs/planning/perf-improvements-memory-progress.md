@@ -21,7 +21,7 @@ Scratch/measurement scripts live under `server/target/tmp/` (gitignored via the 
 - [x] **Fix 1** — Schwartzian transform in `sort-facts`
 - [x] **Fix 2** — decorate-sort-undecorate in `deterministic-fact-str`
 - [x] **Fix 3** — identity-memoized `prune-fns` (callstack-scoped)
-- [ ] **Fix 4** — `enrich-annotations-from-session` fast path
+- [x] **Fix 4** — `enrich-annotations-from-session` fast path + boundary normalization hoist
 
 ---
 
@@ -142,3 +142,49 @@ share nothing and cannot leak.
 
 Fix 3 is complete and green. **Awaiting review before Fix 4**
 (`enrich-annotations-from-session` fast path).
+
+---
+
+## Step 4 — Fix 4: `enrich-annotations-from-session` fast path + normalization hoist ✅
+
+**Files:**
+- `server/src/clara/server/tools/graph/annotations.clj`
+- `server/src/clara/server/tools/graph/core.clj`
+- `server/src/clara/server/tools/graph/analyze.clj` (no change needed — already called `production-annotation`)
+- `server/test/clara/server/tools/graph/annotations_test.clj`
+
+### Changes
+
+- `production-annotation` now **assumes a normalized (string-keyed) annotations
+  map** — no per-call `every?` scan.
+- Deleted the `production-annotation-normalizing` variant.
+- Hoisted normalization to the `rulebase-analysis*` boundary in `core.clj`:
+  `coerce-annotations-arg` output is normalized **once** (guarded by
+  `(every? (comp string? key) …)`) before the two O(P) loops.
+- `core.clj`'s two call sites (`build-production-annotation-map`, `production-summary`)
+  now use the fast `production-annotation`.
+- Removed the now-invalid symbol-keyed `production-annotation` test case
+  (behavior moved to `rulebase-analysis`'s boundary normalization, covered by
+  `normalize-annotations` tests).
+
+This removes the O(P×A) `every?` scan from **three** O(P) loops: the two in
+`rulebase-analysis` and the one in `enrich-annotations-from-session`.
+
+### Verification
+
+- `make test` → **202 tests, 1421 assertions, 0 failures, 0 errors**.
+- `make lint` → 0 errors, 0 warnings; `make reflection-check` → clean;
+  `cljfmt check` on edited files → clean.
+- Boundary normalization verified end-to-end: a **symbol-keyed bare map** passed
+  to `rulebase-analysis` still resolves (`rule found: true`, insert-types resolved).
+
+### Timing (post-fix, 2000-chain rulebase, 2002 annotations)
+
+- `rulebase-analysis`: **~317 ms**
+- `enrich-annotations-from-session` (empty base): **~69 ms**
+
+(Both paths no longer re-scan all annotation keys per production.)
+
+### Stopping point
+
+All four fixes are complete. **Awaiting final review.**

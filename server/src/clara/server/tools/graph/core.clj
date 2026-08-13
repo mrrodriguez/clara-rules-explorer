@@ -386,6 +386,9 @@
   (let [{:keys [productions id-to-node] :as rulebase} (get-rulebase session-or-rulebase)
 
         annotations (:annotations (coerce-annotations-arg annotations))
+        annotations (if (every? (comp string? key) annotations)
+                      annotations
+                      (ann/normalize-annotations annotations))
 
         production-annotation-map (build-production-annotation-map productions annotations)
 
