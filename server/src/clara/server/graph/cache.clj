@@ -68,25 +68,28 @@
 
 (defn analysis
   "Returns the cached rulebase-analysis map for the current session and
-   annotations.  Rebuilds transparently when inputs change.  The returned
-   map includes `:production-id-index` and `:fact-type-id-index` reverse
-   indexes (computed by `core/rulebase-analysis`)."
-  [cache session annotations]
-  (:analysis (get-state cache session annotations nil)))
+   annotations, rebuilding transparently when inputs change.
+
+   `memory-snapshot` is the enrichment-phase working-memory snapshot (nil when
+   none); on a miss it is reused instead of re-inspecting the session."
+  [cache session annotations memory-snapshot]
+  (:analysis (get-state cache session annotations memory-snapshot)))
 
 (defn snapshot
-  "Returns the cached working-memory snapshot for the current session, or
-   nil when working memory is unavailable."
-  [cache session annotations]
-  (:snapshot (get-state cache session annotations nil)))
+  "Returns the cached working-memory snapshot for the current session (nil
+   when working memory is unavailable), rebuilding transparently on change.
+
+   `memory-snapshot` is the enrichment-phase working-memory snapshot (nil when
+   none); on a miss it is reused instead of re-inspecting the session."
+  [cache session annotations memory-snapshot]
+  (:snapshot (get-state cache session annotations memory-snapshot)))
 
 (defn warm!
-  "Eagerly populates the cache so the next request does not pay the full
-   `rulebase-analysis` + `session-snapshot` build cost.  `memory-snapshot`
-   (when non-nil) is a snapshot already produced by memory enrichment for
-   `session`, reused to avoid a second inspection."
-  ([cache session annotations]
-   (warm! cache session annotations nil))
-  ([cache session annotations memory-snapshot]
-   (get-state cache session annotations memory-snapshot)
-   nil))
+  "Eagerly populates the cache so the next request avoids the full
+   `rulebase-analysis` + `session-snapshot` build.
+
+   `memory-snapshot` is the enrichment-phase working-memory snapshot (nil when
+   none); when non-nil it is reused instead of re-inspecting the session."
+  [cache session annotations memory-snapshot]
+  (get-state cache session annotations memory-snapshot)
+  nil)

@@ -11,14 +11,10 @@ Instead, you MUST use the `context-mode` sandbox tools:
 
 # Server State Architecture
 
-Server state is consolidated into a single `state-atom` per system instance:
-
-```clojure
-{:session           ;; live Clara session or raw rulebase
- :annotations-spec  ;; the AnnotationsSpec that produced :annotations
- :annotations       ;; derived bare annotations
- :analyze-cache}    ;; per-ns kondo memoization (plain immutable map value)
-```
+Server state is consolidated into a single `state-atom` per system instance.
+The authoritative shape is the `ServerState` schema in
+`clara.server.graph.server` (`s/defschema`) — the single source of truth; do
+not enumerate its keys here or in docstrings.
 
 **Atom discipline:** all mutation entry points are operator-driven (REPL, CLI,
 tests) — never HTTP, so swaps are effectively single-threaded. Transitions are
@@ -205,3 +201,18 @@ of map arguments and return values.  A schema is compile-time verifiable,
 self-documenting, and stays in sync with code changes.  Use docstrings for
 *why*, not *what* — keep them concise (1-3 lines).  Reserve long-form
 commentary for architecture docs in `docs/`.
+
+**Never enumerate a data structure's keys in a docstring** (state map, options
+map, request/response body, etc.).  When a schema exists, point to it as the
+single source of truth (e.g. "an atom of
+`clara.server.graph.server/ServerState`") instead of repeating its shape inline
+— inline copies drift out of sync the moment the schema changes.  If no schema
+exists and the shape is genuinely part of the contract, define one rather than
+documenting the shape prose-style.
+
+**Do not document a callee's behavior or mechanism in the caller's docstring.**
+When `f` calls `g`, the docstring on `f` must not explain what `g` does or how
+(e.g. "`g` omits nil keys via `remove-nil-vals`").  That belongs to `g`'s
+docstring — if it needs one at all — and repeating it drifts out of sync the
+moment `g` changes.  Nil-vs-missing-key is not worth calling out in a contract
+between functions; schema optional keys already express it where it matters.

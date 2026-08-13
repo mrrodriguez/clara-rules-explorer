@@ -122,6 +122,35 @@ Fix A umbrella — **Fix B (clj-kondo cache) has not been started.**
 - nine test namespaces — `st/validate-schemas` `:once` fixture
 - `server/AGENTS.md` — schema validation rule
 
+### Request-time cache reuse + nil-omission consistency (follow-up)
+
+Review follow-up after Fix A landed, closing two gaps:
+
+- **The snapshot reuse was `warm!`-only.**  `cache/analysis` / `cache/snapshot`
+  (the request path) hard-coded `nil` for the memory snapshot, so any
+  request-time cache miss — a request racing `swap-session!`'s
+  publish-then-warm ordering, or `warm-cache? false` — rebuilt a full
+  `session-snapshot-from-analysis` and discarded the enrichment snapshot the
+  state was already holding.  Fix: `analysis`, `snapshot`, and `warm!` now
+  take `memory-snapshot` as a required argument (single arity — no back-compat
+  shim), threaded from `(:memory-snapshot state)` in every `api.clj` handler,
+  so a miss re-stamps instead of re-inspecting.  This is safe because
+  `:memory-snapshot` in state always corresponds to `:session` in state;
+  `:known` is re-derived from the analysis on each build.
+- **Nil-omission is now a single choke point.**  `build-annotations*` is the
+  one place that strips a nil `:memory-snapshot` (`utils/remove-nil-vals`).
+  Only the auto-detect branch emits the key (a dynamic value that may be nil);
+  the `:reuse` / `(:none nil)` branches omit it literally — never write
+  `:memory-snapshot nil` in a map literal.
+- **New test** `server/test/clara/server/graph/cache_test.clj`: asserts
+  `warm!` reuses the enrichment snapshot (byte-equal to a fresh build) and,
+  via a `with-redefs` spy on `memory/session-snapshot-from-analysis`, that a
+  cold-cache `cache/snapshot` miss re-stamps rather than re-inspects, while
+  the no-snapshot fallback still rebuilds correctly.
+
+Files changed: `cache.clj`, `api.clj` (handlers thread `:memory-snapshot`),
+`server.clj` (`build-annotations*` choke point), `cache_test.clj` (new).
+
 ---
 
 ## Fix B (content-addressed clj-kondo cache) — NOT started

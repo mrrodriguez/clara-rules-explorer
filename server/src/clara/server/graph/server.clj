@@ -2,8 +2,7 @@
   "Lifecycle management for the Clara Rules Explorer server.
 
    State is consolidated into a single atom per server instance; its contract
-   is modeled by the `ServerState` schema — the source of truth for the state
-   shape.
+   is modeled by the `ServerState` schema.
 
    Transitions are pure functions over the state — trivially unit-testable.
    Side effects (Jetty start/stop, cache warming) stay in the shell layer.
@@ -187,15 +186,12 @@
     layers))
 
 (defn- build-auto-detect-annotations
-  "Build annotations for auto-detect enrichment modes, returning
-   {:annotations …} with an optional :memory-snapshot (omitted when memory
-   enrichment did not run).
+  "Build annotations for the auto-detect enrichment modes, returning
+   {:annotations … :memory-snapshot …}.  `:memory-snapshot` is the
+   working-memory snapshot from memory enrichment (nil when it did not run).
 
-   Static layers are merged first so the memory delta is computed against
-   the accumulated base — not an empty map.  When the session contributes
-   nothing new, ->memory-layer returns nil and the memory layer is skipped.
-   `:memory-snapshot` is the working-memory snapshot produced by the memory
-   enrichment — threaded to the cache build so the snapshot is not recomputed."
+   Static layers are merged first so the memory delta is computed against the
+   accumulated base — not an empty map."
   [session source enrichment analyze-cache-atom]
   (let [wm? (core/working-memory-available? session)]
     (when (and (#{:auto-detect-from-memory :auto-detect} enrichment)
@@ -211,13 +207,12 @@
           (when memory?
             (analyze/enrich-annotations-from-session* session base))
           memory-layer  (when memory? (analyze/->memory-layer base annotations))]
-      (utils/remove-nil-vals
-       {:annotations (if memory-layer
-                       (-> (conj static-layers memory-layer)
-                           ann.merge/merge-layers
-                           ann.merge/annotations)
-                       base)
-        :memory-snapshot snapshot}))))
+      {:annotations (if memory-layer
+                      (-> (conj static-layers memory-layer)
+                          ann.merge/merge-layers
+                          ann.merge/annotations)
+                      base)
+       :memory-snapshot snapshot})))
 
 (defn build-annotations*
   "Like `build-annotations`, but returns {:annotations …} with an optional
@@ -236,34 +231,40 @@
                 {:source annotations-spec})
          ;; Validate spec-shaped maps at the choke point.
          _ (when (map? spec) (s/validate AnnotationsSpec spec))
-         {:keys [source enrichment]} spec]
-     (case enrichment
-       :reuse
-       (if (some? source)
-         {:annotations (-> session
-                           (build-static-layers source nil analyze-cache-atom)
-                           ann.merge/merge-layers
-                           ann.merge/annotations)}
-         (if (some? current-annotations)
-           {:annotations current-annotations}
+         {:keys [source enrichment]} spec
+         ;; `:memory-snapshot` exists only on the auto-detect path, where it is
+         ;; a dynamic value that may be nil — `remove-nil-vals` below strips it
+         ;; when nil.  The other branches omit the key literally (memory
+         ;; enrichment never runs there).
+         built
+         (case enrichment
+           :reuse
+           (if (some? source)
+             {:annotations (-> session
+                               (build-static-layers source nil analyze-cache-atom)
+                               ann.merge/merge-layers
+                               ann.merge/annotations)}
+             (if (some? current-annotations)
+               {:annotations current-annotations}
+               {:annotations (-> session
+                                 ann.merge/props-layer
+                                 ann.merge/annotations)}))
+
+           (:none nil)
            {:annotations (-> session
-                             ann.merge/props-layer
-                             ann.merge/annotations)}))
+                             (build-static-layers source nil analyze-cache-atom)
+                             ann.merge/merge-layers
+                             ann.merge/annotations)}
 
-       (:none nil)
-       {:annotations (-> session
-                         (build-static-layers source nil analyze-cache-atom)
-                         ann.merge/merge-layers
-                         ann.merge/annotations)}
+           ;; Auto-detect modes — explicit enumeration with fail-fast for unknown values.
+           (:auto-detect-from-rulebase :auto-detect-from-memory :auto-detect)
+           (build-auto-detect-annotations session source enrichment analyze-cache-atom)
 
-       ;; Auto-detect modes — explicit enumeration with fail-fast for unknown values.
-       (:auto-detect-from-rulebase :auto-detect-from-memory :auto-detect)
-       (build-auto-detect-annotations session source enrichment analyze-cache-atom)
-
-       ;; nil enrichment handled above; catch-all is unknown enum values
-       (throw (IllegalArgumentException.
-               (format "Unknown :enrichment mode %s. Expected: %s"
-                       enrichment (pr-str auto-detect-modes))))))))
+           ;; nil enrichment handled above; catch-all is unknown enum values
+           (throw (IllegalArgumentException.
+                   (format "Unknown :enrichment mode %s. Expected: %s"
+                           enrichment (pr-str auto-detect-modes)))))]
+     (utils/remove-nil-vals built))))
 
 (defn build-annotations
   "Resolve annotations for `session` from `annotations-spec`.
