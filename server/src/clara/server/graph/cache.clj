@@ -30,12 +30,21 @@
    and annotations.  Annotations are unwrapped to bare form; session
    working-memory enrichment is NOT applied here — it is the caller's
    responsibility to enrich `annotations-atom` (e.g. via `swap-session!`
-   with `:enrich-from-session? true`) before the cache rebuilds."
-  [session annotations]
-  (let [bare (ann.merge/->bare-annotations annotations)
-        analysis (core/rulebase-analysis session bare)]
+   with `:enrich-from-session? true`) before the cache rebuilds.
+
+   `memory-snapshot` (when non-nil) is the working-memory snapshot already
+   produced by memory enrichment for this session; it is reused and only its
+   `:known` flags are re-stamped from the analysis, avoiding a second
+   in-memory inspection."
+  [session annotations memory-snapshot]
+  (let [bare      (ann.merge/->bare-annotations annotations)
+        analysis  (core/rulebase-analysis session bare)
+        known-set (-> analysis :fact-types keys set)
+        snapshot  (if memory-snapshot
+                    (memory/update-snapshot-known-set memory-snapshot known-set)
+                    (memory/session-snapshot-from-analysis session analysis))]
     {:analysis analysis
-     :snapshot (memory/session-snapshot-from-analysis session analysis)}))
+     :snapshot snapshot}))
 
 ;; ---------------------------------------------------------------------------
 ;; Cache access
@@ -46,13 +55,13 @@
    reference has changed (identity check).  The state map includes
    `:analysis`, reverse indexes, and `:snapshot` (nil when working memory
    is unavailable)."
-  [cache session annotations]
+  [cache session annotations memory-snapshot]
   (let [cached @cache]
     (if (and cached
              (identical? (:session cached) session)
              (identical? (:annotations cached) annotations))
       cached
-      (let [state (build-state session annotations)]
+      (let [state (build-state session annotations memory-snapshot)]
         (reset! cache (assoc state
                              :session session
                              :annotations annotations))))))
@@ -63,17 +72,21 @@
    map includes `:production-id-index` and `:fact-type-id-index` reverse
    indexes (computed by `core/rulebase-analysis`)."
   [cache session annotations]
-  (:analysis (get-state cache session annotations)))
+  (:analysis (get-state cache session annotations nil)))
 
 (defn snapshot
   "Returns the cached working-memory snapshot for the current session, or
    nil when working memory is unavailable."
   [cache session annotations]
-  (:snapshot (get-state cache session annotations)))
+  (:snapshot (get-state cache session annotations nil)))
 
 (defn warm!
   "Eagerly populates the cache so the next request does not pay the full
-   `rulebase-analysis` + `session-snapshot` build cost."
-  [cache session annotations]
-  (get-state cache session annotations)
-  nil)
+   `rulebase-analysis` + `session-snapshot` build cost.  `memory-snapshot`
+   (when non-nil) is a snapshot already produced by memory enrichment for
+   `session`, reused to avoid a second inspection."
+  ([cache session annotations]
+   (warm! cache session annotations nil))
+  ([cache session annotations memory-snapshot]
+   (get-state cache session annotations memory-snapshot)
+   nil))

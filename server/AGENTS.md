@@ -102,16 +102,30 @@ To ensure code quality and adherence to Clojure standards, use `clj-kondo`:
 ### Schema Validation
 
 **All test namespaces MUST** enable `schema.test/validate-schemas` via a `:once`
-fixture:
+fixture.  No exceptions — a test namespace exercising `s/defn` / `s/defschema`
+code without it validates nothing at all.
 
 ```clojure
-(:require ... [schema.test :as st])
+(ns my.ns-test
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [schema.test :as st]))
+
 (use-fixtures :once st/validate-schemas)
 ```
 
-This catches schema violations in `s/defn`-annotated handler return values at
-test time.  When combining with other `:once` fixtures, compose them:
-`(use-fixtures :once st/validate-schemas other-fixture)`.
+`schema.test/validate-schemas` **is** the global schema instrumentation in this
+schema version (there is no `schema.test/instrument` — do not hunt for it or
+add a selective `instrument` fixture).  While active it:
+
+- validates every `s/defn` function's **input** and **return** schemas at call
+  time (wrong-arg and wrong-shape return values both throw), and
+- validates every `s/defschema` definition is well-formed.
+
+`s/defn` does **not** validate at runtime outside this fixture, so missing it
+silently skips all schema checks.  When combining with other `:once` fixtures,
+compose them in one form:
+`(use-fixtures :once st/validate-schemas other-fixture)`.  The `:once` scope is
+intentional — validation is global and cheap to leave on for a whole namespace.
 
 # Clara Rules API
 

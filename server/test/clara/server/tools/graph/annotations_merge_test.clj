@@ -4,11 +4,14 @@
    fixture layers — no session, no rulebase, no classpath."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clara.server.tools.graph.annotations.callsite :as ann.callsite]
             [clara.server.tools.graph.annotations.merge :as ann]
             [clara.server.tools.graph.annotations.rebase :as ann.rebase]
-            [clara.server.tools.graph.annotations.report :as ann.report]))
+            [clara.server.tools.graph.annotations.report :as ann.report]
+            [schema.test :as st]))
+
+(use-fixtures :once st/validate-schemas)
 
 ;; ---------------------------------------------------------------------------
 ;; Fixtures

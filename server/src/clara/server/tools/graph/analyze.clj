@@ -920,6 +920,71 @@
                    rule->session-types)]
     annotations'))
 
+(defn enrich-annotations-from-session*
+  "Implementation of `enrich-annotations-from-session` returning
+   {:annotations enriched :snapshot snapshot}, so a caller that also needs the
+   working-memory snapshot (the cache build) reuses it instead of re-inspecting
+   the session.  See `enrich-annotations-from-session` for the enrichment
+   semantics."
+  [session annotations]
+  (let [original           (ann/normalize-annotations annotations)
+        snapshot           (memory/session-snapshot session)
+        enriched           (add-auto-detected-annotations snapshot original)
+        rule->session-types (rule->session-raw-types snapshot)
+        rulebase           (-> session eng/components :rulebase)
+
+        merged-annotations
+        (ann.merge/annotations
+         (ann.merge/merge-layers [(ann.merge/props-layer rulebase)
+                                  (ann.merge/layer {:id :enriched
+                                                    :annotations enriched})]))
+
+        resolved-annotation-map
+        (into {}
+              (for [p (:productions rulebase)]
+                [(ann/normalize-rule-name (:name p))
+                 (ann/production-annotation merged-annotations p)]))
+
+        enriched-annotations
+        (reduce-kv (fn [acc rule-name resolved-ann]
+                     (let [rule-ns        (ann/fq-name->namespace rule-name)
+                           resolve-fn     (partial serialize/resolve-type rule-ns)
+                           rule-entry     (get acc rule-name)
+                           declared-strs  (set (map resolve-fn
+                                                    (:insert-types resolved-ann)))
+                           detection-info (:dynamic-insert-types-detected resolved-ann)
+                           raw-types      (get rule->session-types rule-name)
+                           ;; Session-derived types not already declared in the
+                           ;; fully-merged annotation's insert-types, compared
+                           ;; under this rule's own ns.
+                           truly-new      (when (seq raw-types)
+                                            (sort-by resolve-fn
+                                                     (remove (comp declared-strs resolve-fn)
+                                                             raw-types)))]
+                       (if detection-info
+                         (if (seq truly-new)
+                           (let [merged (ann.merge/dedupe-by
+                                         resolve-fn
+                                         (into (vec (:clara-rules/insert-types rule-entry))
+                                               truly-new))]
+                             (-> acc
+                                 (assoc-in [rule-name :clara-rules/insert-types] merged)
+                                 (assoc-in [rule-name :clara-rules/dynamic-insert-types-detected
+                                            :fact-instance-derived-types]
+                                           truly-new)))
+                           ;; No truly-new types from this enrichment pass.
+                           ;; Restore the original annotation for this rule to
+                           ;; preserve any pre-existing dynamic detection
+                           ;; (e.g. :callsites from static analysis).
+                           (if-let [orig (get original rule-name)]
+                             (assoc acc rule-name orig)
+                             (dissoc acc rule-name)))
+                         acc)))
+                   enriched
+                   resolved-annotation-map)]
+    {:annotations enriched-annotations
+     :snapshot    snapshot}))
+
 (defn enrich-annotations-from-session
   "Enriches the given annotations map with fact-type provenance from a live
    Clara session's working memory.
@@ -941,73 +1006,18 @@
    Returns the enriched annotations map suitable for passing to
    `rulebase-analysis`."
   [session annotations]
-  (let [original          (ann/normalize-annotations annotations)
-        snapshot          (memory/session-snapshot session)
-        enriched          (add-auto-detected-annotations snapshot original)
-        rule->session-types (rule->session-raw-types snapshot)
-        rulebase          (-> session eng/components :rulebase)
-
-        merged-annotations
-        (ann.merge/annotations
-         (ann.merge/merge-layers [(ann.merge/props-layer rulebase)
-                                  (ann.merge/layer {:id :enriched
-                                                    :annotations enriched})]))
-
-        resolved-annotation-map
-        (into {}
-              (for [p (:productions rulebase)]
-                [(ann/normalize-rule-name (:name p))
-                 (ann/production-annotation merged-annotations p)]))]
-    (reduce-kv (fn [acc rule-name resolved-ann]
-                 (let [rule-ns        (ann/fq-name->namespace rule-name)
-                       resolve-fn     (partial serialize/resolve-type rule-ns)
-                       rule-entry     (get acc rule-name)
-                       declared-strs  (set (map resolve-fn
-                                                (:insert-types resolved-ann)))
-                       detection-info (:dynamic-insert-types-detected resolved-ann)
-                       raw-types      (get rule->session-types rule-name)
-                       ;; Session-derived types not already declared in the
-                       ;; fully-merged annotation's insert-types, compared
-                       ;; under this rule's own ns.
-                       truly-new      (when (seq raw-types)
-                                        (sort-by resolve-fn
-                                                 (remove (comp declared-strs resolve-fn)
-                                                         raw-types)))]
-                   (if detection-info
-                     (if (seq truly-new)
-                       (let [merged (ann.merge/dedupe-by
-                                     resolve-fn
-                                     (into (vec (:clara-rules/insert-types rule-entry))
-                                           truly-new))]
-                         (-> acc
-                             (assoc-in [rule-name :clara-rules/insert-types] merged)
-                             (assoc-in [rule-name :clara-rules/dynamic-insert-types-detected
-                                        :fact-instance-derived-types]
-                                       truly-new)))
-                       ;; No truly-new types from this enrichment pass.
-                       ;; Restore the original annotation for this rule to
-                       ;; preserve any pre-existing dynamic detection
-                       ;; (e.g. :callsites from static analysis).
-                       (if-let [orig (get original rule-name)]
-                         (assoc acc rule-name orig)
-                         (dissoc acc rule-name)))
-                     acc)))
-               enriched
-               resolved-annotation-map)))
+  (:annotations (enrich-annotations-from-session* session annotations)))
 
 (defn ->memory-layer
-  "Builds a working-memory annotation Layer from a fired Clara session.
-
-  Runs `enrich-annotations-from-session` against `session` and `annotations`,
-  computes the delta of what enrichment added over the base annotations, and
-  wraps it as a validated Layer with id `:clara.tools.graph.analyze/memory`.
+  "Builds a working-memory annotation Layer from `enriched` (the result of
+  enriching `base` from session working memory): the delta of what enrichment
+  added over `base`, wrapped as a validated Layer with id
+  `:clara.tools.graph.analyze/memory`.
 
   Returns nil when the session contributed nothing new — the honest result
   for an unfired session, rather than a layer restating the base."
-  [{:keys [session annotations]}]
-  (let [base      (ann/normalize-annotations annotations)
-        enriched  (enrich-annotations-from-session session base)
-        delta     (ann/annotations-delta base enriched)]
+  [base enriched]
+  (let [delta (ann/annotations-delta base enriched)]
     (when (seq delta)
       (ann.merge/annotations-delta->layer
        :clara.tools.graph.analyze/memory

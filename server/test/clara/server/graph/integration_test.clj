@@ -20,7 +20,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [jsonista.core :as json]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clara.server.graph.demo-setup :as demo]
             [clara.server.graph.main :as main]
             [clara.server.graph.server :as server]
@@ -29,7 +29,10 @@
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [schema.test :as st]))
+
+(use-fixtures :once st/validate-schemas)
 
 ;; ---------------------------------------------------------------------------
 ;; Session builders — the two canonical mk-session combinations

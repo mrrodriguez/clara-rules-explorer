@@ -10,7 +10,10 @@
             [clara.server.tools.graph.rules.nil-safety-test-rules :as nil-safety]
             [clara.server.tools.graph.rules.equal-fact-test-rules :as equal-facts]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [schema.test :as st]))
+
+(use-fixtures :once st/validate-schemas)
 
 (defn- ->test-session
   []
@@ -301,6 +304,25 @@
           snapshot (memory/session-snapshot session)]
       (is (every? (comp false? :known :type) (vals (:facts snapshot)))
           "Default snapshot marks no session fact type known"))))
+
+(deftest test-update-snapshot-known-set
+  (testing "update-snapshot-known-set re-stamps :known to match a fresh analysis-derived snapshot"
+    (let [app (laf/map->Application {:app-id "app-1"})
+          session (-> (->test-session)
+                      (r/insert app)
+                      (r/fire-rules))
+          analysis (core/rulebase-analysis
+                    session
+                    (ann.merge/merge-layers [(ann.merge/props-layer session)]))
+          known-set (set (keys (:fact-types analysis)))
+          ;; The reuse path: enrichment builds a 1-arity snapshot (all unknown).
+          enrichment-snapshot (memory/session-snapshot session)]
+      (is (every? (comp false? :known :type) (vals (:facts enrichment-snapshot)))
+          "enrichment snapshot starts with every fact type unknown")
+      (let [re-stamped (memory/update-snapshot-known-set enrichment-snapshot known-set)
+            fresh      (memory/session-snapshot-from-analysis session analysis)]
+        (is (= fresh re-stamped)
+            "re-stamped snapshot must equal a freshly-built analysis-derived snapshot")))))
 
 (deftest test-snapshot-raw-types
   (testing "Snapshot exposes fact-id → raw type for the enrichment boundary"

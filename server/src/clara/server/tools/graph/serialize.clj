@@ -5,7 +5,8 @@
    [clojure.set :as set]
    [clojure.string :as str]
    [clojure.walk :as w]
-   [clara.rules.schema :as schema])
+   [clara.rules.schema :as schema]
+   [clara.server.tools.graph.utils :as utils])
   (:import [java.math BigInteger]))
 
 (defn default-form-printer
@@ -290,15 +291,6 @@
   [rhs-form]
   (*form-printer* rhs-form))
 
-(defn remove-nil-vals
-  "Returns the map `m` with all entries whose value is nil removed."
-  [m]
-  (->> m
-       (reduce-kv (fn [m' k v]
-                    (if (nil? v) (dissoc! m' k) m'))
-                  (transient m))
-       persistent!))
-
 (defn serialize-dynamic-callsite
   "Serializes a dynamic callsite entry for JSON output.
    - :ns-name-sym → :ns (string).
@@ -348,7 +340,7 @@
                                           (mapv (fn [entry]
                                                   (update entry :var-name-sym #(if (symbol? %) (str %) %)))
                                                 cs))))))
-    true remove-nil-vals))
+    true utils/remove-nil-vals))
 
 (defn serialize-dynamic-detection
   "Serializes a dynamic detection info map (:dynamic-insert-types-detected or

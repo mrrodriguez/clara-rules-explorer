@@ -2,7 +2,10 @@
   (:require [clara.server.graph.main :as main]
             [clara.server.graph.server :as server]
             [clojure.tools.cli :as cli]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [schema.test :as st]))
+
+(use-fixtures :once st/validate-schemas)
 
 (defn dummy-load-session [session-path facts-path]
   {:dummy-session true :session-path session-path :facts-path facts-path})

@@ -285,6 +285,11 @@
                  status-404? {:status (s/eq 404) :body ring-error-body}
                  status-409? {:status (s/eq 409) :body no-working-memory-body}))
 
+(s/defschema GetSessionFactTypesResponse
+  (s/conditional status-200? {:status (s/eq 200) :body {:types [SessionFactTypeItem]
+                                                        :total-count s/Int}}
+                 status-409? {:status (s/eq 409) :body no-working-memory-body}))
+
 ;; ---------------------------------------------------------------------------
 ;; Handlers — each derefs state-atom once per request
 ;; ---------------------------------------------------------------------------
@@ -378,12 +383,7 @@
       (no-working-memory-response :rulebase-input))))
 
 (s/defn handle-get-session-fact-types
-  :- {:status (s/cond-pre (s/eq 200) (s/eq 409))
-      :body (s/conditional
-             #(= 200 (:status %))
-             {:types [SessionFactTypeItem] :total-count s/Int}
-             #(= 409 (:status %))
-             no-working-memory-body)}
+  :- GetSessionFactTypesResponse
   [state-atom cache _req]
   (with-snapshot state-atom cache
     (fn [snapshot]

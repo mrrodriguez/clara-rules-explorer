@@ -418,6 +418,48 @@
   (when (core/working-memory-available? session)
     (session-snapshot session (-> analysis :fact-types keys set))))
 
+(defn update-snapshot-known-set
+  "Re-derives the per-fact :type :known flag of an existing snapshot from
+   `known-set` (serialized fact-type names), without re-inspecting the session.
+   Re-stamps every fact entry wherever it appears — :facts, the rule/query match
+   indices, and the :fact-types inserted-from/used-by role grouping — still
+   O(total fact entries), far cheaper than a fresh snapshot.  Used by the cache
+   build to reuse a snapshot produced during memory enrichment (which is built
+   with an empty known-set)."
+  [snapshot known-set]
+  (letfn [(stamp [fact]
+            (assoc-in fact [:type :known]
+                      (contains? known-set (get-in fact [:type :name]))))
+          (stamp-facts [facts] (mapv stamp facts))
+          (stamp-roles [roles]
+            (mapv (fn [role] (update role :facts stamp-facts)) roles))]
+    (-> snapshot
+        (update :facts
+                (fn [facts]
+                  (reduce-kv (fn [m id fact] (assoc m id (stamp fact))) {} facts)))
+        (update :rule-matches
+                (fn [rm]
+                  (reduce-kv
+                   (fn [m k {:keys [matches inserted-facts]}]
+                     (assoc m k {:matches (stamp-facts matches)
+                                 :inserted-facts (stamp-facts inserted-facts)}))
+                   {} rm)))
+        (update :query-matches
+                (fn [qm]
+                  (reduce-kv
+                   (fn [m k {:keys [matches]}]
+                     (assoc m k {:matches (stamp-facts matches)}))
+                   {} qm)))
+        (update :fact-types
+                (fn [ft]
+                  (reduce-kv
+                   (fn [m type-name entry]
+                     (assoc m type-name
+                            (-> entry
+                                (update :inserted-from stamp-roles)
+                                (update :used-by stamp-roles))))
+                   {} ft))))))
+
 (defn get-session-rule-activity
   "Returns a unified activity map for a rule: {:matches [...] :inserted-facts [...]}"
   [snapshot p-name]

@@ -10,6 +10,7 @@
             [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.nodes :as nodes]
             [clara.server.tools.graph.serialize :as serialize]
+            [clara.server.tools.graph.utils :as utils]
             [clojure.string :as str]))
 
 (defn- get-rulebase [session-or-rulebase]
@@ -119,7 +120,7 @@
           (update :upstream #(serialize-deps % :upstream))
           (update :downstream #(serialize-deps % :downstream))
           (select-keys [:upstream :downstream])
-          serialize/remove-nil-vals))))
+          utils/remove-nil-vals))))
 
 (defn- rule-is-source?
   [{p-name :name :keys [rhs] :as _production} dep-graph]

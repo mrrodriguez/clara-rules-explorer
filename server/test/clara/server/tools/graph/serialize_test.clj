@@ -2,9 +2,12 @@
   (:require [clara.server.tools.graph.serialize :as s]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.rules.loan-app-rules]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
-            [fipp.edn :as fipp]))
+            [fipp.edn :as fipp]
+            [schema.test :as st]))
+
+(use-fixtures :once st/validate-schemas)
 
 (defrecord TestRecord [a b])
 
@@ -374,7 +377,7 @@
   (testing "Binding *form-printer* to pr-str produces compact output"
     (let [form '(my.ns/my-rule (= ?x 1))
           result (binding [s/*form-printer* pr-str]
-                    (s/*form-printer* form))]
+                   (s/*form-printer* form))]
       (is (string? result))
       (is (str/includes? result "my.ns/my-rule"))
       ;; pr-str puts the whole form on one line — no newlines
@@ -384,7 +387,7 @@
     (let [form '(my.ns/my-rule (= ?x 1))
           result (binding [s/*form-printer*
                            (fn [f] (with-out-str (fipp/pprint f)))]
-                    (s/*form-printer* form))]
+                   (s/*form-printer* form))]
       (is (string? result))
       (is (str/includes? result "my.ns/my-rule"))
       (is (str/includes? result "(= ?x 1)"))))
