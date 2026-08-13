@@ -6,17 +6,8 @@
             [clara.rules.platform :as platform]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.fact-types :as ft]
-            [clara.server.tools.graph.serialize :as serialize]))
-
-(defn- sort-by-pr-str
-  "Sorts `coll` by the pr-str of each element, computing pr-str once per
-   element (decorate-sort-undecorate) rather than once per comparison as
-   `sort-by` would."
-  [coll]
-  (->> coll
-       (map (fn [x] [(pr-str x) x]))
-       (sort-by first)
-       (map second)))
+            [clara.server.tools.graph.serialize :as serialize]
+            [clara.server.tools.graph.utils :as utils]))
 
 (defn- deterministic-fact-str
   "Returns a deterministic pr-str representation of a fact for stable sorting.
@@ -28,10 +19,10 @@
   (letfn [(canonicalize [x]
             (cond
               (map? x) (into [::map]
-                             (sort-by-pr-str
-                              (map (fn [[k v]] [(canonicalize k) (canonicalize v)]) x)))
+                             (utils/sort-by-key pr-str
+                                                (map (fn [[k v]] [(canonicalize k) (canonicalize v)]) x)))
               (set? x) (into [::set]
-                             (sort-by-pr-str (map canonicalize x)))
+                             (utils/sort-by-key pr-str (map canonicalize x)))
               (sequential? x) (mapv canonicalize x)
               :else x))]
     (pr-str (canonicalize (prune-fn fact)))))
@@ -66,16 +57,14 @@
 
 (defn- sort-facts
   [facts fact-type-fn fact-type-order prune-fn]
-  (->> facts
-       (map (fn [wrapped]
-              (let [fact (platform/fact-id-unwrap wrapped)
-                    ft (fact-type-fn fact)]
-                [[(get fact-type-order ft Integer/MAX_VALUE)
-                  (str ft)
-                  (deterministic-fact-str fact prune-fn)]
-                 wrapped])))
-       (sort-by first)
-       (map second)))
+  (utils/sort-by-key
+   (fn [wrapped]
+     (let [fact (platform/fact-id-unwrap wrapped)
+           ft (fact-type-fn fact)]
+       [(get fact-type-order ft Integer/MAX_VALUE)
+        (str ft)
+        (deterministic-fact-str fact prune-fn)]))
+   facts))
 
 (defn- build-id-map [sorted-facts]
   (let [id-map (java.util.IdentityHashMap.)]
@@ -306,11 +295,9 @@
                    {:fact fact
                     :bindings (if (= 1 (count binding-set))
                                 (vec binding-set)
-                                (->> binding-set
-                                     (map (fn [bs] [(deterministic-fact-str bs identity) bs]))
-                                     (sort-by first)
-                                     (map second)
-                                     vec))})))
+                                (vec (utils/sort-by-key
+                                      #(deterministic-fact-str % identity)
+                                      binding-set)))})))
          (sort-by (comp :id :fact))
          vec)))
 
