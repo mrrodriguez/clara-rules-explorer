@@ -283,25 +283,34 @@
    activations (distinct bindings) appears once; ids the fact table cannot
    describe are dropped, matching `:inserted-facts`.
 
-   Rows are sorted by fact id; binding sets by a deterministic string of the
-   pruned binding map, so snapshots are byte-stable across identical sessions."
+   Rows are sorted by fact id.  Binding sets are deduplicated by value and,
+   when a fact has more than one, sorted by a deterministic string of the
+   (already-pruned) map so snapshots are byte-stable; a single binding set is
+   emitted unsorted since its order is trivial.  `bindings` is pruned once per
+   explanation and the touched fact ids deduplicated first, so a fact
+   satisfying several conditions of one activation contributes a single pair
+   and large accumulator bindings are not re-stringified per fact."
   [explanations fact-table get-fact-id prune-fn]
   (let [binding-sets (volatile! {})]
     (doseq [{:keys [bindings matches]} explanations
-            match matches
-            fact (extract-match-facts match)
-            :let [id (get-fact-id fact)]
-            :when id]
-      (vswap! binding-sets update id (fnil conj #{}) (prune-fn bindings)))
+            :let [pruned-bindings (prune-fn bindings)
+                  ids (into #{}
+                            (comp (mapcat extract-match-facts)
+                                  (keep get-fact-id))
+                            matches)]]
+      (doseq [id ids]
+        (vswap! binding-sets update id (fnil conj #{}) pruned-bindings)))
     (->> @binding-sets
          (keep (fn [[id binding-set]]
                  (when-let [fact (get fact-table id)]
                    {:fact fact
-                    :bindings (->> binding-set
-                                   (map (fn [bs] [(deterministic-fact-str bs prune-fn) bs]))
-                                   (sort-by first)
-                                   (map second)
-                                   vec)})))
+                    :bindings (if (= 1 (count binding-set))
+                                (vec binding-set)
+                                (->> binding-set
+                                     (map (fn [bs] [(deterministic-fact-str bs identity) bs]))
+                                     (sort-by first)
+                                     (map second)
+                                     vec))})))
          (sort-by (comp :id :fact))
          vec)))
 

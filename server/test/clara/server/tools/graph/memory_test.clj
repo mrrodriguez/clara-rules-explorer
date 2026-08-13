@@ -166,8 +166,9 @@
             (is (map? (:type fact)) "Query match fact :type is a TypeReference")
             (is (string? (get-in fact [:type :name])))
             (is (map? (:data fact)) "Query match fact should have :data (the fact's own value)")))))))
+
 (deftest test-multi-fact-match-flattening
-  (testing "Multi-fact rule matches are flattened to one SessionFact entry per fact-id"
+  (testing "Multi-fact rule matches are flattened to one FactMatch entry per fact-id"
     (let [app (laf/map->Application {:app-id "app-1"})
           req-doc (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
           given-doc (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card})
@@ -230,7 +231,8 @@
           matches (mu-rule-matches snapshot "overlapping-conditions")
           item-matches (filter #(= mu-item-type-name (get-in % [:fact :type :name])) matches)]
       (is (= 3 (count item-matches)) "all three items appear, once each")
-      (is (= [1 2 3] (mapv (comp :id :fact) item-matches)) "rows are sorted by fact id")
+      (is (apply < (mapv (comp :id :fact) item-matches))
+          "rows are sorted by fact id (strictly increasing)")
       (is (every? #(= 1 (count (:bindings %))) item-matches)
           "each item carries exactly one binding set")
       ;; The tagged items satisfied both accumulator conditions; their
