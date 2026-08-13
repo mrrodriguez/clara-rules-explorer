@@ -11,14 +11,10 @@ Instead, you MUST use the `context-mode` sandbox tools:
 
 # Server State Architecture
 
-Server state is consolidated into a single `state-atom` per system instance:
-
-```clojure
-{:session           ;; live Clara session or raw rulebase
- :annotations-spec  ;; the AnnotationsSpec that produced :annotations
- :annotations       ;; derived bare annotations
- :analyze-cache}    ;; per-ns kondo memoization (plain immutable map value)
-```
+Server state is consolidated into a single `state-atom` per system instance.
+The authoritative shape is the `ServerState` schema in
+`clara.server.graph.server` (`s/defschema`) — the single source of truth; do
+not enumerate its keys here or in docstrings.
 
 **Atom discipline:** all mutation entry points are operator-driven (REPL, CLI,
 tests) — never HTTP, so swaps are effectively single-threaded. Transitions are
@@ -102,16 +98,76 @@ To ensure code quality and adherence to Clojure standards, use `clj-kondo`:
 ### Schema Validation
 
 **All test namespaces MUST** enable `schema.test/validate-schemas` via a `:once`
-fixture:
+fixture.  No exceptions — a test namespace exercising `s/defn` / `s/defschema`
+code without it validates nothing at all.
 
 ```clojure
-(:require ... [schema.test :as st])
+(ns my.ns-test
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [schema.test :as st]))
+
 (use-fixtures :once st/validate-schemas)
 ```
 
-This catches schema violations in `s/defn`-annotated handler return values at
-test time.  When combining with other `:once` fixtures, compose them:
-`(use-fixtures :once st/validate-schemas other-fixture)`.
+`schema.test/validate-schemas` **is** the global schema instrumentation in this
+schema version (there is no `schema.test/instrument` — do not hunt for it or
+add a selective `instrument` fixture).  While active it:
+
+- validates every `s/defn` function's **input** and **return** schemas at call
+  time (wrong-arg and wrong-shape return values both throw), and
+- validates every `s/defschema` definition is well-formed.
+
+`s/defn` does **not** validate at runtime outside this fixture, so missing it
+silently skips all schema checks.  When combining with other `:once` fixtures,
+compose them in one form:
+`(use-fixtures :once st/validate-schemas other-fixture)`.  The `:once` scope is
+intentional — validation is global and cheap to leave on for a whole namespace.
+
+# Clara Rules API
+
+**`clara.rules/mk-session`** takes a single variadic sequence of sources and
+options:
+
+```clojure
+;; Sources come first (productions, queries, hierarchies), followed by
+;; key-value option pairs — NOT a map:
+(r/mk-session production-1 production-2
+              :cache false
+              :activation-group-sort-fn my-sort-fn)
+```
+
+The function splits by looking for the first keyword: everything before it
+is a source, everything after becomes `(apply hash-map ...)`.
+
+**Runtime rule/query generation:** `clara.rules/defrule` and `defquery` are
+compile-time macros. When rules or queries need to be generated at runtime
+(e.g. in tests, performance harnesses, or dynamic rule loading), construct
+the production maps directly as plain Clojure maps and pass them to
+`mk-session` instead of trying to invoke the macros:
+
+```clojure
+;; DON'T — macros expand at compile time, can't be used to generate at runtime:
+;; (defrule my-rule ...)   ; only works when written literally in source
+
+;; DO — build production maps directly:
+{:name    "my-ns/my-rule"          ;; string or symbol; the rule's fq name
+ :ns-name 'my.ns                    ;; namespace symbol
+ :doc     "what this rule does"
+ :lhs     [{:type SomeFact :constraints []}]
+ :rhs     '(clara.rules/insert! (->SomeOtherFact ...))}
+```
+
+The `:lhs` is a vector of condition maps (each with `:type` and
+`:constraints`). The `:rhs` is a quoted s-expression — the same body you'd
+write inside a `defrule` macro. Queries follow the same pattern with
+`:params`, `:lhs`, and a `:type` of `:query`. See
+`server/test/clara/server/tools/graph/rules/perf_gen_helpers.clj` for a
+working example (`build-chain-rules`, `build-chain-session`).
+
+When a single static query is needed alongside dynamically generated rules,
+use `defquery` at compile time and reference it by var via `(var my-query)`
+in the `mk-session` sources — both production maps and var references work
+interchangeably.
 
 # Documentation
 
@@ -145,3 +201,18 @@ of map arguments and return values.  A schema is compile-time verifiable,
 self-documenting, and stays in sync with code changes.  Use docstrings for
 *why*, not *what* — keep them concise (1-3 lines).  Reserve long-form
 commentary for architecture docs in `docs/`.
+
+**Never enumerate a data structure's keys in a docstring** (state map, options
+map, request/response body, etc.).  When a schema exists, point to it as the
+single source of truth (e.g. "an atom of
+`clara.server.graph.server/ServerState`") instead of repeating its shape inline
+— inline copies drift out of sync the moment the schema changes.  If no schema
+exists and the shape is genuinely part of the contract, define one rather than
+documenting the shape prose-style.
+
+**Do not document a callee's behavior or mechanism in the caller's docstring.**
+When `f` calls `g`, the docstring on `f` must not explain what `g` does or how
+(e.g. "`g` omits nil keys via `remove-nil-vals`").  That belongs to `g`'s
+docstring — if it needs one at all — and repeating it drifts out of sync the
+moment `g` changes.  Nil-vs-missing-key is not worth calling out in a contract
+between functions; schema optional keys already express it where it matters.

@@ -8,7 +8,10 @@
             [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.serialize :as serialize]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [schema.test :as st]))
+
+(use-fixtures :once st/validate-schemas)
 
 (deftest test-normalize-rule-name
   (testing "symbol → string"
@@ -52,12 +55,7 @@
                              production)))))
     (testing "absent type keys stay absent (no empty vectors)"
       (is (= {}
-             (ann/production-annotation {"user/my-rule" {}} production))))
-    (testing "rule-name lookup is normalized"
-      (is (= [:TypeA]
-             (:insert-types (ann/production-annotation
-                             {'user/my-rule #:clara-rules{:insert-types [:TypeA]}}
-                             production)))))))
+             (ann/production-annotation {"user/my-rule" {}} production))))))
 
 (deftest test-annotations-delta
   (testing "new type added over base"

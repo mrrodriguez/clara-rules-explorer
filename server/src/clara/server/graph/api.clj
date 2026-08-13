@@ -4,10 +4,10 @@
    HTTP is read-only — mutation happens through the in-memory
    `swap-session!` / `reload-annotations!` API in `clara.server.graph.server`.
 
-   The router and handlers take a single `state-atom` (atom of
-   `{:session :annotations-spec :annotations :analyze-cache}`) plus a
-   `cache` cell.  Each handler derefs once per request and passes coherent
-   `(session, annotations)` values down to the analysis engine."
+   The router and handlers take a single `state-atom` (an atom of
+   `clara.server.graph.server/ServerState`) plus a `cache` cell.  Each handler
+   derefs once per request and passes coherent state values down to the analysis
+   engine."
   (:require [reitit.ring :as ring]
             [reitit.ring.middleware.muuntaja :as muuntaja]
             [muuntaja.core :as m]
@@ -285,36 +285,41 @@
                  status-404? {:status (s/eq 404) :body ring-error-body}
                  status-409? {:status (s/eq 409) :body no-working-memory-body}))
 
+(s/defschema GetSessionFactTypesResponse
+  (s/conditional status-200? {:status (s/eq 200) :body {:types [SessionFactTypeItem]
+                                                        :total-count s/Int}}
+                 status-409? {:status (s/eq 409) :body no-working-memory-body}))
+
 ;; ---------------------------------------------------------------------------
 ;; Handlers — each derefs state-atom once per request
 ;; ---------------------------------------------------------------------------
 
 (s/defn handle-get-rulebase-summary :- {:status (s/eq 200) :body RulebaseSummary}
   [state-atom cache working-memory-enabled? _req]
-  (let [{:keys [session annotations]} @state-atom]
+  (let [{:keys [session annotations memory-snapshot]} @state-atom]
     {:status 200
-     :body (assoc (core/rulebase-summary (cache/analysis cache session annotations))
+     :body (assoc (core/rulebase-summary (cache/analysis cache session annotations memory-snapshot))
                   :working-memory-available (boolean
                                              (and working-memory-enabled?
                                                   (core/working-memory-available? session))))}))
 
 (defn- handle-get-analysis
   [state-atom cache _req]
-  (let [{:keys [session annotations]} @state-atom]
+  (let [{:keys [session annotations memory-snapshot]} @state-atom]
     {:status 200
-     :body (core/analysis-result (cache/analysis cache session annotations))}))
+     :body (core/analysis-result (cache/analysis cache session annotations memory-snapshot))}))
 
 (s/defn handle-get-rules :- {:status (s/eq 200) :body {:rules [RuleListItem]}}
   [state-atom cache _req]
-  (let [{:keys [session annotations]} @state-atom]
+  (let [{:keys [session annotations memory-snapshot]} @state-atom]
     {:status 200
-     :body {:rules (core/rules-list (cache/analysis cache session annotations))}}))
+     :body {:rules (core/rules-list (cache/analysis cache session annotations memory-snapshot))}}))
 
 (s/defn handle-get-rule :- GetRuleResponse
   [state-atom cache req]
-  (let [{:keys [session annotations]} @state-atom
+  (let [{:keys [session annotations memory-snapshot]} @state-atom
         id (get-in req [:path-params :id])
-        analysis (cache/analysis cache session annotations)
+        analysis (cache/analysis cache session annotations memory-snapshot)
         name (get (:production-id-index analysis) id)
         rule (get-in analysis [:rules name])]
     (if rule
@@ -323,15 +328,15 @@
 
 (s/defn handle-get-queries :- {:status (s/eq 200) :body {:queries [QueryListItem]}}
   [state-atom cache _req]
-  (let [{:keys [session annotations]} @state-atom]
+  (let [{:keys [session annotations memory-snapshot]} @state-atom]
     {:status 200
-     :body {:queries (core/queries-list (cache/analysis cache session annotations))}}))
+     :body {:queries (core/queries-list (cache/analysis cache session annotations memory-snapshot))}}))
 
 (s/defn handle-get-query :- GetQueryResponse
   [state-atom cache req]
-  (let [{:keys [session annotations]} @state-atom
+  (let [{:keys [session annotations memory-snapshot]} @state-atom
         id (get-in req [:path-params :id])
-        analysis (cache/analysis cache session annotations)
+        analysis (cache/analysis cache session annotations memory-snapshot)
         name (get (:production-id-index analysis) id)
         query (get-in analysis [:queries name])]
     (if query
@@ -340,15 +345,15 @@
 
 (s/defn handle-get-fact-types :- {:status (s/eq 200) :body {:fact-types [FactTypeListItem]}}
   [state-atom cache _req]
-  (let [{:keys [session annotations]} @state-atom]
+  (let [{:keys [session annotations memory-snapshot]} @state-atom]
     {:status 200
-     :body {:fact-types (ft/fact-types-list (cache/analysis cache session annotations))}}))
+     :body {:fact-types (ft/fact-types-list (cache/analysis cache session annotations memory-snapshot))}}))
 
 (s/defn handle-get-fact-type :- GetFactTypeResponse
   [state-atom cache req]
-  (let [{:keys [session annotations]} @state-atom
+  (let [{:keys [session annotations memory-snapshot]} @state-atom
         id (get-in req [:path-params :id])
-        analysis (cache/analysis cache session annotations)
+        analysis (cache/analysis cache session annotations memory-snapshot)
         name (get (:fact-type-id-index analysis) id)
         fact-type (get-in analysis [:fact-types name])]
     (if fact-type
@@ -372,18 +377,13 @@
    runtime; the static `:working-memory-enabled` config flag is resolved
    once at router construction instead (see `router`)."
   [state-atom cache f]
-  (let [{:keys [session annotations]} @state-atom]
-    (if-let [snapshot (cache/snapshot cache session annotations)]
+  (let [{:keys [session annotations memory-snapshot]} @state-atom]
+    (if-let [snapshot (cache/snapshot cache session annotations memory-snapshot)]
       (f snapshot)
       (no-working-memory-response :rulebase-input))))
 
 (s/defn handle-get-session-fact-types
-  :- {:status (s/cond-pre (s/eq 200) (s/eq 409))
-      :body (s/conditional
-             #(= 200 (:status %))
-             {:types [SessionFactTypeItem] :total-count s/Int}
-             #(= 409 (:status %))
-             no-working-memory-body)}
+  :- GetSessionFactTypesResponse
   [state-atom cache _req]
   (with-snapshot state-atom cache
     (fn [snapshot]
@@ -506,8 +506,8 @@
 
 (defn app
   "Returns {:keys [handler cache]}.
-   `state-atom` is a single atom holding the server state
-   `{:session :annotations-spec :annotations :analyze-cache}`.
+   `state-atom` is a single atom holding the server state — see
+   `clara.server.graph.server/ServerState`.
    `working-memory-enabled?` is the raw `:working-memory-enabled` config
    flag (default true at the `start!` level).  When false, working-memory
    routes are bound to a fixed 409 `:disabled-by-config` handler at router

@@ -2,8 +2,12 @@
   (:require [clara.server.tools.graph.serialize :as s]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.rules.loan-app-rules]
-            [clojure.test :refer [deftest is testing]]
-            [clojure.string :as str]))
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [clojure.string :as str]
+            [fipp.edn :as fipp]
+            [schema.test :as st]))
+
+(use-fixtures :once st/validate-schemas)
 
 (defrecord TestRecord [a b])
 
@@ -357,3 +361,64 @@
       (doseq [ft fact-types]
         (is (str/includes? lhs-form-str (str ft))
             (str "fact type " ft " must appear in serialize-lhs-form output"))))))
+
+;; ---------------------------------------------------------------------------
+;; Dynamic var *form-printer* — override examples
+;; ---------------------------------------------------------------------------
+
+(deftest test-form-printer-dynamic-var
+  (testing "Default *form-printer* produces pretty-printed output via clojure.pprint"
+    (let [form '(my.ns/my-rule (= ?x 1))
+          result (s/*form-printer* form)]
+      (is (string? result))
+      (is (str/includes? result "my.ns/my-rule"))
+      (is (str/includes? result "(= ?x 1)"))))
+
+  (testing "Binding *form-printer* to pr-str produces compact output"
+    (let [form '(my.ns/my-rule (= ?x 1))
+          result (binding [s/*form-printer* pr-str]
+                   (s/*form-printer* form))]
+      (is (string? result))
+      (is (str/includes? result "my.ns/my-rule"))
+      ;; pr-str puts the whole form on one line — no newlines
+      (is (not (str/includes? result "\n")))))
+
+  (testing "Binding *form-printer* to fipp.edn/pprint produces valid EDN"
+    (let [form '(my.ns/my-rule (= ?x 1))
+          result (binding [s/*form-printer*
+                           (fn [f] (with-out-str (fipp/pprint f)))]
+                   (s/*form-printer* form))]
+      (is (string? result))
+      (is (str/includes? result "my.ns/my-rule"))
+      (is (str/includes? result "(= ?x 1)"))))
+
+  (testing "serialize-lhs-form respects the dynamic binding"
+    (let [;; A form with a nested map constraint — long enough that the
+          ;; default pretty-printer will break it across multiple lines.
+          lhs [{:type 'my.ns/Foo :fact-binding '?f
+                :constraints '[(= ?f {:status :ok
+                                      :count 42
+                                      :tags [:a :b :c]})]}]
+          pp-result    (s/serialize-lhs-form lhs)
+          fipp-result  (binding [s/*form-printer*
+                                 (fn [f] (with-out-str (fipp/pprint f)))]
+                         (s/serialize-lhs-form lhs))
+          pr-str-result (binding [s/*form-printer* pr-str]
+                          (s/serialize-lhs-form lhs))]
+      ;; Both pretty-printers contain expected identifiers
+      (is (str/includes? pp-result "my.ns/Foo"))
+      (is (str/includes? fipp-result "my.ns/Foo"))
+      (is (str/includes? fipp-result "?f"))
+      ;; Both pretty-printers produce multi-line output for the nested map
+      (is (str/includes? pp-result "\n"))
+      (is (str/includes? fipp-result "\n"))
+      ;; pr-str (single-line) differs from the default pretty-printer
+      (is (not= pp-result pr-str-result)
+          "pr-str produces compact output, clojure.pprint produces multi-line")))
+
+  (testing "serialize-rhs-form respects the dynamic binding"
+    (let [rhs '(do (println :done))
+          pr-str-result (binding [s/*form-printer* pr-str]
+                          (s/serialize-rhs-form rhs))]
+      (is (= "(do (println :done))" pr-str-result)
+          "pr-str returns the form on one line"))))

@@ -10,12 +10,15 @@
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
             [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing use-fixtures]])
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [schema.test :as st])
   (:import [clara.server.tools.graph.rules.loan_app_facts
             Application
             GivenDocument
             AllGivenDocuments
             AllRequiredDocuments]))
+
+(use-fixtures :once st/validate-schemas)
 
 (use-fixtures :each (fn [f]
                       (reset! ldr/count-atom 0)

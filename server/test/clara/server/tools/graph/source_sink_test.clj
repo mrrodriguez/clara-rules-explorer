@@ -4,7 +4,10 @@
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [schema.test :as st]))
+
+(use-fixtures :once st/validate-schemas)
 
 (defn- loan-doc-annotations
   [session]

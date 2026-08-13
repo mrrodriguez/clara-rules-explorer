@@ -101,18 +101,18 @@
     m))
 
 (defn production-annotation
-  "Reads one production's annotation from a merged (or bare) annotations map
-   with unqualified keys (:insert-types, :retract-types, :no-output-types,
-   :notes, :dynamic-insert-types-detected,
+  "Reads one production's annotation from a **normalized** annotations map
+   (string rule-name keys) with unqualified keys (:insert-types, :retract-types,
+   :no-output-types, :notes, :dynamic-insert-types-detected,
    :dynamic-retract-types-detected).  Symbol type tokens are resolved against
-   the production's namespace (classes, vars) as Clara's pluggable
-   fact-type-fn allows.  The lookup normalizes the map's rule-name keys when
-   they are not already strings."
+   the production's namespace (classes, vars) as Clara's pluggable fact-type-fn
+   allows.
+
+   `annotations` must already have string rule-name keys — callers at
+   normalization boundaries (e.g. `core/rulebase-analysis`, which accepts bare
+   maps) normalize first via `normalize-annotations`."
   [annotations production]
-  (let [annotations (if (every? (comp string? key) annotations)
-                      annotations
-                      (normalize-annotations annotations))
-        rule-ann (get-annotation annotations (:name production))
+  (let [rule-ann (get-annotation annotations (:name production))
         production-ns (get-production-ns production)]
     (-> (select-keys rule-ann production-annotation-keys)
         (resolve-type-key :clara-rules/insert-types production-ns)

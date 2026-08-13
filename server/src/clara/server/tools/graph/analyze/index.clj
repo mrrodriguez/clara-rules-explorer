@@ -22,7 +22,6 @@
   (:require [clojure.set :as set]
             [schema.core :as s]
             [clara.server.tools.graph.analyze.utils :as u]
-            [clara.server.tools.graph.analyze.kondo :as kondo]
             [clara.server.tools.graph.analyze.ctor :as ctor]))
 
 (def insert-fns
@@ -70,8 +69,6 @@
    are schematized with `s/=>`; their shapes:
 
    * `:get-source`          - (fn [ns-sym filename] -> source-str-or-nil)
-   * `:read-ctor-form`      - (fn [ctor-usage get-source] -> call-form-or-nil),
-                              memoized per run
    * `:resolve-record-type` - (fn [ns-sym class-sym] -> fq-class-name-sym-or-nil),
                               memoized per run (live-ns lookups + class loads)
 
@@ -95,7 +92,6 @@
    :retractor-type-map    {s/Symbol {s/Symbol {:usage u/KondoVarUsage}}}
    :constructor-callsite-map (s/maybe CtorCallsiteMap)
    :get-source            (s/=> s/Any s/Any s/Any)
-   :read-ctor-form        (s/=> s/Any s/Any s/Any)
    :resolve-record-type   (s/=> s/Any s/Any s/Any)
    :productions-by-name   {s/Symbol s/Any}})
 
@@ -314,10 +310,21 @@
         constructor-callsite-map (when (seq fact-constructors)
                                    (build-constructor-callsite-map
                                     (direct-callers graph boundary-fns)
-                                    usages-by-caller reachable-set fact-constructors))]
+                                    usages-by-caller reachable-set fact-constructors))
+        all-boundary-fns (into insert-fns retract-fns)
+        boundary-usages-by-caller (reduce
+                                   (fn [m u]
+                                     (if (contains? all-boundary-fns
+                                                    (u/var-usage-callee u))
+                                       (let [caller (u/var-usage-caller u)]
+                                         (update m caller (fnil conj []) u))
+                                       m))
+                                   {}
+                                   usages)]
     {:graph graph
      :usages-by-caller usages-by-caller
      :usages-by-callee usages-by-callee
+     :boundary-usages-by-caller boundary-usages-by-caller
      :local-usages-by-name local-usages-by-name
      :locals-by-id locals-by-id
      :reachable-set reachable-set
@@ -327,6 +334,5 @@
      :retractor-type-map retractor-type-map
      :constructor-callsite-map constructor-callsite-map
      :get-source get-source
-     :read-ctor-form (memoize kondo/read-ctor-form)
      :resolve-record-type resolve-record-type
      :productions-by-name productions-by-name}))

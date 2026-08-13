@@ -5,8 +5,21 @@
    [clojure.set :as set]
    [clojure.string :as str]
    [clojure.walk :as w]
-   [clara.rules.schema :as schema])
+   [clara.rules.schema :as schema]
+   [clara.server.tools.graph.utils :as utils])
   (:import [java.math BigInteger]))
+
+(defn default-form-printer
+  "Default form printer: pretty-prints a form to a string using clojure.pprint."
+  ^String [form]
+  (with-out-str (pp/pprint form)))
+
+(def ^:dynamic *form-printer*
+  "Dynamic form printer for LHS/RHS serialization.  Defaults to
+   `default-form-printer` (clojure.pprint).  Callers who do not need
+   pretty-printed sub-forms can bind this to `pr-str` or another cheap
+   (fn [form] String) for a substantial speedup on large rulebases."
+  default-form-printer)
 
 (defn resolve-type
   "Resolves a raw fact type (Class, keyword, symbol, string, tuple, map, ...) to its
@@ -111,37 +124,59 @@
   [production-ns-name x]
   (resolve-type production-ns-name x))
 
+(defn- prune-fns*
+  "Recursive core of `prune-fns`, memoized by object identity in `memo` so a
+   substructure reached more than once is walked only once.  Returns the
+   pruned value for `x`."
+  [^java.util.IdentityHashMap memo x]
+  (if (.containsKey memo x)
+    (.get memo x)
+    (let [result
+          (cond
+            (record? x) (reduce-kv (fn [m k v] (assoc m k (prune-fns* memo v)))
+                                   {}
+                                   x)
+            (map? x) (reduce-kv (fn [m k v] (assoc m k (prune-fns* memo v)))
+                                (empty x)
+                                x)
+            ;; seq-like things or list will insert items to the head, which will reverse the order with
+            ;; `into`. This avoids that.
+            (or (list? x)
+                (and (sequential? x)
+                     (not (vector? x)))) (into (empty x)
+                                               (map #(prune-fns* memo %))
+                                               (reverse x))
+            ;; Do not preserve type here, it could be a lazy seq and we'd get reversed order. If it is not
+            ;; covered by the seq-like checks above, use a vector.
+            (sequential? x) (into []
+                                  (map #(prune-fns* memo %))
+                                  x)
+            (coll? x) (into (empty x)
+                            (map #(prune-fns* memo %))
+                            x)
+            (keyword? x) x
+            (symbol? x) x
+            (class? x) (.getName ^Class x)
+            (ifn? x) (str x)
+            :else x)]
+      (.put memo x result)
+      result)))
+
 (defn prune-fns
   "Recursively walks a data structure and replaces items that implement IFn
    with a string placeholder or their symbol if available."
   [x]
-  (cond
-    (record? x) (reduce-kv (fn [m k v] (assoc m k (prune-fns v)))
-                           {}
-                           x)
-    (map? x) (reduce-kv (fn [m k v] (assoc m k (prune-fns v)))
-                        (empty x)
-                        x)
-    ;; seq-like things or list will insert items to the head, which will reverse the order with
-    ;; `into`. This avoids that.
-    (or (list? x)
-        (and (sequential? x)
-             (not (vector? x)))) (into (empty x)
-                                       (map prune-fns)
-                                       (reverse x))
-    ;; Do not preserve type here, it could be a lazy seq and we'd get reversed order. If it is not
-    ;; covered by the seq-like checks above, use a vector.
-    (sequential? x) (into []
-                          (map prune-fns)
-                          x)
-    (coll? x) (into (empty x)
-                    (map prune-fns)
-                    x)
-    (keyword? x) x
-    (symbol? x) x
-    (class? x) (.getName ^Class x)
-    (ifn? x) (str x)
-    :else x))
+  (prune-fns* (java.util.IdentityHashMap.) x))
+
+(defn memoizing-prune-fns
+  "Returns a `(fn [x] -> pruned)` that memoizes by object identity within the
+   returned fn's scope.  Use where the same fact or substructure is pruned more
+   than once in a single operation (e.g. a session snapshot).  The memo is
+   released with the returned fn — callers must not retain it beyond the
+   enclosing operation."
+  []
+  (let [memo (java.util.IdentityHashMap.)]
+    (fn [x] (prune-fns* memo x))))
 
 (defn stringify-map-keys
   "Recursively converts keyword keys in a map to their string names.
@@ -185,16 +220,17 @@
   "Serializes a single condition, including pretty-printing its constraints and
    args and converting its `:type` (raw fact type) into a TypeReference.
    `prod-ns` is the production's namespace, used to resolve symbol types;
-   `known-set` is the analysis's serialized fact-type names."
+   `known-set` is the analysis's serialized fact-type names.
+
+   Form printing is controlled by the dynamic var `*form-printer*`
+   (defaults to `default-form-printer`)."
   [condition prod-ns known-set]
-  (letfn [(serialize-form [form]
-            (with-out-str (pp/pprint form)))
-          (serialize-forms [forms]
-            ;; `pp/pprint` adds the newline after the last form so do not include it trailing
-            ;; in this `format` call.
+  (letfn [(serialize-forms [forms]
+            ;; The printer adds the newline after the last form so do not
+            ;; include it trailing in this `format` call.
             (format "[\n%s]"
                     (->> forms
-                         (map serialize-form)
+                         (map *form-printer*)
                          (str/join \newline))))
           (serialize-node [node]
             (if (map? node)
@@ -209,7 +245,9 @@
   "Serializes the LHS of a rule.  Condition `:type` values are raw fact types
    here — callers must apply `prune-fns` to the RESULT (not beforehand) so the
    types are still Classes/keywords when `serialize-condition` converts them
-   to TypeReferences."
+   to TypeReferences.
+
+   Form printing is controlled by the dynamic var `*form-printer*`."
   [lhs prod-ns known-set]
   (mapv #(serialize-condition % prod-ns known-set) lhs))
 
@@ -237,25 +275,21 @@
              (into (or (:constraints condition) []))))))
 
 (defn serialize-lhs-form
-  "Pretty-prints the full LHS as a single Clojure code string."
+  "Pretty-prints the full LHS as a single Clojure code string.
+
+   Form printing is controlled by the dynamic var `*form-printer*`."
   [lhs]
   (->> lhs
        (map condition->form)
-       (map (fn [form] (with-out-str (pp/pprint form))))
+       (map *form-printer*)
        str/join))
 
 (defn serialize-rhs-form
-  [rhs-form]
-  (with-out-str (pp/pprint rhs-form)))
+  "Pretty-prints the RHS form as a string.
 
-(defn remove-nil-vals
-  "Returns the map `m` with all entries whose value is nil removed."
-  [m]
-  (->> m
-       (reduce-kv (fn [m' k v]
-                    (if (nil? v) (dissoc! m' k) m'))
-                  (transient m))
-       persistent!))
+   Form printing is controlled by the dynamic var `*form-printer*`."
+  [rhs-form]
+  (*form-printer* rhs-form))
 
 (defn serialize-dynamic-callsite
   "Serializes a dynamic callsite entry for JSON output.
@@ -306,7 +340,7 @@
                                           (mapv (fn [entry]
                                                   (update entry :var-name-sym #(if (symbol? %) (str %) %)))
                                                 cs))))))
-    true remove-nil-vals))
+    true utils/remove-nil-vals))
 
 (defn serialize-dynamic-detection
   "Serializes a dynamic detection info map (:dynamic-insert-types-detected or

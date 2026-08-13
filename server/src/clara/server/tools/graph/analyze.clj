@@ -25,7 +25,7 @@
      (analyze-session-rules
        {:session-or-rulebase session
         :config-dir \"my-kondo-config\"})"
-  (:require [clj-kondo.core :as kondo]
+  (:require [clj-kondo.core :as kondo-core]
             [clojure.string :as str]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -33,6 +33,7 @@
             [clara.server.tools.graph.analyze.callsite :as callsite]
             [clara.server.tools.graph.analyze.alias :as alias]
             [clara.server.tools.graph.analyze.utils :as u]
+            [clara.server.tools.graph.analyze.kondo :as kondo]
             [clara.server.tools.graph.analyze.index :as index]
             [clara.server.tools.graph.analyze.synth :as synth]
             [clara.server.tools.graph.serialize :as serialize]
@@ -85,7 +86,7 @@
 
 (defn- materialize-bundled-kondo-config!
   "Copies the bundled clj-kondo config from classpath resources into a fresh
-   temp directory and returns its absolute path, suitable for `kondo/run!`
+   temp directory and returns its absolute path, suitable for `kondo-core/run!`
    `:config-dir`. Returns nil if the bundled config is not on the classpath.
 
    Materialization is required because resources may live inside a jar, which
@@ -109,7 +110,7 @@
 
 (defn- analyze-source-code [source-code resource-path config-dir]
   (with-in-str source-code
-    (kondo/run!
+    (kondo-core/run!
      (cond-> {:lint ["-"]
               :lang :clj
               :filename resource-path
@@ -182,10 +183,11 @@
                                  (map (comp u/var-usage-caller :usage)))
                            traced-args)
         fallback-vars (when-not (= :none dynamic-type-fallback-resolution)
-                        (into []
-                              (comp (filter #(contains? reachable %))
-                                    (remove handled-vars))
-                              (sort-by str (keys inserter-type-map))))]
+                        (->> reachable
+                             (filter #(contains? inserter-type-map %))
+                             (remove handled-vars)
+                             (sort-by str)
+                             vec))]
     (when (seq fallback-vars)
       (heuristic-fallback-callsites
        {:fallback-vars fallback-vars
@@ -196,39 +198,35 @@
 (defn- extract-insert-types
   "Determines the fact types a rule inserts or retracts via `target-fns`.
 
-   Caller-driven resolution always runs first and is never displaced:
-   constructor-of-interest callsites (when :fact-constructors is supplied)
-   are resolved via their matched `:type-resolver-fn`, then every remaining
-   boundary-call argument form goes through the runtime resolution chain
-   (`analyze.callsite`) and the optional `:callsite-resolver-fn`.
+   Caller-driven resolution always runs first and is never displaced: constructor-of-interest
+  callsites (when :fact-constructors is supplied) are resolved via their matched
+  `:type-resolver-fn`, then every remaining boundary-call argument form goes through the runtime
+  resolution chain (`analyze.callsite`) and the optional `:callsite-resolver-fn`.
 
-   The record-ctor scan (`inserter-type-map`) is a *heuristic fallback*,
-   applied per direct-inserter var: a var's scan types are credited only when
-   no caller-driven path accounted for any of that var's boundary arguments.
-   The scan is name-shape based and subtree-wide — it cannot tell an argument
-   expression apart from an unrelated call in the same body — so it must never
-   override explicit registration (see
-   docs/defect-spurious-defrecord-ctor-types-resolved.md).  Fallback types are
-   emitted as callsites labeled `:via {:source :record-ctor-scan}`; the
-   `:dynamic-type-fallback-resolution` option controls whether the fallback
-   runs at all and the index's type filter scopes what it may credit.
+   The record-ctor scan (`inserter-type-map`) is a *heuristic fallback*, applied per direct-inserter
+  var: a var's scan types are credited only when no caller-driven path accounted for any of that
+  var's boundary arguments. The scan is name-shape based and subtree-wide — it cannot tell an
+  argument expression apart from an unrelated call in the same body — so it must never override
+  explicit registration. Fallback types are emitted as callsites labeled `:via {:source
+  :record-ctor-scan}`; the `:dynamic-type-fallback-resolution` option controls whether the fallback
+  runs at all and the index's type filter scopes what it may credit.
 
-   Boundary usages are found via the `:usages-by-callee` index — the merged
-   `:var-usages` vector is never scanned per rule (that scan made generation
-   quadratic in rules × usages at real-world scale).
+   Boundary usages are found via the `:usages-by-callee` index — the merged `:var-usages` vector is
+  never scanned per rule (that scan makes generation quadratic in rules × usages at).
 
    Returns {:resolved-types #{…} :dynamic-forms …}."
-  [reachable target-fns {:keys [usages-by-callee inserter-type-map
+  [reachable target-fns {:keys [inserter-type-map
                                 constructor-callsite-map graph
+                                boundary-usages-by-caller
                                 dynamic-type-fallback-resolution] :as ctx}]
   (let [boundary-usages
         (into []
-              (comp (mapcat #(get usages-by-callee %))
+              (comp (mapcat #(get boundary-usages-by-caller %))
                     (filter (fn [usage]
                               (let [caller (u/var-usage-caller usage)]
-                                (and (contains? reachable caller)
+                                (and (contains? target-fns (u/var-usage-callee usage))
                                      (not (contains? target-fns caller)))))))
-              target-fns)]
+              reachable)]
     (if (empty? boundary-usages)
       {:resolved-types #{}
        :dynamic-forms nil}
@@ -239,9 +237,10 @@
             ;; specific mechanism, and it decides which arguments the generic
             ;; path still needs to look at.
             ctor-inserter-vars (when constructor-callsite-map
-                                 (into []
-                                       (filter #(contains? reachable %))
-                                       (sort-by str (keys constructor-callsite-map))))
+                                 (->> reachable
+                                      (filter #(contains? constructor-callsite-map %))
+                                      (sort-by str)
+                                      vec))
             ctor-result (when (seq ctor-inserter-vars)
                           (let [scoped-map (select-keys constructor-callsite-map ctor-inserter-vars)]
                             (callsite/resolve-constructor-callsites
@@ -564,15 +563,37 @@
             (swap! cache assoc k source)
             source))))))
 
+(defn- build-lines-loader
+  "Returns a (fn [ns-sym filename] -> lines-vec) that caches str/split-lines
+   by the same key as get-source.  Source strings are fetched via get-source
+   (already memoized by ns-sym)."
+  [get-source]
+  (let [cache (atom {})]
+    (fn [ns-sym filename]
+      (let [k (or ns-sym filename)]
+        (or (get @cache k)
+            (when-let [source (get-source ns-sym filename)]
+              (let [ls (str/split-lines source)]
+                (swap! cache assoc k ls)
+                ls)))))))
+
 (defn- build-infer-ctx
   "Builds the context map passed to `infer-annotation-for-var`: the shared
    `index/AnalysisIndex` plus the caller-supplied resolution hooks, the
-   var-alias linkage, and the heuristic-fallback mode."
-  [index callsite-resolver-fn alias-by-rule dynamic-type-fallback-resolution]
-  (assoc index
-         :callsite-resolver-fn callsite-resolver-fn
-         :alias-by-rule alias-by-rule
-         :dynamic-type-fallback-resolution dynamic-type-fallback-resolution))
+   var-alias linkage, the heuristic-fallback mode, and source-reading helpers.
+
+   `build-lines-loader` creates a memoized `get-lines` from `get-source`;
+   `read-ctor-form` is a closure over `get-lines` for reading constructor
+   forms by kondo usage position."
+  [{:keys [index callsite-resolver-fn alias-by-rule fallback-mode get-source]}]
+  (let [get-lines (build-lines-loader get-source)
+        read-ctor-form (fn [ctor-usage] (kondo/read-ctor-form ctor-usage get-lines))]
+    (assoc index
+           :get-lines get-lines
+           :read-ctor-form read-ctor-form
+           :callsite-resolver-fn callsite-resolver-fn
+           :alias-by-rule alias-by-rule
+           :dynamic-type-fallback-resolution fallback-mode)))
 
 (s/defschema FactConstructorSpec
   "One constructor of interest for `:fact-constructors`.
@@ -736,10 +757,12 @@
                 :fallback-mode fallback-mode})
         project-vars (keys (:graph index))
         var-seq (or effective-filter project-vars)
-        infer-ctx (build-infer-ctx index
-                                   callsite-resolver-fn
-                                   alias-by-rule
-                                   fallback-mode)
+        infer-ctx (build-infer-ctx
+                   {:index index
+                    :callsite-resolver-fn callsite-resolver-fn
+                    :alias-by-rule alias-by-rule
+                    :fallback-mode fallback-mode
+                    :get-source get-source})
         annotations
         (into {}
               (keep (fn [v]
@@ -871,7 +894,8 @@
         rule->session-types (rule->session-raw-types session-analysis)
         annotations'
         (reduce-kv (fn [acc rule-fq-str raw-types]
-                     (let [rule-ns (ann/fq-name->namespace rule-fq-str)
+                     (let [rule-fq-str (str rule-fq-str)
+                           rule-ns (ann/fq-name->namespace rule-fq-str)
                            rule-ann (get acc rule-fq-str)
                            existing (get rule-ann :clara-rules/insert-types)
                            resolve-fn (partial serialize/resolve-type rule-ns)
@@ -896,6 +920,71 @@
                    rule->session-types)]
     annotations'))
 
+(defn enrich-annotations-from-session*
+  "Implementation of `enrich-annotations-from-session` returning
+   {:annotations enriched :snapshot snapshot}, so a caller that also needs the
+   working-memory snapshot (the cache build) reuses it instead of re-inspecting
+   the session.  See `enrich-annotations-from-session` for the enrichment
+   semantics."
+  [session annotations]
+  (let [original           (ann/normalize-annotations annotations)
+        snapshot           (memory/session-snapshot session)
+        enriched           (add-auto-detected-annotations snapshot original)
+        rule->session-types (rule->session-raw-types snapshot)
+        rulebase           (-> session eng/components :rulebase)
+
+        merged-annotations
+        (ann.merge/annotations
+         (ann.merge/merge-layers [(ann.merge/props-layer rulebase)
+                                  (ann.merge/layer {:id :enriched
+                                                    :annotations enriched})]))
+
+        resolved-annotation-map
+        (into {}
+              (for [p (:productions rulebase)]
+                [(ann/normalize-rule-name (:name p))
+                 (ann/production-annotation merged-annotations p)]))
+
+        enriched-annotations
+        (reduce-kv (fn [acc rule-name resolved-ann]
+                     (let [rule-ns        (ann/fq-name->namespace rule-name)
+                           resolve-fn     (partial serialize/resolve-type rule-ns)
+                           rule-entry     (get acc rule-name)
+                           declared-strs  (set (map resolve-fn
+                                                    (:insert-types resolved-ann)))
+                           detection-info (:dynamic-insert-types-detected resolved-ann)
+                           raw-types      (get rule->session-types rule-name)
+                           ;; Session-derived types not already declared in the
+                           ;; fully-merged annotation's insert-types, compared
+                           ;; under this rule's own ns.
+                           truly-new      (when (seq raw-types)
+                                            (sort-by resolve-fn
+                                                     (remove (comp declared-strs resolve-fn)
+                                                             raw-types)))]
+                       (if detection-info
+                         (if (seq truly-new)
+                           (let [merged (ann.merge/dedupe-by
+                                         resolve-fn
+                                         (into (vec (:clara-rules/insert-types rule-entry))
+                                               truly-new))]
+                             (-> acc
+                                 (assoc-in [rule-name :clara-rules/insert-types] merged)
+                                 (assoc-in [rule-name :clara-rules/dynamic-insert-types-detected
+                                            :fact-instance-derived-types]
+                                           truly-new)))
+                           ;; No truly-new types from this enrichment pass.
+                           ;; Restore the original annotation for this rule to
+                           ;; preserve any pre-existing dynamic detection
+                           ;; (e.g. :callsites from static analysis).
+                           (if-let [orig (get original rule-name)]
+                             (assoc acc rule-name orig)
+                             (dissoc acc rule-name)))
+                         acc)))
+                   enriched
+                   resolved-annotation-map)]
+    {:annotations enriched-annotations
+     :snapshot    snapshot}))
+
 (defn enrich-annotations-from-session
   "Enriches the given annotations map with fact-type provenance from a live
    Clara session's working memory.
@@ -917,73 +1006,18 @@
    Returns the enriched annotations map suitable for passing to
    `rulebase-analysis`."
   [session annotations]
-  (let [original          (ann/normalize-annotations annotations)
-        snapshot          (memory/session-snapshot session)
-        enriched          (add-auto-detected-annotations snapshot original)
-        rule->session-types (rule->session-raw-types snapshot)
-        rulebase          (-> session eng/components :rulebase)
-
-        merged-annotations
-        (ann.merge/annotations
-         (ann.merge/merge-layers [(ann.merge/props-layer rulebase)
-                                  (ann.merge/layer {:id :enriched
-                                                    :annotations enriched})]))
-
-        resolved-annotation-map
-        (into {}
-              (for [p (:productions rulebase)]
-                [(ann/normalize-rule-name (:name p))
-                 (ann/production-annotation merged-annotations p)]))]
-    (reduce-kv (fn [acc rule-name resolved-ann]
-                 (let [rule-ns        (ann/fq-name->namespace rule-name)
-                       resolve-fn     (partial serialize/resolve-type rule-ns)
-                       rule-entry     (get acc rule-name)
-                       declared-strs  (set (map resolve-fn
-                                                (:insert-types resolved-ann)))
-                       detection-info (:dynamic-insert-types-detected resolved-ann)
-                       raw-types      (get rule->session-types rule-name)
-                       ;; Session-derived types not already declared in the
-                       ;; fully-merged annotation's insert-types, compared
-                       ;; under this rule's own ns.
-                       truly-new      (when (seq raw-types)
-                                        (sort-by resolve-fn
-                                                 (remove (comp declared-strs resolve-fn)
-                                                         raw-types)))]
-                   (if detection-info
-                     (if (seq truly-new)
-                       (let [merged (ann.merge/dedupe-by
-                                     resolve-fn
-                                     (into (vec (:clara-rules/insert-types rule-entry))
-                                           truly-new))]
-                         (-> acc
-                             (assoc-in [rule-name :clara-rules/insert-types] merged)
-                             (assoc-in [rule-name :clara-rules/dynamic-insert-types-detected
-                                        :fact-instance-derived-types]
-                                       truly-new)))
-                       ;; No truly-new types from this enrichment pass.
-                       ;; Restore the original annotation for this rule to
-                       ;; preserve any pre-existing dynamic detection
-                       ;; (e.g. :callsites from static analysis).
-                       (if-let [orig (get original rule-name)]
-                         (assoc acc rule-name orig)
-                         (dissoc acc rule-name)))
-                     acc)))
-               enriched
-               resolved-annotation-map)))
+  (:annotations (enrich-annotations-from-session* session annotations)))
 
 (defn ->memory-layer
-  "Builds a working-memory annotation Layer from a fired Clara session.
-
-  Runs `enrich-annotations-from-session` against `session` and `annotations`,
-  computes the delta of what enrichment added over the base annotations, and
-  wraps it as a validated Layer with id `:clara.tools.graph.analyze/memory`.
+  "Builds a working-memory annotation Layer from `enriched` (the result of
+  enriching `base` from session working memory): the delta of what enrichment
+  added over `base`, wrapped as a validated Layer with id
+  `:clara.tools.graph.analyze/memory`.
 
   Returns nil when the session contributed nothing new — the honest result
   for an unfired session, rather than a layer restating the base."
-  [{:keys [session annotations]}]
-  (let [base      (ann/normalize-annotations annotations)
-        enriched  (enrich-annotations-from-session session base)
-        delta     (ann/annotations-delta base enriched)]
+  [base enriched]
+  (let [delta (ann/annotations-delta base enriched)]
     (when (seq delta)
       (ann.merge/annotations-delta->layer
        :clara.tools.graph.analyze/memory

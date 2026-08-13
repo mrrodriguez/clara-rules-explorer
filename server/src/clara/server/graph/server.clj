@@ -1,11 +1,8 @@
 (ns clara.server.graph.server
   "Lifecycle management for the Clara Rules Explorer server.
 
-   State is consolidated into a single atom per server instance:
-     {:session           ;; live Clara session or raw rulebase
-      :annotations-spec  ;; the AnnotationsSpec that produced :annotations
-      :annotations       ;; derived bare annotations (source of truth for analysis)
-      :analyze-cache}    ;; per-ns kondo memoization (plain immutable map)
+   State is consolidated into a single atom per server instance; its contract
+   is modeled by the `ServerState` schema.
 
    Transitions are pure functions over the state — trivially unit-testable.
    Side effects (Jetty start/stop, cache warming) stay in the shell layer.
@@ -19,6 +16,7 @@
             [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.core :as core]
+            [clara.server.tools.graph.utils :as utils]
             [clojure.set :as set]
             [schema.core :as s])
   (:import
@@ -97,6 +95,31 @@
    (s/optional-key :annotations) (s/maybe AnnotationsArg)
    (s/optional-key :warm-cache?) s/Bool})
 
+(s/defschema BareAnnotations
+  "A bare rule→annotation map: string rule-name keys, map values (the
+   `:annotations` payload of a merged annotations result)."
+  (s/pred (fn [m]
+            (and (map? m)
+                 (every? string? (keys m))
+                 (every? map? (vals m))))
+          'bare-annotations?))
+
+(s/defschema MemorySnapshot
+  "A working-memory snapshot as produced by `memory/session-snapshot`.
+   An open map here — the snapshot's full shape is owned by
+   `clara.server.tools.graph.memory`."
+  (s/pred map? 'memory-snapshot?))
+
+(s/defschema ServerState
+  "The consolidated server state held in the system's state atom.  The source
+   of truth for the state contract (the ns docstring refers here).  Optional
+   keys are omitted from the map when their value would be nil."
+  {:session                           SessionOrRulebase
+   (s/optional-key :annotations-spec) AnnotationsArg
+   :annotations                       BareAnnotations
+   (s/optional-key :memory-snapshot)  MemorySnapshot
+   :analyze-cache                     (s/pred map? 'analyze-cache?)})
+
 ;; ---------------------------------------------------------------------------
 ;; Annotation building — shared by transitions
 ;; ---------------------------------------------------------------------------
@@ -163,11 +186,12 @@
     layers))
 
 (defn- build-auto-detect-annotations
-  "Build annotations for auto-detect enrichment modes.
+  "Build annotations for the auto-detect enrichment modes, returning
+   {:annotations … :memory-snapshot …}.  `:memory-snapshot` is the
+   working-memory snapshot from memory enrichment (nil when it did not run).
 
-   Static layers are merged first so the memory delta is computed against
-   the accumulated base — not an empty map.  When the session contributes
-   nothing new, ->memory-layer returns nil and the memory layer is skipped."
+   Static layers are merged first so the memory delta is computed against the
+   accumulated base — not an empty map."
   [session source enrichment analyze-cache-atom]
   (let [wm? (core/working-memory-available? session)]
     (when (and (#{:auto-detect-from-memory :auto-detect} enrichment)
@@ -177,15 +201,70 @@
     (let [static-layers (build-static-layers session source enrichment analyze-cache-atom)
           merged-static (ann.merge/merge-layers static-layers)
           base          (ann.merge/annotations merged-static)
-          memory-layer  (when (and wm?
-                                   (#{:auto-detect-from-memory :auto-detect} enrichment))
-                          (analyze/->memory-layer {:session session
-                                                   :annotations base}))]
-      (if memory-layer
-        (-> (conj static-layers memory-layer)
-            ann.merge/merge-layers
-            ann.merge/annotations)
-        base))))
+          memory?       (and wm?
+                             (#{:auto-detect-from-memory :auto-detect} enrichment))
+          {:keys [annotations snapshot]}
+          (when memory?
+            (analyze/enrich-annotations-from-session* session base))
+          memory-layer  (when memory? (analyze/->memory-layer base annotations))]
+      {:annotations (if memory-layer
+                      (-> (conj static-layers memory-layer)
+                          ann.merge/merge-layers
+                          ann.merge/annotations)
+                      base)
+       :memory-snapshot snapshot})))
+
+(defn build-annotations*
+  "Like `build-annotations`, but returns {:annotations …} with an optional
+   :memory-snapshot (omitted when nil) so a caller that also needs the
+   working-memory snapshot (the cache build) can reuse it.  See
+   `build-annotations` for the resolution semantics."
+  ([session annotations-spec current-annotations]
+   (build-annotations* session annotations-spec current-annotations (atom {})))
+  ([session annotations-spec current-annotations analyze-cache-atom]
+   (let [;; Normalize legacy forms to {:source ...}
+         spec (if (or (nil? annotations-spec)
+                      (and (map? annotations-spec)
+                           (or (contains? annotations-spec :source)
+                               (contains? annotations-spec :enrichment))))
+                annotations-spec
+                {:source annotations-spec})
+         ;; Validate spec-shaped maps at the choke point.
+         _ (when (map? spec) (s/validate AnnotationsSpec spec))
+         {:keys [source enrichment]} spec
+         ;; `:memory-snapshot` exists only on the auto-detect path, where it is
+         ;; a dynamic value that may be nil — `remove-nil-vals` below strips it
+         ;; when nil.  The other branches omit the key literally (memory
+         ;; enrichment never runs there).
+         built
+         (case enrichment
+           :reuse
+           (if (some? source)
+             {:annotations (-> session
+                               (build-static-layers source nil analyze-cache-atom)
+                               ann.merge/merge-layers
+                               ann.merge/annotations)}
+             (if (some? current-annotations)
+               {:annotations current-annotations}
+               {:annotations (-> session
+                                 ann.merge/props-layer
+                                 ann.merge/annotations)}))
+
+           (:none nil)
+           {:annotations (-> session
+                             (build-static-layers source nil analyze-cache-atom)
+                             ann.merge/merge-layers
+                             ann.merge/annotations)}
+
+           ;; Auto-detect modes — explicit enumeration with fail-fast for unknown values.
+           (:auto-detect-from-rulebase :auto-detect-from-memory :auto-detect)
+           (build-auto-detect-annotations session source enrichment analyze-cache-atom)
+
+           ;; nil enrichment handled above; catch-all is unknown enum values
+           (throw (IllegalArgumentException.
+                   (format "Unknown :enrichment mode %s. Expected: %s"
+                           enrichment (pr-str auto-detect-modes)))))]
+     (utils/remove-nil-vals built))))
 
 (defn build-annotations
   "Resolve annotations for `session` from `annotations-spec`.
@@ -201,95 +280,69 @@
    Accepts `nil` annotations-spec → returns `{}`.
 
    Call without `analyze-cache-atom` for a one-shot build with a fresh
-   per-build cache (convenience for tests and direct callers)."
+   per-build cache (convenience for tests and direct callers).
+
+   Returns the resolved bare annotations map.  See `build-annotations*` for
+   the variant that also returns the memory snapshot."
   ([session annotations-spec current-annotations]
    (build-annotations session annotations-spec current-annotations (atom {})))
   ([session annotations-spec current-annotations analyze-cache-atom]
-   (let [;; Normalize legacy forms to {:source ...}
-         spec (if (or (nil? annotations-spec)
-                      (and (map? annotations-spec)
-                           (or (contains? annotations-spec :source)
-                               (contains? annotations-spec :enrichment))))
-                annotations-spec
-                {:source annotations-spec})
-         ;; Validate spec-shaped maps at the choke point.
-         _ (when (map? spec) (s/validate AnnotationsSpec spec))
-         {:keys [source enrichment]} spec]
-     (case enrichment
-       :reuse
-       (if (some? source)
-         (-> session
-             (build-static-layers source nil analyze-cache-atom)
-             ann.merge/merge-layers
-             ann.merge/annotations)
-         (if (some? current-annotations)
-           current-annotations
-           (-> session
-               ann.merge/props-layer
-               ann.merge/annotations)))
-
-       (:none nil)
-       (-> session
-           (build-static-layers source nil analyze-cache-atom)
-           ann.merge/merge-layers
-           ann.merge/annotations)
-
-       ;; Auto-detect modes — explicit enumeration with fail-fast for unknown values.
-       (:auto-detect-from-rulebase :auto-detect-from-memory :auto-detect)
-       (build-auto-detect-annotations session source enrichment analyze-cache-atom)
-
-       ;; nil enrichment handled above; catch-all is unknown enum values
-       (throw (IllegalArgumentException.
-               (format "Unknown :enrichment mode %s. Expected: %s"
-                       enrichment (pr-str auto-detect-modes))))))))
+   (:annotations (build-annotations* session annotations-spec current-annotations analyze-cache-atom))))
 
 ;; ---------------------------------------------------------------------------
 ;; Pure state transitions
 ;; ---------------------------------------------------------------------------
 
-(defn- transition-start
+(s/defn ^:private transition-start :- ServerState
   "Config -> State.  Builds fresh state from a validated config map.
    `:annotations-spec` is the raw spec as-given (may be nil for no annotations)."
   [{:keys [session annotations-spec]}]
   (let [tmp   (atom {})
-        built (build-annotations session annotations-spec nil tmp)]
-    {:session          session
-     :annotations-spec annotations-spec
-     :annotations      built
-     :analyze-cache    @tmp}))
+        built (build-annotations* session annotations-spec nil tmp)]
+    (utils/remove-nil-vals
+     {:session          session
+      :annotations-spec annotations-spec
+      :annotations      (:annotations built)
+      :memory-snapshot  (:memory-snapshot built)
+      :analyze-cache    @tmp})))
 
-(defn- transition-swap
+(s/defn ^:private transition-swap :- ServerState
   "State -> {:keys [session annotations-spec]} -> State.
    Only receives the state-affecting keys; :warm-cache? is consumed by the
    shell.  Absent `:session` carries the current session over; absent
    `:annotations-spec` clears annotations (nil spec → {})."
-  [state {:keys [session annotations-spec]}]
+  [state :- ServerState
+   {:keys [session annotations-spec]}]
   (let [s     (if (some? session) session (:session state))
         seed  (if (and (some? session)
                        (not (identical? session (:session state))))
                 {}
                 (:analyze-cache state))
         tmp   (atom seed)
-        built (build-annotations s annotations-spec (:annotations state) tmp)]
-    {:session          s
-     :annotations-spec annotations-spec
-     :annotations      built
-     :analyze-cache    @tmp}))
+        built (build-annotations* s annotations-spec (:annotations state) tmp)]
+    (utils/remove-nil-vals
+     {:session          s
+      :annotations-spec annotations-spec
+      :annotations      (:annotations built)
+      :memory-snapshot  (:memory-snapshot built)
+      :analyze-cache    @tmp})))
 
-(defn- transition-reload
+(s/defn ^:private transition-reload :- ServerState
   "State -> State.  Re-derives :annotations from (:annotations-spec state)
    against the current session.  File-backed sources are re-read from disk;
    the generated (kondo) layer rebuilds from cached per-ns analyses in the
    state (kondo does not re-run)."
-  [state]
+  [state :- ServerState]
   (let [tmp   (atom (:analyze-cache state))
-        built (build-annotations (:session state)
-                                 (:annotations-spec state)
-                                 (:annotations state)
-                                 tmp)]
-    (assoc state
-           :annotations built
-           :analyze-cache @tmp)))
+        built (build-annotations* (:session state)
+                                  (:annotations-spec state)
+                                  (:annotations state)
+                                  tmp)]
+    (utils/remove-nil-vals
+     (assoc state
+            :annotations (:annotations built)
+            :memory-snapshot (:memory-snapshot built)
+            :analyze-cache @tmp))))
 
 ;; ---------------------------------------------------------------------------
 ;; System lifecycle
@@ -316,7 +369,7 @@
       ;; Warm before binding Jetty — defensive: a request in the gap builds
       ;; on demand, but warming first means the first real request never
       ;; pays the cold-build penalty.
-      (cache/warm! cache (:session state) (:annotations state))
+      (cache/warm! cache (:session state) (:annotations state) (:memory-snapshot state))
       (let [jetty (jetty/run-jetty handler {:port port :join? false})]
         {:config      config
          :state-atom  state-atom
@@ -369,7 +422,8 @@
                             {:session session
                              :annotations-spec annotations})]
        (when warm-cache?
-         (cache/warm! (:cache system) (:session new-state) (:annotations new-state)))
+         (cache/warm! (:cache system) (:session new-state) (:annotations new-state)
+                      (:memory-snapshot new-state)))
        (:annotations new-state)))))
 
 (defn reload-annotations!
@@ -382,5 +436,6 @@
    (reload-annotations! (require-system @default-system)))
   ([system]
    (let [new-state (swap! (:state-atom system) transition-reload)]
-     (cache/warm! (:cache system) (:session new-state) (:annotations new-state))
+     (cache/warm! (:cache system) (:session new-state) (:annotations new-state)
+                  (:memory-snapshot new-state))
      (:annotations new-state))))

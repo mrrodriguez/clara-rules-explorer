@@ -10,7 +10,10 @@
             [clara.server.tools.graph.rules.nil-safety-test-rules :as nil-safety]
             [clara.server.tools.graph.rules.equal-fact-test-rules :as equal-facts]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [schema.test :as st]))
+
+(use-fixtures :once st/validate-schemas)
 
 (defn- ->test-session
   []
@@ -217,29 +220,29 @@
 
 (deftest test-deterministic-fact-str--shapes
   (testing "set of maps does not throw"
-    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :results #{{:a 1}}}))
+    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :results #{{:a 1}}} serialize/prune-fns))
         "set of maps must canonicalize without comparator error"))
 
   (testing "map keyed by a map does not throw"
-    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :by {{:a 1} 1}}))
+    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :by {{:a 1} 1}} serialize/prune-fns))
         "map keyed by a map must canonicalize without comparator error"))
 
   (testing "mixed key types does not throw"
-    (is (string? (#'memory/deterministic-fact-str {:a 1 "b" 2}))
+    (is (string? (#'memory/deterministic-fact-str {:a 1 "b" 2} serialize/prune-fns))
         "mixed key types must canonicalize without class cast"))
 
   (testing "vector of maps is fine (regression)"
-    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :results [{:a 1}]}))
+    (is (string? (#'memory/deterministic-fact-str {:fact/type :t :results [{:a 1}]} serialize/prune-fns))
         "vector of maps must canonicalize"))
 
   (testing "determinism: same map in different key orders → identical strings"
-    (is (= (#'memory/deterministic-fact-str {:a 1 :b 2})
-           (#'memory/deterministic-fact-str {:b 2 :a 1}))
+    (is (= (#'memory/deterministic-fact-str {:a 1 :b 2} serialize/prune-fns)
+           (#'memory/deterministic-fact-str {:b 2 :a 1} serialize/prune-fns))
         "key order must not affect the canonical string"))
 
   (testing "determinism: same set in different element orders → identical strings"
-    (is (= (#'memory/deterministic-fact-str {:s #{1 2 3}})
-           (#'memory/deterministic-fact-str {:s #{3 1 2}}))
+    (is (= (#'memory/deterministic-fact-str {:s #{1 2 3}} serialize/prune-fns)
+           (#'memory/deterministic-fact-str {:s #{3 1 2}} serialize/prune-fns))
         "set element order must not affect the canonical string")))
 
 (deftest test-accumulator-fact-extraction
@@ -301,6 +304,25 @@
           snapshot (memory/session-snapshot session)]
       (is (every? (comp false? :known :type) (vals (:facts snapshot)))
           "Default snapshot marks no session fact type known"))))
+
+(deftest test-update-snapshot-known-set
+  (testing "update-snapshot-known-set re-stamps :known to match a fresh analysis-derived snapshot"
+    (let [app (laf/map->Application {:app-id "app-1"})
+          session (-> (->test-session)
+                      (r/insert app)
+                      (r/fire-rules))
+          analysis (core/rulebase-analysis
+                    session
+                    (ann.merge/merge-layers [(ann.merge/props-layer session)]))
+          known-set (set (keys (:fact-types analysis)))
+          ;; The reuse path: enrichment builds a 1-arity snapshot (all unknown).
+          enrichment-snapshot (memory/session-snapshot session)]
+      (is (every? (comp false? :known :type) (vals (:facts enrichment-snapshot)))
+          "enrichment snapshot starts with every fact type unknown")
+      (let [re-stamped (memory/update-snapshot-known-set enrichment-snapshot known-set)
+            fresh      (memory/session-snapshot-from-analysis session analysis)]
+        (is (= fresh re-stamped)
+            "re-stamped snapshot must equal a freshly-built analysis-derived snapshot")))))
 
 (deftest test-snapshot-raw-types
   (testing "Snapshot exposes fact-id → raw type for the enrichment boundary"

@@ -5,9 +5,12 @@
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [ring.mock.request :as mock]
-            [jsonista.core :as j]))
+            [jsonista.core :as j]
+            [schema.test :as st]))
+
+(use-fixtures :once st/validate-schemas)
 
 (defn- parse-json [s]
   (j/read-value s (j/object-mapper {:decode-key-fn true})))

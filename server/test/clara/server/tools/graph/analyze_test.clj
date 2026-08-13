@@ -941,6 +941,22 @@
         (is (nil? (:clara-rules/insert-types aop))
             "Should not add insert-types when :props already covers it")))))
 
+(deftest test-enrich-annotations-from-session*--tuple
+  (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                                  'clara.server.tools.graph.rules.loan-app-rules)
+                    (r/insert (laf/map->Application {:app-id "app-1"}))
+                    (r/fire-rules))
+        result  (analyze/enrich-annotations-from-session* session {})]
+    (testing "Returns the enriched annotations under :annotations"
+      (is (= (analyze/enrich-annotations-from-session session {})
+             (:annotations result))
+          "annotations match the thin wrapper"))
+    (testing "Returns the working-memory snapshot under :snapshot"
+      (is (map? (:snapshot result)))
+      (is (= (memory/session-snapshot session)
+             (:snapshot result))
+          "snapshot is the enrichment-phase session snapshot"))))
+
 (deftest test-enrich-annotations-from-session--preserves-callsites
   (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
                                   'clara.server.tools.graph.rules.loan-app-rules)
