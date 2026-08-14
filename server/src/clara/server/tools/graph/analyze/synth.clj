@@ -21,6 +21,7 @@
    reconstructed ns and the rule snippets, restoring the call graph through
    helper vars that the `declare` alone cannot express."
   (:require [clojure.string :as str]
+            [clojure.tools.logging :as log]
             [schema.core :as s]))
 
 ;; ---------------------------------------------------------------------------
@@ -194,9 +195,8 @@
   (let [var-defs (try
                    (when var-defs-fn (var-defs-fn ns-sym))
                    (catch Throwable t
-                     (binding [*out* *err*]
-                       (println (str "clara.server.tools.graph.analyze: :ns-var-defs-fn threw: "
-                                     (ex-message t))))
+                     (log/errorf "clara.server.tools.graph.analyze: :ns-var-defs-fn threw: %s"
+                                 (ex-message t))
                      nil))]
     (when (seq var-defs)
       (let [lines (->> var-defs

@@ -8,7 +8,8 @@
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clojure.data.fressian :as fres]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [clojure.tools.logging :as log]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fressian fact writer (mirrors FressianFactReader in main.clj)
@@ -60,7 +61,7 @@
         session-path (io/file output-dir "session.bin")
         facts-path (io/file output-dir "session.bin.facts")]
     (io/make-parents session-path)
-    (println "Serializing demo session...")
+    (log/info "Serializing demo session...")
     (with-open [session-out (io/output-stream session-path)
                 facts-out (io/output-stream facts-path)]
       (let [session-serializer (df/create-session-serializer session-out)
@@ -69,10 +70,10 @@
                                    session-serializer
                                    facts-serializer
                                    {:with-rulebase? true})))
-    (println "Session written to:" (str session-path))
-    (println "Facts written to:   " (str facts-path))
-    (println "\nRun the server with:")
-    (println (str "  clojure -M:demo-run -s " output-dir "/session.bin"))))
+    (log/infof "Session written to: %s" (str session-path))
+    (log/infof "Facts written to:   %s" (str facts-path))
+    (log/info "Run the server with:")
+    (log/infof "  clojure -M:demo-run -s %s/session.bin" output-dir)))
 
 ;; ---------------------------------------------------------------------------
 ;; CLI entry point

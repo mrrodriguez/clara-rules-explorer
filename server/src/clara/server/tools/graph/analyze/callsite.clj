@@ -47,6 +47,7 @@
    kondo positions lives in `analyze.kondo`, constructor recognition in
    `analyze.ctor`."
   (:require [schema.core :as s]
+            [clojure.tools.logging :as log]
             [clara.server.tools.graph.analyze.utils :as u]
             [clara.server.tools.graph.analyze.kondo :as kondo]
             [clara.server.tools.graph.analyze.ctor :as ctor]))
@@ -143,9 +144,8 @@
     (try
       (some-> (resolver-fn call-ctx) :resolved-types seq)
       (catch Throwable t
-        (binding [*out* *err*]
-          (println (str "clara.server.tools.graph.analyze: :callsite-resolver-fn threw: "
-                        (ex-message t))))
+        (log/errorf "clara.server.tools.graph.analyze: :callsite-resolver-fn threw: %s"
+                    (ex-message t))
         nil))))
 
 ;; ---------------------------------------------------------------------------
@@ -331,10 +331,8 @@
                    (some-> (resolver-fn resolver-ctx)
                            :resolved-types seq)
                    (catch Throwable t
-                     (binding [*out* *err*]
-                       (println
-                        (format "clara.server.tools.graph.analyze: :fact-constructors :type-resolver-fn threw: %s"
-                                (ex-message t))))
+                     (log/errorf "clara.server.tools.graph.analyze: :fact-constructors :type-resolver-fn threw: %s"
+                                 (ex-message t))
                      nil))
         tokens (into #{} (map normalize-token) (or resolved '()))]
     (cond-> {:source-str (pr-str arg-form)

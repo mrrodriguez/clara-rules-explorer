@@ -7,7 +7,8 @@
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.serialize :as serialize]
-            [clara.server.tools.graph.utils :as utils]))
+            [clara.server.tools.graph.utils :as utils]
+            [clojure.tools.logging :as log]))
 
 (defn- deterministic-fact-str
   "Returns a deterministic pr-str representation of a fact for stable sorting.
@@ -174,11 +175,9 @@
                                      (let [rule-names (into #{}
                                                             (keep :name)
                                                             (get origin-map id []))]
-                                       (println
-                                        (str "WARN: fact-type-fn returned nil for fact "
-                                             (pr-str (prune-fn fact))
-                                             " — inserted by rules: " (pr-str rule-names)
-                                             " — substituting :clara.tools.graph.analyze/unknown-fact-type"))))
+                                       (log/warnf "fact-type-fn returned nil for fact %s — inserted by rules: %s — substituting :clara.tools.graph.analyze/unknown-fact-type"
+                                                  (pr-str (prune-fn fact))
+                                                  (pr-str rule-names))))
                                  type-name (->> (or raw-type
                                                     :clara.tools.graph.analyze/unknown-fact-type)
                                                 (serialize/serialize-fact-type nil))]

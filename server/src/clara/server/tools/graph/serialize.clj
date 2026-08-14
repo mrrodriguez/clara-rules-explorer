@@ -4,6 +4,7 @@
    [clojure.pprint :as pp]
    [clojure.set :as set]
    [clojure.string :as str]
+   [clojure.tools.logging :as log]
    [clojure.walk :as w]
    [clara.rules.schema :as schema]
    [clara.server.tools.graph.utils :as utils])
@@ -76,7 +77,7 @@
    with a WARN — callers should filter nil before reaching this point."
   [s]
   (if (nil? s)
-    (do (println "WARN: route-id* called with nil name — skipping")
+    (do (log/warn "route-id* called with nil name — skipping")
         nil)
     (str (slug s) "-" (subs (sha1-base36 s) 0 8))))
 
@@ -94,8 +95,8 @@
   [known-set prod-ns x]
   (let [name (resolve-type prod-ns x)]
     (if (nil? name)
-      (do (println (str "WARN: serialize-type-ref received a nil-resolving type token: "
-                        (pr-str x) " — dropping. prod-ns=" prod-ns))
+      (do (log/warnf "serialize-type-ref received a nil-resolving type token: %s — dropping. prod-ns=%s"
+                     (pr-str x) prod-ns)
           nil)
       {:name name
        :id (route-id name)

@@ -729,11 +729,11 @@ Requires a serialized session. Produces `annotations.edn` + `analysis.edn` in th
 
 ```bash
 # Auto-discover from session (sources must be on classpath)
-clojure -M -m clara.server.graph.main --generate-analysis out \
+clojure -M:dev -m clara.server.graph.main --generate-analysis out \
   -s session.bin
 
 # With a custom session loader
-clojure -M -m clara.server.graph.main --generate-analysis out \
+clojure -M:dev -m clara.server.graph.main --generate-analysis out \
   -s session.bin --load-session-state-fn my.app/load-session
 ```
 
