@@ -1,14 +1,11 @@
 <script lang="ts">
-	import type { SessionFact } from '$lib/types/api';
+	import type { SessionFact, FactMatch } from '$lib/types/api';
 	import ReferenceCategory from '$lib/components/rulebase/ReferenceCategory.svelte';
 	import SessionActivityList from '$lib/components/rulebase/SessionActivityList.svelte';
 
-	export interface ActivityCategory {
-		title: string;
-		type: 'facts';
-		items: SessionFact[];
-		emptyText?: string;
-	}
+	export type ActivityCategory =
+		| { title: string; type: 'facts'; items: SessionFact[]; emptyText?: string }
+		| { title: string; type: 'matches'; items: FactMatch[]; emptyText?: string };
 
 	interface Props {
 		categories: ActivityCategory[];

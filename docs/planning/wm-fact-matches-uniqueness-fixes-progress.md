@@ -27,7 +27,11 @@ before UI work.
 - [x] Server — `update-snapshot-known-set` retypes `:matches`
 - [x] Server — tests (memory + session API)
 - [x] Server — docs (`explorer-graph-api.md`)
-- [ ] UI — types/components/key-helper/tests (after server review)
+- [x] UI — types (`FactMatch`) + `ActivityCategory` discriminator
+- [x] UI — `SessionActivityRow` multi-binding rendering + list keying
+- [x] UI — key helper (`stableKeys`) applied to server-supplied keyed lists
+- [x] UI — tests (unit + component + Playwright)
+- [x] UI — demo data re-scraped to the new response shape
 
 ---
 
@@ -72,7 +76,66 @@ Server side complete and green. **Awaiting review before UI work.**
 
 ---
 
-## Remaining (after review)
+## Step 2 — UI implementation ✅
 
-UI work per plan §5–§6: types, `ActivityCategory` discriminator, key helper,
-multi-binding rendering, and the §7 UI/Playwright tests.
+### Files
+
+- `ui/src/lib/types/api.ts` — added `FactMatch` (`{ fact, bindings }`);
+  `SessionProductionActivityResponse.matches` retyped `FactMatch[] | null`.
+- `ui/src/lib/keys.ts` (new) — `stableKeys(items, keyFn)` render-key backstop:
+  appends a deterministic `__dup-N` ordinal on collision, leaves duplicate-free
+  keys unchanged. Applied to the keyed `{#each}` blocks over server-supplied
+  data: `SessionActivityList`, `FactGroup`, `fact-types/[id]/+page`,
+  `ReferenceCategory`, `QuerySummary`, `GroupedFilterableNavList`,
+  `DynamicCallsiteList`.
+- `ui/src/lib/components/rulebase/SessionActivityBlock.svelte` —
+  `ActivityCategory` is now a discriminated union (`'facts'` → `SessionFact[]`,
+  `'matches'` → `FactMatch[]`).
+- `ui/src/lib/components/rulebase/SessionActivityList.svelte` — keys match rows
+  on `item.fact.id` and fact rows on `item.id`, both through `stableKeys`.
+- `ui/src/lib/components/rulebase/SessionActivityRow.svelte` — match rows render
+  the wrapped fact (id, type, origins badge) plus one expandable block per
+  binding set, labelled by ordinal when there is more than one; a single-binding
+  row keeps the pre-change shape.
+- `ui/src/lib/components/rulebase/SessionProductionActivity.svelte` —
+  "Active Matches" category now typed `'matches'`.
+
+### UI tests
+
+- `ui/src/lib/keys.test.ts` — distinct keys on duplicates, duplicate-free keys
+  unchanged, deterministic ordinals.
+- `ui/src/lib/components/rulebase/SessionActivityRow.svelte.test.ts` — a
+  `FactMatch` with several binding sets renders one row with one labelled
+  expandable block per binding; single binding renders without an ordinal.
+- `ui/src/lib/components/rulebase/SessionActivityBlock.svelte.test.ts` — a
+  `SessionFact[]` category and a `FactMatch[]` category render side by side;
+  empty state renders its text.
+- `ui/tests/hierarchy/MatchUniqueness.e2e.ts` — navigates to the `pairwise`
+  full view (multi-activation Case B) by client-side navigation and by direct
+  load, asserts the multi-binding row renders and no page errors occur.
+
+### Server fixture for the Playwright test
+
+Neither e2e session had a multi-activation rule, so
+`server/dev/clara/server/graph/hierarchy_run.clj` now also loads
+`match-uniqueness-test-rules` and inserts one Config × three Items — `pairwise`
+activates three times and its Config fact appears in `:matches` once with three
+binding sets.
+
+### Demo data
+
+`ui/static/demo-data` re-scraped from the updated backend
+(`make demo-scrape`) so the demo-mode build matches the new `:matches` shape.
+(AuditTrail timestamps drift on each scrape — expected.)
+
+### Verification
+
+- `cd ui && make format check lint` → 0 errors, 0 warnings.
+- `pnpm exec vitest --passWithNoTests --run` → **27 tests passed** (node + browser).
+- `pnpm exec playwright test --project=hierarchy` → **6 passed**.
+- `pnpm exec playwright test --project=loan-app` → **52 passed**.
+- `cd server && make lint` → 0 errors, 0 warnings; `make format-check` → clean.
+
+### Remaining
+
+None — UI work complete, awaiting review.

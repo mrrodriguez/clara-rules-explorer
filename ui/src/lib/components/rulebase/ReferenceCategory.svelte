@@ -3,6 +3,7 @@
 	import type { ProductionReference, TypeReference } from '$lib/types/api';
 	import ProductionReferenceLink from '$lib/components/rulebase/ProductionReferenceLink.svelte';
 	import FactTypeReferenceLink from '$lib/components/rulebase/FactTypeReferenceLink.svelte';
+	import { stableKeys } from '$lib/keys';
 
 	type ReferenceItem = ProductionReference | TypeReference;
 
@@ -35,6 +36,7 @@
 	}: Props = $props();
 
 	const scrollable = $derived(items.length >= maxVisibleItems);
+	const itemKeys = $derived(stableKeys(items, (item) => item.id));
 
 	// Per-item height: py-2 (1rem vertical) + QualifiedName two-line text (~2rem) = ~3rem.
 	// Add 0.25rem buffer so the last visible item renders nearly fully.
@@ -59,7 +61,7 @@
 			class="list-group list-group-flush border rounded shadow-sm"
 			style={scrollable ? `max-height: ${scrollMaxHeight}; overflow-y: auto;` : ''}
 		>
-			{#each items as item (item.id)}
+			{#each items as item, i (itemKeys[i])}
 				{#if itemKind === 'type'}
 					<FactTypeReferenceLink type={item as TypeReference} />
 				{:else}

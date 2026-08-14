@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { SessionFactGroup } from '$lib/types/api';
+	import { stableKeys } from '$lib/keys';
 	import CopyableTitle from '$lib/components/ui/CopyableTitle.svelte';
 	import LocateInListButton from '$lib/components/ui/LocateInListButton.svelte';
 	import FactGroup from './FactGroup.svelte';
@@ -33,6 +34,8 @@
 				]
 			: []
 	);
+
+	const columnGroupKeys = $derived(columns.map((column) => stableKeys(column.groups, (g) => g.id)));
 </script>
 
 <div class="p-4">
@@ -75,11 +78,11 @@
 		</div>
 	{:else}
 		<div class="row g-4">
-			{#each columns as column (column.label)}
+			{#each columns as column, columnIndex (column.label)}
 				<div class="col-xl-6">
 					<SessionSectionHeader icon={column.icon} label={column.label} />
 
-					{#each column.groups as group (group.id)}
+					{#each column.groups as group, i (columnGroupKeys[columnIndex][i])}
 						<FactGroup name={group.name} type={group.type} id={group.id} instances={group.facts} />
 					{/each}
 
