@@ -7,6 +7,7 @@
 	import LhsTabs from '$lib/components/rulebase/LhsTabs.svelte';
 	import SessionProductionActivity from '$lib/components/rulebase/SessionProductionActivity.svelte';
 	import { queryPath } from '$lib/utils';
+	import { stableKeys } from '$lib/keys';
 	import { appState } from '$lib/state/appState.svelte';
 	import { resolve } from '$app/paths';
 	import type { Pathname } from '$app/types';
@@ -20,6 +21,8 @@
 	let { query, activity, fullView = false }: Props = $props();
 
 	let fullViewHref = $derived(resolve(queryPath(query.id, true) as Pathname));
+
+	const paramKeys = $derived(stableKeys(query.params, (param) => param));
 
 	$effect(() => {
 		if (fullView) {
@@ -42,7 +45,7 @@
 		{#if query.params.length > 0}
 			<div class="ms-4 d-flex align-items-center gap-1">
 				<span class="text-muted small text-uppercase fw-bold me-2">Params:</span>
-				{#each query.params as param (param)}
+				{#each query.params as param, i (paramKeys[i])}
 					<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle"
 						>{param}</span
 					>

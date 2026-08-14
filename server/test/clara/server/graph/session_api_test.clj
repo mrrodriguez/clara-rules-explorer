@@ -5,6 +5,7 @@
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
+            [clara.server.tools.graph.rules.match-uniqueness-test-rules :as mu]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [ring.mock.request :as mock]
             [jsonista.core :as j]
@@ -95,6 +96,48 @@
     (testing "Name-based session rule lookup 404s (id-only resolution)"
       (is (= 404 (:status (handler (mock/request :get
                                                  "/v1/session/rules/clara.server.tools.graph.rules.loan-doc-rules.collect-app-req-docs"))))))))
+
+(defn- ->match-uniqueness-handler
+  []
+  (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.match-uniqueness-test-rules)
+                    (r/insert (mu/->Config "c1") (mu/->Item "a") (mu/->Item "b") (mu/->Item nil))
+                    (r/fire-rules))]
+    (:handler (api/app (atom {:session session :annotations {}}) true))))
+
+(deftest test-session-rule-match-fact-bindings-shape
+  (let [handler (->match-uniqueness-handler)
+        snapshot (parse-json (:body (handler (mock/request :get "/v1/session-snapshot"))))
+        rule-id (id-for (:rule-id-index snapshot)
+                        "clara.server.tools.graph.rules.match-uniqueness-test-rules/pairwise")
+        response (handler (mock/request :get (str "/v1/session/rules/" rule-id)))]
+    (is (= 200 (:status response)))
+    (let [body (parse-json (:body response))
+          config-match (first (filter #(= "clara.server.tools.graph.rules.match_uniqueness_test_rules.Config"
+                                          (get-in % [:fact :type :name]))
+                                      (:matches body)))]
+      (is (some? config-match) "pairwise matches carry the Config fact")
+      (is (= 3 (count (:bindings config-match)))
+          "Config carries one binding set per activation")
+      (is (= #{"a" "b" nil}
+             (set (map #(get-in % [:?item :tag]) (:bindings config-match))))
+          "no activation lost")
+      (is (= "c1" (get-in config-match [:fact :data :name]))
+          ":fact :data is the fact's own value"))))
+
+(deftest test-session-rule-match-data-parity
+  (testing ":data on a match fact equals :data on /v1/session/facts/:id"
+    (let [handler (->match-uniqueness-handler)
+          snapshot (parse-json (:body (handler (mock/request :get "/v1/session-snapshot"))))
+          rule-id (id-for (:rule-id-index snapshot)
+                          "clara.server.tools.graph.rules.match-uniqueness-test-rules/pairwise")
+          rule-body (parse-json (:body (handler (mock/request :get (str "/v1/session/rules/" rule-id)))))]
+      (doseq [match (:matches rule-body)]
+        (let [fact-id (:id (:fact match))
+              fact-response (handler (mock/request :get (str "/v1/session/facts/" fact-id)))
+              fact-body (parse-json (:body fact-response))]
+          (is (= 200 (:status fact-response)))
+          (is (= (:data fact-body) (:data (:fact match)))
+              (str "match :data equals fact :data for id " fact-id)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Rulebase-only: working-memory routes return 409

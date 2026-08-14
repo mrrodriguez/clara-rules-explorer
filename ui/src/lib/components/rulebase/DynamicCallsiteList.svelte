@@ -5,6 +5,7 @@
 	import type { Pathname } from '$app/types';
 	import QualifiedName from '$lib/components/ui/QualifiedName.svelte';
 	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
+	import { stableKeys } from '$lib/keys';
 
 	interface Props {
 		detection?: DynamicDetectionInfo;
@@ -16,6 +17,11 @@
 	let callsites = $derived(detection?.callsites ?? []);
 	let fallbackTypes = $derived(detection?.['fact-instance-derived-types'] ?? []);
 	let resolution = $derived(detection?.resolution);
+
+	const resolvedTypeKeysBySite = $derived(
+		callsites.map((site) => stableKeys(site['resolved-types'] ?? [], (t) => t.id))
+	);
+	const fallbackTypeKeys = $derived(stableKeys(fallbackTypes, (t) => t));
 	let startExpanded = $derived(resolution !== 'full');
 	let hasCallsites = $derived(callsites.length > 0);
 	let hasFallback = $derived(!hasCallsites && fallbackTypes.length > 0);
@@ -71,7 +77,7 @@
 		</h6>
 
 		{#if hasCallsites}
-			{#each callsites as site (site['source-str'] + site.filename)}
+			{#each callsites as site, siteIndex (site['source-str'] + site.filename)}
 				{@const code = site['source-str']}
 				{@const types = site['resolved-types']}
 				{@const status = site.status}
@@ -89,7 +95,7 @@
 						<div class="d-flex flex-wrap align-items-start gap-2">
 							{#if types && types.length > 0}
 								<span class="text-muted small mt-1">→</span>
-								{#each types as type (type.id)}
+								{#each types as type, i (resolvedTypeKeysBySite[siteIndex][i])}
 									{@render resolvedType(type)}
 								{/each}
 							{:else if status === 'none'}
@@ -141,7 +147,7 @@
 						<span class="text-muted small mt-1"
 							>→ Runtime-derived type{fallbackTypes.length !== 1 ? 's' : ''}:</span
 						>
-						{#each fallbackTypes as type (type)}
+						{#each fallbackTypes as type, i (fallbackTypeKeys[i])}
 							<span
 								class="d-inline-flex align-items-center border rounded px-2 py-1 bg-white text-muted"
 							>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { SessionFact } from '$lib/types/api';
 	import SessionActivityRow from '$lib/components/rulebase/SessionActivityRow.svelte';
+	import { stableKeys } from '$lib/keys';
 	import QualifiedName from '$lib/components/ui/QualifiedName.svelte';
 	import RulebaseComponentTypeBadge from '$lib/components/rulebase/RulebaseComponentTypeBadge.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
@@ -19,6 +20,8 @@
 
 	let { name, type, id, instances }: Props = $props();
 	let expanded = $state(false);
+
+	const instanceKeys = $derived(stableKeys(instances, (instance) => instance.id));
 
 	const href = $derived(type === 'rule' ? rulePath(id) : type === 'query' ? queryPath(id) : null);
 </script>
@@ -75,7 +78,7 @@
 	{#if expanded}
 		<div class="bg-light bg-opacity-10 border-top">
 			<div class="list-group list-group-flush">
-				{#each instances as instance (instance.id)}
+				{#each instances as instance, i (instanceKeys[i])}
 					<SessionActivityRow item={instance} type="facts" showOrigins={false} />
 				{/each}
 			</div>

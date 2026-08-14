@@ -15,7 +15,7 @@
 					[
 						{
 							title: 'Active Matches',
-							type: 'facts',
+							type: 'matches',
 							items: activity.matches ?? []
 						},
 						{

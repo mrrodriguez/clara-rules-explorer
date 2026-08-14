@@ -6,17 +6,8 @@
             [clara.rules.platform :as platform]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.fact-types :as ft]
-            [clara.server.tools.graph.serialize :as serialize]))
-
-(defn- sort-by-pr-str
-  "Sorts `coll` by the pr-str of each element, computing pr-str once per
-   element (decorate-sort-undecorate) rather than once per comparison as
-   `sort-by` would."
-  [coll]
-  (->> coll
-       (map (fn [x] [(pr-str x) x]))
-       (sort-by first)
-       (map second)))
+            [clara.server.tools.graph.serialize :as serialize]
+            [clara.server.tools.graph.utils :as utils]))
 
 (defn- deterministic-fact-str
   "Returns a deterministic pr-str representation of a fact for stable sorting.
@@ -28,10 +19,10 @@
   (letfn [(canonicalize [x]
             (cond
               (map? x) (into [::map]
-                             (sort-by-pr-str
-                              (map (fn [[k v]] [(canonicalize k) (canonicalize v)]) x)))
+                             (utils/sort-by-key pr-str
+                                                (map (fn [[k v]] [(canonicalize k) (canonicalize v)]) x)))
               (set? x) (into [::set]
-                             (sort-by-pr-str (map canonicalize x)))
+                             (utils/sort-by-key pr-str (map canonicalize x)))
               (sequential? x) (mapv canonicalize x)
               :else x))]
     (pr-str (canonicalize (prune-fn fact)))))
@@ -66,16 +57,14 @@
 
 (defn- sort-facts
   [facts fact-type-fn fact-type-order prune-fn]
-  (->> facts
-       (map (fn [wrapped]
-              (let [fact (platform/fact-id-unwrap wrapped)
-                    ft (fact-type-fn fact)]
-                [[(get fact-type-order ft Integer/MAX_VALUE)
-                  (str ft)
-                  (deterministic-fact-str fact prune-fn)]
-                 wrapped])))
-       (sort-by first)
-       (map second)))
+  (utils/sort-by-key
+   (fn [wrapped]
+     (let [fact (platform/fact-id-unwrap wrapped)
+           ft (fact-type-fn fact)]
+       [(get fact-type-order ft Integer/MAX_VALUE)
+        (str ft)
+        (deterministic-fact-str fact prune-fn)]))
+   facts))
 
 (defn- build-id-map [sorted-facts]
   (let [id-map (java.util.IdentityHashMap.)]
@@ -277,15 +266,40 @@
           names))
 
 (defn- explanations->fact-match-data
+  "`[{:fact SessionFact :bindings [binding-map …]}]` — one entry per matched
+   fact, carrying every distinct binding set it matched under.  A fact that
+   satisfies several conditions of one activation (duplicate pairs) or several
+   activations (distinct bindings) appears once; ids the fact table cannot
+   describe are dropped, matching `:inserted-facts`.
+
+   Rows are sorted by fact id.  Binding sets are deduplicated by value and,
+   when a fact has more than one, sorted by a deterministic string of the
+   (already-pruned) map so snapshots are byte-stable; a single binding set is
+   emitted unsorted since its order is trivial.  `bindings` is pruned once per
+   explanation and the touched fact ids deduplicated first, so a fact
+   satisfying several conditions of one activation contributes a single pair
+   and large accumulator bindings are not re-stringified per fact."
   [explanations fact-table get-fact-id prune-fn]
-  (vec
-   (for [{:keys [bindings matches]} explanations
-         match matches
-         fact (extract-match-facts match)
-         :let [id (get-fact-id fact)]
-         :when id
-         :let [fact-entry (get fact-table id)]]
-     (assoc fact-entry :data (prune-fn bindings)))))
+  (let [binding-sets (volatile! {})]
+    (doseq [{:keys [bindings matches]} explanations
+            :let [pruned-bindings (prune-fn bindings)
+                  ids (into #{}
+                            (comp (mapcat extract-match-facts)
+                                  (keep get-fact-id))
+                            matches)]]
+      (doseq [id ids]
+        (vswap! binding-sets update id (fnil conj #{}) pruned-bindings)))
+    (->> @binding-sets
+         (keep (fn [[id binding-set]]
+                 (when-let [fact (get fact-table id)]
+                   {:fact fact
+                    :bindings (if (= 1 (count binding-set))
+                                (vec binding-set)
+                                (vec (utils/sort-by-key
+                                      #(deterministic-fact-str % identity)
+                                      binding-set)))})))
+         (sort-by (comp :id :fact))
+         vec)))
 
 (defn- build-rule-match-index
   "`{production-name {:matches [...] :inserted-facts [...]}}`.
@@ -431,34 +445,25 @@
             (assoc-in fact [:type :known]
                       (contains? known-set (get-in fact [:type :name]))))
           (stamp-facts [facts] (mapv stamp facts))
-          (stamp-roles [roles]
-            (mapv (fn [role] (update role :facts stamp-facts)) roles))]
+          (stamp-match [match] (update match :fact stamp))
+          (stamp-matches [matches] (mapv stamp-match matches))
+          (stamp-role [role] (update role :facts stamp-facts))
+          (stamp-roles [roles] (mapv stamp-role roles))]
     (-> snapshot
-        (update :facts
-                (fn [facts]
-                  (reduce-kv (fn [m id fact] (assoc m id (stamp fact))) {} facts)))
-        (update :rule-matches
+        (update :facts update-vals stamp)
+        (update :rule-matches update-vals
                 (fn [rm]
-                  (reduce-kv
-                   (fn [m k {:keys [matches inserted-facts]}]
-                     (assoc m k {:matches (stamp-facts matches)
-                                 :inserted-facts (stamp-facts inserted-facts)}))
-                   {} rm)))
-        (update :query-matches
+                  (-> rm
+                      (update :matches stamp-matches)
+                      (update :inserted-facts stamp-facts))))
+        (update :query-matches update-vals
                 (fn [qm]
-                  (reduce-kv
-                   (fn [m k {:keys [matches]}]
-                     (assoc m k {:matches (stamp-facts matches)}))
-                   {} qm)))
-        (update :fact-types
-                (fn [ft]
-                  (reduce-kv
-                   (fn [m type-name entry]
-                     (assoc m type-name
-                            (-> entry
-                                (update :inserted-from stamp-roles)
-                                (update :used-by stamp-roles))))
-                   {} ft))))))
+                  (update qm :matches stamp-matches)))
+        (update :fact-types update-vals
+                (fn [entry]
+                  (-> entry
+                      (update :inserted-from stamp-roles)
+                      (update :used-by stamp-roles)))))))
 
 (defn get-session-rule-activity
   "Returns a unified activity map for a rule: {:matches [...] :inserted-facts [...]}"

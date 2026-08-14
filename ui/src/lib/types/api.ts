@@ -272,7 +272,12 @@ export interface SessionFactTypeDetail {
 
 export type SessionFactTypeInstancesResponse = SessionFactTypeDetail;
 
+export interface FactMatch {
+	fact: SessionFact;
+	bindings: Record<string, unknown>[];
+}
+
 export interface SessionProductionActivityResponse {
-	matches?: SessionFact[] | null;
+	matches?: FactMatch[] | null;
 	'inserted-facts'?: SessionFact[];
 }

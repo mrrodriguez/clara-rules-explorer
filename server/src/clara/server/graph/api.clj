@@ -192,9 +192,18 @@
    :inserted-from [ProductionDep]
    :used-by       [ProductionDep]})
 
+(s/defschema FactMatch
+  "A working-memory fact matched by a production, with every distinct set of
+   variable bindings it matched under.  One entry per fact — the fact appears
+   once no matter how many conditions or activations it satisfies.  `:fact`
+   carries the fact's own value in `:data`, as everywhere else; `:bindings`
+   holds the (pruned) binding maps, keyword-keyed by Clara variable names."
+  {:fact SessionFact
+   :bindings [{s/Keyword s/Any}]})
+
 (s/defschema ProductionActivity
   "Unified activity view for a rule or query in the current session."
-  {:matches [SessionFact]
+  {:matches [FactMatch]
    (s/optional-key :inserted-facts) [SessionFact]})
 
 (s/defschema FactTypeRoleGroup

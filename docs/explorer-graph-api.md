@@ -545,6 +545,10 @@ The `*-id-index` maps are the session-side reverse indexes used by the
 session detail handlers (id → name), built per snapshot with the same id
 function as the analysis side.
 
+The `matches` arrays inside `rule-matches` / `query-matches` are `FactMatch[]`
+entries (`{:fact SessionFact, :bindings [...]}`), not bare `SessionFact` — see
+[`GET /v1/session/rules/:id`](#get-v1sessionrulesid) for the full shape.
+
 ---
 
 #### `GET /v1/session/fact-types`
@@ -679,13 +683,18 @@ Unified activity view for a rule: what it matched + what it inserted.
 {
   "matches": [
     {
-      "id": 1,
-      "type": { "name": "my.ns.Application", "id": "...", "known": true },
-      "ns": "my.ns",
-      "data": { "?app-id": "app-1" },
-      "is-root": true,
-      "inserted-from": [],
-      "used-by": [ ... ]
+      "fact": {
+        "id": 1,
+        "type": { "name": "my.ns.Application", "id": "...", "known": true },
+        "ns": "my.ns",
+        "data": { "app-id": "app-1" },
+        "is-root": true,
+        "inserted-from": [],
+        "used-by": [ ... ]
+      },
+      "bindings": [
+        { "?app-id": "app-1", "?outcome": { ... } }
+      ]
     }
   ],
   "inserted-facts": [
@@ -704,8 +713,12 @@ Unified activity view for a rule: what it matched + what it inserted.
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `matches` | object[] | All facts matched by this rule's activation. Note: `data` contains **variable bindings** (`:?var` keys), not raw fact data. |
+| `matches` | FactMatch[] | One entry per matched fact. `fact` is a full SessionFact whose `data` is the fact's own value (as everywhere else); `bindings` is every distinct variable-binding set the fact matched under (sorted, one per activation/condition combination). |
 | `inserted-facts` | object[] | Facts this rule inserted (empty if rule never fired). Contains raw fact data in `data`. |
+
+`matches` rows are ordered by fact `id`; a fact that satisfies several
+conditions of one activation or appears in several activations still appears
+**once**, with the distinct binding sets collected in `bindings`.
 
 **Response** `404`: `{ "error": "Rule matches not found" }`
 
@@ -722,13 +735,18 @@ Activity view for a query.
 {
   "matches": [
     {
-      "id": 12,
-      "type": { "name": "my.ns.ApplicationOutcome", "id": "...", "known": true },
-      "ns": "my.ns",
-      "data": { "?outcome": { ... }, "?app-id": "app-1" },
-      "is-root": false,
-      "inserted-from": [],
-      "used-by": [ { "name": "my.ns/find-app-outcome", "id": "...", "ns": "my.ns", "type": "query" } ]
+      "fact": {
+        "id": 12,
+        "type": { "name": "my.ns.ApplicationOutcome", "id": "...", "known": true },
+        "ns": "my.ns",
+        "data": { "app-id": "app-1", "status": "approved" },
+        "is-root": false,
+        "inserted-from": [],
+        "used-by": [ { "name": "my.ns/find-app-outcome", "id": "...", "ns": "my.ns", "type": "query" } ]
+      },
+      "bindings": [
+        { "?outcome": { ... }, "?app-id": "app-1" }
+      ]
     }
   ]
 }

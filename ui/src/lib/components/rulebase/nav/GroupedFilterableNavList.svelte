@@ -9,6 +9,7 @@
 	import { NamespaceFilter } from '$lib/components/rulebase/nav/namespaceFilter.svelte';
 	import { RulebaseFilter } from '$lib/components/rulebase/nav/rulebaseFilter.svelte';
 	import { appState } from '$lib/state/appState.svelte';
+	import { stableKeys } from '$lib/keys';
 
 	let {
 		items,
@@ -160,6 +161,15 @@
 					: items.length
 		};
 	});
+
+	// ── Render keys (backstop against server-supplied duplicate names) ───────
+
+	const searchFilteredKeys = $derived(
+		view.searchFiltered ? stableKeys(view.searchFiltered, (item) => item.name) : []
+	);
+	const groupedItemKeys = $derived(
+		view.groupedItems.map((group) => stableKeys(group.items, (item) => item.name))
+	);
 
 	// ── Namespace of the currently active item (O(1) Map lookup) ─────────────
 
@@ -463,7 +473,7 @@
 	<div class="list-group list-group-flush flex-grow-1 overflow-auto" bind:this={scrollContainer}>
 		{#if view.searchActive}
 			<!-- Flat search results -->
-			{#each view.searchFiltered as item (item.name)}
+			{#each view.searchFiltered as item, i (searchFilteredKeys[i])}
 				{#snippet badge()}
 					{#if itemRight}
 						{@render itemRight(item)}
@@ -481,7 +491,7 @@
 			{/each}
 		{:else}
 			<!-- Grouped view -->
-			{#each view.groupedItems as group (group.ns)}
+			{#each view.groupedItems as group, groupIndex (group.ns)}
 				{@const expanded = !!expandedGroups[group.ns]}
 
 				<GroupHeader
@@ -493,7 +503,7 @@
 				/>
 
 				{#if expanded}
-					{#each group.items as item (item.name)}
+					{#each group.items as item, i (groupedItemKeys[groupIndex][i])}
 						{#snippet badge()}
 							{#if itemRight}
 								{@render itemRight(item)}
