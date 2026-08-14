@@ -1,0 +1,34 @@
+name: Setup Playwright browsers
+description: >
+  Caches and installs the headless Chromium browser shared by the vitest
+  browser-mode unit tests and the Playwright e2e tests.  Both suites launch
+  Chromium only, so the browser set is pinned to chromium (plus its headless
+  shell and system dependencies).  Assumes pnpm is on PATH and run from the
+  repo root; the `ui` package holds the playwright dependency.
+runs:
+  using: composite
+  steps:
+    - name: Get Playwright version
+      id: playwright-version
+      shell: bash
+      working-directory: ui
+      run: echo "PLAYWRIGHT_VERSION=$(pnpm exec playwright --version | awk '{print $2}')" >> $GITHUB_OUTPUT
+
+    - name: Cache Playwright binaries
+      id: playwright-cache
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ runner.os }}-playwright-chromium-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
+
+    - name: Install Playwright Chromium
+      if: steps.playwright-cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: ui
+      run: pnpm exec playwright install chromium --with-deps
+
+    - name: Install Playwright Chromium system dependencies
+      if: steps.playwright-cache.outputs.cache-hit == 'true'
+      shell: bash
+      working-directory: ui
+      run: pnpm exec playwright install-deps chromium
