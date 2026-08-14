@@ -57,7 +57,7 @@
 ;; (the Index pass); kondo usage helpers live in
 ;; `clara.server.tools.graph.analyze.utils`.
 
-(defn- normalize-key [k]
+(defn- normalize-fq-name-key [k]
   (if (string? k)
     (symbol k)
     k))
@@ -416,7 +416,7 @@
     (into []
           (comp (filter :rhs)
                 (map :name)
-                (map normalize-key)
+                (map normalize-fq-name-key)
                 (distinct))
           productions)))
 
@@ -733,10 +733,10 @@
         fallback-type-filter (when (= :rulebase-fact-types-only fallback-mode)
                                (build-fallback-type-filter rulebase))
         productions-by-name (into {}
-                                  (map (fn [p] [(normalize-key (:name p)) p]))
+                                  (map (fn [p] [(normalize-fq-name-key (:name p)) p]))
                                   (:productions rulebase))
         effective-filter (if (seq rules-filter)
-                           (mapv normalize-key rules-filter)
+                           (mapv normalize-fq-name-key rules-filter)
                            (session-rule-fq-names session-or-rulebase))
         ;; Var-alias chains (:fact-type-spec-fn): synthetic rule → aliased-var
         ;; usages are injected before graph building so the existing
@@ -792,7 +792,7 @@
   (->> session-or-rulebase
        extract-session-rule-names
        (into []
-             (comp (map normalize-key)
+             (comp (map normalize-fq-name-key)
                    (keep namespace)
                    (map symbol)
                    (distinct)))))
@@ -824,19 +824,34 @@
      :cache-atom            - optional atom to use as cache; defaults to a fresh
                               atom per call (one session analysis run).
      :config-dir            - optional clj-kondo config dir; defaults to the bundled
-                              verbatim clara-rules config; replaces it entirely."
-  [{:keys [session-or-rulebase include-ns-prefixes exclude-ns-prefixes cache-atom config-dir]
+                              verbatim clara-rules config; replaces it entirely.
+     :ns-var-defs-fn        - optional (fn [ns-sym] -> nil | [VarDef …]) supplying the
+                              definition forms of non-production vars in rule-owning
+                              namespaces whose source is not on the classpath (see
+                              `synth/VarDef`). Called once per such namespace; nil or
+                              empty reproduces current behaviour. Exceptions are
+                              contained: logged, treated as no var defs for that
+                              namespace."
+  [{:keys [session-or-rulebase
+           include-ns-prefixes
+           exclude-ns-prefixes
+           cache-atom
+           config-dir
+           ns-var-defs-fn]
     :or {config-dir @bundled-kondo-config-dir
          cache-atom (atom {})}}]
   (let [rulebase (get-rulebase session-or-rulebase)
         rules-by-ns (session-rules-by-ns rulebase)
-        prune-vars (set (map (comp normalize-key :name) (:productions rulebase)))
+        prune-vars (set (map (comp normalize-fq-name-key :name)
+                             (:productions rulebase)))
         ns-source-map (into {}
                             (map (fn [[ns-sym productions]]
                                    [ns-sym (synth/synthesize-ns-source
-                                            ns-sym productions
-                                            #(some-> (find-ns-resource %) slurp)
-                                            normalize-key)]))
+                                            {:ns-sym ns-sym
+                                             :productions productions
+                                             :base-source-fn #(some-> (find-ns-resource %) slurp)
+                                             :normalize-key-fn normalize-fq-name-key
+                                             :var-defs-fn ns-var-defs-fn})]))
                             rules-by-ns)]
     (-> (build-analysis-from-namespaces
          (cond-> {:starting-namespaces (keys rules-by-ns)

@@ -749,11 +749,11 @@
                =>
                (r/insert! (->fact :demo/alert {:id 1})))))
     (let [synth-result (synth/synthesize-ns-source
-                        ns-sym
-                        [{:name 'fake-helper-rule
-                          :rhs '((r/insert! (->fact :demo/alert {:id 1})))}]
-                        (fn [_] nil)   ;; no classpath source
-                        identity)
+                        {:ns-sym ns-sym
+                         :productions [{:name 'fake-helper-rule
+                                        :rhs '((r/insert! (->fact :demo/alert {:id 1})))}]
+                         :base-source-fn (fn [_] nil)   ;; no classpath source
+                         :normalize-key-fn identity})
           source (:source synth-result)]
       (is (str/includes? source "(declare ->fact)")
           "synthesized source must emit (declare ->fact) for the ns's own helper")
@@ -806,6 +806,243 @@
                 (str "callsite-id must contain the constructor segment, got: " cid)))
           (is (= [:demo/alert] (:resolved-types cs))
               "resolved-types must be [:demo/alert]"))))))
+
+;; ---------------------------------------------------------------------------
+;; Synthesized-namespace var-definition hook (:ns-var-defs-fn)
+;; ---------------------------------------------------------------------------
+
+(deftest test-synthesize-ns-source--var-defs-fn
+  (let [ns-sym 'fake.eval-var-defs]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/defn helper-a [x] (clojure.core/inc x)))
+      (eval '(clojure.core/defn helper-b [x] (clojure.core/dec x)))
+      (eval '(def helper-c 42)))
+    (let [result (synth/synthesize-ns-source
+                  {:ns-sym ns-sym
+                   :productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
+                   :base-source-fn (fn [_] nil)
+                   :normalize-key-fn identity
+                   :var-defs-fn (fn [_] [{:name 'helper-a
+                                          :form '(clojure.core/defn helper-a [x] (clojure.core/inc x))}
+                                         {:name 'helper-b
+                                          :form '(clojure.core/defn helper-b [x] (clojure.core/dec x))}])})
+          source (:source result)
+          lines (str/split-lines source)
+          line-of (fn [needle]
+                    (->> lines
+                         (keep-indexed (fn [i l] (when (str/includes? l needle) (inc i))))
+                         first))
+          helper-a-line (line-of "(clojure.core/defn helper-a")
+          helper-b-line (line-of "(clojure.core/defn helper-b")
+          snip-line (line-of "__clara_explorer_rule_0__")]
+      (testing "defs land in the source region (row <= offset), snippet region unchanged"
+        (is (some? helper-a-line))
+        (is (some? helper-b-line))
+        (is (<= helper-a-line helper-b-line (:offset result))
+            "both defs precede the end of the source region")
+        (is (= snip-line (+ 2 (:offset result)))
+            "snippet starts exactly one blank line after the def region"))
+      (testing "declare precedes var defs which precede snippets"
+        (let [decl-pos (str/index-of source "(declare ")
+              helper-a-pos (str/index-of source "(clojure.core/defn helper-a")
+              helper-b-pos (str/index-of source "(clojure.core/defn helper-b")
+              snip-pos (str/index-of source "__clara_explorer_rule_0__")]
+          (is (< decl-pos helper-a-pos helper-b-pos snip-pos))))
+      (testing ":tag->production is unaffected"
+        (is (= {'__clara_explorer_rule_0__ 'fake-rule-1}
+               (:tag->production result)))))))
+
+(deftest test-synthesize-ns-source--var-defs-production-collision
+  (let [ns-sym 'fake.eval-var-defs-collision]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/defn helper-a [x] (clojure.core/inc x))))
+    (let [result (synth/synthesize-ns-source
+                  {:ns-sym ns-sym
+                   :productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
+                   :base-source-fn (fn [_] nil)
+                   :normalize-key-fn identity
+                   :var-defs-fn (fn [_] [{:name 'fake-rule-1
+                                          :form '(def fake-rule-1 42)}
+                                         {:name 'helper-a
+                                          :form '(clojure.core/defn helper-a [x] (clojure.core/inc x))}])})
+          source (:source result)]
+      (is (not (str/includes? source "fake-rule-1 42"))
+          "a var def colliding with a production name is dropped")
+      (is (str/includes? source "(clojure.core/defn helper-a [x] (clojure.core/inc x))")))))
+
+(deftest test-synthesize-ns-source--var-defs-unreadable-skipped
+  (let [ns-sym 'fake.eval-var-defs-unreadable
+        tapped (atom [])
+        tap-fn (fn [e] (swap! tapped conj e))]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/defn helper-a [x] (clojure.core/inc x))))
+    (add-tap tap-fn)
+    (try
+      (let [result (synth/synthesize-ns-source
+                    {:ns-sym ns-sym
+                     :productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
+                     :base-source-fn (fn [_] nil)
+                     :normalize-key-fn identity
+                     :var-defs-fn (fn [_] [{:name 'helper-a
+                                            :form '(clojure.core/defn helper-a [x] (clojure.core/inc x))}
+                                           {:name 'helper-bad
+                                            :form (Object.)}])})
+            source (:source result)]
+        (is (str/includes? source "(clojure.core/defn helper-a [x] (clojure.core/inc x))"))
+        (is (not (str/includes? source "#object"))
+            "the unreadable form is skipped, so the rest of the namespace still analyzes")
+        (is (= 1 (count @tapped)))
+        (is (= {:event :clara-rules/var-def-skipped
+                :ns ns-sym
+                :var 'helper-bad
+                :reason :unreadable}
+               (dissoc (first @tapped) :printed))))
+      (finally (remove-tap tap-fn)))))
+
+(deftest test-synthesize-ns-source--var-defs-multiline-skipped
+  (let [ns-sym 'fake.eval-var-defs-multiline
+        tapped (atom [])
+        tap-fn (fn [e] (swap! tapped conj e))]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/defn helper-a [x] (clojure.core/inc x))))
+    (add-tap tap-fn)
+    (try
+      (let [result (synth/synthesize-ns-source
+                    {:ns-sym ns-sym
+                     :productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
+                     :base-source-fn (fn [_] nil)
+                     :normalize-key-fn identity
+                     :var-defs-fn (fn [_] [{:name 'helper-a
+                                            :form '(clojure.core/defn helper-a [x] (clojure.core/inc x))}
+                                           {:name 'helper-multiline
+                                            :form (symbol "a\nb")}])})
+            source (:source result)]
+        (is (str/includes? source "(clojure.core/defn helper-a [x] (clojure.core/inc x))"))
+        (is (not (str/includes? source "helper-multiline"))
+            "a form that prints across lines is skipped")
+        (is (= 1 (count @tapped)))
+        (is (= :multiline (:reason (first @tapped)))))
+      (finally (remove-tap tap-fn)))))
+
+(deftest test-synthesize-ns-source--no-var-defs-fn-identical
+  (let [ns-sym 'fake.eval-no-var-defs]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/defn helper-a [x] (clojure.core/inc x))))
+    (let [productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
+          base-opts {:ns-sym ns-sym
+                     :productions productions
+                     :base-source-fn (fn [_] nil)
+                     :normalize-key-fn identity}
+          no-fn (synth/synthesize-ns-source (assoc base-opts :var-defs-fn nil))
+          nil-fn (synth/synthesize-ns-source (assoc base-opts :var-defs-fn (fn [_] nil)))
+          omitted (synth/synthesize-ns-source base-opts)]
+      (is (= no-fn nil-fn omitted)
+          "no hook, a hook returning nil, and an omitted hook produce identical results"))))
+
+(deftest test-ns-var-defs-fn--end-to-end
+  (let [ns-sym 'fake.eval-insert-helper
+        captured-defs {'parse-and-insert!
+                       '(clojure.core/defn parse-and-insert! [xs]
+                          (clojure.core/doseq [x xs]
+                            (r/insert! (->fact :demo/parsed {:id x}))))}]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/require '[clara.rules :as r]))
+      (eval '(clojure.core/defn ->fact [type data]
+               (clojure.core/with-meta data {:type type})))
+      (eval '(clojure.core/defn parse-and-insert! [xs]
+               (clojure.core/doseq [x xs]
+                 (r/insert! (->fact :demo/parsed {:id x})))))
+      (eval '(r/defrule fake-insert-rule
+               [java.lang.Object]
+               =>
+               (parse-and-insert! [1]))))
+    (let [session (r/mk-session ns-sym)
+          rule-key 'fake.eval-insert-helper/fake-insert-rule
+          analyze-opts {:session-or-rulebase session
+                        :include-ns-prefixes ["fake."]}
+          without (analyze/generate-annotations-from-analysis
+                   {:analysis (analyze/analyze-session-rules analyze-opts)
+                    :session-or-rulebase session})]
+      (is (true? (:clara-rules/no-output-types (ann/get-annotation without rule-key)))
+          "without the hook the declared helper has no body → no insert detected")
+      (let [with (analyze/generate-annotations-from-analysis
+                  {:analysis (analyze/analyze-session-rules
+                              (assoc analyze-opts
+                                     :ns-var-defs-fn
+                                     (fn [_]
+                                       (mapv (fn [[sym form]] {:name sym :form form})
+                                             captured-defs))))
+                   :session-or-rulebase session
+                   :fact-constructors [{:match-fn (fn [sym] (= (name sym) "->fact"))
+                                        :type-resolver-fn ->fact-type-resolver}]})
+            annotation (ann/get-annotation with rule-key)
+            detection (:clara-rules/dynamic-insert-types-detected annotation)
+            callsites (:callsites detection)]
+        (is (= [:demo/parsed] (:clara-rules/insert-types annotation))
+            "with the hook the insert type resolves through the helper body")
+        (is (= :full (:resolution detection)))
+        (is (= 1 (count callsites)))
+        (let [cs (first callsites)]
+          (is (= :full (:status cs)))
+          (is (= [:demo/parsed] (:resolved-types cs)))
+          (is (= #{"parse-and-insert!" "->fact"}
+                 (set (map (comp name :var-name-sym) (:callstack (:via cs)))))
+              "the :via callstack names the helper and the constructor"))))))
+
+(deftest test-ns-var-defs-fn--two-hop-helper
+  (let [ns-sym 'fake.eval-two-hop
+        captured-defs {'inner-insert!
+                       '(def inner-insert!
+                          (fn inner-insert! [x]
+                            (r/insert! (->fact :demo/two-hop {:id x}))))
+                       'outer-helper
+                       '(def outer-helper
+                          (fn outer-helper [x]
+                            (inner-insert! x)))}]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/require '[clara.rules :as r]))
+      (eval '(clojure.core/defn ->fact [type data]
+               (clojure.core/with-meta data {:type type})))
+      (eval '(def inner-insert!
+               (clojure.core/fn inner-insert! [x]
+                 (r/insert! (->fact :demo/two-hop {:id x})))))
+      (eval '(def outer-helper
+               (clojure.core/fn outer-helper [x]
+                 (inner-insert! x))))
+      (eval '(r/defrule fake-two-hop-rule
+               [java.lang.Object]
+               =>
+               (outer-helper 1))))
+    (let [session (r/mk-session ns-sym)
+          rule-key 'fake.eval-two-hop/fake-two-hop-rule
+          with (analyze/generate-annotations-from-analysis
+                {:analysis (analyze/analyze-session-rules
+                            {:session-or-rulebase session
+                             :include-ns-prefixes ["fake."]
+                             :ns-var-defs-fn (fn [_]
+                                               (mapv (fn [[sym form]] {:name sym :form form})
+                                                     captured-defs))})
+                 :session-or-rulebase session
+                 :fact-constructors [{:match-fn (fn [sym] (= (name sym) "->fact"))
+                                      :type-resolver-fn ->fact-type-resolver}]})
+          annotation (ann/get-annotation with rule-key)
+          detection (:clara-rules/dynamic-insert-types-detected annotation)
+          callsites (:callsites detection)]
+      (is (= [:demo/two-hop] (:clara-rules/insert-types annotation))
+          "the graph traverses both helper hops to resolve the insert type")
+      (is (= 1 (count callsites)))
+      (let [cs (first callsites)]
+        (is (= :full (:status cs)))
+        (is (= #{"inner-insert!" "->fact"}
+               (set (map (comp name :var-name-sym) (:callstack (:via cs)))))
+            "the :via callstack names the (def f (fn f …)) helper and constructor")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Callsite identity edge cases
