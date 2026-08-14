@@ -144,7 +144,7 @@
     (try
       (some-> (resolver-fn call-ctx) :resolved-types seq)
       (catch Throwable t
-        (log/errorf "clara.server.tools.graph.analyze: :callsite-resolver-fn threw: %s"
+        (log/errorf t "clara.server.tools.graph.analyze: :callsite-resolver-fn threw: %s"
                     (ex-message t))
         nil))))
 
@@ -331,7 +331,7 @@
                    (some-> (resolver-fn resolver-ctx)
                            :resolved-types seq)
                    (catch Throwable t
-                     (log/errorf "clara.server.tools.graph.analyze: :fact-constructors :type-resolver-fn threw: %s"
+                     (log/errorf t "clara.server.tools.graph.analyze: :fact-constructors :type-resolver-fn threw: %s"
                                  (ex-message t))
                      nil))
         tokens (into #{} (map normalize-token) (or resolved '()))]

@@ -195,7 +195,7 @@
   (let [var-defs (try
                    (when var-defs-fn (var-defs-fn ns-sym))
                    (catch Throwable t
-                     (log/errorf "clara.server.tools.graph.analyze: :ns-var-defs-fn threw: %s"
+                     (log/errorf t "clara.server.tools.graph.analyze: :ns-var-defs-fn threw: %s"
                                  (ex-message t))
                      nil))]
     (when (seq var-defs)

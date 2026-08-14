@@ -81,7 +81,7 @@
   (try
     (fact-type-spec-fn fact-type)
     (catch Throwable t
-      (log/errorf "clara.server.tools.graph.analyze: :fact-type-spec-fn threw: %s"
+      (log/errorf t "clara.server.tools.graph.analyze: :fact-type-spec-fn threw: %s"
                   (ex-message t))
       nil)))
 
