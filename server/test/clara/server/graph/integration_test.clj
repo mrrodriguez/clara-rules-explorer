@@ -106,15 +106,20 @@
      false}` starts with an empty working memory (rulebase analysis only).
    - :layers      — annotation-layer vector; defaults to the loan-doc
      annotation fixture (inert for the hierarchy session, whose types are
-     declared in rule :props)."
+     declared in rule :props).
+   - :enrichment  — annotation enrichment mode, defaulting to :auto-detect so
+     the in-memory session mirrors `make demo-run` (working-memory fact types
+     surface as dynamic insert-types).  Pass :none to skip memory enrichment."
   [& [opts]]
-  (let [{:keys [session-fn session-opts layers]
+  (let [{:keys [session-fn session-opts layers enrichment]
          :or {session-fn run-loan-app-rules
               session-opts {:with-facts? true}
-              layers [loan-doc-annotations-path]}} opts]
+              layers [loan-doc-annotations-path]
+              enrichment :auto-detect}} opts]
     (server/start! {:port *port*
                     :session (session-fn session-opts)
-                    :annotations {:source (vec layers)}})))
+                    :annotations (cond-> {:source (vec layers)}
+                                   (some? enrichment) (assoc :enrichment enrichment))})))
 
 (defn with-server
   "Runs `f` with a server up (see `start-server!` for the session options),
@@ -254,6 +259,20 @@
               fact-type (get-fact-type "clara.server.tools.graph.rules.loan_app_facts.Application")]
           (is (seq fact-types))
           (is (= "clara.server.tools.graph.rules.loan_app_facts.Application" (get fact-type "name"))))))))
+
+(deftest test-loan-doc-memory-enrichment
+  (with-server
+    (fn []
+      (testing "WM enrichment surfaces a dynamic insert-type through the HTTP API"
+        (let [rule (get-rule "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail")
+              insert-names (set (map #(get % "name") (get rule "insert-types")))]
+          (is (contains? insert-names "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail")
+              "AuditTrail is a session-derived insert-type for dynamic-insert-audit-trail"))
+
+        (let [audit (get-fact-type "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail")
+              inserted-by (set (map #(get % "name") (get audit "inserted-by-rules")))]
+          (is (contains? inserted-by "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail")
+              "the AuditTrail fact type lists dynamic-insert-audit-trail as an inserter"))))))
 
 (deftest test-loan-doc-session-state-endpoints
   (with-server
