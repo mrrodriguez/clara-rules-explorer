@@ -1,1 +1,0 @@
-import{ut as e}from"../chunks/B4AdKLMu.js";import{i as t}from"../chunks/BsDxxLbO.js";import{t as n}from"../chunks/BNIAbXJm.js";var r=e({load:()=>i}),i=async({params:e,fetch:n})=>({query:await t(e.id,n)});export{n as component,r as universal};
