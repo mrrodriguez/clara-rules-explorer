@@ -11,6 +11,7 @@
    `:callsite-resolver-fn`)."
   (:require [clara.rules.schema :as schema]
             [schema.core :as s]
+            [clojure.tools.logging :as log]
             [clara.server.tools.graph.analyze.utils :as u]))
 
 (defn- subtree-fact-types
@@ -80,9 +81,8 @@
   (try
     (fact-type-spec-fn fact-type)
     (catch Throwable t
-      (binding [*out* *err*]
-        (println (str "clara.server.tools.graph.analyze: :fact-type-spec-fn threw: "
-                      (ex-message t))))
+      (log/errorf t "clara.server.tools.graph.analyze: :fact-type-spec-fn threw: %s"
+                  (ex-message t))
       nil)))
 
 ;; ---------------------------------------------------------------------------

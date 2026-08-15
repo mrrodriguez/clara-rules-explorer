@@ -8,7 +8,8 @@
    that populates `used-by-*` / `inserted-by-rules` / `retracted-by-rules`
    on fact-type views.  Production-level logic (dep-graph, rule/query
    summaries) lives in `clara.server.tools.graph.core`."
-  (:require [clara.server.tools.graph.serialize :as serialize]))
+  (:require [clara.server.tools.graph.serialize :as serialize]
+            [clojure.tools.logging :as log]))
 
 ;; ---------------------------------------------------------------------------
 ;; Shared helpers
@@ -82,8 +83,8 @@
   (when (and (not= existing-serialized new-serialized)
              (not (contains? @warned-types raw-type)))
     (swap! warned-types conj raw-type)
-    (println (format "WARN: type serialization divergence — %s serializes as both %s and %s across production ns contexts; keeping %s"
-                     raw-type existing-serialized new-serialized existing-serialized))))
+    (log/warnf "type serialization divergence — %s serializes as both %s and %s across production ns contexts; keeping %s"
+               raw-type existing-serialized new-serialized existing-serialized)))
 
 (defn- ^:private ->ancestors-index-entry
   "Fresh ancestors-index entry for `raw-type`, serialized in `ns-name` context:

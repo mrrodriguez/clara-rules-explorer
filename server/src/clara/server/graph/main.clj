@@ -12,7 +12,8 @@
             [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.core :as core]
-            [clojure.pprint :as pprint])
+            [clojure.pprint :as pprint]
+            [clojure.tools.logging :as log])
   (:import [java.io EOFException]))
 
 ;; ---------------------------------------------------------------------------
@@ -88,12 +89,12 @@
 
 (defn- usage [summary]
   (println "Clara Graph Server — HTTP API for rulebase exploration and session inspection.\n")
-  (println "Usage: clojure -M -m clara.server.graph.main [options]\n")
+  (println "Usage: clojure -M:dev -m clara.server.graph.main [options]\n")
   (println "Options:")
   (println summary)
   (println "\nExamples:")
-  (println "  clojure -M -m clara.server.graph.main -s session.bin -l curated-annos.edn")
-  (println "  clojure -M -m clara.server.graph.main --generate-analysis out -s session.bin -l curated-annos.edn")
+  (println "  clojure -M:dev -m clara.server.graph.main -s session.bin -l curated-annos.edn")
+  (println "  clojure -M:dev -m clara.server.graph.main --generate-analysis out -s session.bin -l curated-annos.edn")
   (println))
 (defn- exit [code]
   (System/exit code))
@@ -209,27 +210,27 @@
    clj-kondo, with the session rulebase as the source of truth for rules."
   [{:keys [session facts load-session-state-fn generate-analysis-dir edn-printer] :as options}]
   (when-not session
-    (println "Error: --session is required with --generate-analysis")
+    (log/error "Error: --session is required with --generate-analysis")
     (exit 1))
   (when-not (file-exists? session)
-    (println (format "Error: session file not found: %s" session))
+    (log/errorf "Error: session file not found: %s" session)
     (exit 1))
 
   (let [edn-printer (edn-printer-for edn-printer)
         facts-path (resolve-facts-path session facts)]
     (when (and (not load-session-state-fn)
                (not (file-exists? facts-path)))
-      (println (format "Error: facts file not found: %s  (use --facts to specify a different path)"
-                       facts-path))
+      (log/errorf "Error: facts file not found: %s  (use --facts to specify a different path)"
+                  facts-path)
       (exit 1))
 
-    (println (format "Loading session from: %s" session))
+    (log/infof "Loading session from: %s" session)
     (let [loaded-session (load-session-state session facts-path load-session-state-fn)]
-      (println "Session loaded.")
+      (log/info "Session loaded.")
 
       (let [generated
             (do
-              (println "Auto-discovering annotations from session namespaces...")
+              (log/info "Auto-discovering annotations from session namespaces...")
               (let [analysis (analyze/analyze-session-rules
                               {:session-or-rulebase loaded-session})]
                 (analyze/generate-annotations-from-analysis
@@ -248,7 +249,7 @@
                          (map ann.merge/read-layer)
                          (:layer options))
 
-            _ (println "Running rulebase analysis...")
+            _ (log/info "Running rulebase analysis...")
             analysis (core/rulebase-analysis loaded-session
                                              (ann.merge/merge-layers layers))
 
@@ -258,12 +259,12 @@
             analysis-path (str generate-analysis-dir "/analysis.edn")]
 
         (ann.merge/write-layer! annotations-path generated-layer {:edn-printer edn-printer})
-        (println (format "Annotations written to: %s" annotations-path))
+        (log/infof "Annotations written to: %s" annotations-path)
 
         (spit analysis-path
               (with-out-str
                 (edn-printer analysis *out*)))
-        (println (format "Analysis written to: %s" analysis-path))))))
+        (log/infof "Analysis written to: %s" analysis-path)))))
 
 (defn run-explorer-server
   "Starts the explorer server with the given options."
@@ -274,7 +275,7 @@
                      (keep (fn [f]
                              (if (file-exists? f)
                                f
-                               (println (format "Warning: layer file not found, skipping: %s" f)))))
+                               (log/warnf "Warning: layer file not found, skipping: %s" f))))
                      layer)
         spec (some-> annotations parse-annotations-arg)
         annotations-spec
@@ -283,29 +284,29 @@
           (assoc spec :source (vec layer'))        ;; -l becomes the spec's source
 
           (and spec (some? (:source spec)) (seq layer'))
-          (do (println (format "Warning: --annotations :source takes priority; --layer values ignored: %s"
-                               (pr-str layer')))
+          (do (log/warnf "Warning: --annotations :source takes priority; --layer values ignored: %s"
+                         (pr-str layer'))
               spec)
 
           spec          spec
           (seq layer')  {:source (vec layer')}
           :else         nil)]
-    (println (format "Loading session from: %s" session))
+    (log/infof "Loading session from: %s" session)
     (when (or (not load-session-state-fn) (file-exists? facts-path))
-      (println (format "Loading facts from:   %s" facts-path)))
+      (log/infof "Loading facts from:   %s" facts-path))
     (doseq [layer-path layer']
-      (println (format "Loading annotation layer: %s" layer-path)))
+      (log/infof "Loading annotation layer: %s" layer-path))
     (let [loaded-session (load-session-state session facts-path load-session-state-fn)]
-      (println (format "Session deserialized. Starting server on port %s ..." port))
+      (log/infof "Session deserialized. Starting server on port %s ..." port)
       (server/start!
        {:session loaded-session
         :port port
         :annotations annotations-spec
         ;; nil when absent — start!'s :or default (true) applies
         :working-memory-enabled working-memory-enabled})
-      (println (format "Clara Graph Server running at http://localhost:%s" port))
-      (println (format "API endpoints at http://localhost:%s/v1/" port))
-      (println "Press Ctrl+C to stop."))))
+      (log/infof "Clara Graph Server running at http://localhost:%s" port)
+      (log/infof "API endpoints at http://localhost:%s/v1/" port)
+      (log/info "Press Ctrl+C to stop."))))
 
 ;; ---------------------------------------------------------------------------
 ;; -main
@@ -333,8 +334,7 @@
       (exit 0))
 
     (when (seq errors)
-      (doseq [e errors] (println e))
-      (println)
+      (doseq [e errors] (log/error e))
       (exit 1))
 
     (let [{:keys [generate-analysis-dir]} options]
@@ -346,7 +346,7 @@
         (let [validation (validate-server-options options)]
           (if-let [error (:error validation)]
             (do
-              (println error)
+              (log/error error)
               (when (:show-usage? validation)
                 (usage summary))
               (exit 1))
@@ -355,5 +355,5 @@
               ;; Block the main thread to keep the server alive.
               @(promise)
               (catch Throwable t
-                (println (str "Error: " (.getMessage t)))
+                (log/error t (str "Error: " (.getMessage t)))
                 (exit 1)))))))))

@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # This runs the dev alias with *warn-on-reflection* set to true.
 # We capture stderr to catch reflection warnings.

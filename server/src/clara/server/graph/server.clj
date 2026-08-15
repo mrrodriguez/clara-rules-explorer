@@ -18,6 +18,7 @@
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.utils :as utils]
             [clojure.set :as set]
+            [clojure.tools.logging :as log]
             [schema.core :as s])
   (:import
    [org.eclipse.jetty.server
@@ -196,8 +197,8 @@
   (let [wm? (core/working-memory-available? session)]
     (when (and (#{:auto-detect-from-memory :auto-detect} enrichment)
                (not wm?))
-      (println (format "[server] %s requested but no working memory available — skipping memory enrichment"
-                       enrichment)))
+      (log/warnf "[server] %s requested but no working memory available — skipping memory enrichment"
+                 enrichment))
     (let [static-layers (build-static-layers session source enrichment analyze-cache-atom)
           merged-static (ann.merge/merge-layers static-layers)
           base          (ann.merge/annotations merged-static)
@@ -361,9 +362,9 @@
         state-atom (atom state)
         wm-available? (core/working-memory-available? (:session state))]
     (when-not wm-available?
-      (println "[server] Working-memory routes disabled: started with a rulebase, not a session"))
+      (log/warn "[server] Working-memory routes disabled: started with a rulebase, not a session"))
     (when (and wm-available? (not working-memory-enabled))
-      (println "[server] Working-memory routes disabled by configuration (:working-memory-enabled false)"))
+      (log/warn "[server] Working-memory routes disabled by configuration (:working-memory-enabled false)"))
 
     (let [{:keys [handler cache]} (api/app state-atom working-memory-enabled)]
       ;; Warm before binding Jetty — defensive: a request in the gap builds

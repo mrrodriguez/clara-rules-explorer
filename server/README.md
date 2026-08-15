@@ -65,12 +65,24 @@ The server provides a `-main` entry point with two modes:
 **Quick examples:**
 
 ```bash
-# Start the explorer server
-clojure -M -m clara.server.graph.main -s session.bin -a annotations.edn
+# Start the explorer server (use -M:dev for the Logback logging backend)
+clojure -M:dev -m clara.server.graph.main -s session.bin -a annotations.edn
 
 # Static dump: annotations + full analysis to disk
-clojure -M -m clara.server.graph.main --generate-analysis out -s session.bin
+clojure -M:dev -m clara.server.graph.main --generate-analysis out -s session.bin
 ```
+
+> **Logging.** The server logs through
+> [`clojure.tools.logging`](https://github.com/clojure/tools.logging) — a facade
+> with **no runtime dependencies**. At load time it auto-detects the host's
+> logging backend (SLF4J → commons-logging → log4j2 → log4j →
+> java.util.logging), so it never forces a backend and never collides with
+> another project's logging when the server is embedded as a library. For
+> standalone runs, the `:dev`, `:demo-setup`, `:demo-run`, and
+> `:hierarchy-run` aliases add a Logback backend (configured via
+> `dev/logback.xml`). Run without one of those aliases and — because Jetty
+> already puts `slf4j-api` on the classpath — logs fall through to SLF4J's
+> no-op default and are dropped.
 
 For detailed CLI workflows and the programmatic REPL API, see [Rule Annotations → Usage Workflows](docs/rule-annotations.md#usage-workflows).
 
@@ -81,7 +93,7 @@ By default, the session is deserialized from Fressian using `clara.rules.durabil
 To use a custom deserializer (e.g. Nippy, transit, or a custom Fressian setup), pass `--load-session-state-fn` with a fully qualified symbol. The function must accept `(session-path facts-path)` and return the deserialized Clara session:
 
 ```bash
-clojure -M -m clara.server.graph.main -s session.bin --load-session-state-fn my.namespace/load-session
+clojure -M:dev -m clara.server.graph.main -s session.bin --load-session-state-fn my.namespace/load-session
 ```
 
 ## API Endpoints

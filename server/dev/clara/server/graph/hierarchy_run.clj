@@ -14,7 +14,8 @@
   (:require [clara.rules :as r]
             [clara.server.graph.server :as server]
             [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
-            [clara.server.tools.graph.rules.match-uniqueness-test-rules :as mu]))
+            [clara.server.tools.graph.rules.match-uniqueness-test-rules :as mu]
+            [clojure.tools.logging :as log]))
 
 (defn -main
   "Usage: clojure -M:hierarchy-run [port]   (default port: 9201)"
@@ -33,6 +34,6 @@
                     (r/insert (mu/->Item "c"))
                     (r/fire-rules))]
     (server/start! {:session session :port port})
-    (println (format "Hierarchy server running at http://localhost:%s" port))
-    (println "Press Ctrl+C to stop.")
+    (log/infof "Hierarchy server running at http://localhost:%s" port)
+    (log/info "Press Ctrl+C to stop.")
     @(promise)))

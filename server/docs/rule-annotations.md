@@ -572,6 +572,68 @@ Record/Java constructors and the `:fact-type-spec-fn` var-alias flow are unaffec
 Alias-discovered callsites are deliberately never auto-resolved, so ownership never
 claims them either.
 
+### `:ns-var-defs-fn` — helper bodies for source-less rule namespaces
+
+When a rule-owning namespace has no classpath source, `analyze-session-rules`
+reconstructs an `(ns …)` form from the live namespace and emits a
+`(declare …)` for every non-production intern. A `declare` has no body, so the
+analysis sees a helper var the rules call but nothing it calls in turn — a rule
+whose RHS reaches `insert!`/`retract!` only through such a helper is
+indistinguishable from one with no output, and is annotated
+`:clara-rules/no-output-types`.
+
+The analyzer cannot reconstruct those bodies itself: `ns-interns` yields
+compiled `Var`s, with no source text to read. Only the host that interned the
+vars (a rulebase loader, an authoring system, a generated namespace) still holds
+their definition forms, so `analyze-session-rules` takes them as an input:
+
+```clojure
+:ns-var-defs-fn
+(fn [ns-sym]
+  ;; => nil, or a vector of VarDefs:
+  [{:name 'parse-and-insert!                 ; unqualified var symbol
+    :form '(defn parse-and-insert! [xs]      ; the complete top-level form
+             (doseq [x xs]
+               (r/insert! (->fact :demo/parsed {:id x}))))}])
+```
+
+- **Called once per source-less rule-owning namespace.** A return of `nil` or
+  `[]` reproduces the current behaviour exactly. Exceptions are contained —
+  logged and treated as no var defs for that namespace.
+- **`:form` is a whole top-level form** — `(def f (fn f [x] …))`, `(defn f [x]
+  …)`, or anything else that defines `:name`. The analyzer never evaluates it;
+  it prints the form as text for clj-kondo to read.
+- **The `declare` stays and covers everything**, so forward references between
+  helper bodies resolve regardless of order, and vars the hook does not supply
+  keep today's behaviour.
+- **Forms are printed one per line and round-trip validated.** A form that
+  prints across lines, or whose printed text is unreadable (an object with no
+  reader representation), is skipped and reported via `tap>` with
+  `:event :clara-rules/var-def-skipped` (plus `:ns`, `:var`, and `:reason`).
+- **Production names are rejected.** A `VarDef` whose `:name` collides with a
+  production in the namespace is dropped, keeping the synthesized source and
+  its analysis consistent.
+
+Once the helper bodies are in the analyzed text, nothing else changes: the
+helper is recorded as a direct inserter, `var-reachability` reports
+`:is-inserter? true` for rules that call it, and `extract-insert-types` reads
+boundary argument forms out of the synthesized source. `:fact-constructors` and
+`:callsite-resolver-fn` are reached normally, and constructor callsites carry a
+`:via` callstack through the helper chain.
+
+```clojure
+(let [analysis (analyze/analyze-session-rules
+                {:session-or-rulebase session
+                 :ns-var-defs-fn (fn [ns-sym]
+                                   (when-let [defs (captured-defs ns-sym)]
+                                     (mapv (fn [[sym form]] {:name sym :form form})
+                                           defs)))})
+      annotations (analyze/generate-annotations-from-analysis
+                    {:analysis analysis
+                     :session-or-rulebase session})]
+  …)
+```
+
 ---
 
 ## Usage Workflows
@@ -667,11 +729,11 @@ Requires a serialized session. Produces `annotations.edn` + `analysis.edn` in th
 
 ```bash
 # Auto-discover from session (sources must be on classpath)
-clojure -M -m clara.server.graph.main --generate-analysis out \
+clojure -M:dev -m clara.server.graph.main --generate-analysis out \
   -s session.bin
 
 # With a custom session loader
-clojure -M -m clara.server.graph.main --generate-analysis out \
+clojure -M:dev -m clara.server.graph.main --generate-analysis out \
   -s session.bin --load-session-state-fn my.app/load-session
 ```
 
