@@ -55,11 +55,11 @@ make test-e2e           # 58 passed (26.5s)
 
 ## Notes / decisions applied
 
-- **matcher-combinators version:** the plan said 3.11.0, but the local
-  `~/.m2/repository` is write-protected (macOS `com.apple.provenance` on the
-  whole tree), so 3.11.0 could not be downloaded. 3.9.1 was already cached and
-  has the same `match?` / `embeds` / `equals` API — used that instead (per
-  instruction "use whatever version you have available"). Bump to 3.11.0 later.
+- **matcher-combinators version:** the plan said 3.11.0. `deps.edn` declares
+  3.11.0 (added in the Phase 1 commit `8f34105`) and it now resolves from the
+  local Maven cache — the full suite runs against 3.11.0. During development
+  the `~/.m2/repository` tree was briefly write-protected and 3.9.1 served as
+  a stopgap; that was superseded before commit.
 - **`match?` is `is`-macro integrated** (matcher-combinators), not a plain fn —
   assertions read `(is (match? (resolved-detection …) actual))`.
 - `resolved-detection` / `unresolved-detection` now return
@@ -86,5 +86,4 @@ make test-e2e           # 58 passed (26.5s)
 
 ## Remaining
 
-- Bump `nubank/matcher-combinators` 3.9.1 → 3.11.0 once the local Maven cache is
-  writable (or the dependency is otherwise obtainable).
+None.
