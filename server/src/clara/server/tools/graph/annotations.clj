@@ -172,7 +172,7 @@
   Adds one tombstone: `:clara-rules/no-output-types` is an assertion that the rule produces nothing,
   and observing it produce something disproves it. An explicit nil erases the key and its provenance
   (`merge/fold-key`). Leaving it set would contradict the very types this layer just added, and
-  `clara.server.tools.graph.core/production-annotation` reads it to suppress sink classification —
+  `production-annotation` reads it to suppress sink classification —
   so a rule proven to insert would still be reported as producing no output."
   [base enriched rule-ns]
   (when-let [delta (not-empty

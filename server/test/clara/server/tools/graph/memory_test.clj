@@ -391,7 +391,7 @@
 
   (testing "A session route-id collision throws at memory-analysis-build time"
     (is (thrown? clojure.lang.ExceptionInfo
-                 (#'memory/build-id-name-index ["same" "same"])))))
+                 (#'memory/->id-name-index ["same" "same"])))))
 
 (deftest test-session-fact-known-parity
   (testing "Session fact-type known flags honestly reflect membership in the analysis's fact-type names"

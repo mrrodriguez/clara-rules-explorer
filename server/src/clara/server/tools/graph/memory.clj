@@ -67,7 +67,7 @@
         (deterministic-fact-str fact prune-fn)]))
    facts))
 
-(defn- build-id-map [sorted-facts]
+(defn- ->id-map [sorted-facts]
   (let [id-map (java.util.IdentityHashMap.)]
     (doseq [[i wrapped] (map-indexed vector sorted-facts)]
       (.put id-map (platform/fact-id-unwrap wrapped) (inc i)))
@@ -78,7 +78,7 @@
   (fn [{p-name :name :as _production-meta}]
     (get production-order p-name Integer/MAX_VALUE)))
 
-(defn- build-used-by-index
+(defn- ->used-by-index
   [inspection get-id production-order-key-fn]
   (let [{:keys [rule-matches query-matches]} inspection
         rule-match-facts
@@ -137,7 +137,7 @@
    :ns (str p-ns-name)
    :type "rule"})
 
-(defn- build-origin-map
+(defn- ->origin-map
   "`{fact-id [origin …]}` — the rules that inserted each fact."
   [insertions get-id production-order-key-fn]
   (->> (insertion-id+rule-pairs insertions get-id)
@@ -152,7 +152,7 @@
                                        vec)))
                   {})))
 
-(defn- build-fact-table
+(defn- ->fact-table
   [{:keys [sorted-facts
            fact-type-fn
            root-facts
@@ -193,7 +193,7 @@
                                          ;; /fact-types/:id route the analysis cannot
                                          ;; serve.
                                          :known (contains? known-set type-name)}
-                                  :ns (ft/raw-type-ns raw-type)
+                                  :ns (ft/get-raw-type-ns raw-type)
                                   :data (prune-fn fact)
                                   :is-root (boolean (some #(identical? fact %) root-facts))
                                   :inserted-from (get origin-map id [])
@@ -227,7 +227,7 @@
                     (production-order-key-fn entry))))
        vec))
 
-(defn- build-fact-type-index
+(defn- ->fact-type-index
   [fact-table production-order-key-fn]
   (letfn [(add-fact-type-instance-data [m fact-type-name instances]
             (assoc m fact-type-name
@@ -246,7 +246,7 @@
          (group-by (comp :name :type))
          (reduce-kv add-fact-type-instance-data {}))))
 
-(defn- build-id-name-index
+(defn- ->id-name-index
   "Reverse index {route-id(name) → name} for a collection of serialized
    names, asserting id uniqueness (a route-id collision throws loudly at
    memory-analysis-build time rather than silently mislinking)."
@@ -300,7 +300,7 @@
          (sort-by (comp :id :fact))
          vec)))
 
-(defn- build-rule-match-index
+(defn- ->rule-match-index
   "`{production-name {:matches [...] :inserted-facts [...]}}`.
 
   Reads inserted-fact attribution from `:insertions` via
@@ -335,7 +335,7 @@
                           :inserted-facts (p-name->inserted-facts p-name)}]))
           rule-matches)))
 
-(defn- build-query-match-index
+(defn- ->query-match-index
   [query-matches
    fact-table
    get-fact-id
@@ -371,37 +371,37 @@
          all-facts-wrapped (get-all-facts-wrapped inspection)
          prune-fn (serialize/memoizing-prune-fns)
          sorted-facts (sort-facts all-facts-wrapped fact-type-fn fact-type-order prune-fn)
-         id-map (build-id-map sorted-facts)
+         id-map (->id-map sorted-facts)
          get-fact-id (fn get-fact-id [fact] (.get ^java.util.IdentityHashMap id-map fact))
 
          production-order-key-fn (->production-order-key-fn production-order)
 
-         used-by-index (build-used-by-index inspection
-                                            get-fact-id
-                                            production-order-key-fn)
-         origin-map (build-origin-map insertions
-                                      get-fact-id
-                                      production-order-key-fn)
+         used-by-index (->used-by-index inspection
+                                        get-fact-id
+                                        production-order-key-fn)
+         origin-map (->origin-map insertions
+                                  get-fact-id
+                                  production-order-key-fn)
 
-         fact-table (build-fact-table {:sorted-facts sorted-facts
-                                       :fact-type-fn fact-type-fn
-                                       :root-facts root-facts
-                                       :get-fact-id get-fact-id
-                                       :origin-map origin-map
-                                       :used-by-index used-by-index
-                                       :known-set known-set
-                                       :prune-fn prune-fn})
-         fact-type-index (build-fact-type-index (:facts fact-table)
-                                                production-order-key-fn)
-         rule-match-index (build-rule-match-index rule-matches
-                                                  insertions
-                                                  (:facts fact-table)
-                                                  get-fact-id
-                                                  prune-fn)
-         query-match-index (build-query-match-index query-matches
-                                                    (:facts fact-table)
-                                                    get-fact-id
-                                                    prune-fn)]
+         fact-table (->fact-table {:sorted-facts sorted-facts
+                                   :fact-type-fn fact-type-fn
+                                   :root-facts root-facts
+                                   :get-fact-id get-fact-id
+                                   :origin-map origin-map
+                                   :used-by-index used-by-index
+                                   :known-set known-set
+                                   :prune-fn prune-fn})
+         fact-type-index (->fact-type-index (:facts fact-table)
+                                            production-order-key-fn)
+         rule-match-index (->rule-match-index rule-matches
+                                              insertions
+                                              (:facts fact-table)
+                                              get-fact-id
+                                              prune-fn)
+         query-match-index (->query-match-index query-matches
+                                                (:facts fact-table)
+                                                get-fact-id
+                                                prune-fn)]
      {:fact-types        fact-type-index
       :facts             (:facts fact-table)
       ;; Internal fact-id → raw type index for the memory-derived annotation
@@ -419,9 +419,9 @@
       ;; Per-memory-analysis id→name indexes for the session detail handlers — built
       ;; here (no analysis-cache dependency) with the same id function over the
       ;; memory-analysis's serialized names, so session ids align with analysis ids.
-      :fact-type-id-index (build-id-name-index (keys fact-type-index))
-      :rule-id-index      (build-id-name-index (keys rule-match-index))
-      :query-id-index     (build-id-name-index (keys query-match-index))})))
+      :fact-type-id-index (->id-name-index (keys fact-type-index))
+      :rule-id-index      (->id-name-index (keys rule-match-index))
+      :query-id-index     (->id-name-index (keys query-match-index))})))
 
 (defn update-memory-analysis-known-set
   "Re-derives the per-fact :type :known flag of an existing memory-analysis from

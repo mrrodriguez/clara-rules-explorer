@@ -504,7 +504,7 @@
           "Rule consuming only external facts should be a source rule"))
 
     (testing "Unlinked rule's JSON-serialized view (rules-list) omits :downstream"
-      (let [rule-list (core/rules-list analysis)
+      (let [rule-list (core/get-rules-list analysis)
             unlinked-item (first (filter #(= unlinked-rule-name (:name %)) rule-list))]
         (is (contains? unlinked-item :unlinked-rule))
         (is (not (contains? unlinked-item :downstream)))))))
@@ -525,7 +525,7 @@
 (deftest test-dynamic-detection-in-rules-list
   (let [session (->test-session)
         analysis (core/->rulebase-analysis session (loan-doc-annotations session))
-        rule-list (core/rules-list analysis)
+        rule-list (core/get-rules-list analysis)
         rule-by-name #(first (filter (fn [r] (= (:name r) %)) rule-list))]
 
     (testing "Unresolved dynamic-insert rule via helper call"
@@ -699,9 +699,9 @@
     (let [tam (array-map
                'prod-a {:consumed-types ['join] :produced-types [] :retract-types #{} :ns-name 'clojure.string}
                'prod-b {:consumed-types ['join] :produced-types [] :retract-types #{} :ns-name 'clara.server.tools.graph.rules.loan-app-rules})
-          idx (ft/build-ancestors-index tam
-                                        (fn [_] #{})
-                                        [{:name 'prod-a} {:name 'prod-b}])]
+          idx (ft/->ancestors-index tam
+                                    (fn [_] #{})
+                                    [{:name 'prod-a} {:name 'prod-b}])]
       (is (= {"clojure.string/join" {:ancestors [] :ns nil}}
              idx)
           "The first (load-order) production's serialization is canonical; the divergent symbol[...] one is dropped")
@@ -790,14 +790,14 @@
   (testing "The reverse index resolves every fact-type id back to its name"
     (let [session (->hierarchy-session)
           analysis (core/->rulebase-analysis session (hierarchy-annotations session))
-          index (ft/build-fact-type-id-index analysis)]
+          index (ft/->fact-type-id-index analysis)]
       (doseq [{type-name :name type-id :id} (vals (:fact-types analysis))]
         (is (= type-name (get index type-id))
             (str "index resolves " type-id " back to " type-name)))))
 
   (testing "A route-id collision throws at index build time"
     (is (thrown? clojure.lang.ExceptionInfo
-                 (ft/build-fact-type-id-index
+                 (ft/->fact-type-id-index
                   {:fact-types {"a" {:id "same-id" :name "a"}
                                 "b" {:id "same-id" :name "b"}}})))))
 

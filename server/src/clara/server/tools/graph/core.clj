@@ -27,7 +27,7 @@
   "Returns the rulebase's ancestors-fn: the wrapped fn from `:get-alphas-fn`
    metadata when present (Clara's own, which filters internal system facts),
    else `clojure.core/ancestors`.  The fallback matches
-   `analyze/build-fallback-type-filter`; only a hand-built rulebase lacks the
+   `clara.server.tools.graph.analyze/build-fallback-type-filter`; only a hand-built rulebase lacks the
    meta."
   [session-or-rulebase]
   (or (-> session-or-rulebase get-rulebase :get-alphas-fn meta :ancestors-fn)
@@ -291,7 +291,7 @@
           (concat (vals (:rules analysis))
                   (vals (:queries analysis)))))
 
-(defn- build-consumers-by-type
+(defn- ->consumers-by-type
   "Returns a map: consumed-type -> #{consumer-name ...}
    for every consumer in `type-analysis-map` that has at least one consumed type."
   [type-analysis-map]
@@ -312,7 +312,7 @@
    producer walks the ancestor chain of each produced type to find consumers,
    rather than evaluating every producer-consumer pair O(n²)."
   [type-analysis-map ancestors-set-fn]
-  (let [consumers-by-type (build-consumers-by-type type-analysis-map)
+  (let [consumers-by-type (->consumers-by-type type-analysis-map)
         graph (volatile! {})]
     (doseq [[producer-name {:keys [produced-types]}] type-analysis-map
             :when (seq produced-types)
@@ -333,14 +333,14 @@
                                producer-name)))))
     @graph))
 
-(defn- build-production-map
+(defn- ->production-map
   "Builds name to production map for the `productions` while maintaining the insertion order."
   [productions]
   (->> productions
        (sequence (comp (map (juxt :name identity)) cat))
        (apply array-map)))
 
-(defn- build-production-summary-map
+(defn- ->production-summary-map
   "Builds a summary map for the `productions` while maintaining the given load order.
    `ctx` is the shared analysis context map (see `->rulebase-analysis`)."
   [{:keys [production-type productions] :as ctx}]
@@ -354,17 +354,17 @@
                 (mapcat (juxt :name #(production-summary % ctx)))))
          (apply array-map))))
 
-(defn- build-rule-summary-map
+(defn- ->rule-summary-map
   [productions ctx]
-  (build-production-summary-map (assoc ctx :production-type :rule
-                                       :productions productions)))
+  (->production-summary-map (assoc ctx :production-type :rule
+                                   :productions productions)))
 
-(defn- build-query-summary-map
+(defn- ->query-summary-map
   [productions ctx]
-  (build-production-summary-map (assoc ctx :production-type :query
-                                       :productions productions)))
+  (->production-summary-map (assoc ctx :production-type :query
+                                   :productions productions)))
 
-(defn- build-production-annotation-map
+(defn- ->production-annotation-map
   [productions annotations]
   (into {}
         (for [p productions]
@@ -391,16 +391,16 @@
                       annotations
                       (ann/normalize-annotations annotations))
 
-        production-annotation-map (build-production-annotation-map productions annotations)
+        production-annotation-map (->production-annotation-map productions annotations)
 
         ancestors-fn (extract-ancestors-fn rulebase)
         ancestors-set-fn (->memoized-ancestors ancestors-fn)
         type-analysis-map (->type-analysis-map productions production-annotation-map)
-        known-set (ft/known-type-names type-analysis-map)
-        ancestors-index (ft/build-ancestors-index type-analysis-map ancestors-set-fn productions)
+        known-set (ft/get-known-type-names type-analysis-map)
+        ancestors-index (ft/->ancestors-index type-analysis-map ancestors-set-fn productions)
 
         dep-graph (->dep-graph type-analysis-map ancestors-set-fn)
-        production-map (build-production-map productions)
+        production-map (->production-map productions)
 
         ;; Shared context threaded through every production summary — the
         ;; per-production summary functions destructure what they need.
@@ -411,14 +411,14 @@
                       :ancestors-set-fn ancestors-set-fn
                       :known-set known-set}
 
-        rules (build-rule-summary-map productions analysis-ctx)
+        rules (->rule-summary-map productions analysis-ctx)
 
-        queries (build-query-summary-map productions analysis-ctx)
+        queries (->query-summary-map productions analysis-ctx)
 
-        fact-types (ft/build-fact-type-summary-map {:rules rules
-                                                    :queries queries
-                                                    :ancestors-index ancestors-index
-                                                    :known-set known-set})
+        fact-types (ft/->fact-type-summary-map {:rules rules
+                                                :queries queries
+                                                :ancestors-index ancestors-index
+                                                :known-set known-set})
 
         nodes (nodes/build-nodes id-to-node)
 
@@ -435,7 +435,7 @@
                   :unresolved (vec unresolved)
                   :merged-annotations annotations}]
     (assoc analysis
-           :fact-type-id-index (ft/build-fact-type-id-index analysis)
+           :fact-type-id-index (ft/->fact-type-id-index analysis)
            :production-id-index (->production-id-index analysis))))
 
 (defn ->rulebase-analysis
@@ -463,14 +463,14 @@
          (->rulebase-analysis* session-or-rulebase annotations))
        (->rulebase-analysis* session-or-rulebase annotations)))))
 
-(defn rulebase-counts
+(defn get-rulebase-counts
   "Returns a high-level summary of the rulebase counts using kebab-case keys."
   [analysis]
   {:rule-count (count (:rules analysis))
    :query-count (count (:queries analysis))
    :fact-type-count (count (:fact-types analysis))})
 
-(defn rules-list
+(defn get-rules-list
   "Returns a sequence of lightweight rule summaries, preserving load order.
    Omits :upstream and :downstream — they are only needed in the detail view
    and add significant payload weight at scale (3k+ rules)."
@@ -482,14 +482,14 @@
                          :dynamic-retract-types-detected])
         (vals (:rules analysis))))
 
-(defn queries-list
+(defn get-queries-list
   "Returns a sequence of lightweight query summaries, preserving load order.
    Omits :upstream and :downstream — they are only needed in the detail view."
   [analysis]
   (mapv #(select-keys % [:name :id :ns :doc :lhs-types :params])
         (vals (:queries analysis))))
 
-(defn rulebase-analysis-external-view
+(defn get-rulebase-analysis-external-view
   "Returns the analysis map stripped of internal implementation details
    (`:fact-type-id-index`, `:production-id-index`, `:merged-annotations`).
    Suitable for serialization to external consumers (e.g. the HTTP API)

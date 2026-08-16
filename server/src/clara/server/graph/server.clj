@@ -106,7 +106,7 @@
           'bare-annotations?))
 
 (s/defschema MemoryAnalysis
-  "A memory-analysis as produced by `memory/->memory-analysis`.
+  "A memory-analysis as produced by `clara.server.tools.graph.memory/->memory-analysis`.
    An open map here — the memory-analysis's full shape is owned by
    `clara.server.tools.graph.memory`."
   (s/pred map? 'memory-analysis?))

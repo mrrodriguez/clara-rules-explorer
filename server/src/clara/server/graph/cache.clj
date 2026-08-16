@@ -87,7 +87,7 @@
 
 (defn warm!
   "Eagerly populates the cache so the next request avoids the full
-   `->rulebase-analysis` + `->memory-analysis` build.
+   `core/->rulebase-analysis` + `memory/->memory-analysis` build.
 
    `memory-analysis` is the enrichment-phase memory-analysis (nil when none);
    when non-nil it is reused instead of re-inspecting the session."

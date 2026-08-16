@@ -15,7 +15,7 @@
 ;; Shared helpers
 ;; ---------------------------------------------------------------------------
 
-(defn raw-type-ns
+(defn get-raw-type-ns
   "Best-effort namespace/package of a raw fact type for grouping: keyword or
    symbol → `(namespace x)`, class → package name, other kinds → nil."
   [x]
@@ -25,7 +25,7 @@
     (class? x) (not-empty (.getPackageName ^Class x))
     :else nil))
 
-(defn known-type-names
+(defn get-known-type-names
   "Serialized names of every raw type in any production's consumed or produced
    types, each serialized in its own production's ns context.  Equals the
    future fact-types map keys by construction; the ancestors enrichment and
@@ -92,7 +92,7 @@
    hierarchy-ordered serialized ancestor names}."
   [ancestors-set-fn resolve-memo ns-name raw-type]
   {:serialized (resolve-memo ns-name raw-type)
-   :ns (raw-type-ns raw-type)
+   :ns (get-raw-type-ns raw-type)
    :ancestors (hierarchy-order (ancestors-set-fn raw-type)
                                ancestors-set-fn
                                (partial resolve-memo ns-name))})
@@ -121,7 +121,7 @@
           acc
           (distinct (concat consumed-types produced-types))))
 
-(defn build-ancestors-index
+(defn ->ancestors-index
   "Builds {serialized-type-name {:ancestors [hierarchy-ordered serialized
    ancestor-name ...] :ns <best-effort namespace>}} for every raw type
    appearing in any production's consumed/produced types.  Each raw type is
@@ -210,7 +210,7 @@
     (concat direct-used direct-inserted direct-retracted
             hierarchy-used hierarchy-inserted hierarchy-retracted)))
 
-(defn build-fact-type-summary-map
+(defn ->fact-type-summary-map
   "Aggregates fact-type usage across rules and queries, attaching `:ancestors`
    (hierarchy-ordered `TypeReference` entries, from the serialized ancestors
    index), `:ns` (best-effort namespace for grouping), and `[ProductionDep]`
@@ -275,7 +275,7 @@
 ;; Read-side accessors (API-facing)
 ;; ---------------------------------------------------------------------------
 
-(defn build-fact-type-id-index
+(defn ->fact-type-id-index
   "Reverse index {id → name} for every fact type in the analysis, asserting
    id uniqueness (a route-id collision throws loudly at analysis-build time
    rather than silently mislinking)."
@@ -289,7 +289,7 @@
           {}
           (vals (:fact-types analysis))))
 
-(defn fact-types-list
+(defn get-fact-types-list
   "Returns a sequence of lightweight fact type summaries, preserving order.
    Omits :ancestors (detail-only) but keeps :ns for grouping and :id for
    links."
@@ -298,7 +298,7 @@
                          :inserted-by-rules :retracted-by-rules])
         (vals (:fact-types analysis))))
 
-(defn session-fact-types-summary
+(defn get-session-fact-types-summary
   "Returns a lightweight summary of fact types in the session and the total count."
   [memory-analysis]
   {:types (->> (:fact-types memory-analysis)
