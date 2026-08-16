@@ -1,6 +1,6 @@
 # Callsite provenance (`:via`) fixes — Plan
 
-Status: **Implemented**
+Status: **Phase 1 implemented (committed as `8f34105`). Phase 2 (naming) and Phase 3 (UI) pending.**
 
 Related: [`analyze-callsite-provenance-fixes-problem-statement.md`](./analyze-callsite-provenance-fixes-problem-statement.md)
 
@@ -8,6 +8,22 @@ Progress: [`analyze-callsite-provenance-fixes-progress.md`](./analyze-callsite-p
 
 Scope: `analyze.callsite` / `analyze/extract-insert-types` — the `:via` chain on
 callsites of `:clara-rules/dynamic-insert-types-detected` (and the retract twin).
+
+---
+
+## Phases
+
+1. **Phase 1 — provenance (DONE, committed `8f34105`):** `:boundary-in-var` +
+   `:rule-path` on every `:via`; dropped-constructor provenance carried into
+   the boundary entry.  §1–§5 describe this phase.
+
+2. **Phase 2 — naming (pending):** rename the two path keys to say exactly
+   what they are: `:rule-to-boundary-path` and
+   `:boundary-to-constructor-path`.  §6.
+
+3. **Phase 3 — UI (pending, final):** render the *full* provenance chain in the
+   UI — `rule-to-boundary-path` first, then the boundary fn, then
+   `boundary-to-constructor-path` — with the shared anchor shown once.  §7.
 
 ---
 
@@ -157,7 +173,7 @@ boundary-side keys are emitted).
 
 ---
 
-## 4. Execution order
+## 4. Execution order (Phase 1 — done)
 
 1. `callsite.clj` core changes (shared path fn, via-base, rule-path-for, both
    passes, schemas).
@@ -185,3 +201,139 @@ boundary-side keys are emitted).
   nothing.
 - Consumers grouping callsites by `:constructor-sym` now see unresolved
   constructor calls move out of the "no constructor" bucket — which is the point.
+
+---
+
+## 6. Phase 2 — Naming: `:rule-to-boundary-path` / `:boundary-to-constructor-path`
+
+### Decision
+
+Rename the two `ViaChain` path keys so each states its span and direction:
+
+| Current | New | Span (both ends inclusive) |
+| --- | --- | --- |
+| `:rule-path` | `:rule-to-boundary-path` | rule var → … → boundary-holding var |
+| `:callstack` | `:boundary-to-constructor-path` | boundary-holding var → … → constructor |
+
+`(last :rule-to-boundary-path)` == `(first :boundary-to-constructor-path)` ==
+`:boundary-in-var` — the shared join.  Both remain shortest paths through the
+var-level call graph (not observed runtime paths); the schema docstrings keep
+that caveat, just under the new names.
+
+### Boundary keys stay as-is (decided)
+
+`clara.rules/insert!` *is* a var name — a var that names a function — so
+`:boundary-var-name-sym` is already consistent with the `:var-name-sym` entries
+inside the two paths (which also name functions/constructors).  No rename.
+`:boundary-in-var` also stays: it names the var the boundary call is written
+in, and the two new path names give it context as the shared join point.
+
+### Server rename surface
+
+- `analyze/callsite.clj` — `ViaChain` schema keys; `via-base` emits
+  `:rule-to-boundary-path`; `resolve-ctor-callsite` emits
+  `:boundary-to-constructor-path`; `resolve-boundary-callsites` merges the
+  dropped `:boundary-to-constructor-path`; `CallsiteResolution`
+  `:dropped-ctor-provenance` value; rename `rule-path-for` →
+  `rule-to-boundary-path-for` (and ctx key `:rule-path-for`); docstrings.
+- `analyze.clj` — `:rule-path-for` ctx key + comment.
+- `serialize.clj` — `serialize-dynamic-callsite` stringifies both renamed keys.
+- `graph/api.clj` — serialized `ViaChain` schema (both keys; string/`[ViaEntry]`).
+- `annotations/rebase.clj` — `rebase-callsite` remaps both renamed keys
+  (and `rebase-via-path` docstring).
+- `server/docs/rule-annotations.md` + `server/docs/analyze-pipeline-concepts.md`
+  — prose, the detection-map example, and the `ViaChain` section.
+- `server/test/clara/server/tools/graph/analyze_test.clj` — ~15 assertions over
+  `(:callstack (:via cs))` / `(:rule-path (:via cs))`.
+- `server/test/clara/server/tools/graph/annotations_merge_test.clj` —
+  `generated-callsite` fixture and the rebase test.
+- `server/test/clara/server/tools/graph/serialize_test.clj` —
+  `test-serialize-dynamic-callsite-via`.
+- `server/test-resources/.../loan-doc-rules-annotations.edn` — regenerate via
+  `make regen-fixture` (the ctor entry's `:callstack` → new key).
+
+### Not affected
+
+- `callsite-id` — `:via` is outside the basis, so no id churn.
+- Merge semantics — detection maps merge on `:callsite-id`; `:via` is opaque.
+- The heuristic `:via {:source :record-ctor-scan}` shape.
+
+### Verification (Phase 2)
+
+```bash
+cd server && make format format-check lint reflection-check test
+```
+
+---
+
+## 7. Phase 3 — UI: render the full provenance chain
+
+### Goal
+
+Show the *entire* chain in `DynamicCallsiteList`'s "Provenance chain", not just
+the constructor half.  Order is `rule-to-boundary-path` first, then the boundary
+fn, then `boundary-to-constructor-path`, with the shared `:boundary-in-var`
+rendered once.
+
+### Files
+
+- `ui/src/lib/types/api.ts` — extend `ViaChain`:
+  ```ts
+  export interface ViaChain {
+    'boundary-var-name-sym'?: string;
+    'boundary-in-var'?: string;
+    'rule-to-boundary-path'?: ViaEntry[];
+    'boundary-to-constructor-path'?: ViaEntry[];
+    source?: string;
+  }
+  ```
+- `ui/src/lib/components/rulebase/DynamicCallsiteList.svelte` — rewrite
+  `buildViaEntries(via)` to compose the full ordered chain:
+  1. `rule-to-boundary-path` — first entry label `rule`, the rest `caller`.
+  2. boundary fn (`boundary-var-name-sym`) — label `boundary`.
+  3. `boundary-to-constructor-path` — **skip its first entry when
+     `rule-to-boundary-path` is present** (that entry is `:boundary-in-var`,
+     already shown as the path tail); otherwise include all.  Last entry label
+     `constructor`, the rest `caller`.
+
+  This keeps today's rendering byte-for-byte for the RHS case (no
+  `rule-to-boundary-path` → identical to now) and adds the rule-side hops when a
+  helper holds the boundary call.
+
+### Testing (Phase 3)
+
+- Extract the chain-composition into a pure function and unit-test the three
+  shapes: RHS-only, helper+constructor (both paths), helper-without-constructor
+  (`rule-to-boundary-path` only).
+- **Demo/e2e data (decided):** extract `collect-app-doc-check-input`'s inline
+  `insert!` into a new `insert-document-check-input!` helper (one hop), keeping
+  the `->document-check-input` → `helpers/->fact` builder/constructor chain
+  intact — so the demo exercises the *full* chain (both
+  `:rule-to-boundary-path` and `:boundary-to-constructor-path`):
+
+  ```clojure
+  (defn insert-document-check-input! [data]
+    (r/insert! (->document-check-input data)))
+
+  (r/defrule collect-app-doc-check-input
+    [Application (= ?app-id app-id)]
+    [AllGivenDocuments (= ?app-id app-id) (= ?given-docs docs)]
+    [AllRequiredDocuments (= ?app-id app-id) (= ?required-docs docs)]
+    =>
+    (let [given-doc-types (into #{} (map :doc-type) ?given-docs)]
+      (insert-document-check-input! {:app-id ?app-id ...})))
+  ```
+
+  Churn: update `analyze_test.clj` (the loan-doc ctor
+  `:boundary-to-constructor-path`/`:rule-to-boundary-path` assertion + the
+  dynamic-rules `collect-app-doc-check-input` source-str), regenerate
+  `loan-doc-rules-annotations.edn` (`make regen-fixture`), the demo session
+  (`make demo-setup`), and the UI static demo data (`pnpm run scrape:demo`).
+  Graph/edge tests are unaffected — the rule still inserts
+  `:loan-doc-rules/document-check-input`.
+
+### Verification (Phase 3)
+
+```bash
+cd ui && make format check lint && make test
+```

@@ -20,6 +20,24 @@ Tracking implementation of [`analyze-callsite-provenance-fixes-plan.md`](./analy
 - [x] 11. Docs (`rule-annotations.md`, `analyze-pipeline-concepts.md`).
 - [x] 12. Server verification (`make format format-check lint reflection-check test`).
 
+## Phase 2 — Naming (`:rule-to-boundary-path` / `:boundary-to-constructor-path`)
+
+- [ ] 13. Keep `:boundary-var-name-sym` / `:boundary-in-var` as-is (decided — both are var names).
+- [ ] 14. `analyze/callsite.clj` — schema + emitters + `rule-to-boundary-path-for` rename.
+- [ ] 15. `analyze.clj` — ctx key rename.
+- [ ] 16. `serialize.clj` + `graph/api.clj` + `annotations/rebase.clj`.
+- [ ] 17. Server tests (`analyze_test`, `annotations_merge_test`, `serialize_test`).
+- [ ] 18. Regenerate `loan-doc-rules-annotations.edn`.
+- [ ] 19. Server docs (`rule-annotations.md`, `analyze-pipeline-concepts.md`).
+- [ ] 20. Server verification.
+
+## Phase 3 — UI (final)
+
+- [ ] 21. `ui/src/lib/types/api.ts` — `ViaChain` gains both renamed path keys.
+- [ ] 22. `ui/.../DynamicCallsiteList.svelte` — full ordered chain (rule path → boundary → constructor path), shared anchor once.
+- [ ] 23. UI unit tests (RHS-only / helper+ctor / helper-no-ctor) + loan-doc helper-insert extraction for e2e.
+- [ ] 24. UI verification (`make format check lint test`).
+
 ## Verification results
 
 ```bash
@@ -52,7 +70,9 @@ make test             # Ran 229 tests containing 1554 assertions. 0 failures, 0 
 
 ## Remaining
 
+- **Phase 2 (naming)** and **Phase 3 (UI)** — see the two new plan sections;
+  not started.
 - Bump `nubank/matcher-combinators` 3.9.1 → 3.11.0 once the local Maven cache is
   writable (or the dependency is otherwise obtainable).
-- UI-side changes: none needed — the `:via` keys are additive and the API types
-  already model `ViaChain` as an open optional-key map.
+- Note: the earlier "UI-side changes: none needed" line is superseded — Phase 3
+  adds UI rendering of the full chain.
