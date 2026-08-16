@@ -109,7 +109,7 @@
                    {:boundary-var-name-sym clara.rules/insert!,
                     :boundary-in-var
                     clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input,
-                    :callstack
+                    :boundary-to-constructor-path
                     [{:var-name-sym
                       clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input}
                      {:var-name-sym

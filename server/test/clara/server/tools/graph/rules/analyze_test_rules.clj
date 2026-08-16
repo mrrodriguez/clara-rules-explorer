@@ -436,7 +436,7 @@
   (insert-shared! x))
 
 (r/defrule rule-two-paths-to-boundary
-  "The rule reaches insert-shared! by two paths; :rule-path picks one
+  "The rule reaches insert-shared! by two paths; :rule-to-boundary-path picks one
    deterministically (BFS sorted by str)."
   [Application (= ?app-id app-id)]
   =>

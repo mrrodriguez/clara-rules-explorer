@@ -343,11 +343,11 @@
                        (:boundary-in-var via)
                        (update :boundary-in-var #(if (symbol? %) (str %) %))
 
-                       (:callstack via)
-                       (update :callstack stringify-path)
+                       (:boundary-to-constructor-path via)
+                       (update :boundary-to-constructor-path stringify-path)
 
-                       (:rule-path via)
-                       (update :rule-path stringify-path)))))
+                       (:rule-to-boundary-path via)
+                       (update :rule-to-boundary-path stringify-path)))))
     true utils/remove-nil-vals))
 
 (defn serialize-dynamic-detection

@@ -22,14 +22,14 @@ Tracking implementation of [`analyze-callsite-provenance-fixes-plan.md`](./analy
 
 ## Phase 2 — Naming (`:rule-to-boundary-path` / `:boundary-to-constructor-path`)
 
-- [ ] 13. Keep `:boundary-var-name-sym` / `:boundary-in-var` as-is (decided — both are var names).
-- [ ] 14. `analyze/callsite.clj` — schema + emitters + `rule-to-boundary-path-for` rename.
-- [ ] 15. `analyze.clj` — ctx key rename.
-- [ ] 16. `serialize.clj` + `graph/api.clj` + `annotations/rebase.clj`.
-- [ ] 17. Server tests (`analyze_test`, `annotations_merge_test`, `serialize_test`).
-- [ ] 18. Regenerate `loan-doc-rules-annotations.edn`.
-- [ ] 19. Server docs (`rule-annotations.md`, `analyze-pipeline-concepts.md`).
-- [ ] 20. Server verification.
+- [x] 13. Keep `:boundary-var-name-sym` / `:boundary-in-var` as-is (decided — both are var names).
+- [x] 14. `analyze/callsite.clj` — schema + emitters + `rule-to-boundary-path-for` rename.
+- [x] 15. `analyze.clj` — ctx key rename.
+- [x] 16. `serialize.clj` + `graph/api.clj` + `annotations/rebase.clj`.
+- [x] 17. Server tests (`analyze_test`, `annotations_merge_test`, `serialize_test`).
+- [x] 18. Regenerate `loan-doc-rules-annotations.edn`.
+- [x] 19. Server docs (`rule-annotations.md`, `analyze-pipeline-concepts.md`).
+- [x] 20. Server verification.
 
 ## Phase 3 — UI (final)
 
@@ -70,9 +70,7 @@ make test             # Ran 229 tests containing 1554 assertions. 0 failures, 0 
 
 ## Remaining
 
-- **Phase 2 (naming)** and **Phase 3 (UI)** — see the two new plan sections;
-  not started.
+- **Phase 3 (UI)** — types + full-chain rendering + loan-doc helper-insert
+  extraction for e2e; not started.
 - Bump `nubank/matcher-combinators` 3.9.1 → 3.11.0 once the local Maven cache is
   writable (or the dependency is otherwise obtainable).
-- Note: the earlier "UI-side changes: none needed" line is superseded — Phase 3
-  adds UI rendering of the full chain.

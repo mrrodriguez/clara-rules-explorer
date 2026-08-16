@@ -24,7 +24,7 @@
    :filename "acme/pricing.clj"
    :constructor-sym 'acme.facts/make-fact
    :via {:boundary-var-name-sym 'clara.rules/insert!
-         :callstack [{:var-name-sym 'acme.facts/make-fact}]}
+         :boundary-to-constructor-path [{:var-name-sym 'acme.facts/make-fact}]}
    :status :none})
 
 (def ^:private generated-layer
@@ -978,7 +978,7 @@
     (is (str/ends-with? (first ids) ":0"))
     (is (str/ends-with? (second ids) ":1"))))
 
-(deftest rebase-remaps-via-boundary-in-var-and-rule-path
+(deftest rebase-remaps-via-boundary-in-var-and-rule-to-boundary-path
   (let [cs {:source-str "(->fact :t m)"
             :ns-name-sym 'acme.pricing
             :filename "acme/pricing.clj"
@@ -986,10 +986,10 @@
             :status :none
             :via {:boundary-var-name-sym 'clara.rules/insert!
                   :boundary-in-var 'acme.pricing/insert-helper
-                  :rule-path [{:var-name-sym 'acme.pricing/the-rule}
-                              {:var-name-sym 'acme.pricing/insert-helper}]
-                  :callstack [{:var-name-sym 'acme.pricing/insert-helper}
-                              {:var-name-sym 'acme.facts/make-fact}]}}
+                  :rule-to-boundary-path [{:var-name-sym 'acme.pricing/the-rule}
+                                          {:var-name-sym 'acme.pricing/insert-helper}]
+                  :boundary-to-constructor-path [{:var-name-sym 'acme.pricing/insert-helper}
+                                                 {:var-name-sym 'acme.facts/make-fact}]}}
         layer (ann/layer {:id :curated
                           :annotations
                           {"acme.pricing/rule"
@@ -1002,9 +1002,9 @@
     (is (= 'clara.rules/insert! (:boundary-var-name-sym via)))
     (is (= 'acme.billing/insert-helper (:boundary-in-var via)))
     (is (= ['acme.billing/the-rule 'acme.billing/insert-helper]
-           (mapv :var-name-sym (:rule-path via))))
+           (mapv :var-name-sym (:rule-to-boundary-path via))))
     (is (= ['acme.billing/insert-helper 'acme.facts-v2/make-fact]
-           (mapv :var-name-sym (:callstack via))))))
+           (mapv :var-name-sym (:boundary-to-constructor-path via))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Detection-map merge: fact-instance-derived-types survives layering

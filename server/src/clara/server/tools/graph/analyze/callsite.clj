@@ -216,8 +216,8 @@
    Returns [start … end] or nil when unreachable.
    Neighbors are sorted by str for deterministic traversal.
 
-   Shared by the constructor pass (for `:callstack`) and by `rule-path-for`
-   (for the rule-side `:rule-path`); in both cases the result is a *shortest*
+   Shared by the constructor pass (for `:boundary-to-constructor-path`) and by `rule-to-boundary-path-for`
+   (for the rule-side `:rule-to-boundary-path`); in both cases the result is a *shortest*
    path through a var-level call graph, not the observed runtime path."
   [graph start end]
   (loop [queue (conj clojure.lang.PersistentQueue/EMPTY [start])
@@ -233,7 +233,7 @@
             (recur (into (pop queue) (map #(conj path %) neighbors))
                    (into visited neighbors))))))))
 
-(defn rule-path-for
+(defn rule-to-boundary-path-for
   "Returns a memoized `(fn [boundary-in-var] -> [ViaEntry …] | nil)` computing
    the shortest call-graph path from `rule-var` to `boundary-in-var`, both ends
    inclusive, as `{:var-name-sym …}` entries.  nil when the two vars are equal
@@ -251,13 +251,13 @@
 
 (defn- via-base
   "The boundary-side `:via` keys shared by both resolution passes: the boundary
-   fn and the var the boundary call is written in, plus `:rule-path` when that
-   var is not the rule itself (see `rule-path-for`)."
-  [boundary-fn-sym boundary-in-var rule-path-for]
-  (let [rule-path (when rule-path-for (rule-path-for boundary-in-var))]
+   fn and the var the boundary call is written in, plus `:rule-to-boundary-path` when that
+   var is not the rule itself (see `rule-to-boundary-path-for`)."
+  [boundary-fn-sym boundary-in-var rule-to-boundary-path-for]
+  (let [rule-to-boundary-path (when rule-to-boundary-path-for (rule-to-boundary-path-for boundary-in-var))]
     (cond-> {:boundary-var-name-sym boundary-fn-sym
              :boundary-in-var boundary-in-var}
-      rule-path (assoc :rule-path rule-path))))
+      rule-to-boundary-path (assoc :rule-to-boundary-path rule-to-boundary-path))))
 
 (defn resolve-boundary-callsites
   "Resolves boundary-call arguments via the ctor chain and the optional
@@ -271,16 +271,16 @@
      `:resolve-record-type`   - memoized record-type resolver
      `:direction`             - `:insert` | `:retract`
      `:rule`                  - the full production map of the consuming rule (may be nil)
-     `:rule-var`              - the fq rule var symbol (head of `:rule-path`)
-     `:rule-path-for`         - memoized (fn [boundary-in-var] -> [ViaEntry …] | nil)
+     `:rule-var`              - the fq rule var symbol (head of `:rule-to-boundary-path`)
+     `:rule-to-boundary-path-for`         - memoized (fn [boundary-in-var] -> [ViaEntry …] | nil)
      `:callsite-resolver-fn`  - optional caller escape hatch
-     `:dropped-ctor-provenance` - {idx -> {:constructor-sym … :callstack …}} from
+     `:dropped-ctor-provenance` - {idx -> {:constructor-sym … :boundary-to-constructor-path …}} from
                                  the constructor pass, for arguments it dropped
 
    Every entry gains a boundary-side `:via` (`:boundary-var-name-sym`,
-   `:boundary-in-var`, and `:rule-path` when the boundary call is not in the
+   `:boundary-in-var`, and `:rule-to-boundary-path` when the boundary call is not in the
    rule's own RHS).  When the constructor pass dropped an unresolvable
-   constructor for this argument, its `:constructor-sym` and `:callstack` are
+   constructor for this argument, its `:constructor-sym` and `:boundary-to-constructor-path` are
    merged in — so an unresolvable call to `->fact` is still described as such
    rather than emitted with no provenance.
 
@@ -300,7 +300,7 @@
                                                 :status (if (empty? tokens) :none :full)
                                                 :via (via-base (u/var-usage-callee usage)
                                                                (u/var-usage-caller usage)
-                                                               (:rule-path-for ctx))}
+                                                               (:rule-to-boundary-path-for ctx))}
                                          (seq tokens)
                                          (assoc :resolved-types (vec (sort-by str tokens)))
 
@@ -310,8 +310,8 @@
                                          (:constructor-sym dropped)
                                          (assoc :constructor-sym (:constructor-sym dropped))
 
-                                         (:callstack dropped)
-                                         (assoc-in [:via :callstack] (:callstack dropped)))]
+                                         (:boundary-to-constructor-path dropped)
+                                         (assoc-in [:via :boundary-to-constructor-path] (:boundary-to-constructor-path dropped)))]
                              [idx entry])))
                     traced-args)
         entries (into [] (comp (map second) (distinct)) pairs)
@@ -361,17 +361,17 @@
      :call-path - [inserter-var … containing-var] from `ctor-call-path`
      :direction - :insert or :retract
      :rule - the rule production
-     :rule-path-for - memoized (fn [boundary-in-var] -> [ViaEntry …] | nil)
+     :rule-to-boundary-path-for - memoized (fn [boundary-in-var] -> [ViaEntry …] | nil)
      :resolver-fn - the `:type-resolver-fn` of the `:fact-constructors` spec
        that matched this callsite"
   [{:keys [ctor-usage ctor-form boundary-usage call-path direction rule
-           rule-path-for resolver-fn]}]
+           rule-to-boundary-path-for resolver-fn]}]
   (let [boundary-fn-sym (u/fq-sym (:to boundary-usage) (:name boundary-usage))
         ctor-sym (u/fq-sym (:to ctor-usage) (:name ctor-usage))
         via (when (seq call-path)
-              (assoc (via-base boundary-fn-sym (first call-path) rule-path-for)
-                     :callstack (conj (mapv (fn [v] {:var-name-sym v}) call-path)
-                                      {:var-name-sym ctor-sym})))
+              (assoc (via-base boundary-fn-sym (first call-path) rule-to-boundary-path-for)
+                     :boundary-to-constructor-path (conj (mapv (fn [v] {:var-name-sym v}) call-path)
+                                                         {:var-name-sym ctor-sym})))
         arg-form ctor-form
         resolver-ctx (cond-> {:constructor-sym ctor-sym
                               :arg-form arg-form
@@ -480,7 +480,7 @@
                                            pass merges p's keys into its entry
      nil                                — unreachable or unowned (not an insert)
 
-   `:provenance` is the `:constructor-sym` + `:via :callstack` of the dropped
+   `:provenance` is the `:constructor-sym` + `:via :boundary-to-constructor-path` of the dropped
    constructor entry, so the boundary pass can emit the provenance it would
    otherwise throw away."
   [{:keys [ctor-match inserter-var graph get-lines read-ctor-form cfg-base candidates siblings]}]
@@ -502,8 +502,8 @@
           {:owned {:idx (:idx owner) :entry entry}}
           {:dropped {:idx (:idx owner)
                      :provenance (cond-> {:constructor-sym (:constructor-sym entry)}
-                                   (:callstack (:via entry))
-                                   (assoc :callstack (:callstack (:via entry))))}})))))
+                                   (:boundary-to-constructor-path (:via entry))
+                                   (assoc :boundary-to-constructor-path (:boundary-to-constructor-path (:via entry))))}})))))
 
 (defn resolve-constructor-callsites
   "Resolves constructor-of-interest callsites reached from a rule's boundary calls.
@@ -513,7 +513,7 @@
      ({inserter-var -> [CtorUsageMatch …]} from `index/build-analysis-index`),
      scoped to this rule var.
    `ctx` — must contain :get-lines, :read-ctor-form, :graph,
-     :direction, :rule, :rule-path-for, :usages-by-caller.
+     :direction, :rule, :rule-to-boundary-path-for, :usages-by-caller.
 
    A constructor is emitted only when some boundary argument is shown to reach
    it (see `owning-arg`) *and* the resolver returns a type.  A constructor call
@@ -521,19 +521,19 @@
    `(let [f (->fact :x)] (insert! (other)))` from claiming `:x`.  A constructor
    the resolver cannot type is left to the boundary path rather than reported
    twice; its provenance is returned under `:dropped-ctor-provenance` so the
-   boundary entry can carry `:constructor-sym`/`:callstack`.
+   boundary entry can carry `:constructor-sym`/`:boundary-to-constructor-path`.
 
    Returns a `CallsiteResolution` including `:owned-arg-idxs` — the `:idx` of
    every boundary argument a constructor accounted for.  Those must not also go
    through `resolve-boundary-callsites`, or the same insert would be reported
    twice (see `analyze/extract-insert-types`)."
   [traced-args constructor-ctr-map {:keys [get-lines read-ctor-form graph direction rule
-                                           usages-by-caller rule-path-for]}]
+                                           usages-by-caller rule-to-boundary-path-for]}]
   (let [args-by-caller (group-by #(u/fq-sym (:from (:usage %)) (:from-var (:usage %)))
                                  traced-args)
         cfg-base {:direction direction
                   :rule rule
-                  :rule-path-for rule-path-for}
+                  :rule-to-boundary-path-for rule-to-boundary-path-for}
         results (into []
                       (mapcat
                        (fn [[inserter-var ctor-matches]]
@@ -590,24 +590,25 @@
                             (s/optional-key :fact-type-spec) {s/Keyword s/Any}})})
 
 (s/defschema ViaEntry
-  "A single entry in a constructor callstack chain (internal symbol form;
-   `clara.server.graph.api/ViaEntry` is its serialized string counterpart)."
+  "A single entry in a `:rule-to-boundary-path` / `:boundary-to-constructor-path`
+   chain (internal symbol form; `clara.server.graph.api/ViaEntry` is its
+   serialized string counterpart)."
   {:var-name-sym s/Symbol})
 
 (s/defschema ViaChain
   "Provenance chain from a boundary fn to a constructor callsite (internal
    symbol form; `clara.server.graph.api/ViaChain` is its serialized string
    counterpart).  `:boundary-in-var` is the var the boundary call is written
-   in; `:rule-path` is the rule→`:boundary-in-var` chain (omitted when the two
-   are the same var).  `:rule-path` and `:callstack` are shortest paths through
+   in; `:rule-to-boundary-path` is the rule→`:boundary-in-var` chain (omitted when the two
+   are the same var).  `:rule-to-boundary-path` and `:boundary-to-constructor-path` are shortest paths through
    a var-level call graph, not observed runtime call paths.  `:source` marks
    heuristic provenance — `:record-ctor-scan` when the callsite comes from the
    subtree-wide record-ctor scan fallback rather than a traced call chain;
-   heuristic entries have no `:callstack`."
+   heuristic entries have no `:boundary-to-constructor-path`."
   {(s/optional-key :boundary-var-name-sym) s/Symbol
    (s/optional-key :boundary-in-var) s/Symbol
-   (s/optional-key :callstack) [ViaEntry]
-   (s/optional-key :rule-path) [ViaEntry]
+   (s/optional-key :boundary-to-constructor-path) [ViaEntry]
+   (s/optional-key :rule-to-boundary-path) [ViaEntry]
    (s/optional-key :source) (s/enum :record-ctor-scan)})
 
 (s/defschema CallsiteResolverContext
@@ -671,7 +672,7 @@
    which the boundary pass must skip so no insert is reported twice.
    `:dropped-ctor-provenance` (constructor pass only) maps the `:idx` of an
    argument whose constructor the type-resolver could not type to that
-   dropped entry's `:constructor-sym`/`:callstack`; the boundary pass merges
+   dropped entry's `:constructor-sym`/`:boundary-to-constructor-path`; the boundary pass merges
    them into its entry for the argument (ambiguously-owned args are omitted)."
   {:callsites [CallsiteEntry]
    :resolved-types #{s/Any}                  ; type-agnostic tokens — see CallsiteEntry
@@ -680,4 +681,4 @@
    (s/optional-key :resolved-arg-idxs) #{s/Int}
    (s/optional-key :dropped-ctor-provenance)
    {s/Int {(s/optional-key :constructor-sym) s/Symbol
-           (s/optional-key :callstack) [ViaEntry]}}})
+           (s/optional-key :boundary-to-constructor-path) [ViaEntry]}}})

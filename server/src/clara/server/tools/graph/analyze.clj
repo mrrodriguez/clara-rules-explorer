@@ -219,11 +219,11 @@
                                          constructor-callsite-map graph
                                          boundary-usages-by-caller
                                          dynamic-type-fallback-resolution] :as ctx}]
-  (let [;; The rule var is the head of every `:rule-path`; memoize its BFS to
+  (let [;; The rule var is the head of every `:rule-to-boundary-path`; memoize its BFS to
         ;; each boundary-holding var once per rule (callsites cluster in a few).
         ctx (assoc ctx
                    :rule-var var-name
-                   :rule-path-for (callsite/rule-path-for graph var-name))
+                   :rule-to-boundary-path-for (callsite/rule-to-boundary-path-for graph var-name))
         boundary-usages
         (into []
               (comp (mapcat #(get boundary-usages-by-caller %))

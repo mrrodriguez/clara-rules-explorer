@@ -62,7 +62,7 @@
   (if (contains? m k) (update m k f) m))
 
 (defn- rebase-via-path
-  "Remaps each entry of a `:callstack`/`:rule-path` via chain."
+  "Remaps each entry of a `:boundary-to-constructor-path`/`:rule-to-boundary-path` via chain."
   [ns-mapping stack]
   (mapv #(update-some % :var-name-sym (fn [v] (rebase-qualified ns-mapping v)))
         stack))
@@ -81,9 +81,9 @@
                                                          #(rebase-qualified ns-mapping %))
                                             (update-some :boundary-in-var
                                                          #(rebase-qualified ns-mapping %))
-                                            (update-some :callstack
+                                            (update-some :boundary-to-constructor-path
                                                          (partial rebase-via-path ns-mapping))
-                                            (update-some :rule-path
+                                            (update-some :rule-to-boundary-path
                                                          (partial rebase-via-path ns-mapping))))))]
     ;; entries with a basis get fresh ids from the remapped content;
     ;; id-only references (no witness) keep their id and will dangle —

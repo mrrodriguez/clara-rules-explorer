@@ -211,14 +211,14 @@ Each callsite carries provenance:
 ```
 
 `ViaChain` carries two rule-side keys beyond the constructor chain
-(`:callstack`):
+(`:boundary-to-constructor-path`):
 
 - **`:boundary-in-var`** — the var the boundary call is written in (the
   boundary's direct caller).  Exact, no graph walk.
-- **`:rule-path`** — the shortest call-graph path from the rule var to
+- **`:rule-to-boundary-path`** — the shortest call-graph path from the rule var to
   `:boundary-in-var` (both inclusive), omitted when the two are the same var.
 
-Both `:rule-path` and `:callstack` are shortest paths through the var-level
+Both `:rule-to-boundary-path` and `:boundary-to-constructor-path` are shortest paths through the var-level
 call graph, not observed runtime call paths.
 
 ### 2.7 Trace / Traced Args
@@ -531,12 +531,12 @@ detection entry reflects whether all argument forms were accounted for:
 
 When Priority 1 owns an argument but its type-resolver returns no type (an
 unresolvable constructor), the constructor entry is dropped rather than
-emitted twice — but its `:constructor-sym` and `:callstack` are carried over
+emitted twice — but its `:constructor-sym` and `:boundary-to-constructor-path` are carried over
 (`:dropped-ctor-provenance`) and merged into the Priority 2 boundary entry for
 that argument.  When two dropped constructors own the same argument the
 constructor identity is ambiguous, and only the boundary-side keys are
 emitted.  Every Priority 2 entry also gains a boundary-side `:via`
-(`:boundary-var-name-sym`, `:boundary-in-var`, `:rule-path`) from the boundary
+(`:boundary-var-name-sym`, `:boundary-in-var`, `:rule-to-boundary-path`) from the boundary
 `usage` it already has.
 
 | Resolution | Meaning |

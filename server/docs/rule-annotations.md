@@ -254,7 +254,7 @@ Resolved types are **promoted**: a fully-resolved dynamic insert also appears in
     :constructor-sym my.helpers/->fact
     :via {:boundary-var-name-sym clara.rules/insert!
           :boundary-in-var       my.rules/collect-input
-          :callstack [{:var-name-sym my.rules/collect-input}
+          :boundary-to-constructor-path [{:var-name-sym my.rules/collect-input}
                       {:var-name-sym my.rules/->document-check-input}
                       {:var-name-sym my.helpers/->fact}]}}]
   :resolution :full}}
@@ -271,7 +271,7 @@ Resolved types are **promoted**: a fully-resolved dynamic insert also appears in
   curation.
 * **`:resolved-types`** — present when resolved; the fact-type tokens.
 * **`:constructor-sym`** — present when resolved via a `:fact-constructors` spec; the fully-qualified constructor symbol. Its presence also discriminates constructor-path callsites from boundary-path ones (see note on `:source-str` below).
-* **`:via`** — the `ViaChain` provenance (see below).  Constructor-path callsites carry the full chain (`:boundary-var-name-sym`, `:boundary-in-var`, `:callstack`, and `:rule-path` when the boundary call is not in the rule's own RHS).  Boundary-path callsites (no `:constructor-sym`) carry the boundary-side keys — `:boundary-var-name-sym`, `:boundary-in-var`, and `:rule-path` — plus a merged `:callstack` when an unresolvable constructor was dropped onto them.  On *heuristic* callsites (the record-ctor scan fallback, below), `:via` instead carries `{:source :record-ctor-scan}` with no `:callstack`.
+* **`:via`** — the `ViaChain` provenance (see below).  Constructor-path callsites carry the full chain (`:boundary-var-name-sym`, `:boundary-in-var`, `:boundary-to-constructor-path`, and `:rule-to-boundary-path` when the boundary call is not in the rule's own RHS).  Boundary-path callsites (no `:constructor-sym`) carry the boundary-side keys — `:boundary-var-name-sym`, `:boundary-in-var`, and `:rule-to-boundary-path` — plus a merged `:boundary-to-constructor-path` when an unresolvable constructor was dropped onto them.  On *heuristic* callsites (the record-ctor scan fallback, below), `:via` instead carries `{:source :record-ctor-scan}` with no `:boundary-to-constructor-path`.
 * **`:resolution`** (aggregate) — `:full` when every callsite is `:full`, `:none` when every callsite is `:none`, `:partial` otherwise. Heuristic scan callsites count as resolved; check `:via :source` to distinguish their confidence.
 
 ### Heuristic record-ctor scan fallback
@@ -448,7 +448,7 @@ the rule reaches the var holding that boundary call:
 ```clojure
 {:boundary-var-name-sym clara.rules/insert!
  :boundary-in-var       my.rules/collect-app-doc-check-input
- :callstack
+ :boundary-to-constructor-path
  [{:var-name-sym my.rules/collect-app-doc-check-input}
   {:var-name-sym my.rules/->document-check-input}
   {:var-name-sym my.helpers/->fact}]}
@@ -457,15 +457,15 @@ the rule reaches the var holding that boundary call:
 - **`:boundary-var-name-sym`** — the `insert!`/`retract!` variant.
 - **`:boundary-in-var`** — the var the boundary call is written in (the
   boundary's direct caller). Always present when `:via` is.
-- **`:callstack`** — BFS shortest-path through the call graph from the boundary's
+- **`:boundary-to-constructor-path`** — BFS shortest-path through the call graph from the boundary's
   direct caller to the constructor's containing var, then the constructor itself.
-- **`:rule-path`** — BFS shortest-path from the rule var to `:boundary-in-var`
+- **`:rule-to-boundary-path`** — BFS shortest-path from the rule var to `:boundary-in-var`
   (both ends inclusive). Omitted when the two are the same var (a boundary call
   in the rule's own RHS), so a direct-RHS call reads as it did before this key
   existed.
 
 Entries are maps (`{:var-name-sym …}`) so future extensions (arity, filename,
-row/col) don't require a breaking change.  Both `:rule-path` and `:callstack`
+row/col) don't require a breaking change.  Both `:rule-to-boundary-path` and `:boundary-to-constructor-path`
 are **shortest paths through a var-level call graph**, not observed runtime
 call paths — clj-kondo reports var-level edges, so the chain is a shortest path
 rather than the path actually taken at runtime.
@@ -537,7 +537,7 @@ ways an argument reaches a constructor, each matching how the argument is writte
 | The argument is… | Example | How it is matched |
 |---|---|---|
 | the constructor call itself | `(insert! (->fact :t m))`, `(insert-all! (mapv #(->fact :t %) xs))` | the constructor's source span is inside the boundary call's |
-| a call that leads to it | `(insert! (my-middle-fn args))` where `my-middle-fn` calls `->fact` | a call written inside the boundary call names a link on the constructor's `:via` callstack — at any depth |
+| a call that leads to it | `(insert! (my-middle-fn args))` where `my-middle-fn` calls `->fact` | a call written inside the boundary call names a link on the constructor's `:via` `:boundary-to-constructor-path` — at any depth |
 | a local bound to it | `(let [f (->fact :t m)] (insert! f))` | the locals-traced form equals the resolved constructor call form |
 
 All three are needed, and none subsumes the others. The call graph is
@@ -632,7 +632,7 @@ helper is recorded as a direct inserter, `var-reachability` reports
 `:is-inserter? true` for rules that call it, and `extract-insert-types` reads
 boundary argument forms out of the synthesized source. `:fact-constructors` and
 `:callsite-resolver-fn` are reached normally, and constructor callsites carry a
-`:via` callstack through the helper chain.
+`:via` `:boundary-to-constructor-path` through the helper chain.
 
 ```clojure
 (let [analysis (analyze/analyze-session-rules

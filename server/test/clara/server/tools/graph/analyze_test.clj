@@ -529,7 +529,7 @@
           (is (= `atr/widget-transform (-> cs :via :boundary-in-var)))
           (is (= [{:var-name-sym `atr/rule-consume-widget-transform}
                   {:var-name-sym `atr/widget-transform}]
-                 (-> cs :via :rule-path)))
+                 (-> cs :via :rule-to-boundary-path)))
           "alias callsite carries its alias context and rule-side provenance")
         (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-consume-widget-transform))))
 
@@ -567,7 +567,7 @@
           (is (= `atr/widget-transform (-> cs :via :boundary-in-var)))
           (is (= [{:var-name-sym `atr/rule-consume-widget-transform}
                   {:var-name-sym `atr/widget-transform}]
-                 (-> cs :via :rule-path))))
+                 (-> cs :via :rule-to-boundary-path))))
         (is (= [:widget-output]
                (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-consume-widget-transform)))
             "resolver-resolved alias callsites are promoted")
@@ -1011,8 +1011,8 @@
           (is (= :full (:status cs)))
           (is (= [:demo/parsed] (:resolved-types cs)))
           (is (= #{"parse-and-insert!" "->fact"}
-                 (set (map (comp name :var-name-sym) (:callstack (:via cs)))))
-              "the :via callstack names the helper and the constructor"))))))
+                 (set (map (comp name :var-name-sym) (:boundary-to-constructor-path (:via cs)))))
+              "the :via boundary-to-constructor-path names the helper and the constructor"))))))
 
 (deftest test-ns-var-defs-fn--two-hop-helper
   (let [ns-sym 'fake.eval-two-hop
@@ -1060,8 +1060,8 @@
       (let [cs (first callsites)]
         (is (= :full (:status cs)))
         (is (= #{"inner-insert!" "->fact"}
-               (set (map (comp name :var-name-sym) (:callstack (:via cs)))))
-            "the :via callstack names the (def f (fn f …)) helper and constructor")))))
+               (set (map (comp name :var-name-sym) (:boundary-to-constructor-path (:via cs)))))
+            "the :via boundary-to-constructor-path names the (def f (fn f …)) helper and constructor")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Callsite identity edge cases
@@ -1321,13 +1321,13 @@
           (is (= ns-sym (:ns-name-sym cs)))
           (is (= filename (:filename cs)))
           ;; :via chain
-          (let [{:keys [boundary-var-name-sym callstack]} (:via cs)]
+          (let [{:keys [boundary-var-name-sym boundary-to-constructor-path]} (:via cs)]
             (is (= 'clara.rules/insert-all! boundary-var-name-sym))
             (is (= [`atr/rule-ctor-of-interest-via-helper
                     `atr/make-tagged-facts
                     ->fact-sym]
-                   (mapv :var-name-sym callstack))
-                "callstack: rule-var → make-tagged-facts → ->fact")))))
+                   (mapv :var-name-sym boundary-to-constructor-path))
+                "boundary-to-constructor-path: rule-var → make-tagged-facts → ->fact")))))
 
     (testing "Direct ->fact call (no helper) still works but isn't resolved by default"
       ;; Without match-fn, ->fact is just an unknown constructor-named function
@@ -1347,12 +1347,12 @@
           (is (= :full (:status cs)))
           (is (= ->fact-sym (:constructor-sym cs)))
           (is (= [:custom-fact-type] (:resolved-types cs)))
-          (let [{:keys [boundary-var-name-sym callstack]} (:via cs)]
+          (let [{:keys [boundary-var-name-sym boundary-to-constructor-path]} (:via cs)]
             (is (= 'clara.rules/insert! boundary-var-name-sym))
             ;; Direct call: the containing var IS the inserter var
             (is (= [`atr/rule-fact-builder-call ->fact-sym]
-                   (mapv :var-name-sym callstack))
-                "callstack: boundary-caller → ->fact (direct, no helper)")))))))
+                   (mapv :var-name-sym boundary-to-constructor-path))
+                "boundary-to-constructor-path: boundary-caller → ->fact (direct, no helper)")))))))
 
 (deftest test-constructor-resolver-overrules-callsite-resolver
   (testing "constructor path owns its callsite; generic resolver handles the rest"
@@ -1393,7 +1393,7 @@
           (is (= ->fact-sym (:constructor-sym cs)))
           (is (= 'clara.rules/insert! (:boundary-var-name-sym (:via cs))))
           (is (= [`atr/rule-ctor-and-opaque-inserts ->fact-sym]
-                 (mapv :var-name-sym (:callstack (:via cs)))))))
+                 (mapv :var-name-sym (:boundary-to-constructor-path (:via cs)))))))
 
       (testing "the opaque insert still reaches :callsite-resolver-fn"
         (let [cs (by-type :demo/opaque)]
@@ -1433,7 +1433,7 @@
             (str rule-sym " reports the insert exactly once"))
         (is (= ->fact-sym (:constructor-sym cs))
             (str rule-sym " keeps the constructor entry, not the boundary one"))
-        (is (= chain (mapv :var-name-sym (:callstack (:via cs))))
+        (is (= chain (mapv :var-name-sym (:boundary-to-constructor-path (:via cs))))
             (str rule-sym " :via records the full chain"))
         (is (empty? (filter #(and (seq? %) (= arg-head (first %))) @seen))
             (str rule-sym ": :callsite-resolver-fn is not asked about the chained arg")))))
@@ -1572,16 +1572,16 @@
                (:constructor-sym cs)))
         (is (= [:loan-doc-rules/document-check-input]
                (:resolved-types cs)))
-        (let [{:keys [boundary-var-name-sym callstack]} (:via cs)]
+        (let [{:keys [boundary-var-name-sym boundary-to-constructor-path]} (:via cs)]
           (is (= 'clara.rules/insert! boundary-var-name-sym))
           (is (= [`ldr/collect-app-doc-check-input
                   `ldr/->document-check-input
                   'clara.server.tools.graph.rules.helpers/->fact]
-                 (mapv :var-name-sym callstack))
-              "callstack: collect-app-doc-check-input → ->document-check-input → helpers/->fact"))))))
+                 (mapv :var-name-sym boundary-to-constructor-path))
+              "boundary-to-constructor-path: collect-app-doc-check-input → ->document-check-input → helpers/->fact"))))))
 
 ;; ---------------------------------------------------------------------------
-;; Callsite `:via` provenance — `:boundary-in-var` and `:rule-path`
+;; Callsite `:via` provenance — `:boundary-in-var` and `:rule-to-boundary-path`
 ;; (see docs/planning/analyze-callsite-provenance-fixes-problem-statement.md)
 ;; ---------------------------------------------------------------------------
 
@@ -1592,11 +1592,11 @@
                  :callsites
                  first)]
       (is (= `atr/rule-fact-builder-call (-> cs :via :boundary-in-var)))
-      (is (nil? (-> cs :via :rule-path))
-          "no rule-path when the boundary call is in the rule's own RHS")
+      (is (nil? (-> cs :via :rule-to-boundary-path))
+          "no rule-to-boundary-path when the boundary call is in the rule's own RHS")
       (is (= [`atr/rule-fact-builder-call ->fact-sym]
-             (mapv :var-name-sym (-> cs :via :callstack)))
-          ":callstack is unchanged")))
+             (mapv :var-name-sym (-> cs :via :boundary-to-constructor-path)))
+          ":boundary-to-constructor-path is unchanged")))
 
   (testing "a boundary-path callsite (no constructor) in the rule's RHS"
     (let [cs (-> (ann/get-annotation edge-case-annotations `atr/rule-record-constructor)
@@ -1605,10 +1605,10 @@
                  first)]
       (is (= `atr/rule-record-constructor (-> cs :via :boundary-in-var)))
       (is (= 'clara.rules/insert! (-> cs :via :boundary-var-name-sym)))
-      (is (nil? (-> cs :via :callstack)))
-      (is (nil? (-> cs :via :rule-path))))))
+      (is (nil? (-> cs :via :boundary-to-constructor-path)))
+      (is (nil? (-> cs :via :rule-to-boundary-path))))))
 
-(deftest test-via-rule-path-two-hops
+(deftest test-via-rule-to-boundary-path-two-hops
   (let [ann edge-case-ctor-annotations
         cs (-> (ann/get-annotation ann `atr/rule-boundary-two-hops-above)
                :clara-rules/dynamic-insert-types-detected
@@ -1618,10 +1618,10 @@
            (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-boundary-two-hops-above))))
     (is (= `atr/insert-summary! (-> cs :via :boundary-in-var)))
     (is (= [`atr/rule-boundary-two-hops-above `atr/record-summary! `atr/insert-summary!]
-           (mapv :var-name-sym (-> cs :via :rule-path))))
+           (mapv :var-name-sym (-> cs :via :rule-to-boundary-path))))
     (is (= [`atr/insert-summary! ->fact-sym]
-           (mapv :var-name-sym (-> cs :via :callstack)))
-        ":callstack still starts at the boundary-holding var")))
+           (mapv :var-name-sym (-> cs :via :boundary-to-constructor-path)))
+        ":boundary-to-constructor-path still starts at the boundary-holding var")))
 
 (deftest test-via-dropped-ctor-provenance
   (let [ann (ctor-annotations-with ->fact-literal-type-resolver)
@@ -1634,9 +1634,9 @@
       (is (= ->fact-sym (:constructor-sym cs)))
       (is (= `atr/insert-parameterized-fact! (-> cs :via :boundary-in-var)))
       (is (= [`atr/rule-ctor-unresolvable-parameter `atr/insert-parameterized-fact!]
-             (mapv :var-name-sym (-> cs :via :rule-path))))
+             (mapv :var-name-sym (-> cs :via :rule-to-boundary-path))))
       (is (= [`atr/insert-parameterized-fact! ->fact-sym]
-             (mapv :var-name-sym (-> cs :via :callstack)))))))
+             (mapv :var-name-sym (-> cs :via :boundary-to-constructor-path)))))))
 
 (deftest test-via-boundary-no-constructor
   (let [cs (-> (ann/get-annotation edge-case-annotations `atr/rule-insert-via-parameter)
@@ -1648,9 +1648,9 @@
     (is (= "facts" (:source-str cs)))
     (is (= `atr/insert-facts! (-> cs :via :boundary-in-var)))
     (is (= [`atr/rule-insert-via-parameter `atr/insert-facts!]
-           (mapv :var-name-sym (-> cs :via :rule-path))))
+           (mapv :var-name-sym (-> cs :via :rule-to-boundary-path))))
     (is (= 'clara.rules/insert-all! (-> cs :via :boundary-var-name-sym)))
-    (is (nil? (-> cs :via :callstack)))))
+    (is (nil? (-> cs :via :boundary-to-constructor-path)))))
 
 (deftest test-via-dropped-ctor-ambiguity
   (let [ann (ctor-annotations-with ->fact-literal-type-resolver)
@@ -1661,17 +1661,17 @@
       (is (= :none (:status cs)))
       (is (nil? (:constructor-sym cs)) "ambiguous constructor identity — no ctor sym")
       (is (= `atr/rule-two-constructors-one-arg (-> cs :via :boundary-in-var)))
-      (is (nil? (-> cs :via :callstack)))
-      (is (nil? (-> cs :via :rule-path))))))
+      (is (nil? (-> cs :via :boundary-to-constructor-path)))
+      (is (nil? (-> cs :via :rule-to-boundary-path))))))
 
-(deftest test-via-rule-path-determinism
+(deftest test-via-rule-to-boundary-path-determinism
   (let [cs (-> (ann/get-annotation edge-case-ctor-annotations `atr/rule-two-paths-to-boundary)
                :clara-rules/dynamic-insert-types-detected
                :callsites
                first)]
     (is (= `atr/insert-shared! (-> cs :via :boundary-in-var)))
     (is (= [`atr/rule-two-paths-to-boundary `atr/insert-via-a! `atr/insert-shared!]
-           (mapv :var-name-sym (-> cs :via :rule-path)))
+           (mapv :var-name-sym (-> cs :via :rule-to-boundary-path)))
         "BFS sorted by str picks insert-via-a! over insert-via-b!")))
 
 ;; ---------------------------------------------------------------------------
@@ -1698,8 +1698,8 @@
         (is (= ->fact-sym (:constructor-sym cs)))
         (is (= [:demo/scan-precedence] (:resolved-types cs)))
         (is (nil? (-> cs :via :source))
-            "traced ctor callsites carry a callstack, not a heuristic :source")
-        (is (seq (-> cs :via :callstack))))
+            "traced ctor callsites carry a boundary-to-constructor-path, not a heuristic :source")
+        (is (seq (-> cs :via :boundary-to-constructor-path))))
       (is (not (str/includes? (str a) "UnrelatedScanRecord"))
           "the unrelated record ctor reachable in the subtree is never credited")))
 
@@ -1720,8 +1720,8 @@
       (let [cs (first heuristic)]
         (is (= :record-ctor-scan (-> cs :via :source)))
         (is (= 'clara.rules/insert! (-> cs :via :boundary-var-name-sym)))
-        (is (nil? (-> cs :via :callstack))
-            "heuristic entries have no traced callstack")
+        (is (nil? (-> cs :via :boundary-to-constructor-path))
+            "heuristic entries have no traced boundary-to-constructor-path")
         (is (= "map->HiddenHelperRecord" (:source-str cs)))
         (is (= edge-case-ns-sym (:ns-name-sym cs)))
         (is (= edge-case-filename (:filename cs)))
