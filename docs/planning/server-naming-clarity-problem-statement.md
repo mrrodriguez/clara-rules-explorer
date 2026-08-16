@@ -3,6 +3,8 @@ I want you to help make a plan to remedy this. We are not concerned with backwar
 
 This plan will go in @docs/planning/server-naming-clarity-plan.md
 
+**Resolved by:** [`server-naming-clarity-plan.md`](./server-naming-clarity-plan.md).
+
 1. When we refer to analysis of a clara-rules session working memory data, we call it a "snapshot".
    This is already confusing, but we have tried to clarify it in some contexts as "memory-snapshot".
    That is likely better, but still not ideal. The terminology should likely be

@@ -420,7 +420,7 @@
                                                 :ancestors-index ancestors-index
                                                 :known-set known-set})
 
-        nodes (nodes/build-nodes id-to-node)
+        nodes (nodes/->nodes id-to-node)
 
         unresolved (into []
                          (keep (fn [p]

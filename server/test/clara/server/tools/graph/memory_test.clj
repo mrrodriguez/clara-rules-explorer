@@ -32,7 +32,7 @@
           facts (:facts memory-analysis)
           ids (keys facts)]
 
-      (is (seq ids) "Snapshot should contain facts")
+      (is (seq ids) "Memory analysis should contain facts")
       (is (= (set (range 1 (inc (count facts)))) (set ids)) "IDs should be 1 to N")
 
       (let [app-1-data (serialize/prune-fns app-1)
@@ -95,7 +95,7 @@
           (is (= "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs" (:name (first origins)))))))))
 
 (deftest test-enriched-memory-analysis
-  (testing "Snapshot contains enriched fact-table and rule-centric groupings"
+  (testing "Memory analysis contains enriched fact-table and rule-centric groupings"
     (let [app (laf/map->Application {:app-id "app-1"})
           session (-> (->test-session)
                       (r/insert app)
@@ -123,7 +123,7 @@
           (is (seq (:facts usage))))))))
 
 (deftest test-rule-query-activity
-  (testing "Snapshot contains rule and query activity (inserted facts and matches)"
+  (testing "Memory analysis contains rule and query activity (inserted facts and matches)"
     (let [app (laf/map->Application {:app-id "app-1"})
           session (-> (->test-session)
                       (r/insert app)
@@ -405,7 +405,7 @@
           known-set (set (keys (:fact-types analysis)))
           memory-analysis (memory/->memory-analysis session known-set)
           fact-types (map :type (vals (:facts memory-analysis)))]
-      (is (seq fact-types) "Snapshot should contain facts")
+      (is (seq fact-types) "Memory analysis should contain facts")
       (doseq [{type-name :name type-known :known} fact-types]
         (is (= (contains? known-set type-name) type-known)
             (str "known flag for " type-name " must equal analysis membership")))))
@@ -439,7 +439,7 @@
             "re-stamped memory-analysis must equal a freshly-built analysis-derived memory-analysis")))))
 
 (deftest test-memory-analysis-raw-types
-  (testing "Snapshot exposes fact-id → raw type for the enrichment boundary"
+  (testing "Memory analysis exposes fact-id → raw type for the enrichment boundary"
     (let [app (laf/map->Application {:app-id "app-1"})
           req-doc (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
           given-doc (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card})
@@ -488,9 +488,9 @@
           memory-analysis (memory/->memory-analysis session)
           facts (:facts memory-analysis)]
 
-      ;; Snapshot builds without throwing
+      ;; Memory analysis builds without throwing
       (is (map? memory-analysis))
-      (is (seq facts) "Snapshot should contain the triggering fact")
+      (is (seq facts) "Memory analysis should contain the triggering fact")
 
       ;; Nil should not appear — it was filtered at get-wrapped-fact-groups
       (let [nil-facts (filterv (fn [[_id f]]
@@ -553,7 +553,7 @@
           facts (:facts memory-analysis)]
 
       (is (map? memory-analysis))
-      (is (seq facts) "Snapshot should contain the fact")
+      (is (seq facts) "Memory analysis should contain the fact")
 
       ;; The fact should get the unknown-fact-type sentinel
       (is (every? (fn [[_id f]]

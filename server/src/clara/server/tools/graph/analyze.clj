@@ -393,7 +393,7 @@
       res)))
 
 ;;
-;; Source synthesis + prune-and-replace (session-based analysis)
+;; Source synthesis + prune-and-replace (rule-source analysis)
 ;;
 
 (defn- rulebase-rules-by-ns
@@ -823,7 +823,7 @@
      :exclude-ns-prefixes   - optional coll of ns prefix strings; passed to
                               `->rule-source-analysis-from-namespaces`
      :cache-atom            - optional atom to use as cache; defaults to a fresh
-                              atom per call (one session analysis run).
+                              atom per call (one rule-source-analysis run).
      :config-dir            - optional clj-kondo config dir; defaults to the bundled
                               verbatim clara-rules config; replaces it entirely.
      :ns-var-defs-fn        - optional (fn [ns-sym] -> nil | [VarDef …]) supplying the
