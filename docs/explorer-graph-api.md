@@ -456,46 +456,41 @@ included in its own `ancestors`.
 
 #### `GET /v1/annotations`
 
-Returns the currently loaded merged annotations (a `MergedAnnotations` value with `:annotations`, `:layers`, and `:provenance`). The `:annotations` payload is the merged rule→annotation map; `:provenance` records which layer(s) supplied each key (library-internal, not exposed over HTTP).
+Returns the merged rule→annotation map: a bare map keyed by rule fq-name
+(string), each value the merged annotation for that rule.  Values are the
+raw EDN form — annotation keys keep their `clara-rules/` namespace, and
+callsite `:resolved-types` are raw type tokens (strings), not `TypeReference`
+objects (that serialization happens on the analysis endpoints).  Layer
+membership and `:provenance` are library-internal and not exposed over HTTP.
 
 **Response** `200`:
 ```json
 {
-  "annotations": {
-    "my.app/cool-customer": {
-      "insert-types": ["my.app.HappyCustomer"],
-      "notes": "curated",
-      "dynamic-insert-types-detected": {
-        "callsites": [
-          {
-            "callsite-id": "my.app:->HappyCustomer:abc12345:0",
-            "source-str": "(->HappyCustomer ?cust)",
-            "ns-name-sym": "my.app",
-            "filename": "my/app.clj",
-            "status": "full",
-            "resolved-types": [
-              { "name": "my.app.HappyCustomer", "id": "...", "known": true }
-            ],
-            "via": {
-              "boundary-var-name-sym": "clara.rules/insert!",
-              "boundary-in-var": "my.app/cool-customer",
-              "boundary-to-constructor-path": [
-                { "var-name-sym": "my.app/cool-customer" },
-                { "var-name-sym": "my.app/->HappyCustomer" }
-              ]
-            }
+  "my.app/cool-customer": {
+    "clara-rules/insert-types": ["my.app.HappyCustomer"],
+    "clara-rules/notes": "curated",
+    "clara-rules/dynamic-insert-types-detected": {
+      "callsites": [
+        {
+          "callsite-id": "my.app:->HappyCustomer:abc12345:0",
+          "source-str": "(->HappyCustomer ?cust)",
+          "ns-name-sym": "my.app",
+          "filename": "my/app.clj",
+          "status": "full",
+          "resolved-types": ["my.app.HappyCustomer"],
+          "via": {
+            "boundary-var-name-sym": "clara.rules/insert!",
+            "boundary-in-var": "my.app/cool-customer",
+            "boundary-to-constructor-path": [
+              { "var-name-sym": "my.app/cool-customer" },
+              { "var-name-sym": "my.app/->HappyCustomer" }
+            ]
           }
-        ],
-        "resolution": "full"
-      }
+        }
+      ],
+      "resolution": "full"
     }
-  },
-  "layers": [
-    {"id": "props", "source": "rulebase"},
-    {"id": "generated", "source": "generated-from session.bin"},
-    {"id": "curated", "source": "/etc/clara/curated-annotations.edn"}
-  ],
-  "provenance": {}
+  }
 }
 ```
 
