@@ -163,7 +163,7 @@ These endpoints analyze the compiled Rete network and do not require a running s
 
 ### Phase 2 — Session State (Working Memory)
 
-These endpoints require a running session with inserted facts and return point-in-time snapshots.
+These endpoints require a running session with inserted facts and return a point-in-time memory-analysis of working memory.
 
 | API Endpoint | API Client Function | Consumer(s) |
 |--------------|-------------------|-------------|
@@ -192,7 +192,7 @@ API response shapes are defined in `$lib/types/api.ts`. Key interfaces:
 
 UI-specific types are in `$lib/types/ui.ts` (e.g., `ContextualMenuType`).
 
-**Deprecated:** The monolithic `Analysis` interface and `fetchAnalysis()` function are no longer used. Pages consume streamlined per-resource endpoints instead.
+**Not consumed:** The monolithic `RulebaseAnalysis` interface and `fetchRulebaseAnalysis()` function map to the full `/v1/rulebase-analysis` external view but are not used by current pages, which consume streamlined per-resource endpoints instead.
 
 ---
 
