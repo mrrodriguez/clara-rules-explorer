@@ -105,13 +105,13 @@
   []
   (let [session (r/mk-session [intra-producer intra-consumer])
         anns (ann.merge/merge-layers [(ann.merge/props-layer session)])]
-    (core/rulebase-analysis session anns)))
+    (core/->rulebase-analysis session anns)))
 
 (defn- cyc-analysis
   []
   (let [session (r/mk-session [cyc-producer cyc-consumer] :ancestors-fn cycle-ancestors)
         anns (ann.merge/merge-layers [(ann.merge/props-layer session)])]
-    (core/rulebase-analysis session anns)))
+    (core/->rulebase-analysis session anns)))
 
 (deftest test-loan-doc-rules-behavior
   (testing "Document check logic"
@@ -185,7 +185,7 @@
 
 (deftest test-rulebase-analysis-loan-app
   (let [session (->test-session)
-        analysis (core/rulebase-analysis session (loan-doc-annotations session))]
+        analysis (core/->rulebase-analysis session (loan-doc-annotations session))]
 
     (testing "Rules summary"
       (let [rules-map (:rules analysis)]
@@ -255,7 +255,7 @@
 
 (deftest test-dependency-graph-correctness
   (let [session (->test-session)
-        analysis (core/rulebase-analysis session (loan-doc-annotations session))
+        analysis (core/->rulebase-analysis session (loan-doc-annotations session))
         rules (:rules analysis)]
     (testing "Upstream and downstream dependencies are correctly identified"
       (let [collect-given "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
@@ -281,7 +281,7 @@
 
 (deftest test-dep-graph-full
   (let [session (->test-session)
-        analysis (core/rulebase-analysis session (loan-doc-annotations session))
+        analysis (core/->rulebase-analysis session (loan-doc-annotations session))
         graph (:dep-graph analysis)]
     (testing "Full expected dependency graph structure"
       (is (= {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
@@ -395,7 +395,7 @@
 (deftest test-dep-graph-hierarchy
   (testing "Dependency graph edges with type hierarchy (ancestor-fn)"
     (let [session (r/mk-session [car-producer vehicle-consumer])
-          analysis (core/rulebase-analysis session (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/props-layer session)])))
+          analysis (core/->rulebase-analysis session (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/props-layer session)])))
           graph (:dep-graph analysis)]
       (is (contains? (get-in graph ["clara.server.tools.graph.core-test/car-producer" :downstream])
                      "clara.server.tools.graph.core-test/vehicle-consumer"))
@@ -423,7 +423,7 @@
 
 (deftest test-fact-type-summary-order
   (let [session (->test-session)
-        analysis (core/rulebase-analysis session (loan-doc-annotations session))
+        analysis (core/->rulebase-analysis session (loan-doc-annotations session))
         fact-types (:fact-types analysis)]
     (testing "Directly-referenced fact types maintain insertion order as a prefix"
       (is (= loan-app-fact-type-order
@@ -484,7 +484,7 @@
 
 (deftest test-unlinked-rule-detection
   (let [session (->test-session)
-        analysis (core/rulebase-analysis session (loan-doc-annotations session))
+        analysis (core/->rulebase-analysis session (loan-doc-annotations session))
         rules (:rules analysis)
         unlinked-rule-name "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule"
         unlinked (get rules unlinked-rule-name)]
@@ -504,7 +504,7 @@
           "Rule consuming only external facts should be a source rule"))
 
     (testing "Unlinked rule's JSON-serialized view (rules-list) omits :downstream"
-      (let [rule-list (core/rules-list analysis)
+      (let [rule-list (core/get-rules-list analysis)
             unlinked-item (first (filter #(= unlinked-rule-name (:name %)) rule-list))]
         (is (contains? unlinked-item :unlinked-rule))
         (is (not (contains? unlinked-item :downstream)))))))
@@ -512,7 +512,7 @@
 (deftest test-no-output-types-annotation-prevents-unlinked
   (testing "Rule with :clara-rules/no-output-types true is not flagged as unlinked"
     (let [session (->test-session)
-          analysis (core/rulebase-analysis session (loan-doc-annotations session))
+          analysis (core/->rulebase-analysis session (loan-doc-annotations session))
           rules (:rules analysis)
           rule (get rules "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs")]
       (is (not (contains? rule :unlinked-rule))
@@ -524,8 +524,8 @@
 
 (deftest test-dynamic-detection-in-rules-list
   (let [session (->test-session)
-        analysis (core/rulebase-analysis session (loan-doc-annotations session))
-        rule-list (core/rules-list analysis)
+        analysis (core/->rulebase-analysis session (loan-doc-annotations session))
+        rule-list (core/get-rules-list analysis)
         rule-by-name #(first (filter (fn [r] (= (:name r) %)) rule-list))]
 
     (testing "Unresolved dynamic-insert rule via helper call"
@@ -602,7 +602,7 @@
 
 (deftest test-loan-hierarchy-ancestors
   (let [session (->hierarchy-session)
-        analysis (core/rulebase-analysis session (hierarchy-annotations session))]
+        analysis (core/->rulebase-analysis session (hierarchy-annotations session))]
 
     (testing "Keyword derive hierarchy is transitive; known reflects usage"
       (let [income (fact-type-by-name analysis
@@ -649,7 +649,7 @@
           rulebase (-> session eng/components :rulebase)
           gaf (:get-alphas-fn rulebase)
           rulebase' (assoc rulebase :get-alphas-fn (with-meta gaf (dissoc (meta gaf) :ancestors-fn)))
-          analysis (core/rulebase-analysis rulebase' (hierarchy-annotations session))
+          analysis (core/->rulebase-analysis rulebase' (hierarchy-annotations session))
           income (fact-type-by-name analysis
                                     ":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document")]
       (is (seq (:ancestors income))
@@ -658,7 +658,7 @@
 (deftest test-ancestors-nil-returning-fn
   (testing "A user ancestors-fn returning nil yields empty :ancestors — no NPE"
     (let [session (->hierarchy-session {:ancestors-fn (fn [_] nil)})
-          analysis (core/rulebase-analysis session (hierarchy-annotations session))]
+          analysis (core/->rulebase-analysis session (hierarchy-annotations session))]
       (is (seq (:fact-types analysis)))
       (is (every? (comp empty? :ancestors) (vals (:fact-types analysis)))))))
 
@@ -669,7 +669,7 @@
                         (swap! calls inc)
                         (try (clojure.core/ancestors t) (catch Throwable _ nil)))
           session (->hierarchy-session {:ancestors-fn counting-fn})
-          analysis (core/rulebase-analysis session (hierarchy-annotations session))
+          analysis (core/->rulebase-analysis session (hierarchy-annotations session))
           fact-types (:fact-types analysis)
           expected (count (into #{}
                                 (concat (keys fact-types)
@@ -686,7 +686,7 @@
                        "string-parent"}
                      (try (clojure.core/ancestors t) (catch Throwable _ nil))))
           session (->hierarchy-session {:ancestors-fn custom})
-          analysis (core/rulebase-analysis session (hierarchy-annotations session))
+          analysis (core/->rulebase-analysis session (hierarchy-annotations session))
           income (fact-type-by-name analysis
                                     ":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document")]
       (is (= ["\"string-parent\"" ":clara.server.tools.graph.rules.loan-hierarchy-rules/supporting-document"]
@@ -699,15 +699,15 @@
     (let [tam (array-map
                'prod-a {:consumed-types ['join] :produced-types [] :retract-types #{} :ns-name 'clojure.string}
                'prod-b {:consumed-types ['join] :produced-types [] :retract-types #{} :ns-name 'clara.server.tools.graph.rules.loan-app-rules})
-          idx (ft/build-ancestors-index tam
-                                        (fn [_] #{})
-                                        [{:name 'prod-a} {:name 'prod-b}])]
+          idx (ft/->ancestors-index tam
+                                    (fn [_] #{})
+                                    [{:name 'prod-a} {:name 'prod-b}])]
       (is (= {"clojure.string/join" {:ancestors [] :ns nil}}
              idx)
           "The first (load-order) production's serialization is canonical; the divergent symbol[...] one is dropped")
       (is (seq idx) "Degradation still yields an ancestors index — no build-wide failure")))
 
-  (testing "A full rulebase-analysis over a divergent annotation set still builds (no throw)"
+  (testing "A full ->rulebase-analysis over a divergent annotation set still builds (no throw)"
     (let [session (->test-session)
           anns (ann.merge/merge-layers
                 [(ann.merge/props-layer session)
@@ -721,7 +721,7 @@
           ;; 'AllRequiredDocuments resolves in loan-doc-rules (imported there)
           ;; but not in loan-app-rules → the same raw symbol serializes to
           ;; both "...AllRequiredDocuments" and "symbol[AllRequiredDocuments]".
-          analysis (core/rulebase-analysis session anns)
+          analysis (core/->rulebase-analysis session anns)
           canonical (fact-type-by-name analysis
                                        "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments")
           divergent (fact-type-by-name analysis "symbol[AllRequiredDocuments]")]
@@ -751,7 +751,7 @@
 (deftest test-condition-type-matches-lhs-types
   (testing "Every LHS condition :type :name string-equals a :lhs-types entry :name (all kinds)"
     (let [session (->hierarchy-session)
-          analysis (core/rulebase-analysis session (hierarchy-annotations session))]
+          analysis (core/->rulebase-analysis session (hierarchy-annotations session))]
       (doseq [[p-name summary] (:rules analysis)]
         (doseq [cond (:lhs summary)]
           (when-let [type-ref (:type cond)]
@@ -763,7 +763,7 @@
   (testing "A fact type from an unresolved symbol insert-type still appears with :ancestors"
     (let [session (->hierarchy-session)
           rule-name "clara.server.tools.graph.rules.loan-hierarchy-rules/insert-income-document"
-          analysis (core/rulebase-analysis
+          analysis (core/->rulebase-analysis
                     session
                     {rule-name {:clara-rules/insert-types ['my.ns/unresolved-thing]}})
           ft (fact-type-by-name analysis "symbol[my.ns/unresolved-thing]")]
@@ -774,7 +774,7 @@
 (deftest test-fact-type-ns
   (testing "Fact-type :ns is best-effort namespace/package per raw kind"
     (let [session (->hierarchy-session)
-          analysis (core/rulebase-analysis session (hierarchy-annotations session))]
+          analysis (core/->rulebase-analysis session (hierarchy-annotations session))]
       (is (= "clara.server.tools.graph.rules.loan_hierarchy_rules"
              (:ns (fact-type-by-name analysis
                                      "clara.server.tools.graph.rules.loan_hierarchy_rules.LoanApplication")))
@@ -789,23 +789,23 @@
 (deftest test-fact-type-id-index
   (testing "The reverse index resolves every fact-type id back to its name"
     (let [session (->hierarchy-session)
-          analysis (core/rulebase-analysis session (hierarchy-annotations session))
-          index (ft/build-fact-type-id-index analysis)]
+          analysis (core/->rulebase-analysis session (hierarchy-annotations session))
+          index (ft/->fact-type-id-index analysis)]
       (doseq [{type-name :name type-id :id} (vals (:fact-types analysis))]
         (is (= type-name (get index type-id))
             (str "index resolves " type-id " back to " type-name)))))
 
   (testing "A route-id collision throws at index build time"
     (is (thrown? clojure.lang.ExceptionInfo
-                 (ft/build-fact-type-id-index
+                 (ft/->fact-type-id-index
                   {:fact-types {"a" {:id "same-id" :name "a"}
                                 "b" {:id "same-id" :name "b"}}})))))
 
 (deftest test-production-id-index
   (testing "The reverse index resolves every rule and query id back to its name"
     (let [session (->test-session)
-          analysis (core/rulebase-analysis session (loan-doc-annotations session))
-          index (core/build-production-id-index analysis)]
+          analysis (core/->rulebase-analysis session (loan-doc-annotations session))
+          index (core/->production-id-index analysis)]
       (doseq [{prod-name :name prod-id :id} (concat (vals (:rules analysis))
                                                     (vals (:queries analysis)))]
         (is (= prod-name (get index prod-id))
@@ -813,7 +813,7 @@
 
   (testing "A production route-id collision throws at index build time"
     (is (thrown? clojure.lang.ExceptionInfo
-                 (core/build-production-id-index
+                 (core/->production-id-index
                   {:rules {"a" {:id "same-id" :name "a"}}
                    :queries {"b" {:id "same-id" :name "b"}}})))))
 
@@ -866,11 +866,11 @@
   =>
   (r/insert! (with-meta {:done true} {:type ::match-done-3})))
 
-(defn- match-session-analysis
+(defn- match-rulebase-analysis
   [rules]
   (let [session (r/mk-session rules)]
-    (core/rulebase-analysis session
-                            (ann.merge/merge-layers [(ann.merge/props-layer session)]))))
+    (core/->rulebase-analysis session
+                              (ann.merge/merge-layers [(ann.merge/props-layer session)]))))
 
 (defn- dep-by-name [deps name]
   (first (filter #(= name (:name %)) deps)))
@@ -888,7 +888,7 @@
 (deftest test-match-direct
   (testing "Direct match (no hierarchy) on both directions"
     (let [session (->test-session)
-          analysis (core/rulebase-analysis session (loan-doc-annotations session))
+          analysis (core/->rulebase-analysis session (loan-doc-annotations session))
           producer (get-in analysis [:rules "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"])
           consumer (get-in analysis [:rules "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"])
           down (dep-by-name (:downstream producer) (:name consumer))
@@ -902,7 +902,7 @@
 (deftest test-match-hierarchy-jump
   (testing "Single hierarchy jump (produced descendant satisfies consumed ancestor)"
     (let [session (->hierarchy-session)
-          analysis (core/rulebase-analysis session (hierarchy-annotations session))
+          analysis (core/->rulebase-analysis session (hierarchy-annotations session))
           producer (get-in analysis [:rules "clara.server.tools.graph.rules.loan-hierarchy-rules/insert-income-document"])
           consumer (get-in analysis [:rules "clara.server.tools.graph.rules.loan-hierarchy-rules/review-supporting-document"])
           down (dep-by-name (:downstream producer) (:name consumer))
@@ -914,7 +914,7 @@
 
 (deftest test-match-multi-type
   (testing "A single production pair linked by multiple type pairs"
-    (let [analysis (match-session-analysis [match-multi-producer match-multi-consumer])
+    (let [analysis (match-rulebase-analysis [match-multi-producer match-multi-consumer])
           producer (get-in analysis [:rules "clara.server.tools.graph.core-test/match-multi-producer"])]
       (is (= [[":clara.server.tools.graph.core-test/match-child-a"
                ":clara.server.tools.graph.core-test/match-parent-a"]
@@ -926,7 +926,7 @@
 
 (deftest test-match-direct-and-hierarchy
   (testing "Direct and hierarchy matches coexist in one pair"
-    (let [analysis (match-session-analysis [match-direct-producer match-direct-consumer])
+    (let [analysis (match-rulebase-analysis [match-direct-producer match-direct-consumer])
           producer (get-in analysis [:rules "clara.server.tools.graph.core-test/match-direct-producer"])]
       (is (= [[":clara.server.tools.graph.core-test/match-child-a"
                ":clara.server.tools.graph.core-test/match-parent-a"]
@@ -937,7 +937,7 @@
 
 (deftest test-match-dedup
   (testing "Duplicate insert declarations and LHS conditions collapse to one match entry"
-    (let [analysis (match-session-analysis [match-dedup-producer match-dedup-consumer])
+    (let [analysis (match-rulebase-analysis [match-dedup-producer match-dedup-consumer])
           producer (get-in analysis [:rules "clara.server.tools.graph.core-test/match-dedup-producer"])]
       (is (= [[":clara.server.tools.graph.core-test/match-child-a"
                ":clara.server.tools.graph.core-test/match-parent-a"]]
@@ -953,7 +953,7 @@
                                     match-dedup-producer match-dedup-consumer])
                      (fn [s] (ann.merge/merge-layers [(ann.merge/props-layer s)]))]]]
       (doseq [[session annotations-fn] sessions
-              :let [analysis (core/rulebase-analysis session (annotations-fn session))]]
+              :let [analysis (core/->rulebase-analysis session (annotations-fn session))]]
         (doseq [[p-name summary] (concat (:rules analysis) (:queries analysis))]
           (doseq [dir [:upstream :downstream]]
             (doseq [dep (get summary dir)]
@@ -979,7 +979,7 @@
           consumer-name "clara.server.tools.graph.rules.loan-hierarchy-rules/review-supporting-document"
           ;; Bare sidecar annotation (string rule-name keys): a foreign-ns
           ;; unresolved symbol plus the rule's real keyword insert-type.
-          analysis (core/rulebase-analysis
+          analysis (core/->rulebase-analysis
                     session
                     {producer-name {:clara-rules/insert-types ['my.ns/foreign-symbol
                                                                ::lhr/income-document]}})
@@ -1033,7 +1033,7 @@
 
 (deftest test-match-via-retract
   (testing "A retract-only bridge is flagged :via :retract on both directions"
-    (let [analysis (match-session-analysis [via-retract-producer via-retract-consumer])
+    (let [analysis (match-rulebase-analysis [via-retract-producer via-retract-consumer])
           producer (get-in analysis [:rules "clara.server.tools.graph.core-test/via-retract-producer"])
           consumer (get-in analysis [:rules "clara.server.tools.graph.core-test/via-retract-consumer"])
           down (dep-by-name (:downstream producer) (:name consumer))
@@ -1047,7 +1047,7 @@
 
 (deftest test-match-via-insert-and-retract
   (testing "Insert and retract bridges in one pair are flagged distinctly"
-    (let [analysis (match-session-analysis [via-mixed-producer via-mixed-consumer])
+    (let [analysis (match-rulebase-analysis [via-mixed-producer via-mixed-consumer])
           producer (get-in analysis [:rules "clara.server.tools.graph.core-test/via-mixed-producer"])
           down (dep-by-name (:downstream producer) "clara.server.tools.graph.core-test/via-mixed-consumer")]
       (is (= [[":clara.server.tools.graph.core-test/insert-target"

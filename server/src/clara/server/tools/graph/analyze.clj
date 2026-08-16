@@ -2,7 +2,7 @@
   "Static analysis tools for Clara rules using clj-kondo.
    Traces rule RHS call graphs to auto-detect insert/retract fact types.
 
-   ## Session-based analysis
+   ## Rule-source analysis
 
    The Clara session is the source of truth for rules: rule names, LHS, RHS,
    and props come from the rulebase productions.
@@ -21,8 +21,8 @@
      ;; Copy bundled config as a starting point
      cp -r resources/clara/server/tools/graph/kondo-config my-kondo-config
      ;; Edit my-kondo-config/config.edn to register your own hooks
-     ;; Pass it to the analysis:
-     (analyze-session-rules
+     ;; Pass it to the rule-source analysis:
+     (->rule-source-analysis
        {:session-or-rulebase session
         :config-dir \"my-kondo-config\"})"
   (:require [clj-kondo.core :as kondo-core]
@@ -393,10 +393,10 @@
       res)))
 
 ;;
-;; Source synthesis + prune-and-replace (session-based analysis)
+;; Source synthesis + prune-and-replace (rule-source analysis)
 ;;
 
-(defn- session-rules-by-ns
+(defn- rulebase-rules-by-ns
   "Groups rulebase productions that carry an :rhs (rules, not queries) by
    their :ns-name. Returns {ns-sym [production ...]} with productions sorted
    by name for deterministic snippet tag assignment."
@@ -408,7 +408,7 @@
              (map (fn [[ns-sym rules]]
                     [ns-sym (vec (sort-by (comp str :name) rules))])))))
 
-(defn- session-rule-fq-names
+(defn- all-rule-fq-names
   "Returns the fq symbols of the session's rules — productions that carry an
    :rhs (queries excluded)."
   [session-or-rulebase]
@@ -470,10 +470,10 @@
     "cider."
     "nrepl."})
 
-(defn build-analysis-from-namespaces
+(defn ->rule-source-analysis-from-namespaces
   "Resolves transitive dependencies on the classpath for starting namespaces,
    optionally filtering by include-ns-prefixes and exclude-ns-prefixes,
-   runs clj-kondo against them (using the cache), and returns a merged analysis map.
+   runs clj-kondo against them (using the cache), and returns a merged rule-source analysis map.
 
    When both include-ns-prefixes and exclude-ns-prefixes are provided, a namespace is
    included only if it matches include-ns-prefixes AND does not match exclude-ns-prefixes
@@ -496,12 +496,12 @@
      :config-dir            - optional clj-kondo config dir; defaults to the bundled
                               verbatim clara-rules config. Pass nil to disable
                               (falls back to cwd-based `.clj-kondo` discovery).
-     :initial-analysis      - optional map of analysis data to seed the merge with;
-                              defaults to nil.
+     :initial-rule-source-analysis - optional rule-source analysis map to seed the merge
+                              with; defaults to nil.
      :processed-namespaces  - optional coll of namespace symbols already processed;
                               defaults to nil."
   [{:keys [starting-namespaces include-ns-prefixes exclude-ns-prefixes cache-atom ns-source-map prune-vars config-dir
-           initial-analysis processed-namespaces]
+           initial-rule-source-analysis processed-namespaces]
     :or {cache-atom (atom {})
          config-dir @bundled-kondo-config-dir
          exclude-ns-prefixes default-exclude-ns-prefixes}}]
@@ -515,9 +515,9 @@
                                       true))))]
     (loop [queue (into (set starting-namespaces)
                        (filter ns-matches-prefix?)
-                       (extract-required-namespaces initial-analysis))
+                       (extract-required-namespaces initial-rule-source-analysis))
            processed (set processed-namespaces)
-           merged-analysis (or initial-analysis {})]
+           merged-analysis (or initial-rule-source-analysis {})]
       (if (empty? queue)
         merged-analysis
         (let [ns-sym (first queue)
@@ -653,13 +653,14 @@
    resolvable record-ctor type (pre-fix recall)."
   (s/enum :none :rulebase-fact-types-only :all-resolvable-fact-types))
 
-(s/defschema GenerateAnnotationsOptions
-  "Options for `generate-annotations-from-analysis` — validated with
+(s/defschema RuleSourceAnnotationsOptions
+  "Options for `->annotations-from-rule-source-analysis` — validated with
    `s/validate` at function entry (edge-only validation; nothing in the hot
-   path is schema-checked).  `:analysis` and `:session-or-rulebase` are
-   `s/Any`: the analysis is a large open clj-kondo map and the session is a
-   Clara LocalSession or rulebase — neither has a useful closed shape here."
-  {:analysis s/Any                            ; merged clj-kondo analysis (required)
+   path is schema-checked).  `:rule-source-analysis` and `:session-or-rulebase`
+   are `s/Any`: the rule-source analysis is a large open clj-kondo map and the
+   session is a Clara LocalSession or rulebase — neither has a useful closed
+   shape here."
+  {:rule-source-analysis s/Any                ; merged clj-kondo rule-source analysis (required)
    :session-or-rulebase s/Any                 ; Clara session or rulebase (required)
    (s/optional-key :dynamic-type-fallback-resolution) DynamicTypeFallbackResolution
    (s/optional-key :rules-filter) [s/Symbol]
@@ -672,15 +673,15 @@
    (s/=> s/Any s/Any)
    (s/optional-key :fact-constructors) [FactConstructorSpec]})
 
-(defn generate-annotations-from-analysis
+(defn ->annotations-from-rule-source-analysis
   "Generates rule annotations (insert/retract types etc.) from a pre-computed `clj-kondo` analysis
   map.
 
-   Key options (see `GenerateAnnotationsOptions` for the full schema):
+   Key options (see `RuleSourceAnnotationsOptions` for the full schema):
 
-   * `:analysis` — the clj-kondo analysis map (required). When produced by `analyze-session-rules`
-  it carries synthesized sources under `::combined-sources`, which take precedence for callsite
-  source extraction.
+   * `:rule-source-analysis` — the clj-kondo rule-source analysis map (required). When produced by
+  `->rule-source-analysis` it carries synthesized sources under `::combined-sources`, which take
+  precedence for callsite source extraction.
 
    * `:session-or-rulebase` — Clara session or rulebase (required).
 
@@ -715,19 +716,19 @@
   Types the default filter rejects are reported via `tap>` with
   `:event :clara-rules/type-fallback-skipped` context — register a tap with
   `add-tap` to trace what was skipped."
-  [{:keys [analysis rules-filter session-or-rulebase callsite-resolver-fn fact-type-spec-fn
-           fact-constructors dynamic-type-fallback-resolution] :as options}]
-  (s/validate GenerateAnnotationsOptions options)
+  [{:keys [rule-source-analysis rules-filter session-or-rulebase callsite-resolver-fn
+           fact-type-spec-fn fact-constructors dynamic-type-fallback-resolution] :as options}]
+  (s/validate RuleSourceAnnotationsOptions options)
   (when-not session-or-rulebase
-    (throw (ex-info "generate-annotations-from-analysis requires :session-or-rulebase"
+    (throw (ex-info "->annotations-from-rule-source-analysis requires :session-or-rulebase"
                     {:missing :session-or-rulebase})))
-  (doseq [ns-sym (->> analysis
+  (doseq [ns-sym (->> rule-source-analysis
                       :var-definitions
                       (into []
                             (comp (keep :ns) (distinct))))]
     (try (require ns-sym) (catch Exception _ nil)))
 
-  (let [get-source (build-source-loader (::combined-sources analysis))
+  (let [get-source (build-source-loader (::combined-sources rule-source-analysis))
         rulebase (get-rulebase session-or-rulebase)
         fallback-mode (or dynamic-type-fallback-resolution :rulebase-fact-types-only)
         fallback-type-filter (when (= :rulebase-fact-types-only fallback-mode)
@@ -737,19 +738,19 @@
                                   (:productions rulebase))
         effective-filter (if (seq rules-filter)
                            (mapv normalize-fq-name-key rules-filter)
-                           (session-rule-fq-names session-or-rulebase))
+                           (all-rule-fq-names session-or-rulebase))
         ;; Var-alias chains (:fact-type-spec-fn): synthetic rule → aliased-var
         ;; usages are injected before graph building so the existing
         ;; reachability explores each aliased var's call chain.
         alias-by-rule (when fact-type-spec-fn
                         (alias/alias-usage-map productions-by-name effective-filter
-                                               (group-by u/var-usage-caller (:var-usages analysis))
+                                               (group-by u/var-usage-caller (:var-usages rule-source-analysis))
                                                fact-type-spec-fn))
-        analysis (cond-> analysis
-                   (seq alias-by-rule)
-                   (update :var-usages into (mapcat :usages) (vals alias-by-rule)))
+        rule-source-analysis (cond-> rule-source-analysis
+                               (seq alias-by-rule)
+                               (update :var-usages into (mapcat :usages) (vals alias-by-rule)))
         index (index/build-analysis-index
-               {:analysis analysis
+               {:analysis rule-source-analysis
                 :get-source get-source
                 :productions-by-name productions-by-name
                 :fact-constructors fact-constructors
@@ -777,7 +778,7 @@
         annotations (ann/normalize-annotations annotations)]
     annotations))
 
-(defn extract-session-rule-names
+(defn extract-rule-names
   "Extracts all rule and query names (symbols) from a Clara session or rulebase."
   [session-or-rulebase]
   (let [{:keys [productions]} (get-rulebase session-or-rulebase)]
@@ -786,18 +787,18 @@
                 (distinct))
           productions)))
 
-(defn extract-session-namespaces
+(defn extract-rule-namespaces
   "Extracts all namespace symbols where rules or queries in the session are defined."
   [session-or-rulebase]
   (->> session-or-rulebase
-       extract-session-rule-names
+       extract-rule-names
        (into []
              (comp (map normalize-fq-name-key)
                    (keep namespace)
                    (map symbol)
                    (distinct)))))
 
-(defn analyze-session-rules
+(defn ->rule-source-analysis
   "Builds a unified clj-kondo analysis map for the rules in a Clara session
    or rulebase:
 
@@ -813,16 +814,16 @@
    4. Transitive dependencies are analyzed from the classpath and merged.
 
    Returns the merged clj-kondo analysis map, with the combined sources under
-   ::combined-sources for `generate-annotations-from-analysis`.
+   ::combined-sources for `->annotations-from-rule-source-analysis`.
 
    Options:
      :session-or-rulebase   - Clara session or rulebase (required)
      :include-ns-prefixes   - optional coll of ns prefix strings; passed to
-                              `build-analysis-from-namespaces`
+                              `->rule-source-analysis-from-namespaces`
      :exclude-ns-prefixes   - optional coll of ns prefix strings; passed to
-                              `build-analysis-from-namespaces`
+                              `->rule-source-analysis-from-namespaces`
      :cache-atom            - optional atom to use as cache; defaults to a fresh
-                              atom per call (one session analysis run).
+                              atom per call (one rule-source-analysis run).
      :config-dir            - optional clj-kondo config dir; defaults to the bundled
                               verbatim clara-rules config; replaces it entirely.
      :ns-var-defs-fn        - optional (fn [ns-sym] -> nil | [VarDef …]) supplying the
@@ -841,7 +842,7 @@
     :or {config-dir @bundled-kondo-config-dir
          cache-atom (atom {})}}]
   (let [rulebase (get-rulebase session-or-rulebase)
-        rules-by-ns (session-rules-by-ns rulebase)
+        rules-by-ns (rulebase-rules-by-ns rulebase)
         prune-vars (set (map (comp normalize-fq-name-key :name)
                              (:productions rulebase)))
         ns-source-map (into {}
@@ -853,7 +854,7 @@
                                              :normalize-key-fn normalize-fq-name-key
                                              :var-defs-fn ns-var-defs-fn})]))
                             rules-by-ns)]
-    (-> (build-analysis-from-namespaces
+    (-> (->rule-source-analysis-from-namespaces
          (cond-> {:starting-namespaces (keys rules-by-ns)
                   :ns-source-map ns-source-map
                   :prune-vars prune-vars
@@ -867,46 +868,44 @@
                      ns-source-map)))))
 
 ;; ---------------------------------------------------------------------------
-;; Helpers for add-auto-detected-annotations / enrich-annotations-from-session
+;; Helpers for add-memory-derived-insert-type-detections / merge-memory-derived-insert-types
 ;; ---------------------------------------------------------------------------
 
-(defn- rule->session-raw-types
+(defn- rule->memory-derived-raw-types
   "Per rule name → set of RAW fact types the rule inserted at runtime, from
-   the snapshot's fact-id → raw-type index crossed with each fact's
+   the memory-analysis's fact-id → raw-type index crossed with each fact's
    :inserted-from rules.  Raw types (classes, keywords, tuples, strings,
    maps — whatever the session's fact-type-fn returns) flow through the
    enrichment stack un-serialized; only the boundary serializes them."
-  [snapshot]
+  [memory-analysis]
   (reduce-kv (fn [acc fact-id {:keys [inserted-from]}]
-               (let [raw-type (get-in snapshot [:fact-raw-types fact-id])]
+               (let [raw-type (get-in memory-analysis [:fact-raw-types fact-id])]
                  (reduce (fn [acc' {:keys [name]}]
                            (update acc' name (fnil conj #{}) raw-type))
                          acc
                          inserted-from)))
              {}
-             (:facts snapshot)))
+             (:facts memory-analysis)))
 
-(defn add-auto-detected-annotations
-  "Takes a session-analysis structure (from memory/session-snapshot) and an
-   annotations map.  Returns the annotations map updated with
-   :clara-rules/dynamic-insert-types-detected entries for rules whose working-
-   memory fact types are not already declared in the annotations.
+(defn add-memory-derived-insert-type-detections
+  "Takes an annotations map and a memory-analysis (from `memory/->memory-analysis`). Returns the
+  annotations map updated with :clara-rules/dynamic-insert-types-detected entries for rules whose
+  working- memory fact types are not already declared in the annotations.
 
-   Each new entry carries :fact-instance-derived-types (the rule-ns serialized
-   names, for display) and :resolution :partial.  Rules whose session-derived
-   types are already covered by the annotations are left unchanged.
+   Each new entry carries :fact-instance-derived-types (the rule-ns serialized names, for display)
+  and :resolution :partial. Rules whose session-derived types are already covered by the annotations
+  are left unchanged.
 
-   Raw types stay objects throughout: the snapshot's fact-id → raw-type index
-   is compared against the annotation insert-types via per-rule-ns
-   serialization only at the comparison point — never demoted to strings
-   ahead of the merge.
+   Raw types stay objects throughout: the memory-analysis's fact-id → raw-type index is compared
+  against the annotation insert-types via per-rule-ns serialization only at the comparison point —
+  never demoted to strings ahead of the merge.
 
-   NOTE: This function only compares against the annotations map — it does NOT
-   check rule :props.  Use `enrich-annotations-from-session` for the full
-   pipeline that also deduplicates against :props."
-  [session-analysis annotations]
+   NOTE: This function only compares against the annotations map — it does NOT check rule :props.
+  Use `merge-memory-derived-insert-types` for the full pipeline that also deduplicates against
+  :props."
+  [annotations memory-analysis]
   (let [annotations (ann/normalize-annotations annotations)
-        rule->session-types (rule->session-raw-types session-analysis)
+        rule->memory-derived-types (rule->memory-derived-raw-types memory-analysis)
         annotations'
         (reduce-kv (fn [acc rule-fq-str raw-types]
                      (let [rule-fq-str (str rule-fq-str)
@@ -932,20 +931,18 @@
                                          updated-dynamic)))
                          acc)))
                    annotations
-                   rule->session-types)]
+                   rule->memory-derived-types)]
     annotations'))
 
-(defn enrich-annotations-from-session*
-  "Implementation of `enrich-annotations-from-session` returning
-   {:annotations enriched :snapshot snapshot}, so a caller that also needs the
-   working-memory snapshot (the cache build) reuses it instead of re-inspecting
-   the session.  See `enrich-annotations-from-session` for the enrichment
-   semantics."
-  [session annotations]
+(defn merge-memory-derived-insert-types*
+  "Implementation of `merge-memory-derived-insert-types` returning {:annotations … :memory-analysis
+  …}, so a caller that also needs the memory-analysis (the cache build) reuses it instead of
+  re-inspecting the session. See `merge-memory-derived-insert-types` for the merge semantics."
+  [annotations session]
   (let [original           (ann/normalize-annotations annotations)
-        snapshot           (memory/session-snapshot session)
-        enriched           (add-auto-detected-annotations snapshot original)
-        rule->session-types (rule->session-raw-types snapshot)
+        memory-analysis    (memory/->memory-analysis session)
+        enriched           (add-memory-derived-insert-type-detections original memory-analysis)
+        rule->memory-derived-types (rule->memory-derived-raw-types memory-analysis)
         rulebase           (-> session eng/components :rulebase)
 
         merged-annotations
@@ -968,7 +965,7 @@
                            declared-strs  (set (map resolve-fn
                                                     (:insert-types resolved-ann)))
                            detection-info (:dynamic-insert-types-detected resolved-ann)
-                           raw-types      (get rule->session-types rule-name)
+                           raw-types      (get rule->memory-derived-types rule-name)
                            ;; Session-derived types not already declared in the
                            ;; fully-merged annotation's insert-types, compared
                            ;; under this rule's own ns.
@@ -997,36 +994,36 @@
                          acc)))
                    enriched
                    resolved-annotation-map)]
-    {:annotations enriched-annotations
-     :snapshot    snapshot}))
+    {:annotations      enriched-annotations
+     :memory-analysis  memory-analysis}))
 
-(defn enrich-annotations-from-session
-  "Enriches the given annotations map with fact-type provenance from a live
-   Clara session's working memory.
+(defn merge-memory-derived-insert-types
+  "Merges memory-derived insert types into the given annotations map from a live Clara session's
+  working memory.
 
-   1. Takes a session snapshot and runs `add-auto-detected-annotations` to
-      detect fact types inserted by rules at runtime.
-   2. Builds a production-annotation-map from the session's rulebase and the
-      enriched annotations to identify types already declared in rule :props
-      or sidecar annotations.
-   3. Merges truly-new derived types (raw objects from the snapshot's
-      fact-id → raw-type index — classes, keywords, tuples, strings, maps,
-      whatever the session's fact-type-fn returns) into each rule's
-      :clara-rules/insert-types so they connect in the dependency graph;
-      types are only serialized at the boundary.
-   4. For rules whose derived types are already fully covered, restores the
-      original pre-enrichment annotation (preserving any pre-existing dynamic
-      detection keys such as :callsites from static analysis).
+   1. Takes a memory-analysis and runs `add-memory-derived-insert-type-detections` to detect fact
+  types inserted by rules at runtime.
 
-   Returns the enriched annotations map suitable for passing to
-   `rulebase-analysis`."
-  [session annotations]
-  (:annotations (enrich-annotations-from-session* session annotations)))
+   2. Builds a production-annotation-map from the session's rulebase and the enriched annotations to
+  identify types already declared in rule :props or sidecar annotations.
+
+   3. Merges truly-new derived types (raw objects from the memory-analysis's fact-id → raw-type
+  index — classes, keywords, tuples, strings, maps, whatever the session's fact-type-fn returns)
+  into each rule's :clara-rules/insert-types so they connect in the dependency graph; types are only
+  serialized at the boundary.
+
+   4. For rules whose derived types are already fully covered, restores the original pre-merge
+  annotation (preserving any pre-existing dynamic detection keys such as :callsites from static
+  analysis).
+
+   Returns the merged annotations map suitable for passing to `->rulebase-analysis`."
+  [annotations session]
+  (:annotations (merge-memory-derived-insert-types* annotations session)))
 
 (defn ->memory-layer
   "Builds a working-memory annotation Layer from `enriched` (the result of
-  enriching `base` from session working memory): the delta of what enrichment
-  added over `base`, wrapped as a validated Layer with id
+  merging memory-derived insert types into `base`): the delta of what the
+  merge added over `base`, wrapped as a validated Layer with id
   `:clara.tools.graph.analyze/memory`.
 
   Returns nil when the session contributed nothing new — the honest result

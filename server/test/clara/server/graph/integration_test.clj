@@ -149,8 +149,8 @@
       :body
       json/read-value))
 
-(defn get-session-snapshot []
-  (-> (client/get (->url "/session-snapshot") {:accept :json})
+(defn get-memory-analysis []
+  (-> (client/get (->url "/memory-analysis") {:accept :json})
       :body
       json/read-value))
 
@@ -165,7 +165,7 @@
       json/read-value))
 
 (defn get-analysis []
-  (-> (client/get (->url "/analysis") {:accept :json})
+  (-> (client/get (->url "/rulebase-analysis") {:accept :json})
       :body
       json/read-value))
 
@@ -199,8 +199,8 @@
         json/read-value)))
 
 (defn get-session-fact-type [name]
-  (let [snapshot (get-session-snapshot)
-        id (some (fn [[id n]] (when (= n name) id)) (get snapshot "fact-type-id-index"))]
+  (let [memory-analysis (get-memory-analysis)
+        id (some (fn [[id n]] (when (= n name) id)) (get memory-analysis "fact-type-id-index"))]
     (-> (client/get (->url (str "/session/fact-types/" id)) {:accept :json})
         :body
         json/read-value)))
@@ -211,15 +211,15 @@
       json/read-value))
 
 (defn get-session-rule [name]
-  (let [snapshot (get-session-snapshot)
-        id (some (fn [[id n]] (when (= n name) id)) (get snapshot "rule-id-index"))]
+  (let [memory-analysis (get-memory-analysis)
+        id (some (fn [[id n]] (when (= n name) id)) (get memory-analysis "rule-id-index"))]
     (-> (client/get (->url (str "/session/rules/" id)) {:accept :json})
         :body
         json/read-value)))
 
 (defn get-session-query [name]
-  (let [snapshot (get-session-snapshot)
-        id (some (fn [[id n]] (when (= n name) id)) (get snapshot "query-id-index"))]
+  (let [memory-analysis (get-memory-analysis)
+        id (some (fn [[id n]] (when (= n name) id)) (get memory-analysis "query-id-index"))]
     (-> (client/get (->url (str "/session/queries/" id)) {:accept :json})
         :body
         json/read-value)))
@@ -277,8 +277,8 @@
 (deftest test-loan-doc-session-state-endpoints
   (with-server
     (fn []
-      (testing "Session snapshot and facts"
-        (let [ss (get-session-snapshot)
+      (testing "Memory-analysis and facts"
+        (let [ss (get-memory-analysis)
               session-fact-types (get-session-fact-types)
               session-fact-type (get-session-fact-type "clara.server.tools.graph.rules.loan_app_facts.Application")]
           (is (some? ss))
@@ -374,15 +374,15 @@
   (with-hierarchy-server
     (fn []
       (testing "Session fact-type known flags agree with the analysis end-to-end"
-        (let [snapshot (get-session-snapshot)
+        (let [memory-analysis (get-memory-analysis)
               income-entry (first (filter (fn [[_id fact]]
                                             (= income-document (get-in fact ["type" "name"])))
-                                          (get snapshot "facts")))]
+                                          (get memory-analysis "facts")))]
           (is (some? income-entry) "income-document fact is in working memory")
           (is (true? (get-in income-entry [1 "type" "known"]))
               "income-document is an analysis insert-type → session known: true (linkable)")
-          (is (nil? (get snapshot "fact-raw-types"))
-              "The internal fact-id → raw-type index is stripped from the served snapshot (raw objects do not serialize to JSON)"))))))
+          (is (nil? (get memory-analysis "fact-raw-types"))
+              "The internal fact-id → raw-type index is stripped from the served memory-analysis (raw objects do not serialize to JSON)"))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Fressian fact round-trip
@@ -392,7 +392,7 @@
   throwaway list, separate from the facts list.  If they are the same list,
   the Fressian record read handler (create-identity-based-handler)
   double-adds every record via d/clj-struct-holder-add-obj!, shifting all
-  MemIdx positions and corrupting working-memory snapshots."}
+  MemIdx positions and corrupting memory-analyses."}
   test-fressian-fact-reader-no-double-add
   (testing "Fressian fact round-trip preserves correct fact count"
     (let [session (run-loan-app-rules)
@@ -414,11 +414,11 @@
                  " got " (count deserialized)
                  ". Double-add bug in FressianFactReader?"))))))
 
-(deftest ^{:doc "End-to-end: session → serialize → deserialize → snapshot must contain
+(deftest ^{:doc "End-to-end: session → serialize → deserialize → memory-analysis must contain
   only legitimate Clara fact types — no internal Clojure/Java types like
   clojure.lang.PersistentVector or clojure.lang.Symbol."}
   test-fressian-roundtrip-no-garbage-fact-types
-  (testing "Session snapshot after Fressian round-trip has no internal Clojure/Java fact types"
+  (testing "Memory-analysis after Fressian round-trip has no internal Clojure/Java fact types"
     (let [session (run-loan-app-rules)
           ;; Full round-trip: serialize session + facts, then deserialize
           session-baos (java.io.ByteArrayOutputStream.)
@@ -432,8 +432,8 @@
             session-deser (df/create-session-serializer session-in)
             facts-deser (main/->FressianFactReader facts-in)
             restored (d/deserialize-session-state session-deser facts-deser)
-            snapshot (memory/session-snapshot restored)
-            type-names (into #{} (map :name) (vals (:fact-types snapshot)))]
+            memory-analysis (memory/->memory-analysis restored)
+            type-names (into #{} (map :name) (vals (:fact-types memory-analysis)))]
         (doseq [tname type-names]
           (is (not (clojure.string/starts-with? tname "clojure.lang."))
               (str "Internal Clojure type leaked into fact types: " tname))
@@ -458,7 +458,7 @@
                          "extract-doc-meta"}
               present (set/intersection expected type-names)]
           (is (seq present)
-              (str "No expected fact types found in snapshot. "
+              (str "No expected fact types found in memory-analysis. "
                    "Expected at least some of: " (pr-str expected)
                    " Got: " (pr-str type-names))))))))
 
@@ -474,12 +474,12 @@
   ;; Or with an EMPTY working memory — rulebase analysis only, no facts:
   (start-server! {:session-opts {:with-facts? false}})
   (get-fact-types)
-  (get-session-snapshot)
+  (get-memory-analysis)
 
   ;; Flip to the loan-hierarchy-rules session (keyword hierarchy + tuples):
   (start-server! {:session-fn run-loan-hierarchy-rules :layers []})
   (get-fact-type income-document)
-  (get-session-snapshot)
+  (get-memory-analysis)
 
   ;; Same, with an empty working memory:
   (start-server! {:session-fn run-loan-hierarchy-rules :layers []

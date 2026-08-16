@@ -1,6 +1,6 @@
 (ns clara.server.graph.cache-test
-  "Tests for the analysis/snapshot cache, focused on memory-snapshot reuse:
-   a working-memory snapshot already produced by memory enrichment must be
+  "Tests for the analysis/memory-analysis cache, focused on memory-analysis
+   reuse: a memory-analysis already produced by memory enrichment must be
    re-stamped (O(facts)) rather than rebuilt (re-inspect + re-sort + re-index)
    on a cache miss."
   (:require [clara.rules :as r]
@@ -28,37 +28,37 @@
   [session]
   (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/props-layer session)])))
 
-(deftest test-warm-reuses-enrichment-snapshot
-  (testing "warm! with a memory-snapshot stores a re-stamped snapshot equal to a fresh build"
+(deftest test-warm-reuses-enrichment-memory-analysis
+  (testing "warm! with a memory-analysis stores a re-stamped memory-analysis equal to a fresh build"
     (let [session (->test-session)
           annotations (->annotations session)
-          enrichment-snapshot (memory/session-snapshot session)
-          expected (memory/session-snapshot-from-analysis
-                    session (core/rulebase-analysis session annotations))
-          c (cache/create)]
-      (is (every? (comp false? :known :type) (vals (:facts enrichment-snapshot)))
-          "the enrichment snapshot starts with every fact type unknown")
-      (cache/warm! c session annotations enrichment-snapshot)
-      (is (= expected (cache/snapshot c session annotations enrichment-snapshot))
-          "the request path serves the re-stamped snapshot"))))
+          enrichment-memory-analysis (memory/->memory-analysis session)
+          analysis (core/->rulebase-analysis session annotations)
+          expected (memory/->memory-analysis session (-> analysis :fact-types keys set))
+          c (cache/->cache)]
+      (is (every? (comp false? :known :type) (vals (:facts enrichment-memory-analysis)))
+          "the enrichment memory-analysis starts with every fact type unknown")
+      (cache/warm! c session annotations enrichment-memory-analysis)
+      (is (= expected (cache/get-memory-analysis c session annotations enrichment-memory-analysis))
+          "the request path serves the re-stamped memory-analysis"))))
 
-(deftest test-snapshot-miss-reuses-memory-snapshot
+(deftest test-memory-analysis-miss-reuses-memory-analysis
   (let [session (->test-session)
         annotations (->annotations session)
-        enrichment-snapshot (memory/session-snapshot session)
-        expected (memory/session-snapshot-from-analysis
-                  session (core/rulebase-analysis session annotations))]
-    (testing "a cold-cache miss re-stamps a provided memory-snapshot instead of re-inspecting"
+        enrichment-memory-analysis (memory/->memory-analysis session)
+        analysis (core/->rulebase-analysis session annotations)
+        expected (memory/->memory-analysis session (-> analysis :fact-types keys set))]
+    (testing "a cold-cache miss re-stamps a provided memory-analysis instead of re-inspecting"
       (let [rebuilt? (atom false)
-            c (cache/create)]
-        (with-redefs [memory/session-snapshot-from-analysis
+            c (cache/->cache)]
+        (with-redefs [memory/->memory-analysis
                       (fn [_ _]
                         (reset! rebuilt? true)
                         expected)]
-          (let [served (cache/snapshot c session annotations enrichment-snapshot)]
+          (let [served (cache/get-memory-analysis c session annotations enrichment-memory-analysis)]
             (is (false? @rebuilt?)
-                "a miss with a memory-snapshot must re-stamp, not re-inspect")
+                "a miss with a memory-analysis must re-stamp, not re-inspect")
             (is (= expected served))))))
-    (testing "a cold-cache miss without a memory-snapshot falls back to a fresh snapshot"
-      (let [c (cache/create)]
-        (is (= expected (cache/snapshot c session annotations nil)))))))
+    (testing "a cold-cache miss without a memory-analysis falls back to a fresh memory-analysis"
+      (let [c (cache/->cache)]
+        (is (= expected (cache/get-memory-analysis c session annotations nil)))))))

@@ -1,5 +1,5 @@
 (ns clara.server.tools.graph.memory
-  "Helpers for analyzing and snapshotting Clara Rules working memory."
+  "Helpers for analyzing Clara Rules working memory."
   (:require [clara.server.vendor.tools.inspect :as inspect]
             [clara.rules.engine :as eng]
             [clara.rules.memory :as mem]
@@ -67,7 +67,7 @@
         (deterministic-fact-str fact prune-fn)]))
    facts))
 
-(defn- build-id-map [sorted-facts]
+(defn- ->id-map [sorted-facts]
   (let [id-map (java.util.IdentityHashMap.)]
     (doseq [[i wrapped] (map-indexed vector sorted-facts)]
       (.put id-map (platform/fact-id-unwrap wrapped) (inc i)))
@@ -78,7 +78,7 @@
   (fn [{p-name :name :as _production-meta}]
     (get production-order p-name Integer/MAX_VALUE)))
 
-(defn- build-used-by-index
+(defn- ->used-by-index
   [inspection get-id production-order-key-fn]
   (let [{:keys [rule-matches query-matches]} inspection
         rule-match-facts
@@ -137,7 +137,7 @@
    :ns (str p-ns-name)
    :type "rule"})
 
-(defn- build-origin-map
+(defn- ->origin-map
   "`{fact-id [origin …]}` — the rules that inserted each fact."
   [insertions get-id production-order-key-fn]
   (->> (insertion-id+rule-pairs insertions get-id)
@@ -152,7 +152,7 @@
                                        vec)))
                   {})))
 
-(defn- build-fact-table
+(defn- ->fact-table
   [{:keys [sorted-facts
            fact-type-fn
            root-facts
@@ -193,7 +193,7 @@
                                          ;; /fact-types/:id route the analysis cannot
                                          ;; serve.
                                          :known (contains? known-set type-name)}
-                                  :ns (ft/raw-type-ns raw-type)
+                                  :ns (ft/get-raw-type-ns raw-type)
                                   :data (prune-fn fact)
                                   :is-root (boolean (some #(identical? fact %) root-facts))
                                   :inserted-from (get origin-map id [])
@@ -227,7 +227,7 @@
                     (production-order-key-fn entry))))
        vec))
 
-(defn- build-fact-type-index
+(defn- ->fact-type-index
   [fact-table production-order-key-fn]
   (letfn [(add-fact-type-instance-data [m fact-type-name instances]
             (assoc m fact-type-name
@@ -246,10 +246,10 @@
          (group-by (comp :name :type))
          (reduce-kv add-fact-type-instance-data {}))))
 
-(defn- build-id-name-index
+(defn- ->id-name-index
   "Reverse index {route-id(name) → name} for a collection of serialized
    names, asserting id uniqueness (a route-id collision throws loudly at
-   snapshot-build time rather than silently mislinking)."
+   memory-analysis-build time rather than silently mislinking)."
   [names]
   (reduce (fn [idx name]
             (let [id (serialize/route-id (str name))]
@@ -273,7 +273,7 @@
 
    Rows are sorted by fact id.  Binding sets are deduplicated by value and,
    when a fact has more than one, sorted by a deterministic string of the
-   (already-pruned) map so snapshots are byte-stable; a single binding set is
+   (already-pruned) map so memory-analyses are byte-stable; a single binding set is
    emitted unsorted since its order is trivial.  `bindings` is pruned once per
    explanation and the touched fact ids deduplicated first, so a fact
    satisfying several conditions of one activation contributes a single pair
@@ -300,7 +300,7 @@
          (sort-by (comp :id :fact))
          vec)))
 
-(defn- build-rule-match-index
+(defn- ->rule-match-index
   "`{production-name {:matches [...] :inserted-facts [...]}}`.
 
   Reads inserted-fact attribution from `:insertions` via
@@ -335,7 +335,7 @@
                           :inserted-facts (p-name->inserted-facts p-name)}]))
           rule-matches)))
 
-(defn- build-query-match-index
+(defn- ->query-match-index
   [query-matches
    fact-table
    get-fact-id
@@ -348,16 +348,16 @@
                                                                 prune-fn)}]))
         query-matches))
 
-(defn session-snapshot
-  "Return a snapshot of the memory state of the given `session`. This includes details of all facts
-  in the memory and information about rule/query matches for those facts.
+(defn ->memory-analysis
+  "Return a memory-analysis of the given `session`'s working memory. This includes details of all
+  facts in the memory and information about rule/query matches for those facts.
 
-  Two-arity takes the analysis's serialized fact-type names (`known-set`);
+  Two-arity takes the rulebase-analysis's serialized fact-type names (`known-set`);
   session TypeReference `known` flags are honest membership checks against it
   (runtime-derived types absent from the analysis are marked unknown).  The
   one-arity defaults to no known types."
   ([session]
-   (session-snapshot session #{}))
+   (->memory-analysis session #{}))
   ([session known-set]
    (let [{:keys [root-facts insertions query-matches rule-matches] :as inspection}
          (inspect/inspect session)
@@ -371,75 +371,67 @@
          all-facts-wrapped (get-all-facts-wrapped inspection)
          prune-fn (serialize/memoizing-prune-fns)
          sorted-facts (sort-facts all-facts-wrapped fact-type-fn fact-type-order prune-fn)
-         id-map (build-id-map sorted-facts)
+         id-map (->id-map sorted-facts)
          get-fact-id (fn get-fact-id [fact] (.get ^java.util.IdentityHashMap id-map fact))
 
          production-order-key-fn (->production-order-key-fn production-order)
 
-         used-by-index (build-used-by-index inspection
-                                            get-fact-id
-                                            production-order-key-fn)
-         origin-map (build-origin-map insertions
-                                      get-fact-id
-                                      production-order-key-fn)
+         used-by-index (->used-by-index inspection
+                                        get-fact-id
+                                        production-order-key-fn)
+         origin-map (->origin-map insertions
+                                  get-fact-id
+                                  production-order-key-fn)
 
-         fact-table (build-fact-table {:sorted-facts sorted-facts
-                                       :fact-type-fn fact-type-fn
-                                       :root-facts root-facts
-                                       :get-fact-id get-fact-id
-                                       :origin-map origin-map
-                                       :used-by-index used-by-index
-                                       :known-set known-set
-                                       :prune-fn prune-fn})
-         fact-type-index (build-fact-type-index (:facts fact-table)
-                                                production-order-key-fn)
-         rule-match-index (build-rule-match-index rule-matches
-                                                  insertions
-                                                  (:facts fact-table)
-                                                  get-fact-id
-                                                  prune-fn)
-         query-match-index (build-query-match-index query-matches
-                                                    (:facts fact-table)
-                                                    get-fact-id
-                                                    prune-fn)]
+         fact-table (->fact-table {:sorted-facts sorted-facts
+                                   :fact-type-fn fact-type-fn
+                                   :root-facts root-facts
+                                   :get-fact-id get-fact-id
+                                   :origin-map origin-map
+                                   :used-by-index used-by-index
+                                   :known-set known-set
+                                   :prune-fn prune-fn})
+         fact-type-index (->fact-type-index (:facts fact-table)
+                                            production-order-key-fn)
+         rule-match-index (->rule-match-index rule-matches
+                                              insertions
+                                              (:facts fact-table)
+                                              get-fact-id
+                                              prune-fn)
+         query-match-index (->query-match-index query-matches
+                                                (:facts fact-table)
+                                                get-fact-id
+                                                prune-fn)]
      {:fact-types        fact-type-index
       :facts             (:facts fact-table)
-      ;; Internal fact-id → raw type index for the annotation-enrichment
-      ;; boundary (add-auto-detected-annotations / enrich-annotations-from-session):
+      ;; Internal fact-id → raw type index for the memory-derived annotation
+      ;; boundary (add-memory-derived-insert-type-detections /
+      ;; merge-memory-derived-insert-types):
       ;; session-derived types must merge into annotations as the raw objects
       ;; the analysis itself serializes — never as serialized name strings,
       ;; which would double-serialize (phantom string-kinded fact types).
-      ;; Stripped from the served snapshot in api.clj.
+      ;; Stripped from the served memory-analysis in api.clj.
       :fact-raw-types    (:raw-types fact-table)
       :used-by           used-by-index
       :origin            origin-map
       :rule-matches      rule-match-index
       :query-matches     query-match-index
-      ;; Per-snapshot id→name indexes for the session detail handlers — built
+      ;; Per-memory-analysis id→name indexes for the session detail handlers — built
       ;; here (no analysis-cache dependency) with the same id function over the
-      ;; snapshot's serialized names, so session ids align with analysis ids.
-      :fact-type-id-index (build-id-name-index (keys fact-type-index))
-      :rule-id-index      (build-id-name-index (keys rule-match-index))
-      :query-id-index     (build-id-name-index (keys query-match-index))})))
+      ;; memory-analysis's serialized names, so session ids align with analysis ids.
+      :fact-type-id-index (->id-name-index (keys fact-type-index))
+      :rule-id-index      (->id-name-index (keys rule-match-index))
+      :query-id-index     (->id-name-index (keys query-match-index))})))
 
-(defn session-snapshot-from-analysis
-  "Returns a working-memory snapshot like `session-snapshot`, deriving the
-   known-type set from the static `rulebase-analysis` result so TypeReference
-   `:known` flags are honest membership checks against the analysis.
-   Returns nil when `session` has no working memory (rulebase only)."
-  [session analysis]
-  (when (core/working-memory-available? session)
-    (session-snapshot session (-> analysis :fact-types keys set))))
-
-(defn update-snapshot-known-set
-  "Re-derives the per-fact :type :known flag of an existing snapshot from
+(defn update-memory-analysis-known-set
+  "Re-derives the per-fact :type :known flag of an existing memory-analysis from
    `known-set` (serialized fact-type names), without re-inspecting the session.
    Re-stamps every fact entry wherever it appears — :facts, the rule/query match
    indices, and the :fact-types inserted-from/used-by role grouping — still
-   O(total fact entries), far cheaper than a fresh snapshot.  Used by the cache
-   build to reuse a snapshot produced during memory enrichment (which is built
-   with an empty known-set)."
-  [snapshot known-set]
+   O(total fact entries), far cheaper than a fresh memory-analysis.  Used by the
+   cache build to reuse a memory-analysis produced during memory enrichment
+   (which is built with an empty known-set)."
+  [memory-analysis known-set]
   (letfn [(stamp [fact]
             (assoc-in fact [:type :known]
                       (contains? known-set (get-in fact [:type :name]))))
@@ -448,7 +440,7 @@
           (stamp-matches [matches] (mapv stamp-match matches))
           (stamp-role [role] (update role :facts stamp-facts))
           (stamp-roles [roles] (mapv stamp-role roles))]
-    (-> snapshot
+    (-> memory-analysis
         (update :facts update-vals stamp)
         (update :rule-matches update-vals
                 (fn [rm]
@@ -464,15 +456,15 @@
                       (update :inserted-from stamp-roles)
                       (update :used-by stamp-roles)))))))
 
-(defn get-session-rule-activity
+(defn get-rule-activity
   "Returns a unified activity map for a rule: {:matches [...] :inserted-facts [...]}"
-  [snapshot p-name]
-  (get-in snapshot [:rule-matches p-name]))
+  [memory-analysis p-name]
+  (get-in memory-analysis [:rule-matches p-name]))
 
-(defn get-session-query-activity
+(defn get-query-activity
   "Returns a unified activity map for a query: {:matches [...]}"
-  [snapshot p-name]
-  (get-in snapshot [:query-matches p-name]))
+  [memory-analysis p-name]
+  (get-in memory-analysis [:query-matches p-name]))
 
 (defn get-node-elements
   "Returns all elements (facts) currently in the memory for the given node ID."

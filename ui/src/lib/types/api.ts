@@ -164,8 +164,7 @@ export interface FactTypeSummary {
 }
 
 /**
- * Represents the dependency graph and analysis from the backend.
- * @deprecated Use streamlined endpoints instead.
+ * A node in the dependency graph: upstream and downstream production names.
  */
 export interface DepGraphNode {
 	upstream?: string[];
@@ -173,9 +172,11 @@ export interface DepGraphNode {
 }
 
 /**
- * @deprecated Use streamlined endpoints instead.
+ * The full rulebase analysis external view (`GET /v1/rulebase-analysis`).
+ * Not consumed by current pages — they use the streamlined per-resource
+ * endpoints instead.
  */
-export interface Analysis {
+export interface RulebaseAnalysis {
 	rules: Record<string, RuleSummary>;
 	queries: Record<string, QuerySummary>;
 	'fact-types': Record<string, FactTypeSummary>;
@@ -227,7 +228,7 @@ export interface QueryListItem {
 }
 
 /**
- * --- Phase 2: Session Snapshot Interfaces ---
+ * --- Phase 2: Memory Analysis Interfaces ---
  */
 
 export interface SessionFactTypeInfo {

@@ -31,9 +31,9 @@
 ;; ---------------------------------------------------------------------------
 ;; Shared session fixtures (computed once, reused across deftests)
 ;;
-;; The session is the source of truth: analyze-session-rules synthesizes
+;; The session is the source of truth: ->rule-source-analysis synthesizes
 ;; per-namespace sources (real source + one snippet def per rule RHS) and
-;; prunes hook-emitted defrule/defquery constructs. generate-annotations-from-analysis
+;; prunes hook-emitted defrule/defquery constructs. ->annotations-from-rule-source-analysis
 ;; defaults its rules filter to the session's rules (productions with an :rhs).
 ;; ---------------------------------------------------------------------------
 
@@ -45,34 +45,34 @@
   (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules))
 
 (def ^:private loan-doc-analysis
-  (analyze/analyze-session-rules
+  (analyze/->rule-source-analysis
    {:session-or-rulebase loan-doc-session
     :include-ns-prefixes [rules-prefix]}))
 
 (def ^:private loan-doc-annotations
   "Annotations for the loan-doc rule suite (separate rule set from edge cases)."
-  (analyze/generate-annotations-from-analysis
-   {:analysis loan-doc-analysis
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis loan-doc-analysis
     :session-or-rulebase loan-doc-session}))
 
 (def ^:private edge-case-session
   (r/mk-session 'clara.server.tools.graph.rules.analyze-test-rules))
 
 (def ^:private edge-case-analysis
-  (analyze/analyze-session-rules
+  (analyze/->rule-source-analysis
    {:session-or-rulebase edge-case-session
     :include-ns-prefixes [rules-prefix]}))
 
 (def ^:private edge-case-annotations
   "Annotations for the analyze-test-rules suite (all edge-case rules)."
-  (analyze/generate-annotations-from-analysis
-   {:analysis edge-case-analysis
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
     :session-or-rulebase edge-case-session}))
 
 (def ^:private edge-case-annotations-filtered
   "Annotations for same rules but with a rules-filter that only keeps side-effect-only."
-  (analyze/generate-annotations-from-analysis
-   {:analysis edge-case-analysis
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
     :session-or-rulebase edge-case-session
     :rules-filter [`atr/rule-side-effect-only]}))
 
@@ -102,8 +102,8 @@
 
 (def ^:private edge-case-ctor-annotations
   "Edge-case annotations with constructor-of-interest resolution enabled."
-  (analyze/generate-annotations-from-analysis
-   {:analysis edge-case-analysis
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
     :session-or-rulebase edge-case-session
     :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
                          :type-resolver-fn ->fact-type-resolver}]}))
@@ -112,8 +112,8 @@
   "Loan-doc annotations with constructor-of-interest resolution enabled.
    Resolves :loan-doc-rules/document-check-input via the ->fact chain
    (helpers/->fact → loan-doc-rules/->document-check-input → collect-app-doc-check-input)."
-  (analyze/generate-annotations-from-analysis
-   {:analysis loan-doc-analysis
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis loan-doc-analysis
     :session-or-rulebase loan-doc-session
     :fact-constructors [{:match-fn (->fact-sym-match-fn helpers->fact-sym)
                          :type-resolver-fn ->fact-type-resolver}]}))
@@ -121,16 +121,16 @@
 (def ^:private edge-case-annotations-all-fallback
   "Edge-case annotations with the heuristic fallback scoped to any resolvable
    record-ctor type (pre-fix recall), no constructor-of-interest resolution."
-  (analyze/generate-annotations-from-analysis
-   {:analysis edge-case-analysis
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
     :session-or-rulebase edge-case-session
     :dynamic-type-fallback-resolution :all-resolvable-fact-types}))
 
 (def ^:private edge-case-ctor-annotations-all-fallback
   "Ctor-of-interest annotations with unrestricted heuristic fallback recall —
    exercises that caller-registered resolution still wins over the scan."
-  (analyze/generate-annotations-from-analysis
-   {:analysis edge-case-analysis
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
     :session-or-rulebase edge-case-session
     :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
                          :type-resolver-fn ->fact-type-resolver}]
@@ -138,8 +138,8 @@
 
 (def ^:private edge-case-ctor-annotations-no-fallback
   "Ctor-of-interest annotations with the heuristic fallback disabled (:none)."
-  (analyze/generate-annotations-from-analysis
-   {:analysis edge-case-analysis
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
     :session-or-rulebase edge-case-session
     :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
                          :type-resolver-fn ->fact-type-resolver}]
@@ -421,8 +421,8 @@
                          (when-let [v (ns-resolve (the-ns ns-name-sym) (second arg-form))]
                            (when-let [t (:type (meta v))]
                              {:resolved-types [t]})))))
-          ann (analyze/generate-annotations-from-analysis
-               {:analysis loan-doc-analysis
+          ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis loan-doc-analysis
                 :session-or-rulebase loan-doc-session
                 :callsite-resolver-fn resolver})
           a (ann/get-annotation ann `ldr/extract-doc-meta-rule)
@@ -454,8 +454,8 @@
           (is (some? (:lhs (:rule extract-call))))))))
 
   (testing "throwing resolver degrades to unresolved capture"
-    (let [ann (analyze/generate-annotations-from-analysis
-               {:analysis loan-doc-analysis
+    (let [ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis loan-doc-analysis
                 :session-or-rulebase loan-doc-session
                 :callsite-resolver-fn (fn [_] (throw (ex-info "boom" {})))})]
       (is (= loan-doc-annotations ann)
@@ -497,8 +497,8 @@
                  (ann/get-annotation edge-case-annotations `atr/rule-consume-widget-transform)))))
 
     (testing "with a spec fn, the aliased var's chain attaches to the consuming rule"
-      (let [ann (analyze/generate-annotations-from-analysis
-                 {:analysis edge-case-analysis
+      (let [ann (analyze/->annotations-from-rule-source-analysis
+                 {:rule-source-analysis edge-case-analysis
                   :session-or-rulebase edge-case-session
                   :fact-type-spec-fn spec-fn})
             dyn (:clara-rules/dynamic-insert-types-detected
@@ -529,8 +529,8 @@
                        (swap! resolver-calls conj call-ctx)
                        (when (= :widget-transform (:fact-type call-ctx))
                          {:resolved-types [:widget-output]}))
-            ann (analyze/generate-annotations-from-analysis
-                 {:analysis edge-case-analysis
+            ann (analyze/->annotations-from-rule-source-analysis
+                 {:rule-source-analysis edge-case-analysis
                   :session-or-rulebase edge-case-session
                   :fact-type-spec-fn spec-fn
                   :callsite-resolver-fn resolver})
@@ -556,8 +556,8 @@
 
     (testing "a throwing spec fn degrades to no alias derivation"
       (is (= edge-case-annotations
-             (analyze/generate-annotations-from-analysis
-              {:analysis edge-case-analysis
+             (analyze/->annotations-from-rule-source-analysis
+              {:rule-source-analysis edge-case-analysis
                :session-or-rulebase edge-case-session
                :fact-type-spec-fn (fn [_] (throw (ex-info "boom" {})))}))))))
 
@@ -646,13 +646,13 @@
   (testing "explicitly empty :config-dir yields identical annotations
             (prune is a no-op; the snippets carry everything)"
     (let [analysis-no-config
-          (analyze/analyze-session-rules
+          (analyze/->rule-source-analysis
            {:session-or-rulebase loan-doc-session
             :include-ns-prefixes [rules-prefix]
             :config-dir "test-resources/clara/server/tools/graph/empty-kondo-config"})
           annotations-no-config
-          (analyze/generate-annotations-from-analysis
-           {:analysis analysis-no-config
+          (analyze/->annotations-from-rule-source-analysis
+           {:rule-source-analysis analysis-no-config
             :session-or-rulebase loan-doc-session})]
       (is (= loan-doc-annotations annotations-no-config)))))
 
@@ -660,10 +660,10 @@
 ;; Session-scoped cache
 ;; ---------------------------------------------------------------------------
 
-(deftest test-analyze-session-rules--cache-scoping
+(deftest test-rule-source-analysis--cache-scoping
   (testing "explicit :cache-atom is populated; default runs use a fresh cache per call"
     (let [cache (atom {})]
-      (analyze/analyze-session-rules
+      (analyze/->rule-source-analysis
        {:session-or-rulebase loan-doc-session
         :include-ns-prefixes [rules-prefix]
         :cache-atom cache})
@@ -671,10 +671,10 @@
       (is (contains? @cache 'clara.server.tools.graph.rules.loan-app-facts)
           "dependencies transitively analyzed and cached"))
     (is (= loan-doc-annotations
-           (analyze/generate-annotations-from-analysis
-            {:analysis (analyze/analyze-session-rules
-                        {:session-or-rulebase loan-doc-session
-                         :include-ns-prefixes [rules-prefix]})
+           (analyze/->annotations-from-rule-source-analysis
+            {:rule-source-analysis (analyze/->rule-source-analysis
+                                    {:session-or-rulebase loan-doc-session
+                                     :include-ns-prefixes [rules-prefix]})
              :session-or-rulebase loan-doc-session}))
         "sequential runs with the default session-scoped cache produce identical annotations")))
 
@@ -682,7 +682,7 @@
 ;; Reconstructed ns form (no source on the classpath)
 ;; ---------------------------------------------------------------------------
 
-(deftest test-analyze-session-rules--reconstructed-ns-fallback
+(deftest test-rule-source-analysis--reconstructed-ns-fallback
   (testing "eval'd namespace (no classpath source): reconstructed ns form still yields annotations"
     (let [ns-sym 'fake.eval-rules]
       (create-ns ns-sym)
@@ -693,10 +693,10 @@
                  =>
                  (r/insert! {:fake true}))))
       (let [session (r/mk-session ns-sym)
-            annotations (analyze/generate-annotations-from-analysis
-                         {:analysis (analyze/analyze-session-rules
-                                     {:session-or-rulebase session
-                                      :include-ns-prefixes ["fake."]})
+            annotations (analyze/->annotations-from-rule-source-analysis
+                         {:rule-source-analysis (analyze/->rule-source-analysis
+                                                 {:session-or-rulebase session
+                                                  :include-ns-prefixes ["fake."]})
                           :session-or-rulebase session})]
         (is (= {:callsites (ann.callsite/assign-callsite-ids
                             [{:source-str "{:fake true}"
@@ -777,10 +777,10 @@
                =>
                (r/insert! (->fact :demo/alert {:id 1})))))
     (let [session (r/mk-session ns-sym)
-          annotations (analyze/generate-annotations-from-analysis
-                       {:analysis (analyze/analyze-session-rules
-                                   {:session-or-rulebase session
-                                    :include-ns-prefixes ["fake."]})
+          annotations (analyze/->annotations-from-rule-source-analysis
+                       {:rule-source-analysis (analyze/->rule-source-analysis
+                                               {:session-or-rulebase session
+                                                :include-ns-prefixes ["fake."]})
                         :session-or-rulebase session
                         :fact-constructors
                         [{:match-fn (fn [sym]
@@ -966,18 +966,18 @@
           rule-key 'fake.eval-insert-helper/fake-insert-rule
           analyze-opts {:session-or-rulebase session
                         :include-ns-prefixes ["fake."]}
-          without (analyze/generate-annotations-from-analysis
-                   {:analysis (analyze/analyze-session-rules analyze-opts)
+          without (analyze/->annotations-from-rule-source-analysis
+                   {:rule-source-analysis (analyze/->rule-source-analysis analyze-opts)
                     :session-or-rulebase session})]
       (is (true? (:clara-rules/no-output-types (ann/get-annotation without rule-key)))
           "without the hook the declared helper has no body → no insert detected")
-      (let [with (analyze/generate-annotations-from-analysis
-                  {:analysis (analyze/analyze-session-rules
-                              (assoc analyze-opts
-                                     :ns-var-defs-fn
-                                     (fn [_]
-                                       (mapv (fn [[sym form]] {:name sym :form form})
-                                             captured-defs))))
+      (let [with (analyze/->annotations-from-rule-source-analysis
+                  {:rule-source-analysis (analyze/->rule-source-analysis
+                                          (assoc analyze-opts
+                                                 :ns-var-defs-fn
+                                                 (fn [_]
+                                                   (mapv (fn [[sym form]] {:name sym :form form})
+                                                         captured-defs))))
                    :session-or-rulebase session
                    :fact-constructors [{:match-fn (fn [sym] (= (name sym) "->fact"))
                                         :type-resolver-fn ->fact-type-resolver}]})
@@ -1022,13 +1022,13 @@
                (outer-helper 1))))
     (let [session (r/mk-session ns-sym)
           rule-key 'fake.eval-two-hop/fake-two-hop-rule
-          with (analyze/generate-annotations-from-analysis
-                {:analysis (analyze/analyze-session-rules
-                            {:session-or-rulebase session
-                             :include-ns-prefixes ["fake."]
-                             :ns-var-defs-fn (fn [_]
-                                               (mapv (fn [[sym form]] {:name sym :form form})
-                                                     captured-defs))})
+          with (analyze/->annotations-from-rule-source-analysis
+                {:rule-source-analysis (analyze/->rule-source-analysis
+                                        {:session-or-rulebase session
+                                         :include-ns-prefixes ["fake."]
+                                         :ns-var-defs-fn (fn [_]
+                                                           (mapv (fn [[sym form]] {:name sym :form form})
+                                                                 captured-defs))})
                  :session-or-rulebase session
                  :fact-constructors [{:match-fn (fn [sym] (= (name sym) "->fact"))
                                       :type-resolver-fn ->fact-type-resolver}]})
@@ -1061,12 +1061,12 @@
   (is (nil? (analyze/find-ns-resource 'non-existent-ns.fake))))
 
 ;; ---------------------------------------------------------------------------
-;; build-analysis-from-namespaces
+;; ->rule-source-analysis-from-namespaces
 ;; ---------------------------------------------------------------------------
 
-(deftest test-build-analysis-from-namespaces--custom-cache
+(deftest test-rule-source-analysis-from-namespaces--custom-cache
   (let [cache (atom {})
-        merged (analyze/build-analysis-from-namespaces
+        merged (analyze/->rule-source-analysis-from-namespaces
                 {:starting-namespaces ['clara.server.tools.graph.rules.analyze-test-rules]
                  :include-ns-prefixes [rules-prefix]
                  :cache-atom cache})]
@@ -1078,38 +1078,38 @@
       (is (contains? var-defs 'rule-record-constructor)))))
 
 ;; ---------------------------------------------------------------------------
-;; generate-annotations-from-analysis (caller-built analysis + required session)
+;; ->annotations-from-rule-source-analysis (caller-built analysis + required session)
 ;; ---------------------------------------------------------------------------
 
-(deftest test-generate-annotations-from-analysis--from-merged-analysis
-  (testing "works on a caller-built analysis (no analyze-session-rules synthesis)"
-    (let [merged-analysis (analyze/build-analysis-from-namespaces
+(deftest test-annotations-from-rule-source-analysis--from-merged-analysis
+  (testing "works on a caller-built analysis (no ->rule-source-analysis synthesis)"
+    (let [merged-analysis (analyze/->rule-source-analysis-from-namespaces
                            {:starting-namespaces ['clara.server.tools.graph.rules.analyze-test-rules]
                             :include-ns-prefixes [rules-prefix]})
-          annotations (analyze/generate-annotations-from-analysis
-                       {:analysis merged-analysis
+          annotations (analyze/->annotations-from-rule-source-analysis
+                       {:rule-source-analysis merged-analysis
                         :session-or-rulebase edge-case-session})]
       (is (some? (ann/get-annotation annotations `atr/rule-record-constructor)))
       (is (= [`LocalDummyRecord]
              (:clara-rules/insert-types (ann/get-annotation annotations `atr/rule-record-constructor))))))
   (testing ":session-or-rulebase is required"
     (is (thrown? clojure.lang.ExceptionInfo
-                 (analyze/generate-annotations-from-analysis
-                  {:analysis {}})))))
+                 (analyze/->annotations-from-rule-source-analysis
+                  {:rule-source-analysis {}})))))
 
 ;; ---------------------------------------------------------------------------
-;; add-auto-detected-annotations
+;; add-memory-derived-insert-type-detections
 ;; ---------------------------------------------------------------------------
 
-(deftest test-add-auto-detected-annotations--base-case
+(deftest test-add-memory-derived-insert-type-detections--base-case
   (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
                                   'clara.server.tools.graph.rules.loan-app-rules)
                     (r/insert (laf/map->Application {:app-id "app-1"})
                               (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
                               (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
                     (r/fire-rules))
-        snapshot (memory/session-snapshot session)
-        enriched (analyze/add-auto-detected-annotations snapshot {})]
+        memory-analysis (memory/->memory-analysis session)
+        enriched (analyze/add-memory-derived-insert-type-detections {} memory-analysis)]
     (testing "Detects fact types from working memory"
       (let [crd (get enriched "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
         (is (some? (:clara-rules/dynamic-insert-types-detected crd)))
@@ -1117,7 +1117,7 @@
                 [AllRequiredDocuments]
                 :resolution :partial}
                (:clara-rules/dynamic-insert-types-detected crd))))
-      ;; No insert-types added (that is enrich-annotations-from-session's job)
+      ;; No insert-types added (that is merge-memory-derived-insert-types's job)
       (is (nil? (:clara-rules/insert-types
                  (get enriched "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")))))
 
@@ -1128,28 +1128,28 @@
                                   (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
                                   (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
                         (r/fire-rules))
-            snapshot (memory/session-snapshot session)
+            memory-analysis (memory/->memory-analysis session)
             existing-annos
             {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
              {:clara-rules/insert-types
               ['clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments]}}
-            enriched (analyze/add-auto-detected-annotations snapshot existing-annos)
+            enriched (analyze/add-memory-derived-insert-type-detections existing-annos memory-analysis)
             crd (get enriched "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
         (is (nil? (:clara-rules/dynamic-insert-types-detected crd))
             "Should NOT add dynamic detection when annotation already has the type")))))
 
 ;; ---------------------------------------------------------------------------
-;; enrich-annotations-from-session
+;; merge-memory-derived-insert-types
 ;; ---------------------------------------------------------------------------
 
-(deftest test-enrich-annotations-from-session--base-case
+(deftest test-merge-memory-derived-insert-types--base-case
   (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
                                   'clara.server.tools.graph.rules.loan-app-rules)
                     (r/insert (laf/map->Application {:app-id "app-1"})
                               (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
                               (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
                     (r/fire-rules))
-        fe      (analyze/enrich-annotations-from-session session {})]
+        fe      (analyze/merge-memory-derived-insert-types {} session)]
     (testing "Adds insert-types and dynamic detection for rules with session-derived facts"
       (let [crd (get fe "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
         (is (= [AllRequiredDocuments]
@@ -1178,23 +1178,23 @@
         (is (nil? (:clara-rules/insert-types aop))
             "Should not add insert-types when :props already covers it")))))
 
-(deftest test-enrich-annotations-from-session*--tuple
+(deftest test-merge-memory-derived-insert-types*--tuple
   (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
                                   'clara.server.tools.graph.rules.loan-app-rules)
                     (r/insert (laf/map->Application {:app-id "app-1"}))
                     (r/fire-rules))
-        result  (analyze/enrich-annotations-from-session* session {})]
+        result  (analyze/merge-memory-derived-insert-types* {} session)]
     (testing "Returns the enriched annotations under :annotations"
-      (is (= (analyze/enrich-annotations-from-session session {})
+      (is (= (analyze/merge-memory-derived-insert-types {} session)
              (:annotations result))
           "annotations match the thin wrapper"))
-    (testing "Returns the working-memory snapshot under :snapshot"
-      (is (map? (:snapshot result)))
-      (is (= (memory/session-snapshot session)
-             (:snapshot result))
-          "snapshot is the enrichment-phase session snapshot"))))
+    (testing "Returns the memory-analysis under :memory-analysis"
+      (is (map? (:memory-analysis result)))
+      (is (= (memory/->memory-analysis session)
+             (:memory-analysis result))
+          "memory-analysis is the enrichment-phase memory-analysis"))))
 
-(deftest test-enrich-annotations-from-session--preserves-callsites
+(deftest test-merge-memory-derived-insert-types--preserves-callsites
   (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
                                   'clara.server.tools.graph.rules.loan-app-rules)
                     (r/insert (laf/map->Application {:app-id "app-1"})
@@ -1211,7 +1211,7 @@
                         :filename "some/ns.clj"
                         :status :none}]
            :resolution :full}}}
-        fe  (analyze/enrich-annotations-from-session session existing-annos)
+        fe  (analyze/merge-memory-derived-insert-types existing-annos session)
         crd (get fe "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")]
     (testing "Preserves pre-existing :callsites when no new types detected"
       (let [dyn (:clara-rules/dynamic-insert-types-detected crd)]
@@ -1223,7 +1223,7 @@
         (is (= :full (:resolution dyn))
             "Should keep original :resolution")))))
 
-(deftest test-enrich-annotations-from-session--preserves-callsites-with-new-types
+(deftest test-merge-memory-derived-insert-types--preserves-callsites-with-new-types
   "When session-derived fact types are found for a rule that already has
    :callsites from static analysis, both :callsites and :fact-instance-derived-types
    should be present in the enriched annotation."
@@ -1246,7 +1246,7 @@
                         :status :none}]
            :resolution :none}
           :clara-rules/notes "Compliance review inserted via helper call"}}
-        fe  (analyze/enrich-annotations-from-session session existing-annos)
+        fe  (analyze/merge-memory-derived-insert-types existing-annos session)
         crd (get fe "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review")]
     (testing "Merges session-derived types with pre-existing :callsites"
       (let [dyn (:clara-rules/dynamic-insert-types-detected crd)]
@@ -1261,7 +1261,7 @@
                        ComplianceReview)
             "Should detect the ComplianceReview type")))))
 
-(deftest test-enrich-annotations-from-session--dedup-against-props
+(deftest test-merge-memory-derived-insert-types--dedup-against-props
   (testing "Session-derived types already in :props are not flagged as dynamic"
     (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
                                     'clara.server.tools.graph.rules.loan-app-rules)
@@ -1269,7 +1269,7 @@
                                 (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
                                 (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
                       (r/fire-rules))
-          fe      (analyze/enrich-annotations-from-session session {})
+          fe      (analyze/merge-memory-derived-insert-types {} session)
           aop     (get fe "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?")]
       (is (nil? (:clara-rules/dynamic-insert-types-detected aop))
           "app-outcome-pending? declares ApplicationOutcome in its :props")
@@ -1348,8 +1348,8 @@
 
                       (and (seq? arg-form) (= 'with-meta (first arg-form)))
                       {:resolved-types [(:type (nth arg-form 2))]}))
-          ann (analyze/generate-annotations-from-analysis
-               {:analysis edge-case-analysis
+          ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis edge-case-analysis
                 :session-or-rulebase edge-case-session
                 :callsite-resolver-fn generic
                 :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
@@ -1399,8 +1399,8 @@
                       (swap! seen conj arg-form)
                       (when (and (seq? arg-form) (= arg-head (first arg-form)))
                         {:resolved-types [fact-type]}))
-            ann (analyze/generate-annotations-from-analysis
-                 {:analysis edge-case-analysis
+            ann (analyze/->annotations-from-rule-source-analysis
+                 {:rule-source-analysis edge-case-analysis
                   :session-or-rulebase edge-case-session
                   :callsite-resolver-fn generic
                   :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
@@ -1430,8 +1430,8 @@
                     (swap! seen conj arg-form)
                     (when (and (seq? arg-form) (= '->fact (first arg-form)))
                       {:resolved-types [(second arg-form)]}))
-          ann (analyze/generate-annotations-from-analysis
-               {:analysis edge-case-analysis
+          ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis edge-case-analysis
                 :session-or-rulebase edge-case-session
                 :callsite-resolver-fn generic
                 :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
@@ -1447,8 +1447,8 @@
           ":callsite-resolver-fn is not asked about the locals-traced constructor form"))))
 
 (deftest test-constructor-only-counts-on-an-insert-path
-  (let [ann (analyze/generate-annotations-from-analysis
-             {:analysis edge-case-analysis
+  (let [ann (analyze/->annotations-from-rule-source-analysis
+             {:rule-source-analysis edge-case-analysis
               :session-or-rulebase edge-case-session
               :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
                                    :type-resolver-fn ->fact-type-resolver}]})]
@@ -1498,22 +1498,22 @@
 (deftest test-constructor-options-validation
   (testing "a :fact-constructors spec missing :type-resolver-fn fails schema validation"
     (is (thrown? Exception
-                 (analyze/generate-annotations-from-analysis
-                  {:analysis edge-case-analysis
+                 (analyze/->annotations-from-rule-source-analysis
+                  {:rule-source-analysis edge-case-analysis
                    :session-or-rulebase edge-case-session
                    :fact-constructors [{:match-fn (constantly true)}]}))))
 
   (testing "a :fact-constructors spec missing :match-fn fails schema validation"
     (is (thrown? Exception
-                 (analyze/generate-annotations-from-analysis
-                  {:analysis edge-case-analysis
+                 (analyze/->annotations-from-rule-source-analysis
+                  {:rule-source-analysis edge-case-analysis
                    :session-or-rulebase edge-case-session
                    :fact-constructors [{:type-resolver-fn (constantly nil)}]})))))
 
 (deftest test-fact-constructors-vector
   (testing "first matching spec in vector order wins"
-    (let [ann (analyze/generate-annotations-from-analysis
-               {:analysis edge-case-analysis
+    (let [ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis edge-case-analysis
                 :session-or-rulebase edge-case-session
                 :fact-constructors [;; matches, and its resolver wins
                                     {:match-fn (->fact-sym-match-fn ->fact-sym)
@@ -1526,8 +1526,8 @@
           "the first matching spec's resolver decided the type")))
 
   (testing "a non-matching first spec falls through to the next"
-    (let [ann (analyze/generate-annotations-from-analysis
-               {:analysis edge-case-analysis
+    (let [ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis edge-case-analysis
                 :session-or-rulebase edge-case-session
                 :fact-constructors [{:match-fn (fn [sym] (= 'no.such/ctor sym))
                                      :type-resolver-fn (fn [_] {:resolved-types [:demo/never]})}
@@ -1667,8 +1667,8 @@
           tap-fn (fn [v] (swap! tapped conj v))]
       (add-tap tap-fn)
       (try
-        (analyze/generate-annotations-from-analysis
-         {:analysis edge-case-analysis
+        (analyze/->annotations-from-rule-source-analysis
+         {:rule-source-analysis edge-case-analysis
           :session-or-rulebase edge-case-session})
         (finally
           (remove-tap tap-fn)))

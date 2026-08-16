@@ -38,10 +38,10 @@
   (with-meta {:step step-kw} {:type step-kw}))
 
 (defn bulk-fact
-  "A heavier, nested fact for memory-snapshot load testing. Includes a set,
+  "A heavier, nested fact for memory-analysis load testing. Includes a set,
    nested maps, vectors, and a function value so `deterministic-fact-str`
    (canonicalization + sorting) and `serialize/prune-fns` both have real work
-   to do during a snapshot."
+   to do during a memory-analysis."
   [i]
   (with-meta {:bulk-id i
               :tags #{:bulk/a :bulk/b :bulk/c :bulk/d :bulk/e}
@@ -110,7 +110,7 @@
 
 (r/defquery all-bulk-facts
   "Query matching all bulk facts via their common :bulk/fact type, so they are
-   retained in working memory for snapshot-load testing."
+   retained in working memory for memory-analysis-load testing."
   []
   [?f <- :bulk/fact])
 
@@ -137,7 +137,7 @@
   "Builds and fires a chain of `n-chain` rules. When `n-bulk-facts` is
    positive, also inserts that many heavy `bulk-fact`s into working memory
    (each retained by the `all-bulk-facts` query) to simulate a memory-heavy
-   session snapshot."
+   memory-analysis."
   ([n-chain]
    (run-rules n-chain 0))
   ([n-chain n-bulk-facts]

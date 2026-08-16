@@ -4,7 +4,7 @@ import type {
 	QuerySummary,
 	RuleListItem,
 	QueryListItem,
-	Analysis,
+	RulebaseAnalysis,
 	FactTypeSummary,
 	RulebaseSummary,
 	SessionFactTypesResponse,
@@ -39,13 +39,16 @@ export async function fetchRulebaseSummary(
 }
 
 /**
- * Fetches the full analysis and dependency graph.
- * @deprecated Use specific endpoints instead.
+ * Fetches the full rulebase analysis external view (dependency graph and
+ * summaries).  Not consumed by current pages — they use the streamlined
+ * per-resource endpoints instead.
  */
-export async function fetchAnalysis(customFetch: typeof fetch = fetch): Promise<Analysis> {
-	const response = await customFetch(getUrl(`${API_BASE}/analysis`));
+export async function fetchRulebaseAnalysis(
+	customFetch: typeof fetch = fetch
+): Promise<RulebaseAnalysis> {
+	const response = await customFetch(getUrl(`${API_BASE}/rulebase-analysis`));
 	if (!response.ok) {
-		throw new Error(`Failed to fetch analysis: ${response.statusText}`);
+		throw new Error(`Failed to fetch rulebase analysis: ${response.statusText}`);
 	}
 	return response.json();
 }
@@ -133,7 +136,7 @@ export async function fetchFactType(
 }
 
 /**
- * --- Phase 2: Session Snapshot Endpoints ---
+ * --- Phase 2: Memory Analysis Endpoints ---
  */
 
 /**

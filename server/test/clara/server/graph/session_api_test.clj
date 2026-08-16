@@ -48,8 +48,8 @@
                          "clara.server.tools.graph.rules.loan_app_facts.Application")))))
 
     (testing "GET /v1/session/fact-types/:id"
-      (let [snapshot (parse-json (:body (handler (mock/request :get "/v1/session-snapshot"))))
-            app-id (id-for (:fact-type-id-index snapshot)
+      (let [memory-analysis (parse-json (:body (handler (mock/request :get "/v1/memory-analysis"))))
+            app-id (id-for (:fact-type-id-index memory-analysis)
                            "clara.server.tools.graph.rules.loan_app_facts.Application")
             response (handler (mock/request :get (str "/v1/session/fact-types/" app-id)))]
         (is (= 200 (:status response)))
@@ -60,16 +60,16 @@
 (deftest test-session-facts-granular
   (let [handler (->handler)]
     (testing "GET /v1/session/facts/:id"
-      ;; First get the snapshot to find an ID
-      (let [snapshot-resp (handler (mock/request :get "/v1/session-snapshot"))
-            snapshot (parse-json (:body snapshot-resp))
+      ;; First get the memory-analysis to find an ID
+      (let [memory-analysis-resp (handler (mock/request :get "/v1/memory-analysis"))
+            memory-analysis (parse-json (:body memory-analysis-resp))
             ;; Be more specific: lookup by type AND app-id
             fact-id (some (fn [[id f]]
                             (when (and (= (get-in f [:type :name])
                                           "clara.server.tools.graph.rules.loan_app_facts.Application")
                                        (= (get-in f [:data :app-id]) "app-1"))
                               id))
-                          (:facts snapshot))
+                          (:facts memory-analysis))
 
             ;; Now test the granular endpoint
             response (handler (mock/request :get (str "/v1/session/facts/" (name fact-id))))]
@@ -84,8 +84,8 @@
 (deftest test-session-rules-activations
   (let [handler (->handler)]
     (testing "GET /v1/session/rules/:id"
-      (let [snapshot (parse-json (:body (handler (mock/request :get "/v1/session-snapshot"))))
-            rule-id (id-for (:rule-id-index snapshot)
+      (let [memory-analysis (parse-json (:body (handler (mock/request :get "/v1/memory-analysis"))))
+            rule-id (id-for (:rule-id-index memory-analysis)
                             "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs")
             response (handler (mock/request :get (str "/v1/session/rules/" rule-id)))]
         (is (= 200 (:status response)))
@@ -106,8 +106,8 @@
 
 (deftest test-session-rule-match-fact-bindings-shape
   (let [handler (->match-uniqueness-handler)
-        snapshot (parse-json (:body (handler (mock/request :get "/v1/session-snapshot"))))
-        rule-id (id-for (:rule-id-index snapshot)
+        memory-analysis (parse-json (:body (handler (mock/request :get "/v1/memory-analysis"))))
+        rule-id (id-for (:rule-id-index memory-analysis)
                         "clara.server.tools.graph.rules.match-uniqueness-test-rules/pairwise")
         response (handler (mock/request :get (str "/v1/session/rules/" rule-id)))]
     (is (= 200 (:status response)))
@@ -127,8 +127,8 @@
 (deftest test-session-rule-match-data-parity
   (testing ":data on a match fact equals :data on /v1/session/facts/:id"
     (let [handler (->match-uniqueness-handler)
-          snapshot (parse-json (:body (handler (mock/request :get "/v1/session-snapshot"))))
-          rule-id (id-for (:rule-id-index snapshot)
+          memory-analysis (parse-json (:body (handler (mock/request :get "/v1/memory-analysis"))))
+          rule-id (id-for (:rule-id-index memory-analysis)
                           "clara.server.tools.graph.rules.match-uniqueness-test-rules/pairwise")
           rule-body (parse-json (:body (handler (mock/request :get (str "/v1/session/rules/" rule-id)))))]
       (doseq [match (:matches rule-body)]
@@ -146,7 +146,7 @@
 (deftest test-rulebase-only-409
   ;; NOTE: flag=true matches the shipped start! wiring for rulebase input:
   ;; start! passes the raw :working-memory-enabled flag (default true) and
-  ;; the 409 is attributed dynamically by with-snapshot (:rulebase-input).
+  ;; the 409 is attributed dynamically by with-memory-analysis (:rulebase-input).
   (let [rulebase (-> (->test-session) eng/components :rulebase)
         handler (:handler (api/app (atom {:session rulebase :annotations {}}) true))]
 
@@ -157,8 +157,8 @@
           (is (= "rulebase-input" (:reason body)))
           (is (string? (:error body)) "error should be a string"))))
 
-    (testing "GET /v1/session-snapshot → 409"
-      (let [resp (handler (mock/request :get "/v1/session-snapshot"))]
+    (testing "GET /v1/memory-analysis → 409"
+      (let [resp (handler (mock/request :get "/v1/memory-analysis"))]
         (is (= 409 (:status resp)))
         (let [body (parse-json (:body resp))]
           (is (= "rulebase-input" (:reason body))))))
@@ -170,7 +170,7 @@
 
     (testing "Rulebase routes still 200"
       (is (= 200 (:status (handler (mock/request :get "/v1/rulebase-summary")))))
-      (is (= 200 (:status (handler (mock/request :get "/v1/analysis"))))))))
+      (is (= 200 (:status (handler (mock/request :get "/v1/rulebase-analysis"))))))))
 
 (deftest test-rulebase-summary-working-memory-flag
   (testing "RulebaseSummary :working-memory-available is false for rulebase"
@@ -211,7 +211,7 @@
 
     (testing "session routes 409 with :disabled-by-config despite live session"
       (doseq [uri ["/v1/session/fact-types"
-                   "/v1/session-snapshot"
+                   "/v1/memory-analysis"
                    "/v1/session/rules/some-rule"
                    "/v1/session/queries/some-query"
                    "/v1/session/facts/0"

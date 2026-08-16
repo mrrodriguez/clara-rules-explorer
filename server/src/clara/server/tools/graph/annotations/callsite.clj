@@ -53,12 +53,12 @@
    (s/optional-key :dangling?) s/Bool})
 
 (s/defschema DetectionMap
-  "One dimension's callsite audit trail.  `:resolution` is derived from the
-   callsites and never taken from a layer, so it is optional on input and
-   always present in merged output.  `:fact-instance-derived-types` is the
-   session-enrichment channel (analyze/enrich-annotations-from-session) —
-   types observed in working memory rather than resolved from source; such
-   maps carry no `:callsites` and merge as opaque values."
+  "One dimension's callsite audit trail. `:resolution` is derived from the callsites and never taken
+   from a layer, so it is optional on input and always present in merged output.
+   `:fact-instance-derived-types` is the session-enrichment channel
+   (`clara.server.tools.graph.analyze/merge-memory-derived-insert-types`) — types observed in
+   working memory rather than resolved from source; such maps carry no `:callsites` and merge as
+   opaque values."
   {(s/optional-key :callsites) [CallsiteEntry]
    (s/optional-key :resolution) Resolution
    (s/optional-key :fact-instance-derived-types) [s/Any]})

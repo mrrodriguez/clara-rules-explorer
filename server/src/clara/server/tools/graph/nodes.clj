@@ -49,7 +49,7 @@
 
       :else (assoc common :kind :unknown))))
 
-(defn- build-reverse-index
+(defn- ->reverse-index
   "Builds a mapping from node-id to its parents."
   [id-to-node]
   (letfn [(add-children [acc parent-id node]
@@ -72,10 +72,10 @@
     (:name (:production term-node))
     (:name (:query term-node))))
 
-(defn- build-reachability
+(defn- ->reachability
   "Returns a map of node-id to the set of production names that are reachable from it."
   [id-to-node]
-  (let [rev-index (build-reverse-index id-to-node)
+  (let [rev-index (->reverse-index id-to-node)
         terminals (get-terminal-nodes id-to-node)]
     (reduce
      (fn [acc term-node]
@@ -99,9 +99,9 @@
      {}
      terminals)))
 
-(defn- build-node-summary-map
+(defn- ->node-summary-map
   [id-to-node]
-  (let [reachability (build-reachability id-to-node)
+  (let [reachability (->reachability id-to-node)
         node-id->productions (update-vals reachability :productions)
         node-id->queries (update-vals reachability :queries)]
 
@@ -111,17 +111,17 @@
                                :node-id->productions node-id->productions
                                :node-id->queries node-id->queries})]))))
 
-(defn- build-node-parents-map
+(defn- ->node-parents-map
   [nodes id-to-node]
-  (let [rev-index (build-reverse-index id-to-node)]
+  (let [rev-index (->reverse-index id-to-node)]
     (reduce-kv (fn [acc id parents]
                  (assoc-in acc [id :parents] (vec parents)))
                nodes
                rev-index)))
 
-(defn build-nodes
+(defn ->nodes
   "Builds a map of node-id to node summary, including reachability and parent information."
   [id-to-node]
   (-> id-to-node
-      (build-node-summary-map)
-      (build-node-parents-map id-to-node)))
+      (->node-summary-map)
+      (->node-parents-map id-to-node)))

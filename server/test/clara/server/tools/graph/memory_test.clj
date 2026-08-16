@@ -28,11 +28,11 @@
           session (-> (->test-session)
                       (r/insert app-1 app-2)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
-          facts (:facts snapshot)
+          memory-analysis (memory/->memory-analysis session)
+          facts (:facts memory-analysis)
           ids (keys facts)]
 
-      (is (seq ids) "Snapshot should contain facts")
+      (is (seq ids) "Memory analysis should contain facts")
       (is (= (set (range 1 (inc (count facts)))) (set ids)) "IDs should be 1 to N")
 
       (let [app-1-data (serialize/prune-fns app-1)
@@ -53,12 +53,12 @@
           session (-> (->test-session)
                       (r/insert app-a app-b)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
-          facts (:facts snapshot)
+          memory-analysis (memory/->memory-analysis session)
+          facts (:facts memory-analysis)
           app-data (serialize/prune-fns app-a)
           instances (filter #(= (:data (val %)) app-data) facts)]
 
-      (is (= 2 (count instances)) "Both equal facts should be in the snapshot")
+      (is (= 2 (count instances)) "Both equal facts should be in the memory-analysis")
       (is (not= (first (keys instances)) (second (keys instances))) "They must have different IDs"))))
 
 (deftest test-used-by-index
@@ -67,10 +67,10 @@
           session (-> (->test-session)
                       (r/insert app)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
+          memory-analysis (memory/->memory-analysis session)
           app-data (serialize/prune-fns app)
-          fact-id (some (fn [[id f]] (when (= (:data f) app-data) id)) (:facts snapshot))
-          used-by (get-in snapshot [:used-by fact-id])]
+          fact-id (some (fn [[id f]] (when (= (:data f) app-data) id)) (:facts memory-analysis))
+          used-by (get-in memory-analysis [:used-by fact-id])]
 
       (is (seq used-by) "Fact should be used by some rules/queries")
       (is (some #(= (:name %) "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs") used-by)))))
@@ -81,30 +81,30 @@
           session (-> (->test-session)
                       (r/insert app)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
+          memory-analysis (memory/->memory-analysis session)
           ;; Find a fact that was inserted by a rule, e.g., AllRequiredDocuments
           inserted-fact-entry (some (fn [[id f]]
                                       (when (= (:type f) "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments")
                                         [id f]))
-                                    (:facts snapshot))]
+                                    (:facts memory-analysis))]
 
       (when inserted-fact-entry
         (let [[id _] inserted-fact-entry
-              origins (get-in snapshot [:origin id])]
+              origins (get-in memory-analysis [:origin id])]
           (is (seq origins) "Inserted fact should have an origin")
           (is (= "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs" (:name (first origins)))))))))
 
-(deftest test-enriched-snapshot
-  (testing "Snapshot contains enriched fact-table and rule-centric groupings"
+(deftest test-enriched-memory-analysis
+  (testing "Memory analysis contains enriched fact-table and rule-centric groupings"
     (let [app (laf/map->Application {:app-id "app-1"})
           session (-> (->test-session)
                       (r/insert app)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
+          memory-analysis (memory/->memory-analysis session)
 
           ;; 1. Verify Enriched Fact Table
           app-data (serialize/prune-fns app)
-          fact (some #(when (= (:data %) app-data) %) (vals (:facts snapshot)))]
+          fact (some #(when (= (:data %) app-data) %) (vals (:facts memory-analysis)))]
       (is (some? fact))
       (is (vector? (:inserted-from fact)))
       (is (vector? (:used-by fact)))
@@ -112,7 +112,7 @@
       (is (seq (:used-by fact)) "Fact should be used by rules/queries")
 
       ;; 2. Verify Rule-Centric Index
-      (let [type-info (get-in snapshot [:fact-types "clara.server.tools.graph.rules.loan_app_facts.Application"])]
+      (let [type-info (get-in memory-analysis [:fact-types "clara.server.tools.graph.rules.loan_app_facts.Application"])]
         (is (seq (:inserted-from type-info)) "Type info should have rule-centric inserted-from")
         (is (= "Root Facts (External)" (:name (first (:inserted-from type-info)))))
         (is (= "root" (:type (first (:inserted-from type-info)))))
@@ -123,16 +123,16 @@
           (is (seq (:facts usage))))))))
 
 (deftest test-rule-query-activity
-  (testing "Snapshot contains rule and query activity (inserted facts and matches)"
+  (testing "Memory analysis contains rule and query activity (inserted facts and matches)"
     (let [app (laf/map->Application {:app-id "app-1"})
           session (-> (->test-session)
                       (r/insert app)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
+          memory-analysis (memory/->memory-analysis session)
 
           ;; 1. Verify Rule Activity
           rule-name "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
-          rule-info (get-in snapshot [:rule-matches rule-name])]
+          rule-info (get-in memory-analysis [:rule-matches rule-name])]
       (is (some? rule-info) "Rule info should exist in rule-matches")
       (is (seq (:inserted-facts rule-info)) "Rule should have inserted facts")
       (is (every? :id (:inserted-facts rule-info)) "Inserted facts should have IDs")
@@ -154,7 +154,7 @@
 
       ;; 2. Verify Query Activity
       (let [query-name "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"
-            query-info (get-in snapshot [:query-matches query-name])]
+            query-info (get-in memory-analysis [:query-matches query-name])]
         (is (some? query-info) "Query info should exist in query-matches")
         (is (vector? (:matches query-info)) "Query should have matches vector")
         ;; Query matches are also FactMatch entries
@@ -175,10 +175,10 @@
           session (-> (->test-session)
                       (r/insert app req-doc given-doc)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
+          memory-analysis (memory/->memory-analysis session)
 
           rule-name "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
-          rule-info (get-in snapshot [:rule-matches rule-name])
+          rule-info (get-in memory-analysis [:rule-matches rule-name])
           matches (:matches rule-info)]
 
       (is (some? rule-info) "app-has-all-required-docs should exist in rule-matches")
@@ -206,18 +206,18 @@
 ;; Match uniqueness — FactMatch shape (one row per fact, N binding sets)
 ;; ---------------------------------------------------------------------------
 
-(defn- ->match-uniqueness-snapshot
+(defn- ->match-uniqueness-memory-analysis
   []
   (-> (r/mk-session 'clara.server.tools.graph.rules.match-uniqueness-test-rules)
       (r/insert (mu/->Config "c1") (mu/->Item "a") (mu/->Item "b") (mu/->Item nil))
       (r/fire-rules)
-      (memory/session-snapshot)))
+      (memory/->memory-analysis)))
 
 (defn- mu-rule-matches
-  [snapshot short-name]
-  (get-in snapshot [:rule-matches
-                    (str "clara.server.tools.graph.rules.match-uniqueness-test-rules/" short-name)
-                    :matches]))
+  [memory-analysis short-name]
+  (get-in memory-analysis [:rule-matches
+                           (str "clara.server.tools.graph.rules.match-uniqueness-test-rules/" short-name)
+                           :matches]))
 
 (def ^:private mu-item-type-name
   "clara.server.tools.graph.rules.match_uniqueness_test_rules.Item")
@@ -227,8 +227,8 @@
 
 (deftest test-match-uniqueness-case-a
   (testing "One fact satisfying two conditions of one activation yields one row with one binding set"
-    (let [snapshot (->match-uniqueness-snapshot)
-          matches (mu-rule-matches snapshot "overlapping-conditions")
+    (let [memory-analysis (->match-uniqueness-memory-analysis)
+          matches (mu-rule-matches memory-analysis "overlapping-conditions")
           item-matches (filter #(= mu-item-type-name (get-in % [:fact :type :name])) matches)]
       (is (= 3 (count item-matches)) "all three items appear, once each")
       (is (apply < (mapv (comp :id :fact) item-matches))
@@ -246,8 +246,8 @@
 
 (deftest test-match-uniqueness-case-b
   (testing "One fact across N activations yields one row with N binding sets, none lost"
-    (let [snapshot (->match-uniqueness-snapshot)
-          matches (mu-rule-matches snapshot "pairwise")
+    (let [memory-analysis (->match-uniqueness-memory-analysis)
+          matches (mu-rule-matches memory-analysis "pairwise")
           config-match (first (filter #(= mu-config-type-name (get-in % [:fact :type :name])) matches))]
       (is (some? config-match) "config appears in the pairwise matches")
       (is (= 3 (count (:bindings config-match)))
@@ -260,8 +260,8 @@
 
 (deftest test-match-uniqueness-combined
   (testing "A fact duplicated within and across activations appears once with distinct binding sets"
-    (let [snapshot (->match-uniqueness-snapshot)
-          matches (mu-rule-matches snapshot "combined")
+    (let [memory-analysis (->match-uniqueness-memory-analysis)
+          matches (mu-rule-matches memory-analysis "combined")
           config-match (first (filter #(= mu-config-type-name (get-in % [:fact :type :name])) matches))]
       (is (some? config-match))
       (is (= 3 (count (:bindings config-match)))
@@ -274,17 +274,17 @@
 
 (deftest test-match-uniqueness-distinct-ids
   (testing "Match fact ids are distinct over every rule and query in a fixture session"
-    (let [snapshot (->match-uniqueness-snapshot)]
-      (doseq [[p-name {:keys [matches]}] (:rule-matches snapshot)]
+    (let [memory-analysis (->match-uniqueness-memory-analysis)]
+      (doseq [[p-name {:keys [matches]}] (:rule-matches memory-analysis)]
         (is (= (count matches) (count (distinct (map (comp :id :fact) matches))))
             (str "rule " p-name " has distinct match fact ids")))
-      (doseq [[p-name {:keys [matches]}] (:query-matches snapshot)]
+      (doseq [[p-name {:keys [matches]}] (:query-matches memory-analysis)]
         (is (= (count matches) (count (distinct (map (comp :id :fact) matches))))
             (str "query " p-name " has distinct match fact ids")))
       ;; The query mirrors pairwise: Config appears once with three binding sets.
-      (let [query-matches (get-in snapshot [:query-matches
-                                            "clara.server.tools.graph.rules.match-uniqueness-test-rules/find-pairs"
-                                            :matches])
+      (let [query-matches (get-in memory-analysis [:query-matches
+                                                   "clara.server.tools.graph.rules.match-uniqueness-test-rules/find-pairs"
+                                                   :matches])
             config-match (first (filter #(= mu-config-type-name (get-in % [:fact :type :name])) query-matches))]
         (is (some? config-match) "find-pairs query has a Config match")
         (is (= 3 (count (:bindings config-match)))
@@ -296,7 +296,7 @@
                   (-> (r/mk-session 'clara.server.tools.graph.rules.match-uniqueness-test-rules)
                       (r/insert (mu/->Config "c1") (mu/->Item "a") (mu/->Item "b") (mu/->Item nil))
                       (r/fire-rules)
-                      (memory/session-snapshot)))
+                      (memory/->memory-analysis)))
           s1 (build)
           s2 (build)
           ;; `:inserted-facts` order for equal facts is not part of this
@@ -312,15 +312,15 @@
     (let [app-1 (laf/map->Application {:app-id "app-1"})
           app-2 (laf/map->Application {:app-id "app-2"})
 
-          ;; Create two snapshots of identical sessions
-          make-snapshot (fn []
-                          (-> (->test-session)
-                              (r/insert app-1 app-2)
-                              (r/fire-rules)
-                              (memory/session-snapshot)))
+          ;; Create two memory-analyses of identical sessions
+          make-memory-analysis (fn []
+                                 (-> (->test-session)
+                                     (r/insert app-1 app-2)
+                                     (r/fire-rules)
+                                     (memory/->memory-analysis)))
 
-          snapshot-1 (make-snapshot)
-          snapshot-2 (make-snapshot)
+          memory-analysis-1 (make-memory-analysis)
+          memory-analysis-2 (make-memory-analysis)
 
           ;; Strip volatile fields (e.g. timestamps) from fact data for comparison
           strip-volatile (fn [data]
@@ -328,9 +328,9 @@
                              (dissoc data :timestamp)
                              data))]
 
-      (is (= (keys (:facts snapshot-1)) (keys (:facts snapshot-2))) "ID keys should be identical")
-      (is (= (set (map (comp strip-volatile :data) (vals (:facts snapshot-1))))
-             (set (map (comp strip-volatile :data) (vals (:facts snapshot-2))))) "Fact data set should be identical"))))
+      (is (= (keys (:facts memory-analysis-1)) (keys (:facts memory-analysis-2))) "ID keys should be identical")
+      (is (= (set (map (comp strip-volatile :data) (vals (:facts memory-analysis-1))))
+             (set (map (comp strip-volatile :data) (vals (:facts memory-analysis-2))))) "Fact data set should be identical"))))
 
 (deftest test-deterministic-fact-str--shapes
   (testing "set of maps does not throw"
@@ -366,32 +366,32 @@
           session (-> (->test-session)
                       (r/insert app given-doc)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
-          fact-types (:fact-types snapshot)]
-      ;; The snapshot should NOT contain PersistentVector as a fact type
+          memory-analysis (memory/->memory-analysis session)
+          fact-types (:fact-types memory-analysis)]
+      ;; The memory-analysis should NOT contain PersistentVector as a fact type
       (is (nil? (get fact-types "clojure.lang.PersistentVector")) "PersistentVector should not be in fact types")
       (is (nil? (get fact-types "java.lang.Boolean")) "Boolean should not be in fact types")
       (is (some? (get fact-types "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"))))))
 
 (deftest test-session-id-indexes
-  (testing "Session snapshots expose id→name reverse indexes that resolve every id"
+  (testing "Memory-analyses expose id→name reverse indexes that resolve every id"
     (let [app (laf/map->Application {:app-id "app-1"})
           session (-> (->test-session)
                       (r/insert app)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)]
-      (doseq [name (keys (:rule-matches snapshot))]
-        (is (= name (get (:rule-id-index snapshot)
+          memory-analysis (memory/->memory-analysis session)]
+      (doseq [name (keys (:rule-matches memory-analysis))]
+        (is (= name (get (:rule-id-index memory-analysis)
                          (serialize/route-id (str name))))
             (str "rule-id-index resolves " (serialize/route-id (str name)) " back to " name)))
-      (doseq [name (keys (:query-matches snapshot))]
-        (is (= name (get (:query-id-index snapshot)
+      (doseq [name (keys (:query-matches memory-analysis))]
+        (is (= name (get (:query-id-index memory-analysis)
                          (serialize/route-id (str name))))
             (str "query-id-index resolves " (serialize/route-id (str name)) " back to " name)))))
 
-  (testing "A session route-id collision throws at snapshot-build time"
+  (testing "A session route-id collision throws at memory-analysis-build time"
     (is (thrown? clojure.lang.ExceptionInfo
-                 (#'memory/build-id-name-index ["same" "same"])))))
+                 (#'memory/->id-name-index ["same" "same"])))))
 
 (deftest test-session-fact-known-parity
   (testing "Session fact-type known flags honestly reflect membership in the analysis's fact-type names"
@@ -399,13 +399,13 @@
           session (-> (->test-session)
                       (r/insert app)
                       (r/fire-rules))
-          analysis (core/rulebase-analysis
+          analysis (core/->rulebase-analysis
                     session
                     (ann.merge/merge-layers [(ann.merge/props-layer session)]))
           known-set (set (keys (:fact-types analysis)))
-          snapshot (memory/session-snapshot session known-set)
-          fact-types (map :type (vals (:facts snapshot)))]
-      (is (seq fact-types) "Snapshot should contain facts")
+          memory-analysis (memory/->memory-analysis session known-set)
+          fact-types (map :type (vals (:facts memory-analysis)))]
+      (is (seq fact-types) "Memory analysis should contain facts")
       (doseq [{type-name :name type-known :known} fact-types]
         (is (= (contains? known-set type-name) type-known)
             (str "known flag for " type-name " must equal analysis membership")))))
@@ -415,61 +415,61 @@
           session (-> (->test-session)
                       (r/insert app)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)]
-      (is (every? (comp false? :known :type) (vals (:facts snapshot)))
-          "Default snapshot marks no session fact type known"))))
+          memory-analysis (memory/->memory-analysis session)]
+      (is (every? (comp false? :known :type) (vals (:facts memory-analysis)))
+          "Default memory-analysis marks no session fact type known"))))
 
-(deftest test-update-snapshot-known-set
-  (testing "update-snapshot-known-set re-stamps :known to match a fresh analysis-derived snapshot"
+(deftest test-update-memory-analysis-known-set
+  (testing "update-memory-analysis-known-set re-stamps :known to match a fresh analysis-derived memory-analysis"
     (let [app (laf/map->Application {:app-id "app-1"})
           session (-> (->test-session)
                       (r/insert app)
                       (r/fire-rules))
-          analysis (core/rulebase-analysis
+          analysis (core/->rulebase-analysis
                     session
                     (ann.merge/merge-layers [(ann.merge/props-layer session)]))
           known-set (set (keys (:fact-types analysis)))
-          ;; The reuse path: enrichment builds a 1-arity snapshot (all unknown).
-          enrichment-snapshot (memory/session-snapshot session)]
-      (is (every? (comp false? :known :type) (vals (:facts enrichment-snapshot)))
-          "enrichment snapshot starts with every fact type unknown")
-      (let [re-stamped (memory/update-snapshot-known-set enrichment-snapshot known-set)
-            fresh      (memory/session-snapshot-from-analysis session analysis)]
+          ;; The reuse path: enrichment builds a 1-arity memory-analysis (all unknown).
+          enrichment-memory-analysis (memory/->memory-analysis session)]
+      (is (every? (comp false? :known :type) (vals (:facts enrichment-memory-analysis)))
+          "enrichment memory-analysis starts with every fact type unknown")
+      (let [re-stamped (memory/update-memory-analysis-known-set enrichment-memory-analysis known-set)
+            fresh      (memory/->memory-analysis session known-set)]
         (is (= fresh re-stamped)
-            "re-stamped snapshot must equal a freshly-built analysis-derived snapshot")))))
+            "re-stamped memory-analysis must equal a freshly-built analysis-derived memory-analysis")))))
 
-(deftest test-snapshot-raw-types
-  (testing "Snapshot exposes fact-id → raw type for the enrichment boundary"
+(deftest test-memory-analysis-raw-types
+  (testing "Memory analysis exposes fact-id → raw type for the enrichment boundary"
     (let [app (laf/map->Application {:app-id "app-1"})
           req-doc (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
           given-doc (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card})
           session (-> (->test-session)
                       (r/insert app req-doc given-doc)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
-          raw-types (:fact-raw-types snapshot)]
+          memory-analysis (memory/->memory-analysis session)
+          raw-types (:fact-raw-types memory-analysis)]
       (is (seq raw-types))
       (is (some (comp class? val) raw-types) "record facts map to their Class object")
       (is (some (comp keyword? val) raw-types)
           "tagged facts (e.g. :loan-doc-rules/document-check-input) map to their keyword — never a string")
       ;; Every fact's raw type re-serializes to the served :type :name
-      (doseq [[id fact] (:facts snapshot)]
+      (doseq [[id fact] (:facts memory-analysis)]
         (is (= (get-in fact [:type :name])
                (serialize/serialize-fact-type nil (get raw-types id)))
             (str "raw type of fact " id " re-serializes to its served :type :name"))))))
 
-(deftest test-session-analysis-id-parity
+(deftest test-memory-analysis-id-parity
   (testing "Session fact-type ids use the same route-id(name) function as the analysis side"
     (let [app (laf/map->Application {:app-id "app-1"})
           session (-> (->test-session)
                       (r/insert app)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
-          analysis (core/rulebase-analysis
+          memory-analysis (memory/->memory-analysis session)
+          analysis (core/->rulebase-analysis
                     session
                     (ann.merge/merge-layers [(ann.merge/props-layer session)]))
           analysis-types (:fact-types analysis)]
-      (doseq [{type-name :name type-id :id} (vals (:fact-types snapshot))]
+      (doseq [{type-name :name type-id :id} (vals (:fact-types memory-analysis))]
         (is (= (serialize/route-id type-name) type-id)
             (str "session id for " type-name " is route-id(name)"))
         ;; Session facts include runtime-inserted types the analysis does not
@@ -485,33 +485,33 @@
           session (-> (r/mk-session 'clara.server.tools.graph.rules.nil-safety-test-rules)
                       (r/insert fact)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
-          facts (:facts snapshot)]
+          memory-analysis (memory/->memory-analysis session)
+          facts (:facts memory-analysis)]
 
-      ;; Snapshot builds without throwing
-      (is (map? snapshot))
-      (is (seq facts) "Snapshot should contain the triggering fact")
+      ;; Memory analysis builds without throwing
+      (is (map? memory-analysis))
+      (is (seq facts) "Memory analysis should contain the triggering fact")
 
       ;; Nil should not appear — it was filtered at get-wrapped-fact-groups
       (let [nil-facts (filterv (fn [[_id f]]
                                  (nil? (:data f)))
                                facts)]
         (is (empty? nil-facts)
-            "Nil facts should be excluded from the snapshot")))))
+            "Nil facts should be excluded from the memory-analysis")))))
 
-(deftest test-nil-inserting-rule-snapshot
+(deftest test-nil-inserting-rule-memory-analysis
   (testing "A rule that inserts nil still appears in rule-matches with clean entries"
     (let [fact (nil-safety/->NilSafetyFact "f1")
           session (-> (r/mk-session 'clara.server.tools.graph.rules.nil-safety-test-rules)
                       (r/insert fact)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
+          memory-analysis (memory/->memory-analysis session)
           entry (some (fn [[p-name m]]
                         (when (= "nil-insertion-rule" (name (symbol (str p-name)))) m))
-                      (:rule-matches snapshot))]
+                      (:rule-matches memory-analysis))]
       (is (some? entry) "the nil-inserting rule must still appear in the rule-match index")
       (is (every? some? (:inserted-facts entry))
-          "a fact with no snapshot entry is absent, never present as nil")
+          "a fact with no memory-analysis entry is absent, never present as nil")
       (is (every? some? (:matches entry))))))
 
 (deftest test-equal-facts-attributed-to-their-own-inserting-rule
@@ -519,18 +519,18 @@
     (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.equal-fact-test-rules)
                       (r/insert (equal-facts/->Seed 1))
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
-          derived (->> (:facts snapshot)
+          memory-analysis (memory/->memory-analysis session)
+          derived (->> (:facts memory-analysis)
                        (filter (fn [[_id f]]
                                  (str/includes? (get-in f [:type :name]) "Derived"))))
           derived-ids (set (map key derived))
           claimed (into {}
                         (map (fn [[p-name m]]
                                [(name (symbol (str p-name))) (mapv :id (:inserted-facts m))]))
-                        (:rule-matches snapshot))
+                        (:rule-matches memory-analysis))
           claimed-ids (mapcat val claimed)]
 
-      (is (= 2 (count derived-ids)) "both equal facts are distinct in the snapshot")
+      (is (= 2 (count derived-ids)) "both equal facts are distinct in the memory-analysis")
       (is (= (sort claimed-ids) (distinct (sort claimed-ids)))
           "no fact is claimed by more than one rule")
       (is (= derived-ids (set claimed-ids))
@@ -549,11 +549,11 @@
                                     :fact-type-fn nil-ft-fn)
                       (r/insert fact)
                       (r/fire-rules))
-          snapshot (memory/session-snapshot session)
-          facts (:facts snapshot)]
+          memory-analysis (memory/->memory-analysis session)
+          facts (:facts memory-analysis)]
 
-      (is (map? snapshot))
-      (is (seq facts) "Snapshot should contain the fact")
+      (is (map? memory-analysis))
+      (is (seq facts) "Memory analysis should contain the fact")
 
       ;; The fact should get the unknown-fact-type sentinel
       (is (every? (fn [[_id f]]
@@ -574,7 +574,7 @@
           session (-> (r/mk-session 'clara.server.tools.graph.rules.nil-safety-test-rules)
                       (r/insert fact)
                       (r/fire-rules))
-          analysis (core/rulebase-analysis
+          analysis (core/->rulebase-analysis
                     session
                     (ann.merge/merge-layers [(ann.merge/props-layer session)]))]
       (is (map? analysis))

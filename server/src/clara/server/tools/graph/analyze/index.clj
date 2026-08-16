@@ -1,24 +1,26 @@
 (ns clara.server.tools.graph.analyze.index
   "Pass 2 (Index) of the annotation-generation pipeline.
 
-   Builds every derived, precomputed view over the merged clj-kondo analysis
-   exactly once per `generate-annotations-from-analysis` run and shares them
-   across all per-rule passes:
+   Builds every derived, precomputed view over the merged clj-kondo analysis exactly once per
+  `clara.server.tools.graph.analyze/->annotations-from-rule-source-analysis` run and shares them
+  across all per-rule passes:
 
-   * the call graph plus a memoized transitive-reachability fn (boundary fns
-     terminate expansion);
-   * var-usages indexed by caller and by callee — per-rule passes must never
-     scan the whole `:var-usages` vector (that scan is what made generation
-     quadratic in rules × usages at real-world scale);
-   * `:locals` / `:local-usages` indexed by [filename id] / [filename name]
-     for locals tracing;
+   * the call graph plus a memoized transitive-reachability fn (boundary fns terminate expansion);
+
+   * var-usages indexed by caller and by callee — per-rule passes must never scan the whole
+  `:var-usages` vector (that scan is what made generation quadratic in rules × usages at real-world
+  scale);
+
+   * `:locals` / `:local-usages` indexed by [filename id] / [filename name] for locals tracing;
+
    * direct inserter/retractor sets and the bottom-up inserter-type-maps;
-   * the constructor-of-interest callsite map (when configured);
-   * per-run memoized record-type resolution (live-ns lookups + class loads)
-     and constructor-form source reads.
 
-   Nothing here is rule-specific; per-rule work starts from the
-   `AnalysisIndex`."
+   * the constructor-of-interest callsite map (when configured);
+
+   * per-run memoized record-type resolution (live-ns lookups + class loads) and constructor-form
+  source reads.
+
+   Nothing here is rule-specific; per-rule work starts from the `AnalysisIndex`."
   (:require [clojure.set :as set]
             [schema.core :as s]
             [clara.server.tools.graph.analyze.utils :as u]

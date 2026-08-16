@@ -1,5 +1,5 @@
 <script lang="ts">
-	import AnalysisSummaryListLayout from '$lib/components/rulebase/AnalysisSummaryListLayout.svelte';
+	import SummaryListLayout from '$lib/components/rulebase/SummaryListLayout.svelte';
 	import { setListFilterState, type ListFilterState } from '$lib/state/listFilterContext.svelte';
 	import QueryList from './QueryList.svelte';
 	let { data, children } = $props();
@@ -8,7 +8,7 @@
 	setListFilterState(filterState);
 </script>
 
-<AnalysisSummaryListLayout>
+<SummaryListLayout>
 	{#snippet sidebar()}
 		<QueryList
 			queries={data.queries}
@@ -16,4 +16,4 @@
 		/>
 	{/snippet}
 	{@render children()}
-</AnalysisSummaryListLayout>
+</SummaryListLayout>

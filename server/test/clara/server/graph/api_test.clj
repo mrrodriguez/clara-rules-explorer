@@ -50,8 +50,8 @@
 
 (deftest test-v1-analysis
   (let [handler (->handler)]
-    (testing "GET /v1/analysis"
-      (let [response (handler (mock/request :get "/v1/analysis"))]
+    (testing "GET /v1/rulebase-analysis"
+      (let [response (handler (mock/request :get "/v1/rulebase-analysis"))]
         (is (= 200 (:status response)))
         (let [body (parse-json (:body response))]
           (is (contains? body :rules))
@@ -180,13 +180,13 @@
     (testing "Unknown fact-type ids 404"
       (is (= 404 (:status (handler (mock/request :get "/v1/fact-types/not-a-real-fact-type-id"))))))))
 
-(deftest test-v1-session-snapshot
+(deftest test-v1-memory-analysis
   (let [session (-> (->test-session)
                     (r/insert (clara.server.tools.graph.rules.loan_app_facts.Application. "app-1"))
                     (r/fire-rules))
         handler (->handler session)]
-    (testing "GET /v1/session-snapshot"
-      (let [response (handler (mock/request :get "/v1/session-snapshot"))]
+    (testing "GET /v1/memory-analysis"
+      (let [response (handler (mock/request :get "/v1/memory-analysis"))]
         (is (= 200 (:status response)))
         (let [body (parse-json (:body response))]
           (is (contains? body :fact-types))
@@ -195,8 +195,8 @@
           (is (contains? body :origin))
           (is (seq (:facts body))))))))
 
-(deftest test-session-snapshot-known-tracks-session-swap
-  (testing "After the host swaps the session atom, the snapshot known-set is recomputed against the new session's analysis — never served stale"
+(deftest test-memory-analysis-known-tracks-session-swap
+  (testing "After the host swaps the session atom, the memory-analysis known-set is recomputed against the new session's analysis — never served stale"
     (let [loan-app-application "clara.server.tools.graph.rules.loan_app_facts.Application"
           income-document ":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document"
           session-a (-> (->test-session)
@@ -212,12 +212,12 @@
           state-atom (atom {:session session-a :annotations (loan-doc-annotations session-a)})
           {:keys [handler]} (api/app state-atom true)]
       ;; Warm the analysis for session A so the pre-fix stale known-set is non-empty.
-      (is (= 200 (:status (handler (mock/request :get "/v1/analysis")))))
+      (is (= 200 (:status (handler (mock/request :get "/v1/rulebase-analysis")))))
       ;; Host application swaps in the new session + its annotations (the documented
       ;; atom-swap feature).
       (swap! state-atom assoc :session session-b :annotations (loan-doc-annotations session-b))
-      (let [snapshot (parse-json (:body (handler (mock/request :get "/v1/session-snapshot"))))
-            facts (vals (:facts snapshot))
+      (let [memory-analysis (parse-json (:body (handler (mock/request :get "/v1/memory-analysis"))))
+            facts (vals (:facts memory-analysis))
             app-fact (some #(when (= loan-app-application (get-in % [:type :name])) %) facts)
             income-doc-fact (some #(when (= income-document (get-in % [:type :name])) %) facts)]
         (is (some? app-fact) "the swapped-in session's memory holds the loan-app Application fact")
@@ -226,8 +226,8 @@
         (is (some? income-doc-fact) "the swapped-in session produced its keyword-derived fact")
         (is (true? (:known (:type income-doc-fact)))
             "a type present in the new session's analysis is known — the known-set was recomputed, not served stale")
-        ;; The session-snapshot request itself rebuilt the analysis against session B.
-        (let [analysis (parse-json (:body (handler (mock/request :get "/v1/analysis"))))
+        ;; The memory-analysis request itself rebuilt the analysis against session B.
+        (let [analysis (parse-json (:body (handler (mock/request :get "/v1/rulebase-analysis"))))
               analysis-names (set (map :name (:fact-types analysis)))]
           (is (not (contains? analysis-names loan-app-application))
               "the analysis cache now reflects the swapped-in session B"))))))

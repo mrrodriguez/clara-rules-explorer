@@ -122,9 +122,9 @@
 
 (defn- resolver-context
   "Builds the context map handed to `:callsite-resolver-fn` (see
-   `analyze/generate-annotations-from-analysis`).  Alias context keys
-   (`:fact-type`/`:fact-type-spec`) are present only for callsites discovered
-   through a var-alias chain (`:fact-type-spec-fn`)."
+  `clara.server.tools.graph.analyze/->annotations-from-rule-source-analysis`). Alias context keys
+  (`:fact-type`/`:fact-type-spec`) are present only for callsites discovered through a var-alias
+  chain (`:fact-type-spec-fn`)."
   [{:keys [rule direction usage alias-context]} arg-form]
   (cond-> {:rule rule
            :ns-name-sym (:from usage)
@@ -531,7 +531,7 @@
 
 (s/defschema CallsiteResolverContext
   "Context map passed to `:callsite-resolver-fn` by
-   `generate-annotations-from-analysis`.
+   `clara.server.tools.graph.analyze/->annotations-from-rule-source-analysis`.
    `:rule` is the full rulebase production — `s/Any` because productions are
    large open maps; the keys of interest are :name :ns-name :lhs :rhs :props
    (relates to `clara.server.graph.api` production schemas, which add
