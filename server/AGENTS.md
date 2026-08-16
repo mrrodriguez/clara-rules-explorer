@@ -76,6 +76,37 @@ To ensure changes are correctly verified and to maintain development velocity, y
     make test
     ```
 
+# Test Matchers (matcher-combinators)
+
+For assertions over nested maps/vectors where you only care about some keys,
+use `matcher-combinators` instead of hand-building full `=` expectations.
+
+```clojure
+(:require [matcher-combinators.test :refer [match?]])
+
+(is (match? {:callsites [{:source-str "(->fact :t m)"
+                          :status :full}]
+             :resolution :full}
+            actual-detection))
+```
+
+Two rules make the common case terse — **do not reach for
+`matcher-combinators.matchers` (`m/embeds`, `m/equals`, …) unless you need
+non-default semantics**:
+
+- **Maps match as a subset by default** (`embeds` semantics): every expected
+  key/value must be present, extra keys in `actual` are allowed.  This is how
+  the example above ignores `:via` / `:callsite-id` without naming them.
+- **Sequences/vectors match exactly by default** (`equals` semantics): same
+  length and order.  A one-element vector `[{…}]` asserts exactly one
+  callsite, not "at least one".
+
+`match?` is `clojure.test/is`-integrated (assert-expr), not a plain fn — always
+use it inside `(is (match? expected actual))`, never call it standalone.  Only
+pull in `matcher-combinators.matchers` when you genuinely need `embeds` on a
+*sequence* (order-agnostic subset), `prefix`, `regex`, `in-any-order`,
+`set-equals`, etc.
+
 # Linting Procedures
 
 To ensure code quality and adherence to Clojure standards, use `clj-kondo`:
