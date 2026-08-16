@@ -475,7 +475,15 @@ Returns the currently loaded merged annotations (a `MergedAnnotations` value wit
             "status": "full",
             "resolved-types": [
               { "name": "my.app.HappyCustomer", "id": "...", "known": true }
-            ]
+            ],
+            "via": {
+              "boundary-var-name-sym": "clara.rules/insert!",
+              "boundary-in-var": "my.app/cool-customer",
+              "boundary-to-constructor-path": [
+                { "var-name-sym": "my.app/cool-customer" },
+                { "var-name-sym": "my.app/->HappyCustomer" }
+              ]
+            }
           }
         ],
         "resolution": "full"
