@@ -231,10 +231,10 @@
       (let [generated
             (do
               (log/info "Auto-discovering annotations from session namespaces...")
-              (let [analysis (analyze/analyze-session-rules
-                              {:session-or-rulebase loaded-session})]
-                (analyze/generate-annotations-from-analysis
-                 {:analysis analysis
+              (let [rule-source-analysis (analyze/->rule-source-analysis
+                                          {:session-or-rulebase loaded-session})]
+                (analyze/->annotations-from-rule-source-analysis
+                 {:rule-source-analysis rule-source-analysis
                   :session-or-rulebase loaded-session})))
 
             generated-layer (ann.merge/layer
@@ -250,8 +250,8 @@
                          (:layer options))
 
             _ (log/info "Running rulebase analysis...")
-            analysis (core/rulebase-analysis loaded-session
-                                             (ann.merge/merge-layers layers))
+            analysis (core/->rulebase-analysis loaded-session
+                                               (ann.merge/merge-layers layers))
 
             _ (.mkdirs (io/file generate-analysis-dir))
 

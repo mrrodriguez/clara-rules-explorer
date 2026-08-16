@@ -172,7 +172,7 @@
 (defn memoizing-prune-fns
   "Returns a `(fn [x] -> pruned)` that memoizes by object identity within the
    returned fn's scope.  Use where the same fact or substructure is pruned more
-   than once in a single operation (e.g. a session snapshot).  The memo is
+   than once in a single operation (e.g. a memory-analysis).  The memo is
    released with the returned fn — callers must not retain it beyond the
    enclosing operation."
   []

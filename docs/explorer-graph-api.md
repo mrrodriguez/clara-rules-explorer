@@ -1,7 +1,7 @@
 # Clara Rules Explorer Graph API
 
 Unified API reference for the Clara Rules explorer graph server. Covers both
-**static rulebase analysis** and **working-memory snapshots**.
+**static rulebase analysis** and **memory-analysis** of working memory.
 
 The API is alpha and shaped at-will.  Every linkable entity — fact type, rule,
 or query — carries a server-issued, deterministic `id` used for **all** URL
@@ -17,7 +17,7 @@ The explorer server wraps a Clara `session` in a Ring/Jetty HTTP server and expo
 | Family | Mount Point | Source | State |
 |--------|-------------|--------|-------|
 | **Rulebase analysis** | `/v1/...` | `clara.server.tools.graph.core` | Stateless — derived from the compiled rulebase |
-| **Session state** | `/v1/session/...` | `clara.server.tools.graph.memory` | Point-in-time snapshot of working memory |
+| **Session state** | `/v1/session/...` | `clara.server.tools.graph.memory` | Point-in-time memory-analysis of working memory |
 
 The session and merged annotations are held in atoms so the host application can swap them at runtime without restarting.
 
@@ -53,7 +53,7 @@ The session and merged annotations are held in atoms so the host application can
 | `:session` | session or rulebase | _required_ | Clara session (working memory enabled) or raw Rete rulebase (working memory disabled; session routes return 409 `:rulebase-input`) |
 | `:port` | int | `9999` | HTTP listen port |
 | `:layers` | vector | `[]` | Ordered annotation layers (paths or in-memory maps), folded lowest precedence first |
-| `:working-memory-enabled` | boolean | `true` | When `false`, all `/v1/session/*` and `/v1/session-snapshot` routes return 409 `:disabled-by-config` regardless of session type |
+| `:working-memory-enabled` | boolean | `true` | When `false`, all `/v1/session/*` and `/v1/memory-analysis` routes return 409 `:disabled-by-config` regardless of session type |
 
 **CLI flag:** `--working-memory-enabled BOOL` (passed through `run-explorer-server` → `start!`).
 
@@ -164,7 +164,7 @@ names all get the same treatment.  Ids are a pure function of the name, so
 re-running the analysis never changes existing ids.  Uniqueness is asserted
 per analysis (a collision throws loudly at analysis-build time, never
 silently mislinks).  The reverse indexes are internal: they live in the
-analysis cache / snapshot, never in the `/v1/analysis` payload.
+analysis cache / memory-analysis, never in the `/v1/rulebase-analysis` payload.
 
 Example ids:
 
@@ -203,11 +203,11 @@ High-level dashboard counts.  Always returns 200 — this endpoint does not requ
 | `rule-count` | int | Number of rules (productions with an RHS) |
 | `query-count` | int | Number of queries |
 | `fact-type-count` | int | Distinct fact types across all rules/queries |
-| `working-memory-available` | boolean | **Effective state** — `true` iff working-memory routes are served. Computed as `(and :working-memory-enabled (working-memory-available? session))`. When `false`, all `/v1/session/*` and `/v1/session-snapshot` routes return 409. A rulebase input or explicit `:working-memory-enabled false` opt-out both produce `false`. |
+| `working-memory-available` | boolean | **Effective state** — `true` iff working-memory routes are served. Computed as `(and :working-memory-enabled (working-memory-available? session))`. When `false`, all `/v1/session/*` and `/v1/memory-analysis` routes return 409. A rulebase input or explicit `:working-memory-enabled false` opt-out both produce `false`. |
 
 ---
 
-#### `GET /v1/analysis`
+#### `GET /v1/rulebase-analysis`
 
 Full static analysis of the rulebase: rules, queries, fact-types, nodes, the
 internal dependency graph, and unresolved detections.  (The internal id
@@ -498,7 +498,7 @@ HTTP is read-only — all mutation goes through the in-memory
 
 ### Session State (Dynamic)
 
-All session endpoints return a **point-in-time snapshot** of working memory. The snapshot is cached per session and recalculated on session change.
+All session endpoints return a **point-in-time memory-analysis** of working memory. The memory-analysis is cached per session and recalculated on session change.
 
 #### Working-Memory Availability (409)
 
@@ -520,9 +520,9 @@ Clients should check `:working-memory-available` on `/v1/rulebase-summary` to de
 
 ---
 
-#### `GET /v1/session-snapshot`
+#### `GET /v1/memory-analysis`
 
-Full session snapshot. Internal indices included for completeness; the UI should use the targeted endpoints below.
+Full memory-analysis. Internal indices included for completeness; the UI should use the targeted endpoints below.
 
 **Response** `200`:
 ```json
@@ -542,7 +542,7 @@ Full session snapshot. Internal indices included for completeness; the UI should
 **Response** `409`: See [Working-Memory Availability (409)](#working-memory-availability-409) above.
 
 The `*-id-index` maps are the session-side reverse indexes used by the
-session detail handlers (id → name), built per snapshot with the same id
+session detail handlers (id → name), built per memory-analysis with the same id
 function as the analysis side.
 
 The `matches` arrays inside `rule-matches` / `query-matches` are `FactMatch[]`
@@ -762,13 +762,13 @@ Same match shape as rules; queries have no `inserted-facts`.
 
 ## Fact ID Stability
 
-Fact IDs are **monotonic integers** (`1`, `2`, `3`, ...) assigned via `IdentityHashMap` during snapshot creation. Sorting order:
+Fact IDs are **monotonic integers** (`1`, `2`, `3`, ...) assigned via `IdentityHashMap` during memory-analysis creation. Sorting order:
 
 1. Production load order (from the rulebase compiler)
 2. Fact type name
 3. Fact hash
 
-IDs are stable **within a single snapshot** and deterministic for the same session state, but not guaranteed across snapshots.
+IDs are stable **within a single memory-analysis** and deterministic for the same session state, but not guaranteed across memory-analyses.
 
 ---
 
@@ -800,7 +800,7 @@ The dimension-level `:resolution` (on `dynamic-insert-types-detected` / `dynamic
 
 ## Unresolved Detection
 
-The `:unresolved` collection in `/v1/analysis` tracks rules whose RHS appears to contain `insert!` / `retract!` but no types could be resolved from any annotation layer. Each entry:
+The `:unresolved` collection in `/v1/rulebase-analysis` tracks rules whose RHS appears to contain `insert!` / `retract!` but no types could be resolved from any annotation layer. Each entry:
 
 ```json
 {
@@ -829,7 +829,7 @@ name-based URL is not a supported addressing surface and 404s.
 | Module | Purpose |
 |--------|---------|
 | `clara.server.tools.graph.core` | Static rulebase analysis, dep graph, type-hierarchy indexes, summary building |
-| `clara.server.tools.graph.memory` | Working-memory snapshots, indices, per-snapshot id indexes |
+| `clara.server.tools.graph.memory` | Working-memory memory-analysis, indices, per-memory-analysis id indexes |
 | `clara.server.tools.graph.serialize` | Kind-explicit type serialization (`resolve-type`), route ids (`route-id`), TypeReferences, match serialization |
 | `clara.server.tools.graph.annotations` | Layered annotations: format, merge, callsite identity, derivation, rebase, validation |
 | `clara.server.graph.api` | Reitit routes, Ring handlers, reverse indexes, Prismatic response schemas |

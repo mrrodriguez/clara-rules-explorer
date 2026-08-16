@@ -20,7 +20,7 @@
 
 (deftest test-source-sink-indicators-loan-app
   (let [session (->loan-app-session)
-        analysis (core/rulebase-analysis session (loan-doc-annotations session))
+        analysis (core/->rulebase-analysis session (loan-doc-annotations session))
         rules (:rules analysis)
         queries (:queries analysis)]
 

@@ -1,6 +1,6 @@
 (ns clara.server.graph.server-test
   "Tests for server lifecycle and swap-session! annotation building.
-   Organized by the build-annotations decision tree paths."
+   Organized by the ->resolved-annotations decision tree paths."
   (:require [clara.rules :as r]
             [clara.rules.engine :as eng]
             [clara.server.graph.server :as server]
@@ -392,33 +392,33 @@
 ;; Unknown enrichment mode throws
 ;; ---------------------------------------------------------------------------
 
-(deftest test-build-annotations-unknown-enrichment
+(deftest test->resolved-annotations-unknown-enrichment
   (testing "unknown enumeration value throws (schema validation catches it first)"
     (let [sess (->test-session)]
       ;; Schema validation catches unknown enum values before the case throw.
       (is (thrown? Exception
-                   (server/build-annotations sess
-                                             {:enrichment :auto-dectect}
-                                             nil))
+                   (server/->resolved-annotations sess
+                                                  {:enrichment :auto-dectect}
+                                                  nil))
           "typo in enrichment mode throws")))
   (testing "completely bogus enrichment also throws"
     (let [sess (->test-session)]
       (is (thrown? Exception
-                   (server/build-annotations sess
-                                             {:enrichment :some-future-mode}
-                                             nil))
+                   (server/->resolved-annotations sess
+                                                  {:enrichment :some-future-mode}
+                                                  nil))
           "totally unknown enrichment mode throws"))))
 
 ;; ---------------------------------------------------------------------------
-;; build-annotations with :auto-detect and working memory
+;; ->resolved-annotations with :auto-detect and working memory
 ;; ---------------------------------------------------------------------------
 
-(deftest test-build-annotations-auto-detect-with-memory
+(deftest test->resolved-annotations-auto-detect-with-memory
   (testing "with :auto-detect — WM enrichment detected"
     (let [sess (->test-session-with-wm-enrichment)
-          result (server/build-annotations sess
-                                           {:enrichment :auto-detect}
-                                           nil)]
+          result (server/->resolved-annotations sess
+                                                {:enrichment :auto-detect}
+                                                nil)]
       (is (map? result))
       (is (seq result) "non-empty annotations")
       (is (contains? result rule-collect-given-docs)
@@ -432,9 +432,9 @@
 
   (testing "with :auto-detect-from-memory — WM enrichment only (no static analysis)"
     (let [sess (->test-session-with-wm-enrichment)
-          result (server/build-annotations sess
-                                           {:enrichment :auto-detect-from-memory}
-                                           nil)]
+          result (server/->resolved-annotations sess
+                                                {:enrichment :auto-detect-from-memory}
+                                                nil)]
       (is (map? result))
       ;; Props layer always present
       (is (contains? result rule-app-outcome)
@@ -446,9 +446,9 @@
 
   (testing "without WM (rulebase only) — :auto-detect still runs static analysis"
     (let [rulebase (->rulebase (->test-session))
-          result (server/build-annotations rulebase
-                                           {:enrichment :auto-detect}
-                                           nil)]
+          result (server/->resolved-annotations rulebase
+                                                {:enrichment :auto-detect}
+                                                nil)]
       (is (map? result))
       (is (seq result) "non-empty — static analysis runs even without WM")
       (is (contains? result rule-collect-given-docs)

@@ -300,8 +300,8 @@
 
 (defn session-fact-types-summary
   "Returns a lightweight summary of fact types in the session and the total count."
-  [snapshot]
-  {:types (->> (:fact-types snapshot)
+  [memory-analysis]
+  {:types (->> (:fact-types memory-analysis)
                vals
                (mapv #(select-keys % [:name :id :ns :count])))
-   :total-count (count (:facts snapshot))})
+   :total-count (count (:facts memory-analysis))})

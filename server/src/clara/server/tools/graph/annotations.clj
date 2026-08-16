@@ -101,16 +101,14 @@
     m))
 
 (defn production-annotation
-  "Reads one production's annotation from a **normalized** annotations map
-   (string rule-name keys) with unqualified keys (:insert-types, :retract-types,
-   :no-output-types, :notes, :dynamic-insert-types-detected,
-   :dynamic-retract-types-detected).  Symbol type tokens are resolved against
-   the production's namespace (classes, vars) as Clara's pluggable fact-type-fn
-   allows.
+  "Reads one production's annotation from a **normalized** annotations map (string rule-name keys)
+  with unqualified keys (:insert-types, :retract-types, :no-output-types, :notes,
+  :dynamic-insert-types-detected, :dynamic-retract-types-detected). Symbol type tokens are resolved
+  against the production's namespace (classes, vars) as Clara's pluggable fact-type-fn allows.
 
-   `annotations` must already have string rule-name keys — callers at
-   normalization boundaries (e.g. `core/rulebase-analysis`, which accepts bare
-   maps) normalize first via `normalize-annotations`."
+   `annotations` must already have string rule-name keys — callers at normalization boundaries (e.g.
+  `clara.server.tools.graph.core/->rulebase-analysis`, which accepts bare maps) normalize first via
+  `normalize-annotations`."
   [annotations production]
   (let [rule-ann (get-annotation annotations (:name production))
         production-ns (get-production-ns production)]
@@ -166,19 +164,16 @@
         (assoc detection-key {:fact-instance-derived-types (vec derived)})))))
 
 (defn- rule-delta
-  "What `enriched` added to one rule across every dimension, or nil if
-  nothing.
+  "What `enriched` added to one rule across every dimension, or nil if nothing.
 
-  `rule-ns` is the rule's namespace (extracted from its FQ name via
-  `fq-name->namespace`), used so symbol types canonicalize the same way
-  they did during enrichment.
+  `rule-ns` is the rule's namespace (extracted from its FQ name via `fq-name->namespace`), used so
+  symbol types canonicalize the same way they did during enrichment.
 
-  Adds one tombstone: `:clara-rules/no-output-types` is an assertion that the
-  rule produces nothing, and observing it produce something disproves it.  An
-  explicit nil erases the key and its provenance (`merge/fold-key`).  Leaving
-  it set would contradict the very types this layer just added, and
-  `core/production-annotation` reads it to suppress sink classification — so
-  a rule proven to insert would still be reported as producing no output."
+  Adds one tombstone: `:clara-rules/no-output-types` is an assertion that the rule produces nothing,
+  and observing it produce something disproves it. An explicit nil erases the key and its provenance
+  (`merge/fold-key`). Leaving it set would contradict the very types this layer just added, and
+  `clara.server.tools.graph.core/production-annotation` reads it to suppress sink classification —
+  so a rule proven to insert would still be reported as producing no output."
   [base enriched rule-ns]
   (when-let [delta (not-empty
                     (into {}

@@ -19,7 +19,7 @@
     session-or-rulebase))
 
 (defn working-memory-available?
-  "True when `session-or-rulebase` is a live session and can be snapshotted."
+  "True when `session-or-rulebase` is a live session with inspectable working memory."
   [session-or-rulebase]
   (satisfies? eng/ISession session-or-rulebase))
 
@@ -82,7 +82,7 @@
   "Serializes the :upstream / :downstream production refs of `production-name`
    and attaches `:match` — the raw type pairs that link each adjacent
    production (each end serialized in its own production's ns context).
-   `ctx` is the shared analysis context map (see `rulebase-analysis`)."
+   `ctx` is the shared analysis context map (see `->rulebase-analysis`)."
   [production-name
    {:keys [dep-graph production-map type-analysis-map ancestors-set-fn known-set]}]
   (letfn [(->match [direction adjacent-name]
@@ -159,7 +159,7 @@
   `annotations` is the merged rule→annotation map (see
   annotations/merge-layers).  `ctx` is the shared analysis context map
   (annotations, dep-graph, production-map, type-analysis-map,
-  ancestors-set-fn, known-set; see `rulebase-analysis`).  `known-set` is the
+  ancestors-set-fn, known-set; see `->rulebase-analysis`).  `known-set` is the
   analysis's serialized fact-type names, used for TypeReference `known` flags.
 
   Form printing is controlled by the dynamic var `serialize/*form-printer*`."
@@ -249,7 +249,7 @@
        :reason "RHS likely contains insertion/retraction calls but no :clara-rules/insert-types or :clara-rules/retract-types declared."
        :hint "Add :clara-rules/insert-types to the rule's properties map or a sidecar annotation file."})))
 
-(defn build-type-analysis-map
+(defn ->type-analysis-map
   "Builds the per-production raw type analysis map used by the dep-graph and
    the serialized ancestors index: {:consumed-types [...] :produced-types
    [...] :retract-types <set> :ns-name <sym-or-nil>} per production name.
@@ -276,7 +276,7 @@
                           :ns-name (get-production-ns-name-sym production)}])))
         productions))
 
-(defn build-production-id-index
+(defn ->production-id-index
   "Reverse index {id → name} for every rule and query in the analysis,
    asserting id uniqueness (a route-id collision throws loudly at
    analysis-build time rather than silently mislinking)."
@@ -301,7 +301,7 @@
       (vswap! idx update ct (fnil conj #{}) consumer-name))
     @idx))
 
-(defn build-dep-graph
+(defn ->dep-graph
   "Builds the production dependency graph: {production-name {:upstream #{...}
    :downstream #{...}}} where an edge producer → consumer exists when some
    produced type of the producer satisfies some consumed type of the consumer
@@ -342,7 +342,7 @@
 
 (defn- build-production-summary-map
   "Builds a summary map for the `productions` while maintaining the given load order.
-   `ctx` is the shared analysis context map (see `rulebase-analysis`)."
+   `ctx` is the shared analysis context map (see `->rulebase-analysis`)."
   [{:keys [production-type productions] :as ctx}]
   (let [filter-xf (case production-type
                     :rule (filter :rhs)
@@ -371,7 +371,7 @@
           [(:name p) (ann/production-annotation annotations p)])))
 
 (defn- coerce-annotations-arg
-  "Normalizes the annotations argument of `rulebase-analysis`: a
+  "Normalizes the annotations argument of `->rulebase-analysis`: a
    MergedAnnotations value passes through; a bare rule→annotation map is
    wrapped as merged content with no provenance."
   [x]
@@ -379,9 +379,9 @@
     x
     {:annotations (or x {}) :provenance {}}))
 
-(defn- rulebase-analysis*
-  "Implementation of `rulebase-analysis`.  Callers go through the public
-   multi-arity `rulebase-analysis`, which manages the `*form-printer*`
+(defn- ->rulebase-analysis*
+  "Implementation of `->rulebase-analysis`.  Callers go through the public
+   multi-arity `->rulebase-analysis`, which manages the `*form-printer*`
    dynamic binding."
   [session-or-rulebase annotations]
   (let [{:keys [productions id-to-node] :as rulebase} (get-rulebase session-or-rulebase)
@@ -395,11 +395,11 @@
 
         ancestors-fn (extract-ancestors-fn rulebase)
         ancestors-set-fn (->memoized-ancestors ancestors-fn)
-        type-analysis-map (build-type-analysis-map productions production-annotation-map)
+        type-analysis-map (->type-analysis-map productions production-annotation-map)
         known-set (ft/known-type-names type-analysis-map)
         ancestors-index (ft/build-ancestors-index type-analysis-map ancestors-set-fn productions)
 
-        dep-graph (build-dep-graph type-analysis-map ancestors-set-fn)
+        dep-graph (->dep-graph type-analysis-map ancestors-set-fn)
         production-map (build-production-map productions)
 
         ;; Shared context threaded through every production summary — the
@@ -436,9 +436,9 @@
                   :merged-annotations annotations}]
     (assoc analysis
            :fact-type-id-index (ft/build-fact-type-id-index analysis)
-           :production-id-index (build-production-id-index analysis))))
+           :production-id-index (->production-id-index analysis))))
 
-(defn rulebase-analysis
+(defn ->rulebase-analysis
   "Analyzes a rulebase against merged annotations.  `annotations` is either
    a MergedAnnotations value (annotations/merge-layers output — annotations
    and provenance are both used) or a bare rule→annotation map.
@@ -455,15 +455,15 @@
      Defaults to `serialize/default-form-printer` (clojure.pprint).
      Pass `pr-str` for a cheap non-pretty-printing alternative."
   ([session-or-rulebase annotations]
-   (rulebase-analysis session-or-rulebase annotations nil))
+   (->rulebase-analysis session-or-rulebase annotations nil))
   ([session-or-rulebase annotations opts]
    (let [form-printer (:form-printer opts)]
      (if form-printer
        (binding [serialize/*form-printer* form-printer]
-         (rulebase-analysis* session-or-rulebase annotations))
-       (rulebase-analysis* session-or-rulebase annotations)))))
+         (->rulebase-analysis* session-or-rulebase annotations))
+       (->rulebase-analysis* session-or-rulebase annotations)))))
 
-(defn rulebase-summary
+(defn rulebase-counts
   "Returns a high-level summary of the rulebase counts using kebab-case keys."
   [analysis]
   {:rule-count (count (:rules analysis))
@@ -489,7 +489,7 @@
   (mapv #(select-keys % [:name :id :ns :doc :lhs-types :params])
         (vals (:queries analysis))))
 
-(defn analysis-result
+(defn rulebase-analysis-external-view
   "Returns the analysis map stripped of internal implementation details
    (`:fact-type-id-index`, `:production-id-index`, `:merged-annotations`).
    Suitable for serialization to external consumers (e.g. the HTTP API)

@@ -26,65 +26,66 @@
 (defonce state-atom
   (atom {}))
 
-(defn run-session!
+(defn run-rules!
   "Builds and fires an `n-chain` rule chain. When `n-bulk-facts` is positive,
-   inserts that many heavy bulk facts into working memory for snapshot-load
-   testing."
+   inserts that many heavy bulk facts into working memory for memory-analysis
+   load testing."
   ([n-chain]
-   (run-session! n-chain 0))
+   (run-rules! n-chain 0))
   ([n-chain n-bulk-facts]
    (reset! state-atom {:run-rules-result (time (pgh/run-rules (long n-chain)
                                                               (long n-bulk-facts)))})
    ::done))
 
-(defn run-session-snapshot!
-  "Times `memory/session-snapshot` on the current run-rules session."
+(defn run-memory-analysis!
+  "Times `memory/->memory-analysis` on the current run-rules session."
   []
   (swap! state-atom
          (fn [{:keys [run-rules-result] :as state}]
            (assoc state
-                  :session-snapshot
-                  (time (memory/session-snapshot (:session run-rules-result))))))
+                  :memory-analysis
+                  (time (memory/->memory-analysis (:session run-rules-result))))))
   ::done)
 
-(defn run-analyze-session-rules!
-  "Run clj-kondo analysis on the session rules.  The resulting analysis map
-   carries :var-definitions, :var-usages etc. that generate-annotations-from-analysis
-   needs to find RHS callsites (including ->step-fact constructor calls)."
+(defn run-rule-source-analysis!
+  "Run clj-kondo analysis on the session rules.  The resulting rule-source
+   analysis carries :var-definitions, :var-usages etc. that
+   ->annotations-from-rule-source-analysis needs to find RHS callsites
+   (including ->step-fact constructor calls)."
   []
   (swap! state-atom
          (fn [{:keys [run-rules-result] :as state}]
            (assoc state
-                  :session-rules-analysis
-                  (time (analyze/analyze-session-rules
+                  :rule-source-analysis
+                  (time (analyze/->rule-source-analysis
                          {:session-or-rulebase (:session run-rules-result)})))))
   ::done)
 
-(defn run-analysis! []
+(defn run-rulebase-analysis! []
   (swap! state-atom
          (fn [{:keys [run-rules-result annotations] :as state}]
            (assoc state
-                  :analysis
-                  (time (core/rulebase-analysis (:session run-rules-result) annotations)))))
+                  :rulebase-analysis
+                  (time (core/->rulebase-analysis (:session run-rules-result) annotations)))))
   ::done)
 
-(defn run-generate-annotations-from-analysis! []
+(defn run-annotations-from-rule-source-analysis! []
   (swap! state-atom
-         (fn [{:keys [run-rules-result session-rules-analysis] :as state}]
+         (fn [{:keys [run-rules-result rule-source-analysis] :as state}]
            (assoc state
                   :annotations
-                  (time (analyze/generate-annotations-from-analysis
-                         {:analysis session-rules-analysis
+                  (time (analyze/->annotations-from-rule-source-analysis
+                         {:rule-source-analysis rule-source-analysis
                           :session-or-rulebase (:session run-rules-result)
                           :fact-constructors fact-constructors-spec})))))
   ::done)
 
-(defn run-enrich-annotations-from-session! []
+(defn run-merge-memory-derived-insert-types! []
   (swap! state-atom
          (fn [{:keys [run-rules-result annotations] :as state}]
            (assoc state
-                  :memory-enriched-annotations
-                  (time (analyze/enrich-annotations-from-session (:session run-rules-result)
-                                                                 annotations)))))
+                  :memory-derived-annotations
+                  (time (analyze/merge-memory-derived-insert-types
+                         annotations
+                         (:session run-rules-result))))))
   ::done)
-

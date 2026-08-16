@@ -38,7 +38,7 @@
   (with-meta {:step step-kw} {:type step-kw}))
 
 (defn bulk-fact
-  "A heavier, nested fact for memory-snapshot load testing. Includes a set,
+  "A heavier, nested fact for memory-analysis load testing. Includes a set,
    nested maps, vectors, and a function value so `deterministic-fact-str`
    (canonicalization + sorting) and `serialize/prune-fns` both have real work
    to do during a snapshot."

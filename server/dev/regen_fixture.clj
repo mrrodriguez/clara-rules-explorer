@@ -31,12 +31,12 @@
   (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
                 'clara.server.tools.graph.rules.loan-app-rules))
 
-(def ^:private analysis
-  (analyze/analyze-session-rules {:session-or-rulebase session}))
+(def ^:private rule-source-analysis
+  (analyze/->rule-source-analysis {:session-or-rulebase session}))
 
 (def ^:private generated
-  (analyze/generate-annotations-from-analysis
-   {:analysis analysis
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis rule-source-analysis
     :session-or-rulebase session
     :fact-constructors [{:match-fn (->fact-sym-match-fn helpers->fact-sym)
                          :type-resolver-fn ->fact-type-resolver}]}))
