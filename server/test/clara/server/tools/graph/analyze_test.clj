@@ -131,7 +131,7 @@
 (def ^:private loan-doc-ctor-annotations
   "Loan-doc annotations with constructor-of-interest resolution enabled.
    Resolves :loan-doc-rules/document-check-input via the ->fact chain
-   (helpers/->fact → loan-doc-rules/->document-check-input → collect-app-doc-check-input)."
+   (helpers/->fact → loan-doc-rules/->document-check-input → loan-doc-rules/insert-document-check-input! → collect-app-doc-check-input)."
   (analyze/->annotations-from-rule-source-analysis
    {:rule-source-analysis loan-doc-analysis
     :session-or-rulebase loan-doc-session
@@ -413,7 +413,7 @@
       (is (match? (unresolved-detection ns-sym filename "(build-audit-trail-entry ?app-id :doc-check-passed)")
                   (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `ldr/dynamic-insert-audit-trail))))
       (is (match? (unresolved-detection ns-sym filename
-                                        "(->document-check-input {:app-id ?app-id, :required-docs ?required-docs, :given-docs ?given-docs, :missing-required-docs (into [] (remove (comp given-doc-types :doc-type)) ?required-docs)})")
+                                        "(->document-check-input data)")
                   (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `ldr/collect-app-doc-check-input))))
       (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `ldr/collect-app-doc-check-input))))
       (is (match? (resolved-detection ns-sym filename
@@ -1572,13 +1572,19 @@
                (:constructor-sym cs)))
         (is (= [:loan-doc-rules/document-check-input]
                (:resolved-types cs)))
-        (let [{:keys [boundary-var-name-sym boundary-to-constructor-path]} (:via cs)]
+        (let [{:keys [boundary-var-name-sym boundary-in-var
+                      rule-to-boundary-path boundary-to-constructor-path]} (:via cs)]
           (is (= 'clara.rules/insert! boundary-var-name-sym))
+          (is (= `ldr/insert-document-check-input! boundary-in-var))
           (is (= [`ldr/collect-app-doc-check-input
+                  `ldr/insert-document-check-input!]
+                 (mapv :var-name-sym rule-to-boundary-path))
+              "rule-to-boundary-path: collect-app-doc-check-input → insert-document-check-input!")
+          (is (= [`ldr/insert-document-check-input!
                   `ldr/->document-check-input
                   'clara.server.tools.graph.rules.helpers/->fact]
                  (mapv :var-name-sym boundary-to-constructor-path))
-              "boundary-to-constructor-path: collect-app-doc-check-input → ->document-check-input → helpers/->fact"))))))
+              "boundary-to-constructor-path: insert-document-check-input! → ->document-check-input → helpers/->fact"))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Callsite `:via` provenance — `:boundary-in-var` and `:rule-to-boundary-path`

@@ -1,6 +1,6 @@
 # Callsite provenance (`:via`) fixes — Plan
 
-Status: **Phase 1 implemented (committed as `8f34105`). Phase 2 (naming) and Phase 3 (UI) pending.**
+Status: **All three phases implemented. Phase 1 committed as `8f34105`; Phase 2 (naming) and Phase 3 (UI) complete in the working tree.**
 
 Related: [`analyze-callsite-provenance-fixes-problem-statement.md`](./analyze-callsite-provenance-fixes-problem-statement.md)
 

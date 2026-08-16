@@ -4,7 +4,11 @@
 			"dynamic-insert-types-detected": {
 				"callsites": [
 					{
-						"source-str": "resolved__44034__auto__",
+						"source-str": "resolved__44273__auto__",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/insert!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 						"status": "none"
@@ -34,6 +38,10 @@
 				"callsites": [
 					{
 						"source-str": "(laf/map->AllGivenDocumentsMeta {:app-id ?app-id, :doc-metas doc-metas})",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/insert!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 						"status": "full",
@@ -85,6 +93,10 @@
 				"callsites": [
 					{
 						"source-str": "(map->AllIdCardGivenDocuments {:app-id ?app-id, :docs ?docs})",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/insert!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 						"status": "full",
@@ -131,6 +143,10 @@
 				"callsites": [
 					{
 						"source-str": "(laf/map->AllGivenDocuments {:app-id ?app-id, :docs ?docs})",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/insert!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 						"status": "full",
@@ -177,6 +193,10 @@
 				"callsites": [
 					{
 						"source-str": "(laf/map->AllRequiredDocuments {:app-id ?app-id, :docs ?docs})",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/insert!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 						"status": "full",
@@ -225,9 +245,18 @@
 						"source-str": "(h/->fact :loan-doc-rules/document-check-input data)",
 						"via": {
 							"boundary-var-name-sym": "clara.rules/insert!",
-							"callstack": [
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/insert-document-check-input!",
+							"rule-to-boundary-path": [
 								{
 									"var-name-sym": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
+								},
+								{
+									"var-name-sym": "clara.server.tools.graph.rules.loan-doc-rules/insert-document-check-input!"
+								}
+							],
+							"boundary-to-constructor-path": [
+								{
+									"var-name-sym": "clara.server.tools.graph.rules.loan-doc-rules/insert-document-check-input!"
 								},
 								{
 									"var-name-sym": "clara.server.tools.graph.rules.loan-doc-rules/->document-check-input"
@@ -289,6 +318,10 @@
 				"callsites": [
 					{
 						"source-str": "(laf/map->DocumentCheck {:app-id ?app-id, :status status, :message message})",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/insert!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 						"status": "full",
@@ -353,6 +386,10 @@
 				"callsites": [
 					{
 						"source-str": "(build-compliance-review ?app-id)",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/insert!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 						"status": "none"
@@ -390,6 +427,10 @@
 				"callsites": [
 					{
 						"source-str": "(build-compliance-via-metadata ?app-id)",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/insert!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 						"status": "none"
@@ -444,6 +485,10 @@
 				"callsites": [
 					{
 						"source-str": "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/retract!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 						"status": "full",
@@ -466,6 +511,10 @@
 				"callsites": [
 					{
 						"source-str": "(build-audit-trail-entry ?app-id :doc-check-passed)",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/insert!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 						"status": "none"
@@ -501,6 +550,10 @@
 				"callsites": [
 					{
 						"source-str": "(map->ApplicationOutcome {:app-id ?app-id, :status :approved, :message \"Application approved\", :passed-checks [{:check-type :document} {:check-type :identity} {:check-type :fraud}]})",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/insert!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-app-rules",
 						"filename": "clara/server/tools/graph/rules/loan_app_rules.clj",
 						"status": "full",
@@ -557,6 +610,10 @@
 				"callsites": [
 					{
 						"source-str": "(map->ApplicationOutcome {:app-id ?app-id, :status :denied, :message \"Application denied\", :passed-checks passed-checks, :failed-checks failed-checks})",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/insert!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-app-rules",
 						"filename": "clara/server/tools/graph/rules/loan_app_rules.clj",
 						"status": "full",
@@ -618,6 +675,10 @@
 				"callsites": [
 					{
 						"source-str": "(map->ApplicationOutcome {:app-id ?app-id, :status :pending, :message \"Application pending\", :checks-complete checks-complete, :checks-incomplete checks-incomplete})",
+						"via": {
+							"boundary-var-name-sym": "clara.rules/insert!",
+							"boundary-in-var": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
+						},
 						"ns": "clara.server.tools.graph.rules.loan-app-rules",
 						"filename": "clara/server/tools/graph/rules/loan_app_rules.clj",
 						"status": "full",

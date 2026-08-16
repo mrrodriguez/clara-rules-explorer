@@ -98,18 +98,25 @@
   =>
   (r/insert! (laf/map->AllRequiredDocuments {:app-id ?app-id :docs ?docs})))
 
+;; The boundary hop the demo uses to exercise the full provenance chain:
+;; the rule's RHS calls this helper, which holds the `insert!` — so the
+;; callsite carries both `:rule-to-boundary-path` (rule → helper) and
+;; `:boundary-to-constructor-path` (helper → ->document-check-input → ->fact).
+(defn insert-document-check-input! [data]
+  (r/insert! (->document-check-input data)))
+
 (r/defrule collect-app-doc-check-input
   [Application (= ?app-id app-id)]
   [AllGivenDocuments (= ?app-id app-id) (= ?given-docs docs)]
   [AllRequiredDocuments (= ?app-id app-id) (= ?required-docs docs)]
   =>
   (let [given-doc-types (into #{} (map :doc-type) ?given-docs)]
-    (r/insert! (->document-check-input {:app-id ?app-id
-                                        :required-docs ?required-docs
-                                        :given-docs ?given-docs
-                                        :missing-required-docs (into []
-                                                                     (remove (comp given-doc-types :doc-type))
-                                                                     ?required-docs)}))))
+    (insert-document-check-input! {:app-id ?app-id
+                                   :required-docs ?required-docs
+                                   :given-docs ?given-docs
+                                   :missing-required-docs (into []
+                                                                (remove (comp given-doc-types :doc-type))
+                                                                ?required-docs)})))
 
 (r/defrule app-has-all-required-docs
   [Application (= ?app-id app-id)]

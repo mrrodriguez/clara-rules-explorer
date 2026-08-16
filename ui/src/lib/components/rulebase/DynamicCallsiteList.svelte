@@ -1,11 +1,12 @@
 <script lang="ts">
-	import type { DynamicDetectionInfo, ViaChain, TypeReference } from '$lib/types/api';
+	import type { DynamicDetectionInfo, TypeReference } from '$lib/types/api';
 	import { factPath } from '$lib/utils';
 	import { resolve } from '$app/paths';
 	import type { Pathname } from '$app/types';
 	import QualifiedName from '$lib/components/ui/QualifiedName.svelte';
 	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
 	import { stableKeys } from '$lib/keys';
+	import { buildViaEntries } from '$lib/components/rulebase/viaChain';
 
 	interface Props {
 		detection?: DynamicDetectionInfo;
@@ -25,19 +26,6 @@
 	let startExpanded = $derived(resolution !== 'full');
 	let hasCallsites = $derived(callsites.length > 0);
 	let hasFallback = $derived(!hasCallsites && fallbackTypes.length > 0);
-
-	function buildViaEntries(via: ViaChain) {
-		const boundarySym = via['boundary-var-name-sym'] ?? '';
-		const entries = [{ label: 'boundary', sym: boundarySym }];
-		const callstack = via.callstack ?? [];
-		callstack.forEach((e, i) => {
-			entries.push({
-				label: i === callstack.length - 1 ? 'constructor' : 'caller',
-				sym: e['var-name-sym']
-			});
-		});
-		return entries.filter((entry) => entry.sym.length > 0);
-	}
 </script>
 
 {#snippet resolvedType(type: TypeReference)}

@@ -24,7 +24,11 @@
 	"dynamic-insert-types-detected": {
 		"callsites": [
 			{
-				"source-str": "resolved__44034__auto__",
+				"source-str": "resolved__44273__auto__",
+				"via": {
+					"boundary-var-name-sym": "clara.rules/insert!",
+					"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule"
+				},
 				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 				"status": "none"

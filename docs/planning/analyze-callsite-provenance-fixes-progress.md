@@ -33,10 +33,10 @@ Tracking implementation of [`analyze-callsite-provenance-fixes-plan.md`](./analy
 
 ## Phase 3 — UI (final)
 
-- [ ] 21. `ui/src/lib/types/api.ts` — `ViaChain` gains both renamed path keys.
-- [ ] 22. `ui/.../DynamicCallsiteList.svelte` — full ordered chain (rule path → boundary → constructor path), shared anchor once.
-- [ ] 23. UI unit tests (RHS-only / helper+ctor / helper-no-ctor) + loan-doc helper-insert extraction for e2e.
-- [ ] 24. UI verification (`make format check lint test`).
+- [x] 21. `ui/src/lib/types/api.ts` — `ViaChain` gains both renamed path keys.
+- [x] 22. `ui/.../DynamicCallsiteList.svelte` — full ordered chain (rule path → boundary → constructor path), shared anchor once.
+- [x] 23. UI unit tests (RHS-only / helper+ctor / helper-no-ctor) + loan-doc helper-insert extraction for e2e.
+- [x] 24. UI verification (`make format check lint test`).
 
 ## Verification results
 
@@ -45,7 +45,12 @@ make format           # ok
 make format-check     # All source files formatted correctly
 make lint             # errors: 0, warnings: 0
 make reflection-check # Reflection check passed (no warnings in project code)
-make test             # Ran 229 tests containing 1554 assertions. 0 failures, 0 errors.
+make test             # Ran 229 tests containing 1556 assertions. 0 failures, 0 errors.
+
+# UI (Phase 3)
+make format check lint  # svelte-check 0 errors/0 warnings; prettier + eslint clean
+make test-unit          # 5 files, 31 tests passed
+make test-e2e           # 58 passed (26.5s)
 ```
 
 ## Notes / decisions applied
@@ -63,14 +68,23 @@ make test             # Ran 229 tests containing 1554 assertions. 0 failures, 0 
   19 call sites from churning on the new keys.
 - New fixtures live in `rules/analyze_test_rules.clj` under a dedicated
   "Callsite `:via` provenance fixtures" section; six focused tests cover the
-  Section-9 scenarios (direct RHS, two-hop `:rule-path`, dropped-ctor-in-helper,
+  Section-9 scenarios (direct RHS, two-hop `:rule-to-boundary-path`, dropped-ctor-in-helper,
   no-constructor boundary arg, ambiguous double-drop, two-path determinism).
-- `loan-doc-rules-annotations.edn` was regenerated: boundary-path entries gain
-  `:via`, ctor entries gain `:boundary-in-var`; `:callstack` unchanged.
+- Phase 2 was a mechanical rename (`:rule-path` → `:rule-to-boundary-path`,
+  `:callstack` → `:boundary-to-constructor-path`, plus `rule-path-for` →
+  `rule-to-boundary-path-for`) via perl across the server surface, with two
+  docstring cleanups ("constructor callstack chain" → the two-path wording) and
+  a fixture regen.  `:boundary-var-name-sym` / `:boundary-in-var` untouched.
+- Phase 3 extracted the chain composition into a pure fn
+  (`ui/src/lib/components/rulebase/viaChain.ts` `buildViaEntries`) with a
+  co-located unit test (`viaChain.test.ts`, 4 cases: RHS-only, helper+ctor,
+  helper-only, pathless heuristic).  The loan-doc demo gained
+  `insert-document-check-input!` (one boundary hop) so `collect-app-doc-check-input`
+  exercises the full chain; `session.bin` + static demo data were regenerated
+  (`make demo-setup`, `pnpm run scrape:demo`) — demo-data churn is the
+  accumulated Phase-1 `:via` additions plus the AuditTrail timestamp re-roll.
 
 ## Remaining
 
-- **Phase 3 (UI)** — types + full-chain rendering + loan-doc helper-insert
-  extraction for e2e; not started.
 - Bump `nubank/matcher-combinators` 3.9.1 → 3.11.0 once the local Maven cache is
   writable (or the dependency is otherwise obtainable).

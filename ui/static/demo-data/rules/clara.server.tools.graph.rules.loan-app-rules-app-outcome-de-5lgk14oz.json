@@ -65,6 +65,10 @@
 		"callsites": [
 			{
 				"source-str": "(map->ApplicationOutcome {:app-id ?app-id, :status :denied, :message \"Application denied\", :passed-checks passed-checks, :failed-checks failed-checks})",
+				"via": {
+					"boundary-var-name-sym": "clara.rules/insert!",
+					"boundary-in-var": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+				},
 				"ns": "clara.server.tools.graph.rules.loan-app-rules",
 				"filename": "clara/server/tools/graph/rules/loan_app_rules.clj",
 				"status": "full",
