@@ -305,24 +305,31 @@
 
 (s/defn handle-get-rulebase-summary :- {:status (s/eq 200) :body RulebaseSummary}
   [state-atom cache working-memory-enabled? _req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom]
+  (let [{:keys [session annotations memory-analysis]} @state-atom
+        working-memory-available (boolean
+                                  (and working-memory-enabled?
+                                       (core/working-memory-available? session)))]
     {:status 200
-     :body (assoc (core/get-rulebase-counts (cache/get-rulebase-analysis cache session annotations memory-analysis))
-                  :working-memory-available (boolean
-                                             (and working-memory-enabled?
-                                                  (core/working-memory-available? session))))}))
+     :body (-> cache
+               (cache/get-rulebase-analysis session annotations memory-analysis)
+               core/get-rulebase-counts
+               (assoc :working-memory-available working-memory-available))}))
 
 (defn- handle-get-rulebase-analysis
   [state-atom cache _req]
   (let [{:keys [session annotations memory-analysis]} @state-atom]
     {:status 200
-     :body (core/get-rulebase-analysis-external-view (cache/get-rulebase-analysis cache session annotations memory-analysis))}))
+     :body (-> cache
+               (cache/get-rulebase-analysis session annotations memory-analysis)
+               core/get-rulebase-analysis-external-view)}))
 
 (s/defn handle-get-rules :- {:status (s/eq 200) :body {:rules [RuleListItem]}}
   [state-atom cache _req]
   (let [{:keys [session annotations memory-analysis]} @state-atom]
     {:status 200
-     :body {:rules (core/get-rules-list (cache/get-rulebase-analysis cache session annotations memory-analysis))}}))
+     :body {:rules (-> cache
+                       (cache/get-rulebase-analysis session annotations memory-analysis)
+                       core/get-rules-list)}}))
 
 (s/defn handle-get-rule :- GetRuleResponse
   [state-atom cache req]
@@ -339,7 +346,9 @@
   [state-atom cache _req]
   (let [{:keys [session annotations memory-analysis]} @state-atom]
     {:status 200
-     :body {:queries (core/get-queries-list (cache/get-rulebase-analysis cache session annotations memory-analysis))}}))
+     :body {:queries (-> cache
+                         (cache/get-rulebase-analysis session annotations memory-analysis)
+                         core/get-queries-list)}}))
 
 (s/defn handle-get-query :- GetQueryResponse
   [state-atom cache req]
@@ -356,7 +365,9 @@
   [state-atom cache _req]
   (let [{:keys [session annotations memory-analysis]} @state-atom]
     {:status 200
-     :body {:fact-types (ft/get-fact-types-list (cache/get-rulebase-analysis cache session annotations memory-analysis))}}))
+     :body {:fact-types (-> cache
+                            (cache/get-rulebase-analysis session annotations memory-analysis)
+                            ft/get-fact-types-list)}}))
 
 (s/defn handle-get-fact-type :- GetFactTypeResponse
   [state-atom cache req]
