@@ -332,15 +332,22 @@
 
     (:via callsite)
     (update :via (fn [via]
-                   (cond-> via
-                     (:boundary-var-name-sym via)
-                     (update :boundary-var-name-sym #(if (symbol? %) (str %) %))
-
-                     (:callstack via)
-                     (update :callstack (fn [cs]
+                   (let [stringify-path (fn [path]
                                           (mapv (fn [entry]
                                                   (update entry :var-name-sym #(if (symbol? %) (str %) %)))
-                                                cs))))))
+                                                path))]
+                     (cond-> via
+                       (:boundary-var-name-sym via)
+                       (update :boundary-var-name-sym #(if (symbol? %) (str %) %))
+
+                       (:boundary-in-var via)
+                       (update :boundary-in-var #(if (symbol? %) (str %) %))
+
+                       (:callstack via)
+                       (update :callstack stringify-path)
+
+                       (:rule-path via)
+                       (update :rule-path stringify-path)))))
     true utils/remove-nil-vals))
 
 (defn serialize-dynamic-detection

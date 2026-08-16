@@ -11,6 +11,7 @@
             [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [matcher-combinators.test :refer [match?]]
             [schema.test :as st])
   (:import [clara.server.tools.graph.rules.loan_app_facts
             Application
@@ -535,11 +536,11 @@
         (let [dyn (:dynamic-insert-types-detected rule)]
           (is (= :none (:resolution dyn)))
           (is (= 1 (count (:callsites dyn))))
-          (is (= [{:source-str "(build-compliance-review ?app-id)"
-                   :ns "clara.server.tools.graph.rules.loan-doc-rules"
-                   :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-                   :status :none}]
-                 (:callsites dyn))))))
+          (is (match? [{:source-str "(build-compliance-review ?app-id)"
+                        :ns "clara.server.tools.graph.rules.loan-doc-rules"
+                        :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+                        :status :none}]
+                      (:callsites dyn))))))
 
     (testing "Unresolved dynamic-insert rule via metadata helper"
       (let [rule (rule-by-name "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata")]
@@ -548,11 +549,11 @@
         (let [dyn (:dynamic-insert-types-detected rule)]
           (is (= :none (:resolution dyn)))
           (is (= 1 (count (:callsites dyn))))
-          (is (= [{:source-str "(build-compliance-via-metadata ?app-id)"
-                   :ns "clara.server.tools.graph.rules.loan-doc-rules"
-                   :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-                   :status :none}]
-                 (:callsites dyn))))))
+          (is (match? [{:source-str "(build-compliance-via-metadata ?app-id)"
+                        :ns "clara.server.tools.graph.rules.loan-doc-rules"
+                        :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+                        :status :none}]
+                      (:callsites dyn))))))
 
     (testing "Resolved dynamic-retract rule"
       (let [rule (rule-by-name "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice")]
@@ -580,11 +581,11 @@
         (let [dyn (:dynamic-insert-types-detected rule)]
           (is (= :none (:resolution dyn)))
           (is (= 1 (count (:callsites dyn))))
-          (is (= [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
-                   :ns "clara.server.tools.graph.rules.loan-doc-rules"
-                   :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
-                   :status :none}]
-                 (:callsites dyn))))))))
+          (is (match? [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)"
+                        :ns "clara.server.tools.graph.rules.loan-doc-rules"
+                        :filename "clara/server/tools/graph/rules/loan_doc_rules.clj"
+                        :status :none}]
+                      (:callsites dyn))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Fact-type hierarchy: :ancestors, :known, ordering, :ns

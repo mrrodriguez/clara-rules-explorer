@@ -85,11 +85,17 @@
 
 (s/defschema ViaChain
   "Provenance chain from a boundary fn to a constructor callsite.
-   `:source` marks heuristic provenance — `:record-ctor-scan` when the
-   callsite comes from the subtree-wide record-ctor scan fallback rather
-   than a traced call chain; heuristic entries have no `:callstack`."
+   `:boundary-in-var` is the var the boundary call is written in; `:rule-path`
+   is the rule→`:boundary-in-var` chain (omitted when the two are the same
+   var).  `:rule-path` and `:callstack` are shortest paths through a var-level
+   call graph, not observed runtime call paths.  `:source` marks heuristic
+   provenance — `:record-ctor-scan` when the callsite comes from the
+   subtree-wide record-ctor scan fallback rather than a traced call chain;
+   heuristic entries have no `:callstack`."
   {(s/optional-key :boundary-var-name-sym) s/Str
+   (s/optional-key :boundary-in-var) s/Str
    (s/optional-key :callstack) [ViaEntry]
+   (s/optional-key :rule-path) [ViaEntry]
    (s/optional-key :source) s/Keyword})
 
 (s/defschema DynamicCallsiteEntry

@@ -215,11 +215,16 @@
   never scanned per rule (that scan makes generation quadratic in rules × usages at).
 
    Returns {:resolved-types #{…} :dynamic-forms …}."
-  [reachable target-fns {:keys [inserter-type-map
-                                constructor-callsite-map graph
-                                boundary-usages-by-caller
-                                dynamic-type-fallback-resolution] :as ctx}]
-  (let [boundary-usages
+  [var-name reachable target-fns {:keys [inserter-type-map
+                                         constructor-callsite-map graph
+                                         boundary-usages-by-caller
+                                         dynamic-type-fallback-resolution] :as ctx}]
+  (let [;; The rule var is the head of every `:rule-path`; memoize its BFS to
+        ;; each boundary-holding var once per rule (callsites cluster in a few).
+        ctx (assoc ctx
+                   :rule-var var-name
+                   :rule-path-for (callsite/rule-path-for graph var-name))
+        boundary-usages
         (into []
               (comp (mapcat #(get boundary-usages-by-caller %))
                     (filter (fn [usage]
@@ -257,7 +262,9 @@
                              (into [] (remove (comp owned :idx)) traced-args)
                              traced-args)
             {:keys [callsites resolved-types resolved-arg-idxs]}
-            (callsite/resolve-boundary-callsites remaining-args ctx)
+            (callsite/resolve-boundary-callsites
+             remaining-args
+             (assoc ctx :dropped-ctor-provenance (:dropped-ctor-provenance ctor-result)))
             ;; Anything still here is a boundary argument the constructor path
             ;; did NOT own, so it stands on its own — including when it is
             ;; unresolved. Dropping those would erase a real insert we cannot
@@ -347,8 +354,8 @@
             retract-ctx (assoc ctx
                                :inserter-type-map retractor-type-map
                                :direction :retract)
-            inserts  (when is-inserter? (extract-insert-types reachable index/insert-fns insert-ctx))
-            retracts (when is-retractor? (extract-insert-types reachable index/retract-fns retract-ctx))
+            inserts  (when is-inserter? (extract-insert-types var-name reachable index/insert-fns insert-ctx))
+            retracts (when is-retractor? (extract-insert-types var-name reachable index/retract-fns retract-ctx))
             insert-types (:resolved-types inserts)
             retract-types (:resolved-types retracts)]
         (cond-> {}
