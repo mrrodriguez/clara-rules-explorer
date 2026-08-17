@@ -25,6 +25,10 @@
 		"callsites": [
 			{
 				"source-str": "(laf/map->AllRequiredDocuments {:app-id ?app-id, :docs ?docs})",
+				"via": {
+					"boundary-var-name-sym": "clara.rules/insert!",
+					"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
+				},
 				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 				"status": "full",

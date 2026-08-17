@@ -16,6 +16,10 @@
                    :filename
                    "clara/server/tools/graph/rules/loan_app_rules.clj",
                    :status :full,
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?},
                    :resolved-types
                    [clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome],
                    :callsite-id
@@ -33,6 +37,10 @@
                    :filename
                    "clara/server/tools/graph/rules/loan_app_rules.clj",
                    :status :full,
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?},
                    :resolved-types
                    [clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome],
                    :callsite-id
@@ -50,6 +58,10 @@
                    :filename
                    "clara/server/tools/graph/rules/loan_app_rules.clj",
                    :status :full,
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?},
                    :resolved-types
                    [clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome],
                    :callsite-id
@@ -67,6 +79,10 @@
                    :filename
                    "clara/server/tools/graph/rules/loan_doc_rules.clj",
                    :status :full,
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs},
                    :resolved-types
                    [clara.server.tools.graph.rules.loan_app_facts.DocumentCheck],
                    :callsite-id
@@ -91,9 +107,16 @@
                    [:loan-doc-rules/document-check-input],
                    :via
                    {:boundary-var-name-sym clara.rules/insert!,
-                    :callstack
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-doc-rules/insert-document-check-input!,
+                    :rule-to-boundary-path
                     [{:var-name-sym
                       clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input}
+                     {:var-name-sym
+                      clara.server.tools.graph.rules.loan-doc-rules/insert-document-check-input!}],
+                    :boundary-to-constructor-path
+                    [{:var-name-sym
+                      clara.server.tools.graph.rules.loan-doc-rules/insert-document-check-input!}
                      {:var-name-sym
                       clara.server.tools.graph.rules.loan-doc-rules/->document-check-input}
                      {:var-name-sym
@@ -113,6 +136,10 @@
                    :filename
                    "clara/server/tools/graph/rules/loan_doc_rules.clj",
                    :status :full,
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs},
                    :resolved-types
                    [clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments],
                    :callsite-id
@@ -130,6 +157,10 @@
                    :filename
                    "clara/server/tools/graph/rules/loan_doc_rules.clj",
                    :status :full,
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs},
                    :resolved-types
                    [clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments],
                    :callsite-id
@@ -147,6 +178,10 @@
                    :filename
                    "clara/server/tools/graph/rules/loan_doc_rules.clj",
                    :status :full,
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs},
                    :resolved-types
                    [clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments],
                    :callsite-id
@@ -164,6 +199,10 @@
                    :filename
                    "clara/server/tools/graph/rules/loan_doc_rules.clj",
                    :status :full,
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta},
                    :resolved-types
                    [clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta],
                    :callsite-id
@@ -179,6 +218,10 @@
                    :filename
                    "clara/server/tools/graph/rules/loan_doc_rules.clj",
                    :status :none,
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail},
                    :callsite-id
                    "clara.server.tools.graph.rules.loan-doc-rules:-:965c8524:0"}],
                  :resolution :none}},
@@ -192,6 +235,10 @@
                    :filename
                    "clara/server/tools/graph/rules/loan_doc_rules.clj",
                    :status :none,
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata},
                    :callsite-id
                    "clara.server.tools.graph.rules.loan-doc-rules:-:88bcf7ba:0"}],
                  :resolution :none}},
@@ -204,6 +251,10 @@
                    :filename
                    "clara/server/tools/graph/rules/loan_doc_rules.clj",
                    :status :none,
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review},
                    :callsite-id
                    "clara.server.tools.graph.rules.loan-doc-rules:-:c6a16f6e:0"}],
                  :resolution :none}},
@@ -219,6 +270,10 @@
                    :filename
                    "clara/server/tools/graph/rules/loan_doc_rules.clj",
                    :status :full,
+                   :via
+                   {:boundary-var-name-sym clara.rules/retract!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice},
                    :resolved-types
                    [clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice],
                    :callsite-id
@@ -227,12 +282,16 @@
   "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule"
   #:clara-rules{:dynamic-insert-types-detected
                 {:callsites
-                 [{:source-str "resolved__44034__auto__",
+                 [{:source-str "resolved__44273__auto__",
                    :ns-name-sym
                    clara.server.tools.graph.rules.loan-doc-rules,
                    :filename
                    "clara/server/tools/graph/rules/loan_doc_rules.clj",
                    :status :none,
+                   :via
+                   {:boundary-var-name-sym clara.rules/insert!,
+                    :boundary-in-var
+                    clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule},
                    :callsite-id
-                   "clara.server.tools.graph.rules.loan-doc-rules:-:0d0ffd93:0"}],
+                   "clara.server.tools.graph.rules.loan-doc-rules:-:5f0cd54e:0"}],
                  :resolution :none}}}}

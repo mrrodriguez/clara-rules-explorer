@@ -422,3 +422,25 @@
                           (s/serialize-rhs-form rhs))]
       (is (= "(do (println :done))" pr-str-result)
           "pr-str returns the form on one line"))))
+
+(deftest test-serialize-dynamic-callsite-via
+  (testing ":via stringifies :boundary-in-var and :rule-to-boundary-path like :boundary-to-constructor-path"
+    (let [cs {:source-str "(->fact :x m)"
+              :ns-name-sym 'acme.rules
+              :filename "acme/rules.clj"
+              :status :full
+              :resolved-types [:acme/x]
+              :constructor-sym 'acme.facts/->fact
+              :via {:boundary-var-name-sym 'clara.rules/insert!
+                    :boundary-in-var 'acme.rules/insert-helper
+                    :rule-to-boundary-path [{:var-name-sym 'acme.rules/the-rule}
+                                            {:var-name-sym 'acme.rules/insert-helper}]
+                    :boundary-to-constructor-path [{:var-name-sym 'acme.rules/insert-helper}
+                                                   {:var-name-sym 'acme.facts/->fact}]}}
+          out (s/serialize-dynamic-callsite cs 'acme.rules #{})]
+      (is (= "clara.rules/insert!" (-> out :via :boundary-var-name-sym)))
+      (is (= "acme.rules/insert-helper" (-> out :via :boundary-in-var)))
+      (is (= ["acme.rules/the-rule" "acme.rules/insert-helper"]
+             (mapv :var-name-sym (-> out :via :rule-to-boundary-path))))
+      (is (= ["acme.rules/insert-helper" "acme.facts/->fact"]
+             (mapv :var-name-sym (-> out :via :boundary-to-constructor-path)))))))

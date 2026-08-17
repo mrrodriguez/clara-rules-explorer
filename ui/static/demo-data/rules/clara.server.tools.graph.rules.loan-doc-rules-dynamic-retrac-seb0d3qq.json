@@ -34,6 +34,10 @@
 		"callsites": [
 			{
 				"source-str": "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")",
+				"via": {
+					"boundary-var-name-sym": "clara.rules/retract!",
+					"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
+				},
 				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 				"status": "full",

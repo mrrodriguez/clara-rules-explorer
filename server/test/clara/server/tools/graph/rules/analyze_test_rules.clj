@@ -378,6 +378,72 @@
     (r/insert! (->fact :demo/identical {:id ?app-id}))))
 
 ;; ---------------------------------------------------------------------------
+;; Callsite `:via` provenance fixtures
+;; (gap A / gap B — see docs/planning/analyze-callsite-provenance-fixes-*)
+
+(defn insert-summary! [id]
+  (r/insert! (->fact :demo/summary {:id id})))
+
+(defn record-summary! [id]
+  (insert-summary! id))
+
+(r/defrule rule-boundary-two-hops-above
+  "The boundary call lives in insert-summary!, two hops above the rule:
+   rule -> record-summary! -> insert-summary! -> insert!."
+  [Application (= ?app-id app-id)]
+  =>
+  (record-summary! ?app-id))
+
+(defn insert-parameterized-fact! [fact-type]
+  (r/insert! (->fact fact-type {:value :x})))
+
+(r/defrule rule-ctor-unresolvable-parameter
+  "The constructor's fact type is a parameter — a literal-only type resolver
+   cannot type it, so the constructor entry is dropped and its provenance must
+   survive on the boundary entry."
+  [Application (= ?app-id app-id)]
+  =>
+  (insert-parameterized-fact! :example/from-config))
+
+(defn insert-facts! [facts]
+  (r/insert-all! facts))
+
+(r/defrule rule-insert-via-parameter
+  "The boundary argument is the helper's parameter — no constructor call to
+   read, so the callsite carries boundary-side provenance only."
+  [Application (= ?app-id app-id)]
+  =>
+  (insert-facts! [{:value ?app-id}]))
+
+(defn build-ambiguous-facts! [a b]
+  [(->fact a {:id 1})
+   (->fact b {:id 2})])
+
+(r/defrule rule-two-constructors-one-arg
+  "One boundary argument reaches two constructors; when both are dropped the
+   constructor identity is ambiguous."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert-all! (build-ambiguous-facts! :one :two)))
+
+(defn insert-shared! [x]
+  (r/insert! (->fact :demo/shared {:id x})))
+
+(defn insert-via-a! [x]
+  (insert-shared! x))
+
+(defn insert-via-b! [x]
+  (insert-shared! x))
+
+(r/defrule rule-two-paths-to-boundary
+  "The rule reaches insert-shared! by two paths; :rule-to-boundary-path picks one
+   deterministically (BFS sorted by str)."
+  [Application (= ?app-id app-id)]
+  =>
+  (insert-via-a! ?app-id)
+  (insert-via-b! ?app-id))
+
+;; ---------------------------------------------------------------------------
 ;; Heuristic record-ctor scan fallback fixtures
 ;; (defect: spurious record-ctor scan types outranking constructor-of-interest
 ;; resolution — see server/docs/defect-spurious-defrecord-ctor-types-resolved.md)

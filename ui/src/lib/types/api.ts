@@ -62,7 +62,9 @@ export interface UnlinkedRuleInfo {
 }
 
 /**
- * A single entry in a constructor callstack chain.
+ * A single entry in a provenance path (`rule-to-boundary-path` /
+ * `boundary-to-constructor-path`) — a shortest path through a var-level call
+ * graph, not an observed runtime call path.
  */
 export interface ViaEntry {
 	'var-name-sym': string;
@@ -70,10 +72,18 @@ export interface ViaEntry {
 
 /**
  * Provenance chain from a boundary fn to a constructor callsite.
+ *
+ * `rule-to-boundary-path` is the rule → boundary-holding var path (omitted
+ * when the boundary call is in the rule's own RHS);
+ * `boundary-to-constructor-path` is the boundary-holding var → constructor
+ * path.  Both share `boundary-in-var` as a join point.  `source` marks
+ * heuristic provenance (`record-ctor-scan`) entries that carry no path.
  */
 export interface ViaChain {
 	'boundary-var-name-sym'?: string;
-	callstack?: ViaEntry[];
+	'boundary-in-var'?: string;
+	'rule-to-boundary-path'?: ViaEntry[];
+	'boundary-to-constructor-path'?: ViaEntry[];
 	source?: string;
 }
 
