@@ -657,6 +657,53 @@
                                    (:boundary-to-constructor-path (:via entry))
                                    (assoc :boundary-to-constructor-path (:boundary-to-constructor-path (:via entry))))}})))))
 
+(defn- resolve-ctor-matches-for-inserter
+  "Resolves every constructor-of-interest match for one inserter var against
+   the boundary arguments written in that var.  Returns the per-match results
+   (see `resolve-ctor-usage-for-inserter` for the outcome shapes).
+
+   `env` — the shared resolution context (`:args-by-caller`,
+   `:usages-by-caller`, `:graph`, `:get-lines`, `:read-ctor-form`,
+   `:cfg-base`) plus `:inserter-var` and `:ctor-matches`."
+  [{:keys [inserter-var ctor-matches] :as env}]
+  (let [candidates (sort-by (juxt #(:row (:usage %)) #(:col (:usage %)))
+                            (get (:args-by-caller env) inserter-var))
+        siblings (get (:usages-by-caller env) inserter-var)]
+    (keep #(resolve-ctor-usage-for-inserter
+            (assoc env
+                   :ctor-match %
+                   :candidates candidates
+                   :siblings siblings))
+          ctor-matches)))
+
+(defn- unambiguous-dropped-ctor-provenance
+  "`:idx` -> dropped-constructor provenance for the constructor pass result.
+   An `:idx` is kept only when exactly one constructor claimed it — an
+   ambiguously-owned argument's provenance is omitted rather than reported
+   (see `CallsiteResolution`)."
+  [dropped]
+  (into {}
+        (keep (fn [[idx ds]]
+                (when (= 1 (count ds))
+                  [idx (:provenance (first ds))])))
+        (group-by :idx dropped)))
+
+(defn- build-ctor-pass-resolution
+  "Shapes the constructor pass's per-match `results` into its
+   `CallsiteResolution`: owned results become callsite entries
+   (`:callsites`, `:owned-arg-idxs`, `:resolved-types`); dropped results
+   become `:dropped-ctor-provenance`."
+  [results]
+  (let [owned (keep :owned results)
+        pairs (mapv (juxt :idx :entry) owned)
+        entries (mapv second pairs)
+        dropped (keep :dropped results)]
+    {:callsites entries
+     :resolved-types (into #{} (mapcat :resolved-types) entries)
+     :owned-arg-idxs (into #{} (map first) pairs)
+     :dropped-ctor-provenance (unambiguous-dropped-ctor-provenance dropped)
+     :resolution (resolution-status entries)}))
+
 (s/defn resolve-constructor-callsites
   :- CallsiteResolution
   "Resolves constructor-of-interest callsites reached from a rule's boundary calls.
@@ -683,42 +730,22 @@
    constructor-ctr-map :- index/CtorCallsiteMap
    {:keys [get-lines read-ctor-form graph direction rule
            usages-by-caller rule-to-boundary-path-for]} :- ConstructorCallsiteCtx]
-  (let [args-by-caller (group-by #(u/fq-sym (:from (:usage %)) (:from-var (:usage %)))
-                                 traced-args)
+  (let [args-by-caller (group-by #(u/var-usage-caller (:usage %)) traced-args)
         cfg-base {:direction direction
                   :rule rule
                   :rule-to-boundary-path-for rule-to-boundary-path-for}
+        resolver-env {:args-by-caller args-by-caller
+                      :usages-by-caller usages-by-caller
+                      :graph graph
+                      :get-lines get-lines
+                      :read-ctor-form read-ctor-form
+                      :cfg-base cfg-base}
         results (into []
-                      (mapcat
-                       (fn [[inserter-var ctor-matches]]
-                         (let [candidates (sort-by (juxt #(:row (:usage %)) #(:col (:usage %)))
-                                                   (get args-by-caller inserter-var))
-                               siblings (get usages-by-caller inserter-var)]
-                           (keep #(resolve-ctor-usage-for-inserter
-                                   {:ctor-match %
-                                    :inserter-var inserter-var
-                                    :graph graph
-                                    :get-lines get-lines
-                                    :read-ctor-form read-ctor-form
-                                    :cfg-base cfg-base
-                                    :candidates candidates
-                                    :siblings siblings})
-                                 ctor-matches)))
-                       constructor-ctr-map))
-        owned (keep :owned results)
-        pairs (mapv (juxt :idx :entry) owned)
-        entries (mapv second pairs)
-        resolved-types (into #{} (mapcat :resolved-types) entries)
-        dropped (keep :dropped results)
-        dropped-ctor-provenance
-        (into {}
-              (keep (fn [[idx ds]]
-                      (when (= 1 (count ds))
-                        [idx (:provenance (first ds))])))
-              (group-by :idx dropped))]
-    {:callsites entries
-     :resolved-types resolved-types
-     :owned-arg-idxs (into #{} (map first) pairs)
-     :dropped-ctor-provenance dropped-ctor-provenance
-     :resolution (resolution-status entries)}))
+                      (mapcat (fn [[inserter-var ctor-matches]]
+                                (resolve-ctor-matches-for-inserter
+                                 (assoc resolver-env
+                                        :inserter-var inserter-var
+                                        :ctor-matches ctor-matches))))
+                      constructor-ctr-map)]
+    (build-ctor-pass-resolution results)))
 
