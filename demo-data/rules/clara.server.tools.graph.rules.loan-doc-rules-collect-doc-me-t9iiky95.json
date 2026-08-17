@@ -3,6 +3,10 @@
 		"callsites": [
 			{
 				"source-str": "(laf/map->AllGivenDocumentsMeta {:app-id ?app-id, :doc-metas doc-metas})",
+				"via": {
+					"boundary-var-name-sym": "clara.rules/insert!",
+					"boundary-in-var": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta"
+				},
 				"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 				"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
 				"status": "full",
