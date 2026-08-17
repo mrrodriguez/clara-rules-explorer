@@ -216,7 +216,7 @@
    Returns [start … end] or nil when unreachable.
    Neighbors are sorted by str for deterministic traversal.
 
-   Shared by the constructor pass (for `:boundary-to-constructor-path`) and by `rule-to-boundary-path-for`
+   Shared by the constructor pass (for `:boundary-to-constructor-path`) and by `rule-to-boundary-path-for-memo`
    (for the rule-side `:rule-to-boundary-path`); in both cases the result is a *shortest*
    path through a var-level call graph, not the observed runtime path."
   [graph start end]
@@ -233,7 +233,7 @@
             (recur (into (pop queue) (map #(conj path %) neighbors))
                    (into visited neighbors))))))))
 
-(defn rule-to-boundary-path-for
+(defn rule-to-boundary-path-for-memo
   "Returns a memoized `(fn [boundary-in-var] -> [ViaEntry …] | nil)` computing
    the shortest call-graph path from `rule-var` to `boundary-in-var`, both ends
    inclusive, as `{:var-name-sym …}` entries.  nil when the two vars are equal
@@ -252,7 +252,7 @@
 (defn- via-base
   "The boundary-side `:via` keys shared by both resolution passes: the boundary
    fn and the var the boundary call is written in, plus `:rule-to-boundary-path` when that
-   var is not the rule itself (see `rule-to-boundary-path-for`)."
+   var is not the rule itself (see `rule-to-boundary-path-for-memo`)."
   [boundary-fn-sym boundary-in-var rule-to-boundary-path-for]
   (let [rule-to-boundary-path (when rule-to-boundary-path-for (rule-to-boundary-path-for boundary-in-var))]
     (cond-> {:boundary-var-name-sym boundary-fn-sym
