@@ -1,8 +1,3 @@
 1. hierarchy shows ancestors in UI, but no descendants which is also useful.
-2. Spend time understand callsite "via" chain more since I still get confused why some calls do not
-   have one such as:
-   ```
-   (def my-fn [x] (insert! (->fact x)))
-   (defrule my-rule => (my-fn :stuff))
-   ```
-   where ->fact has a handler given.
+
+2. resolve-constructor-callsites is a mess of long fn complexity with nested looping for the `result` binding. refactor it and split to meaningful names for the complex transformation functions involved.

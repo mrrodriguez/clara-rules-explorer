@@ -50,7 +50,8 @@
             [clojure.tools.logging :as log]
             [clara.server.tools.graph.analyze.utils :as u]
             [clara.server.tools.graph.analyze.kondo :as kondo]
-            [clara.server.tools.graph.analyze.ctor :as ctor]))
+            [clara.server.tools.graph.analyze.ctor :as ctor]
+            [clara.server.tools.graph.analyze.index :as index]))
 
 (def ^:private max-resolution-depth 8)
 
@@ -259,23 +260,173 @@
              :boundary-in-var boundary-in-var}
       rule-to-boundary-path (assoc :rule-to-boundary-path rule-to-boundary-path))))
 
-(defn resolve-boundary-callsites
+;; ---------------------------------------------------------------------------
+;; Schemas
+;; ---------------------------------------------------------------------------
+
+(s/defschema TracedArg
+  "One boundary-call argument after reading + locals tracing (the output of
+   `trace-boundary-args`).  `:arg` and `:traced` are unevaluated source data —
+   rule bindings inside them are free symbols.  `:alias-context` is non-nil
+   only for callsites discovered through a var-alias chain."
+  {:idx s/Int
+   :usage u/KondoVarUsage
+   :arg s/Any
+   :traced s/Any
+   ;; the kondo :locals entry whose init form is :traced (open kondo map;
+   ;; keys of interest: :row :end-col) — nil when :traced is :arg itself
+   :traced-binding (s/maybe s/Any)
+   ;; :fact-type is s/Any: keywords, fq class-name symbols, strings are all
+   ;; legitimate fact types; :fact-type-spec is an open caller-defined map
+   :alias-context (s/maybe {(s/optional-key :fact-type) s/Any
+                            (s/optional-key :fact-type-spec) {s/Keyword s/Any}})})
+
+(s/defschema ViaEntry
+  "A single entry in a `:rule-to-boundary-path` / `:boundary-to-constructor-path`
+   chain (internal symbol form; `clara.server.graph.api/ViaEntry` is its
+   serialized string counterpart)."
+  {:var-name-sym s/Symbol})
+
+(s/defschema ViaChain
+  "Provenance chain from a boundary fn to a constructor callsite (internal
+   symbol form; `clara.server.graph.api/ViaChain` is its serialized string
+   counterpart).  `:boundary-in-var` is the var the boundary call is written
+   in; `:rule-to-boundary-path` is the rule→`:boundary-in-var` chain (omitted when the two
+   are the same var).  `:rule-to-boundary-path` and `:boundary-to-constructor-path` are shortest paths through
+   a var-level call graph, not observed runtime call paths.  `:source` marks
+   heuristic provenance — `:record-ctor-scan` when the callsite comes from the
+   subtree-wide record-ctor scan fallback rather than a traced call chain;
+   heuristic entries have no `:boundary-to-constructor-path`."
+  {(s/optional-key :boundary-var-name-sym) s/Symbol
+   (s/optional-key :boundary-in-var) s/Symbol
+   (s/optional-key :boundary-to-constructor-path) [ViaEntry]
+   (s/optional-key :rule-to-boundary-path) [ViaEntry]
+   (s/optional-key :source) (s/enum :record-ctor-scan)})
+
+(s/defschema CallsiteResolverContext
+  "Context map passed to `:callsite-resolver-fn` by
+   `clara.server.tools.graph.analyze/->annotations-from-rule-source-analysis`.
+   `:rule` is the full rulebase production — `s/Any` because productions are
+   large open maps; the keys of interest are :name :ns-name :lhs :rhs :props
+   (relates to `clara.server.graph.api` production schemas, which add
+   serialization concerns and stay at that layer).  `:arg-form` is `s/Any`
+   because it is unevaluated source data of arbitrary shape."
+  {:rule s/Any                               ; full production (:name, :ns-name, :lhs, :rhs, …)
+   :ns-name-sym s/Symbol                     ; ns where the callsite was found
+   :direction (s/enum :insert :retract)
+   :boundary-fn s/Symbol                     ; e.g. `clara.rules/insert!`
+   :arg-form s/Any                           ; the unresolved argument form
+   :source-str s/Str                         ; `pr-str` of `:arg-form`
+   :filename s/Str
+   (s/optional-key :fact-type) s/Any         ; present only for alias-discovered callsites;
+                                             ;   s/Any: keywords, fq class-name symbols, strings
+   (s/optional-key :fact-type-spec)          ; present only for alias-discovered callsites
+   {s/Keyword s/Any}})
+
+(s/defschema ConstructorTypeResolverContext
+  "Context map passed to a fact-constructor's `:type-resolver-fn`.
+   `:rule` is the full rulebase production — `s/Any` because productions are
+   large open maps; the keys of interest are :name :ns-name :lhs :rhs :props
+   (relates to `clara.server.graph.api` production schemas, which add
+   serialization concerns and stay at that layer).  `:arg-form` is `s/Any`
+   because it is unevaluated source data of arbitrary shape."
+  {:constructor-sym s/Symbol
+   :arg-form s/Any
+   :ns-name-sym s/Symbol
+   :filename s/Str
+   :direction (s/enum :insert :retract)
+   :rule s/Any
+   (s/optional-key :via) ViaChain})
+
+(s/defschema CallsiteEntry
+  "One captured boundary/constructor callsite, internal form: fact-type tokens
+   are still arbitrary Clojure values (keywords, fq class-name symbols) — the
+   serialize pass stringifies them for the API.  Relates to
+   `clara.server.graph.api/DynamicCallsiteEntry` (its serialized counterpart).
+   `:resolved-types` is `[s/Any]` because the analyzer is type-agnostic by
+   design: token shape is the caller resolver's decision."
+  {:source-str s/Str
+   :ns-name-sym s/Symbol
+   :filename s/Str
+   :status (s/enum :none :partial :full)
+   (s/optional-key :resolved-types) [s/Any]
+   (s/optional-key :constructor-sym) s/Symbol
+   (s/optional-key :via) ViaChain
+   (s/optional-key :fact-type) s/Any         ; alias context only — s/Any: keywords,
+                                             ;   fq class-name symbols, strings
+   (s/optional-key :fact-type-spec) {s/Keyword s/Any}})
+
+(s/defschema CallsiteResolution
+  "Result of one callsite-resolution pass — the boundary chain
+   (`resolve-boundary-callsites`) or the constructor-of-interest chain
+   (`resolve-constructor-callsites`).  `:owned-arg-idxs` is present only on
+   the constructor pass result: the `TracedArg` `:idx`s it accounted for,
+   which the boundary pass must skip so no insert is reported twice.
+   `:dropped-ctor-provenance` (constructor pass only) maps the `:idx` of an
+   argument whose constructor the type-resolver could not type to that
+   dropped entry's `:constructor-sym`/`:boundary-to-constructor-path`; the boundary pass merges
+   them into its entry for the argument (ambiguously-owned args are omitted)."
+  {:callsites [CallsiteEntry]
+   :resolved-types #{s/Any}                  ; type-agnostic tokens — see CallsiteEntry
+   :resolution (s/maybe (s/enum :full :partial :none))
+   (s/optional-key :owned-arg-idxs) #{s/Int}
+   (s/optional-key :resolved-arg-idxs) #{s/Int}
+   (s/optional-key :dropped-ctor-provenance)
+   {s/Int {(s/optional-key :constructor-sym) s/Symbol
+           (s/optional-key :boundary-to-constructor-path) [ViaEntry]}}})
+
+(s/defschema BoundaryCallsiteCtx
+  "The `ctx` map for `resolve-boundary-callsites`: an `index/AnalysisIndex`
+   plus the per-rule resolution keys.  `:rule` may be nil when the consuming
+   var is not a rulebase production; `:rule-var` is the fq rule var symbol
+   (head of every `:rule-to-boundary-path`).  `:dropped-ctor-provenance` maps
+   a boundary argument's `:idx` to the `:constructor-sym` /
+   `:boundary-to-constructor-path` of the constructor the ctor pass owned but
+   could not type, so the argument's entry still carries that provenance; nil
+   when no ctor pass ran.  `:rule-to-boundary-path-for` and
+   `:callsite-resolver-fn` are fns, so the `s/=>` fn schemas are
+   documentation (prismatic FnSchema does not validate fn-ness).
+
+   Open map — the caller's ctx carries more than the declared keys
+   (`:get-lines`, `:read-ctor-form`, `:alias-context-for`, …)."
+  (merge index/AnalysisIndex
+         {:direction (s/enum :insert :retract)
+          :rule (s/maybe s/Any)                            ; full production (:name, :ns-name, :lhs, :rhs, …)
+          :rule-var s/Symbol
+          :rule-to-boundary-path-for (s/=> (s/maybe [ViaEntry]) s/Symbol)
+          :callsite-resolver-fn (s/maybe (s/=> s/Any s/Any))
+          :dropped-ctor-provenance (s/maybe
+                                    {s/Int {(s/optional-key :constructor-sym) s/Symbol
+                                            (s/optional-key :boundary-to-constructor-path) [ViaEntry]}})
+          s/Any s/Any}))
+
+(s/defschema ConstructorCallsiteCtx
+  "The `ctx` map for `resolve-constructor-callsites`: an `index/AnalysisIndex`
+   plus the per-rule keys that pass consumes — `:direction`, `:rule`,
+   `:rule-to-boundary-path-for`, and the source-reading closures
+   `:get-lines` / `:read-ctor-form`.  `:rule` may be nil when the consuming
+   var is not a rulebase production.  `:rule-to-boundary-path-for`,
+   `:get-lines` and `:read-ctor-form` are fns, so the `s/=>` fn schemas are
+   documentation (prismatic FnSchema does not validate fn-ness).
+
+   Open map — the caller's ctx carries more than the declared keys."
+  (merge index/AnalysisIndex
+         {:direction (s/enum :insert :retract)
+          :rule (s/maybe s/Any)                           ; full production (:name, :ns-name, :lhs, :rhs, …)
+          :rule-to-boundary-path-for (s/=> (s/maybe [ViaEntry]) s/Symbol)
+          :get-lines (s/=> s/Any s/Any)
+          :read-ctor-form (s/=> s/Any s/Any)
+          s/Any s/Any}))
+
+(s/defn resolve-boundary-callsites
+  :- CallsiteResolution
   "Resolves boundary-call arguments via the ctor chain and the optional
    `:callsite-resolver-fn`.
 
    `traced-args` — entries from `trace-boundary-args`, already filtered to those
    the constructor path did not own.
 
-   `ctx` keys (an `index/AnalysisIndex` plus):
-     `:local-usages-by-name` / `:locals-by-id` - locals indexes (for tracing)
-     `:resolve-record-type`   - memoized record-type resolver
-     `:direction`             - `:insert` | `:retract`
-     `:rule`                  - the full production map of the consuming rule (may be nil)
-     `:rule-var`              - the fq rule var symbol (head of `:rule-to-boundary-path`)
-     `:rule-to-boundary-path-for`         - memoized (fn [boundary-in-var] -> [ViaEntry …] | nil)
-     `:callsite-resolver-fn`  - optional caller escape hatch
-     `:dropped-ctor-provenance` - {idx -> {:constructor-sym … :boundary-to-constructor-path …}} from
-                                 the constructor pass, for arguments it dropped
+   `ctx` — a `BoundaryCallsiteCtx`.
 
    Every entry gains a boundary-side `:via` (`:boundary-var-name-sym`,
    `:boundary-in-var`, and `:rule-to-boundary-path` when the boundary call is not in the
@@ -288,7 +439,8 @@
    of every traced argument that resolved to at least one type (used by
    `analyze/extract-insert-types` for per-inserter-var heuristic fallback
    attribution)."
-  [traced-args {:keys [dropped-ctor-provenance] :as ctx}]
+  [traced-args :- [TracedArg]
+   {:keys [dropped-ctor-provenance] :as ctx} :- BoundaryCallsiteCtx]
   (let [pairs (into []
                     (map (fn [{:keys [idx usage arg traced alias-context]}]
                            (let [ctx' (assoc ctx :usage usage :alias-context alias-context)
@@ -505,15 +657,15 @@
                                    (:boundary-to-constructor-path (:via entry))
                                    (assoc :boundary-to-constructor-path (:boundary-to-constructor-path (:via entry))))}})))))
 
-(defn resolve-constructor-callsites
+(s/defn resolve-constructor-callsites
+  :- CallsiteResolution
   "Resolves constructor-of-interest callsites reached from a rule's boundary calls.
 
    `traced-args` — entries from `trace-boundary-args` for this rule var.
    `constructor-ctr-map` — an `index/CtorCallsiteMap`
      ({inserter-var -> [CtorUsageMatch …]} from `index/build-analysis-index`),
      scoped to this rule var.
-   `ctx` — must contain :get-lines, :read-ctor-form, :graph,
-     :direction, :rule, :rule-to-boundary-path-for, :usages-by-caller.
+   `ctx` — a `ConstructorCallsiteCtx`.
 
    A constructor is emitted only when some boundary argument is shown to reach
    it (see `owning-arg`) *and* the resolver returns a type.  A constructor call
@@ -527,8 +679,10 @@
    every boundary argument a constructor accounted for.  Those must not also go
    through `resolve-boundary-callsites`, or the same insert would be reported
    twice (see `analyze/extract-insert-types`)."
-  [traced-args constructor-ctr-map {:keys [get-lines read-ctor-form graph direction rule
-                                           usages-by-caller rule-to-boundary-path-for]}]
+  [traced-args :- [TracedArg]
+   constructor-ctr-map :- index/CtorCallsiteMap
+   {:keys [get-lines read-ctor-form graph direction rule
+           usages-by-caller rule-to-boundary-path-for]} :- ConstructorCallsiteCtx]
   (let [args-by-caller (group-by #(u/fq-sym (:from (:usage %)) (:from-var (:usage %)))
                                  traced-args)
         cfg-base {:direction direction
@@ -568,117 +722,3 @@
      :dropped-ctor-provenance dropped-ctor-provenance
      :resolution (resolution-status entries)}))
 
-;; ---------------------------------------------------------------------------
-;; Schemas
-;; ---------------------------------------------------------------------------
-
-(s/defschema TracedArg
-  "One boundary-call argument after reading + locals tracing (the output of
-   `trace-boundary-args`).  `:arg` and `:traced` are unevaluated source data —
-   rule bindings inside them are free symbols.  `:alias-context` is non-nil
-   only for callsites discovered through a var-alias chain."
-  {:idx s/Int
-   :usage u/KondoVarUsage
-   :arg s/Any
-   :traced s/Any
-   ;; the kondo :locals entry whose init form is :traced (open kondo map;
-   ;; keys of interest: :row :end-col) — nil when :traced is :arg itself
-   :traced-binding (s/maybe s/Any)
-   ;; :fact-type is s/Any: keywords, fq class-name symbols, strings are all
-   ;; legitimate fact types; :fact-type-spec is an open caller-defined map
-   :alias-context (s/maybe {(s/optional-key :fact-type) s/Any
-                            (s/optional-key :fact-type-spec) {s/Keyword s/Any}})})
-
-(s/defschema ViaEntry
-  "A single entry in a `:rule-to-boundary-path` / `:boundary-to-constructor-path`
-   chain (internal symbol form; `clara.server.graph.api/ViaEntry` is its
-   serialized string counterpart)."
-  {:var-name-sym s/Symbol})
-
-(s/defschema ViaChain
-  "Provenance chain from a boundary fn to a constructor callsite (internal
-   symbol form; `clara.server.graph.api/ViaChain` is its serialized string
-   counterpart).  `:boundary-in-var` is the var the boundary call is written
-   in; `:rule-to-boundary-path` is the rule→`:boundary-in-var` chain (omitted when the two
-   are the same var).  `:rule-to-boundary-path` and `:boundary-to-constructor-path` are shortest paths through
-   a var-level call graph, not observed runtime call paths.  `:source` marks
-   heuristic provenance — `:record-ctor-scan` when the callsite comes from the
-   subtree-wide record-ctor scan fallback rather than a traced call chain;
-   heuristic entries have no `:boundary-to-constructor-path`."
-  {(s/optional-key :boundary-var-name-sym) s/Symbol
-   (s/optional-key :boundary-in-var) s/Symbol
-   (s/optional-key :boundary-to-constructor-path) [ViaEntry]
-   (s/optional-key :rule-to-boundary-path) [ViaEntry]
-   (s/optional-key :source) (s/enum :record-ctor-scan)})
-
-(s/defschema CallsiteResolverContext
-  "Context map passed to `:callsite-resolver-fn` by
-   `clara.server.tools.graph.analyze/->annotations-from-rule-source-analysis`.
-   `:rule` is the full rulebase production — `s/Any` because productions are
-   large open maps; the keys of interest are :name :ns-name :lhs :rhs :props
-   (relates to `clara.server.graph.api` production schemas, which add
-   serialization concerns and stay at that layer).  `:arg-form` is `s/Any`
-   because it is unevaluated source data of arbitrary shape."
-  {:rule s/Any                               ; full production (:name, :ns-name, :lhs, :rhs, …)
-   :ns-name-sym s/Symbol                     ; ns where the callsite was found
-   :direction (s/enum :insert :retract)
-   :boundary-fn s/Symbol                     ; e.g. `clara.rules/insert!`
-   :arg-form s/Any                           ; the unresolved argument form
-   :source-str s/Str                         ; `pr-str` of `:arg-form`
-   :filename s/Str
-   (s/optional-key :fact-type) s/Any         ; present only for alias-discovered callsites;
-                                             ;   s/Any: keywords, fq class-name symbols, strings
-   (s/optional-key :fact-type-spec)          ; present only for alias-discovered callsites
-   {s/Keyword s/Any}})
-
-(s/defschema ConstructorTypeResolverContext
-  "Context map passed to a fact-constructor's `:type-resolver-fn`.
-   `:rule` is the full rulebase production — `s/Any` because productions are
-   large open maps; the keys of interest are :name :ns-name :lhs :rhs :props
-   (relates to `clara.server.graph.api` production schemas, which add
-   serialization concerns and stay at that layer).  `:arg-form` is `s/Any`
-   because it is unevaluated source data of arbitrary shape."
-  {:constructor-sym s/Symbol
-   :arg-form s/Any
-   :ns-name-sym s/Symbol
-   :filename s/Str
-   :direction (s/enum :insert :retract)
-   :rule s/Any
-   (s/optional-key :via) ViaChain})
-
-(s/defschema CallsiteEntry
-  "One captured boundary/constructor callsite, internal form: fact-type tokens
-   are still arbitrary Clojure values (keywords, fq class-name symbols) — the
-   serialize pass stringifies them for the API.  Relates to
-   `clara.server.graph.api/DynamicCallsiteEntry` (its serialized counterpart).
-   `:resolved-types` is `[s/Any]` because the analyzer is type-agnostic by
-   design: token shape is the caller resolver's decision."
-  {:source-str s/Str
-   :ns-name-sym s/Symbol
-   :filename s/Str
-   :status (s/enum :none :partial :full)
-   (s/optional-key :resolved-types) [s/Any]
-   (s/optional-key :constructor-sym) s/Symbol
-   (s/optional-key :via) ViaChain
-   (s/optional-key :fact-type) s/Any         ; alias context only — s/Any: keywords,
-                                             ;   fq class-name symbols, strings
-   (s/optional-key :fact-type-spec) {s/Keyword s/Any}})
-
-(s/defschema CallsiteResolution
-  "Result of one callsite-resolution pass — the boundary chain
-   (`resolve-boundary-callsites`) or the constructor-of-interest chain
-   (`resolve-constructor-callsites`).  `:owned-arg-idxs` is present only on
-   the constructor pass result: the `TracedArg` `:idx`s it accounted for,
-   which the boundary pass must skip so no insert is reported twice.
-   `:dropped-ctor-provenance` (constructor pass only) maps the `:idx` of an
-   argument whose constructor the type-resolver could not type to that
-   dropped entry's `:constructor-sym`/`:boundary-to-constructor-path`; the boundary pass merges
-   them into its entry for the argument (ambiguously-owned args are omitted)."
-  {:callsites [CallsiteEntry]
-   :resolved-types #{s/Any}                  ; type-agnostic tokens — see CallsiteEntry
-   :resolution (s/maybe (s/enum :full :partial :none))
-   (s/optional-key :owned-arg-idxs) #{s/Int}
-   (s/optional-key :resolved-arg-idxs) #{s/Int}
-   (s/optional-key :dropped-ctor-provenance)
-   {s/Int {(s/optional-key :constructor-sym) s/Symbol
-           (s/optional-key :boundary-to-constructor-path) [ViaEntry]}}})
