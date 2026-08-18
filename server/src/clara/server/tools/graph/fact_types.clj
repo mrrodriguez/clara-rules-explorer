@@ -248,8 +248,9 @@
    and `:descendants` (hierarchy-ordered `clara.server.graph.api/TypeReference`
    entries, derived from the serialized ancestors index), `:ns` (best-effort
    namespace for grouping), and `[clara.server.graph.api/ProductionDep]` usage
-   lists.  `ancestors-index` maps each serialized fact-type name to {:ancestors [...] :ns ...}; `known-set` is the serialized
-   fact-type names, used for `known` flags.
+   lists.  `ancestors-index` maps each serialized fact-type name to
+   {:ancestors [...] :ns ...}; `known-set` is the serialized fact-type names,
+   used for `known` flags.
 
    Hierarchy expansion: when a production reads type T, all descendants of T
    (types that have T as an ancestor) also list the production in `used-by-*`.

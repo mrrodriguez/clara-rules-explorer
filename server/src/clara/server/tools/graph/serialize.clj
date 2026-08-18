@@ -111,8 +111,7 @@
    downstream entries: producer-type is what the producing rule inserts (or
    retracts), consumer-type is what the consuming rule's LHS requires.  A raw
    pair's `:via :retract` (producer-type is a retract type) is carried through
-   so
-   the UI can distinguish retraction coupling from production."
+   so the UI can distinguish retraction coupling from production."
   [{:keys [raw-pairs known-set producer-ns consumer-ns]}]
   (->> raw-pairs
        (map (fn [{:keys [producer-type consumer-type via]}]

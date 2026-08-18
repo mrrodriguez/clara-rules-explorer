@@ -431,8 +431,7 @@
 
 (defn reload-annotations!
   "Re-derives annotations from the last effective `AnnotationsSpec` against
-   the
-   current session.  File-backed sources are re-read from disk; the generated
+   the current session.  File-backed sources are re-read from disk; the generated
    (kondo) layer rebuilds from cached per-ns analyses in the state (kondo
    does not re-run).
    0-arity operates on the default system; 1-arity on an explicit system."

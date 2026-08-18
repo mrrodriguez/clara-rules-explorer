@@ -266,8 +266,8 @@
 
 (defn- explanations->fact-match-data
   "`[{:fact clara.server.graph.api/SessionFact :bindings [binding-map …]}]` —
-   one entry per matched
-   fact, carrying every distinct binding set it matched under.  A fact that
+   one entry per matched fact, carrying every distinct binding set it matched
+   under.  A fact that
    satisfies several conditions of one activation (duplicate pairs) or several
    activations (distinct bindings) appears once; ids the fact table cannot
    describe are dropped, matching `:inserted-facts`.
