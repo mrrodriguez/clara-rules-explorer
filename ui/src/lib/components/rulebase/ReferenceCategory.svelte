@@ -36,7 +36,7 @@
 		fullView = false,
 		class: className = '',
 		maxVisibleItems = 6,
-		typeRole = undefined,
+		typeRole,
 		upstream = [],
 		downstream = [],
 		children

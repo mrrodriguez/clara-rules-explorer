@@ -3,12 +3,11 @@
 	import RulebaseComponentTypeBadge from '$lib/components/rulebase/RulebaseComponentTypeBadge.svelte';
 	import ReferenceListItem from '$lib/components/rulebase/nav/ReferenceListItem.svelte';
 	import FactTypeInlineLink from '$lib/components/rulebase/FactTypeInlineLink.svelte';
+	import OpenReferenceLink from '$lib/components/rulebase/nav/OpenReferenceLink.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Popover from '$lib/components/ui/Popover.svelte';
 	import { tooltip } from '$lib/actions/tooltip';
-	import { getShortName, rulePath, queryPath } from '$lib/utils';
-	import { resolve } from '$app/paths';
-	import type { Pathname } from '$app/types';
+	import { rulePath, queryPath } from '$lib/utils';
 
 	interface Props {
 		ref: ProductionReference;
@@ -19,9 +18,7 @@
 	let { ref, fullView = false, active = false }: Props = $props();
 
 	const path = $derived(
-		resolve(
-			(ref.type === 'rule' ? rulePath(ref.id, fullView) : queryPath(ref.id, fullView)) as Pathname
-		)
+		ref.type === 'rule' ? rulePath(ref.id, fullView) : queryPath(ref.id, fullView)
 	);
 
 	const activeColor = $derived(ref.type === 'rule' ? '#0d6efd' : '#198754');
@@ -82,14 +79,7 @@
 		</Popover>
 	{/if}
 
-	<a
-		href={path}
-		class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 d-flex align-items-center"
-		use:tooltip={`Open ${getShortName(ref.name)}`}
-		aria-label="Open {ref.name}"
-	>
-		<i class="bi bi-box-arrow-up-right"></i>
-	</a>
+	<OpenReferenceLink {path} name={ref.name} />
 {/snippet}
 
 <ReferenceListItem

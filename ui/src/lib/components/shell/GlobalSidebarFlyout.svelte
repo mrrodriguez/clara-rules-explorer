@@ -89,9 +89,7 @@
 		width: fit-content;
 		min-width: 300px;
 		z-index: 1020;
-		transition:
-			left 0.2s ease-in-out,
-			width 0.2s ease-in-out;
+		transition: left 0.2s ease-in-out;
 		animation: slideIn 0.2s ease-out;
 	}
 

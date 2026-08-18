@@ -1,12 +1,11 @@
 <script lang="ts">
 	import type { ProductionReference, TypeReference } from '$lib/types/api';
-	import { factPath, getShortName } from '$lib/utils';
+	import { factPath } from '$lib/utils';
 	import { stableKeys } from '$lib/keys';
 	import ReferenceListItem from '$lib/components/rulebase/nav/ReferenceListItem.svelte';
 	import ProductionReferenceLink from '$lib/components/rulebase/ProductionReferenceLink.svelte';
+	import OpenReferenceLink from '$lib/components/rulebase/nav/OpenReferenceLink.svelte';
 	import { tooltip } from '$lib/actions/tooltip';
-	import { resolve } from '$app/paths';
-	import type { Pathname } from '$app/types';
 
 	interface Props {
 		type: TypeReference;
@@ -26,15 +25,13 @@
 	let {
 		type,
 		active = false,
-		role = undefined,
+		role,
 		upstream = [],
 		downstream = [],
 		fullView = false
 	}: Props = $props();
 
 	let expanded = $state(false);
-
-	const href = $derived(resolve(factPath(type.id) as Pathname));
 
 	const relatedRefs = $derived.by((): ProductionReference[] => {
 		if (role === 'input') {
@@ -70,14 +67,7 @@
 		</button>
 	{/if}
 	{#if type.known}
-		<a
-			{href}
-			class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 d-flex align-items-center"
-			use:tooltip={`Open ${getShortName(type.name)}`}
-			aria-label="Open {type.name}"
-		>
-			<i class="bi bi-box-arrow-up-right"></i>
-		</a>
+		<OpenReferenceLink path={factPath(type.id)} name={type.name} />
 	{/if}
 {/snippet}
 

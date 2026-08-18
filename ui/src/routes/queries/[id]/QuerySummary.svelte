@@ -60,7 +60,7 @@
 			<RulebaseComponentSummaryDescription doc={query.doc} />
 
 			{#if !fullView}
-				<ProductionSummaryTabs>
+				<ProductionSummaryTabs typesLabel="Matched Types">
 					{#snippet types()}
 						<div class="row g-3">
 							<div class="col-md-12">

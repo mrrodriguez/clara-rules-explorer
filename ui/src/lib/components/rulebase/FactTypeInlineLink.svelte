@@ -14,12 +14,16 @@
 	const href = $derived(resolve(factPath(type.id) as Pathname));
 </script>
 
+{#snippet name()}
+	<QualifiedName fullName={type.name} size="sm" />
+{/snippet}
+
 {#if type.known}
 	<a {href} class="text-decoration-none d-block" title={type.name}>
-		<QualifiedName fullName={type.name} size="sm" />
+		{@render name()}
 	</a>
 {:else}
 	<div class="text-muted fst-italic" title={type.name}>
-		<QualifiedName fullName={type.name} size="sm" />
+		{@render name()}
 	</div>
 {/if}
