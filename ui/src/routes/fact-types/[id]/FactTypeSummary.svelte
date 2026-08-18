@@ -79,5 +79,27 @@
 				</p>
 			{/if}
 		</div>
+
+		<div class="mt-4">
+			<ReferenceCategory
+				title="Hierarchy (Descendants)"
+				icon="bi-diagram-3-fill"
+				items={factType.descendants}
+				itemKind="type"
+			>
+				<div
+					class="p-3 text-muted text-center fs-7 bg-light rounded fst-italic border border-dashed"
+				>
+					No descendants — this type sits at a leaf of its hierarchy.
+				</div>
+			</ReferenceCategory>
+			{#if factType.descendants && factType.descendants.length > 0}
+				<p class="text-muted small ps-2 mt-1 mb-0">
+					Descendants are listed in hierarchy order (direct descendants first, then their
+					descendants). Italicized entries are hierarchy-only types with no rulebase usage — they
+					are not linkable.
+				</p>
+			{/if}
+		</div>
 	</div>
 </div>

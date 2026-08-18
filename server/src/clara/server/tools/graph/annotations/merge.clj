@@ -87,13 +87,13 @@
                   anns))))
 
 (defn layer
-  "Constructs and validates an in-memory Layer.  Layers are plain values — an
+  "Constructs and validates an in-memory `Layer`.  Layers are plain values — an
    in-memory layer is a first-class input everywhere a file-backed one is."
   [m]
   (s/validate Layer (normalize-layer m)))
 
 (defn read-layer
-  "Reads an EDN file into a Layer.  `:source` defaults to the path; entries
+  "Reads an EDN file into a `Layer`.  `:source` defaults to the path; entries
    in `m` override file content.  Rule-name keys are normalized to strings."
   ([path] (read-layer path {}))
   ([path m]
@@ -115,7 +115,7 @@
   pp/pprint)
 
 (defn- write-layer!*
-  "Writes a Layer as EDN using the current `*edn-printer*`.
+  "Writes a `Layer` as EDN using the current `*edn-printer*`.
    `*print-meta*` is bound false: reader metadata from synthesized analysis
    snippets must not leak into artifacts."
   [path layer]
@@ -124,7 +124,7 @@
       (*edn-printer* layer w))))
 
 (defn write-layer!
-  "Writes a Layer as EDN.  `*print-meta*` is bound false: reader metadata
+  "Writes a `Layer` as EDN.  `*print-meta*` is bound false: reader metadata
    from synthesized analysis snippets must not leak into artifacts.
 
    `opts` is an optional map:
@@ -534,8 +534,8 @@
    s/Keyword s/Any})
 
 (defn merge-layers
-  "Folds `layers` — ordered lowest precedence first — into MergedAnnotations.
-   The rightmost layer wins a conflict.  Layer ids must be distinct: with two
+  "Folds `layers` — ordered lowest precedence first — into `MergedAnnotations`.
+   The rightmost layer wins a conflict.  `Layer` ids must be distinct: with two
    layers named the same, `:provenance` and `:from-layer` become ambiguous, so
    a repeated `:id` throws.
 
@@ -569,7 +569,7 @@
         :provenance provenance}))))
 
 (defn annotations
-  "Unwraps MergedAnnotations to the bare rule→annotation map for consumers
+  "Unwraps `MergedAnnotations` to the bare rule→annotation map for consumers
    that do not care about provenance."
   [merged]
   (:annotations merged))
@@ -585,7 +585,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn merged-annotations?
-  "True when `x` is a MergedAnnotations value — a map with both
+  "True when `x` is a `MergedAnnotations` value — a map with both
    `:annotations` and `:provenance` keys.  Key membership is tested with
    `some` because bare maps may have string keys and `contains?` throws
    ClassCastException on those."
@@ -596,7 +596,7 @@
         (some #{:provenance} (keys x)))))
 
 (defn ->bare-annotations
-  "Unwraps a MergedAnnotations to its bare rule→annotation map; bare maps
+  "Unwraps a `MergedAnnotations` to its bare rule→annotation map; bare maps
    pass through unchanged.  Use at coercion boundaries where either form
    may arrive."
   [x]
@@ -605,7 +605,7 @@
     x))
 
 (defn annotations-delta->layer
-  "Wraps an `annotations-delta` result as a validated Layer with the given
+  "Wraps an `annotations-delta` result as a validated `Layer` with the given
   `id` and `source` provenance info.
 
   `delta-annotations` holds **only what was added** over the base — see
@@ -618,7 +618,7 @@
           :annotations delta-annotations}))
 
 (defn ->layer
-  "Coerces `x` to a Layer: a path string or File is read from disk via
+  "Coerces `x` to a `Layer`: a path string or File is read from disk via
    `read-layer`; a map is validated as an in-memory layer via `layer`."
   [x]
   (if (or (string? x) (instance? java.io.File x))
@@ -630,8 +630,8 @@
 
    `annotations-input` may be:
      - A bare rule→annotation map (passes through)
-     - A MergedAnnotations value (unwrapped to its `:annotations` payload)
-     - A vector of Layer maps (merged via `merge-layers`, with
+     - A `MergedAnnotations` value (unwrapped to its `:annotations` payload)
+     - A vector of `Layer` maps (merged via `merge-layers`, with
        `props-layer` from `session` folded in first as the base)
      - A string path to a layer file (read via `read-layer` and merged).
 

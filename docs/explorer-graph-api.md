@@ -94,7 +94,7 @@ Anywhere the API emits a fact type that the UI may hyperlink, the value is a
 | `id` | string | Deterministic route id (linkage) |
 | `known` | boolean | `true` iff the type appears in the analysis `fact-types` map; `false` marks hierarchy ghosts, which render as plain text (their ids are not a supported linking surface) |
 
-`TypeReference` is used for: fact-type `:ancestors` entries, rule/query
+`TypeReference` is used for: fact-type `:ancestors` / `:descendants` entries, rule/query
 `:lhs-types` / `:insert-types` / `:retract-types`, LHS condition `:type`,
 dynamic-callsite `:resolved-types` / `:fact-type`, session fact `:type`, and
 the `:match` pairs below.  `known` is always `true` for the
@@ -415,14 +415,14 @@ List of all fact types referenced by rules and queries.
 | `inserted-by-rules` | ProductionDep[] | Rules that insert this type |
 | `retracted-by-rules` | ProductionDep[] | Rules that retract this type |
 
-`:ancestors` is detail-only — the list endpoint omits it.
+`:ancestors` and `:descendants` are detail-only — the list endpoint omits them.
 
 ---
 
 #### `GET /v1/fact-types/:id`
 
 Full fact-type detail — the list shape plus the hierarchy-ordered
-`:ancestors`.
+`:ancestors` and `:descendants`.
 
 **Response** `200`:
 ```json
@@ -437,6 +437,9 @@ Full fact-type detail — the list shape plus the hierarchy-ordered
   "ancestors": [
     { "name": "my.ns.IScanMarker", "id": "my.ns.IScanMarker-b2c4d6e8", "known": true },
     { "name": "java.lang.Object", "id": "java.lang.Object-f4g6h8j1", "known": false }
+  ],
+  "descendants": [
+    { "name": "my.ns.MarkerRecord", "id": "my.ns.MarkerRecord-a1b2c3d4", "known": true }
   ]
 }
 ```
@@ -444,6 +447,7 @@ Full fact-type detail — the list shape plus the hierarchy-ordered
 | Key | Type | Description |
 |-----|------|-------------|
 | `ancestors` | TypeReference[] | Ancestor types in deterministic hierarchy order — descendants before their own ancestors, ties broken lexicographically (see `core/hierarchy-order`). `known: true` entries link via their id; `known: false` ghosts render as plain text |
+| `descendants` | TypeReference[] | Descendant types (types that list this type among their ancestors) in deterministic hierarchy order — direct descendants first, then their descendants, ties broken lexicographically. `known: false` ghosts are not part of the rulebase's fact-types map |
 
 `known` is the primary noise filter: Clara's default ancestors-fn
 (`clojure.core/ancestors`) gives every record type a long tail of JDK/CLJ

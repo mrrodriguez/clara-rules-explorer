@@ -160,7 +160,8 @@
   annotations/merge-layers).  `ctx` is the shared analysis context map
   (annotations, dep-graph, production-map, type-analysis-map,
   ancestors-set-fn, known-set; see `->rulebase-analysis`).  `known-set` is the
-  analysis's serialized fact-type names, used for TypeReference `known` flags.
+  analysis's serialized fact-type names, used for
+  `clara.server.graph.api/TypeReference` `known` flags.
 
   Form printing is controlled by the dynamic var `serialize/*form-printer*`."
   [{p-name :name :as production}
@@ -372,8 +373,8 @@
 
 (defn- coerce-annotations-arg
   "Normalizes the annotations argument of `->rulebase-analysis`: a
-   MergedAnnotations value passes through; a bare rule→annotation map is
-   wrapped as merged content with no provenance."
+   `ann.merge/MergedAnnotations` value passes through; a bare rule→annotation
+   map is wrapped as merged content with no provenance."
   [x]
   (if (ann.merge/merged-annotations? x)
     x
@@ -440,8 +441,8 @@
 
 (defn ->rulebase-analysis
   "Analyzes a rulebase against merged annotations.  `annotations` is either
-   a MergedAnnotations value (annotations/merge-layers output — annotations
-   and provenance are both used) or a bare rule→annotation map.
+   a `ann.merge/MergedAnnotations` value (`ann.merge/merge-layers` output —
+   annotations and provenance are both used) or a bare rule→annotation map.
 
    This function is pure: the result depends only on the rulebase and the
    annotations argument.  It touches no working memory and no mutable state,

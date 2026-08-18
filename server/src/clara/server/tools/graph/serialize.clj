@@ -82,12 +82,13 @@
     (str (slug s) "-" (subs (sha1-base36 s) 0 8))))
 
 (def route-id
-  "Memoized `route-id*` — the same name recurs in thousands of ProductionDep
-   entries across an analysis build."
+  "Memoized `route-id*` — the same name recurs in thousands of
+   `clara.server.graph.api/ProductionDep` entries across an analysis build."
   (memoize route-id*))
 
 (defn serialize-type-ref
-  "Serializes a raw fact type into a TypeReference map for JSON output:
+  "Serializes a raw fact type into a `clara.server.graph.api/TypeReference` map
+   for JSON output:
    {:name kind-explicit serialized name, :id deterministic route id,
    :known true iff the serialized name is a member of `known-set` (the
    analysis's fact-type names).  `prod-ns` is the production's namespace,
@@ -104,12 +105,13 @@
 
 (defn serialize-match
   "Serializes raw {:producer-type ... :consumer-type ...} pairs (the
-   `matching-type-pairs` output) into TypeReference pairs, each end
-   serialized in its own production's ns context, sorted by producer then
-   consumer :name.  Symmetric shape and meaning on upstream and downstream
-   entries: producer-type is what the producing rule inserts (or retracts),
-   consumer-type is what the consuming rule's LHS requires.  A raw pair's
-   `:via :retract` (producer-type is a retract type) is carried through so
+   `matching-type-pairs` output) into `clara.server.graph.api/TypeReference`
+   pairs, each end serialized in its own production's ns context, sorted by
+   producer then consumer :name.  Symmetric shape and meaning on upstream and
+   downstream entries: producer-type is what the producing rule inserts (or
+   retracts), consumer-type is what the consuming rule's LHS requires.  A raw
+   pair's `:via :retract` (producer-type is a retract type) is carried through
+   so
    the UI can distinguish retraction coupling from production."
   [{:keys [raw-pairs known-set producer-ns consumer-ns]}]
   (->> raw-pairs
@@ -199,7 +201,8 @@
     (into (empty coll) (map name) coll)))
 
 (defn serialize-production-dep
-  "Serializes a production reference (ProductionDep): {name, ns, type, id}."
+  "Serializes a production reference (`clara.server.graph.api/ProductionDep`):
+   {name, ns, type, id}."
   [production-map fq-dep-name]
   (let [{p-ns-name :ns-name :keys [rhs]} (get production-map fq-dep-name)
         base
@@ -219,7 +222,8 @@
 
 (defn serialize-condition
   "Serializes a single condition, including pretty-printing its constraints and
-   args and converting its `:type` (raw fact type) into a TypeReference.
+   args and converting its `:type` (raw fact type) into a
+   `clara.server.graph.api/TypeReference`.
    `prod-ns` is the production's namespace, used to resolve symbol types;
    `known-set` is the analysis's serialized fact-type names.
 
@@ -246,7 +250,7 @@
   "Serializes the LHS of a rule.  Condition `:type` values are raw fact types
    here — callers must apply `prune-fns` to the RESULT (not beforehand) so the
    types are still Classes/keywords when `serialize-condition` converts them
-   to TypeReferences.
+   to `clara.server.graph.api/TypeReference` maps.
 
    Form printing is controlled by the dynamic var `*form-printer*`."
   [lhs prod-ns known-set]

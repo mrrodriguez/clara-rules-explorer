@@ -181,7 +181,7 @@
    `(let [f (->fact :t m)] (insert! f))` — the argument `f` names nothing, but
    its traced form is the constructor call.
 
-   Returns `[TracedArg …]`."
+   Returns a vector of `TracedArg` entries."
   [usages {:keys [get-lines alias-context-for] :as ctx}]
   (into []
         (comp (mapcat (fn [usage]
@@ -235,10 +235,11 @@
                    (into visited neighbors))))))))
 
 (defn rule-to-boundary-path-for-memo
-  "Returns a memoized `(fn [boundary-in-var] -> [ViaEntry …] | nil)` computing
-   the shortest call-graph path from `rule-var` to `boundary-in-var`, both ends
-   inclusive, as `{:var-name-sym …}` entries.  nil when the two vars are equal
-   (a boundary call in the rule's own RHS) or unreachable.
+  "Returns a memoized fn from `boundary-in-var` to a vector of `ViaEntry`
+   entries (or nil), computing the shortest call-graph path from `rule-var` to
+   `boundary-in-var`, both ends inclusive, as `{:var-name-sym …}` entries.  nil
+   when the two vars are equal (a boundary call in the rule's own RHS) or
+   unreachable.
 
    Memoized per (rule-var, boundary-in-var) pair — a rule's callsites cluster
    in a few boundary-holding vars, and the path is the same for every callsite

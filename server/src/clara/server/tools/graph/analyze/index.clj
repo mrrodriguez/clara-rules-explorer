@@ -61,7 +61,7 @@
 
 (s/defschema CtorCallsiteMap
   "Constructor-of-interest callsites by inserter var:
-   {inserter-var -> [CtorUsageMatch …]}."
+   `{inserter-var -> [CtorUsageMatch …]}`."
   {s/Symbol [CtorUsageMatch]})
 
 (s/defschema AnalysisIndex

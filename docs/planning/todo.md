@@ -1,4 +1,4 @@
-1. hierarchy shows ancestors in UI, but no descendants which is also useful.
+1. DONE hierarchy shows ancestors in UI, but no descendants which is also useful.
 2. provenance chain is confusing when you only have the boundary-to-constructor-path - rule name
    goes in middle of the path.
 3. default provenance expanded

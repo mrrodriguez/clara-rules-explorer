@@ -617,7 +617,32 @@
             "Descendant-first hierarchy order (supporting <: loan <: base)")
         (is (= [true true false]
                (mapv :known ancestors))
-            "supporting/loan are on an LHS (known), base-document is a ghost")))
+            "supporting/loan are on an LHS (known), base-document is a ghost")
+        (is (empty? (:descendants income))
+            "income-document is a leaf — nothing derives from it")))
+
+    (testing "Keyword derive hierarchy exposes descendants (direct descendants first, lexicographic tie-break)"
+      (let [base (fact-type-by-name analysis
+                                    ":clara.server.tools.graph.rules.loan-hierarchy-rules/base-document")
+            loan (fact-type-by-name analysis
+                                    ":clara.server.tools.graph.rules.loan-hierarchy-rules/loan-document")
+            supporting (fact-type-by-name analysis
+                                          ":clara.server.tools.graph.rules.loan-hierarchy-rules/supporting-document")]
+        (is (= [":clara.server.tools.graph.rules.loan-hierarchy-rules/loan-document"
+                ":clara.server.tools.graph.rules.loan-hierarchy-rules/supporting-document"
+                ":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document"]
+               (mapv :name (:descendants base)))
+            "base-document's descendants ordered direct-first")
+        (is (= [true true true]
+               (mapv :known (:descendants base)))
+            "all derive-keyword descendants are known (on some LHS or insert-type)")
+        (is (= [":clara.server.tools.graph.rules.loan-hierarchy-rules/supporting-document"
+                ":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document"]
+               (mapv :name (:descendants loan)))
+            "loan-document lists its direct descendant before the deeper one")
+        (is (= [":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document"]
+               (mapv :name (:descendants supporting)))
+            "supporting-document lists only income-document")))
 
     (testing "Record type: interface ancestor known, JDK ghosts not"
       (let [app (fact-type-by-name analysis

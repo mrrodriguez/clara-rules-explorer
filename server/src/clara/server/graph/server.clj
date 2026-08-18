@@ -68,8 +68,9 @@
                                                  :auto-detect))})
 
 (s/defschema AnnotationsArg
-  "Either an AnnotationsSpec map or a legacy annotation-input form
-   (bare map, MergedAnnotations, vector of Layers, string path, or File)."
+  "Either an `AnnotationsSpec` map or a legacy annotation-input form
+   (bare map, `ann.merge/MergedAnnotations`, vector of `ann.merge/Layer`
+   entries, string path, or File)."
   (s/pred (fn [x]
             (or (nil? x)
                 (and (map? x)
@@ -129,9 +130,10 @@
   #{:auto-detect-from-rulebase :auto-detect-from-memory :auto-detect})
 
 (defn- ->source-layer
-  "Coerce one source entry to a Layer.  Path strings / Files are read from
-   disk via `read-layer`; bare rule→annotation maps are wrapped as a source
-   layer; MergedAnnotations are unwrapped first."
+  "Coerce one source entry to a `ann.merge/Layer`.  Path strings / Files are
+   read from disk via `ann.merge/read-layer`; bare rule→annotation maps are
+   wrapped as a source layer; `ann.merge/MergedAnnotations` are unwrapped
+   first."
   [x]
   (cond
     (or (string? x) (instance? File x))
@@ -428,7 +430,8 @@
        (:annotations new-state)))))
 
 (defn reload-annotations!
-  "Re-derives annotations from the last effective AnnotationsSpec against the
+  "Re-derives annotations from the last effective `AnnotationsSpec` against
+   the
    current session.  File-backed sources are re-read from disk; the generated
    (kondo) layer rebuilds from cached per-ns analyses in the state (kondo
    does not re-run).

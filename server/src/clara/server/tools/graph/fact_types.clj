@@ -29,7 +29,8 @@
   "Serialized names of every raw type in any production's consumed or produced
    types, each serialized in its own production's ns context.  Equals the
    future fact-types map keys by construction; the ancestors enrichment and
-   TypeReference `known` flags are computed against this set upfront."
+   `clara.server.graph.api/TypeReference` `known` flags are computed against
+   this set upfront."
   [type-analysis-map]
   (into #{}
         (mapcat (fn [{:keys [consumed-types produced-types ns-name]}]
@@ -158,10 +159,22 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- init-fact-type-summary
-  "Initial fact-type entry for `type-name`: empty usage vectors, ancestors
-   as TypeReference maps with `known` flags from `known-set`."
-  [ancestors-index known-set type-name]
-  (let [{idx-ancestors :ancestors :keys [ns]} (get ancestors-index type-name)]
+  "Initial fact-type entry for `type-name`: empty usage vectors, `:ancestors`
+   and `:descendants` as hierarchy-ordered `clara.server.graph.api/TypeReference`
+   maps with `known` flags from `known-set`."
+  [ancestors-index descendants-index known-set type-name]
+  (let [{idx-ancestors :ancestors :keys [ns]} (get ancestors-index type-name)
+        idx-descendants (get descendants-index type-name #{})
+        ordered-descendants (reverse
+                             (hierarchy-order idx-descendants
+                                              (fn [d]
+                                                (into #{} (filter idx-descendants)
+                                                      (get-in ancestors-index [d :ancestors])))
+                                              identity))
+        ->type-ref (fn [name]
+                     {:name name
+                      :id (serialize/route-id name)
+                      :known (contains? known-set name)})]
     {:name type-name
      :id (serialize/route-id type-name)
      :used-by-rules []
@@ -169,18 +182,15 @@
      :inserted-by-rules []
      :retracted-by-rules []
      :ns ns
-     :ancestors (mapv (fn [a]
-                        {:name a
-                         :id (serialize/route-id a)
-                         :known (contains? known-set a)})
-                      idx-ancestors)}))
+     :ancestors (mapv ->type-ref idx-ancestors)
+     :descendants (mapv ->type-ref ordered-descendants)}))
 
 (defn- conj-production-ref
   "Adds `production-ref` to the `key` vector of a fact-type summary entry,
    deduping by `:id`.  When `summary` is nil the entry is initialised from
-   `ancestors-index`/`known-set`."
-  [ancestors-index known-set summary type-name key production-ref]
-  (let [s (or summary (init-fact-type-summary ancestors-index known-set type-name))
+   `ancestors-index`/`descendants-index`/`known-set`."
+  [ancestors-index descendants-index known-set summary type-name key production-ref]
+  (let [s (or summary (init-fact-type-summary ancestors-index descendants-index known-set type-name))
         existing (set (map :id (get s key [])))]
     (if (existing (:id production-ref))
       s
@@ -212,11 +222,11 @@
 
 (defn ->fact-type-summary-map
   "Aggregates fact-type usage across rules and queries, attaching `:ancestors`
-   (hierarchy-ordered `TypeReference` entries, from the serialized ancestors
-   index), `:ns` (best-effort namespace for grouping), and `[ProductionDep]`
-   usage lists.  `ancestors-index` maps each serialized fact-type name to
-   {:ancestors [...] :ns ...}; `known-set` is the serialized fact-type names,
-   used for `known` flags.
+   and `:descendants` (hierarchy-ordered `clara.server.graph.api/TypeReference`
+   entries, derived from the serialized ancestors index), `:ns` (best-effort
+   namespace for grouping), and `[clara.server.graph.api/ProductionDep]` usage
+   lists.  `ancestors-index` maps each serialized fact-type name to {:ancestors [...] :ns ...}; `known-set` is the serialized
+   fact-type names, used for `known` flags.
 
    Hierarchy expansion: when a production reads type T, all descendants of T
    (types that have T as an ancestor) also list the production in `used-by-*`.
@@ -248,7 +258,7 @@
                     (reduce (fn [a [t k]]
                               (update a t
                                       #(conj-production-ref
-                                        ancestors-index known-set % t k pref)))
+                                        ancestors-index descendants-index known-set % t k pref)))
                             acc
                             updates)))
                 {}
@@ -291,8 +301,8 @@
 
 (defn get-fact-types-list
   "Returns a sequence of lightweight fact type summaries, preserving order.
-   Omits :ancestors (detail-only) but keeps :ns for grouping and :id for
-   links."
+   Omits :ancestors and :descendants (detail-only) but keeps :ns for grouping
+   and :id for links."
   [analysis]
   (mapv #(select-keys % [:name :id :ns :used-by-rules :used-by-queries
                          :inserted-by-rules :retracted-by-rules])

@@ -171,6 +171,13 @@ export interface FactTypeSummary {
 	 * render as plain text.
 	 */
 	ancestors?: TypeReference[];
+	/**
+	 * Hierarchy-ordered descendant types (direct descendants first, then their
+	 * descendants, ties broken lexicographically). Detail-only — the list
+	 * endpoint omits it. `known: true` entries link via their id; ghosts
+	 * render as plain text.
+	 */
+	descendants?: TypeReference[];
 }
 
 /**

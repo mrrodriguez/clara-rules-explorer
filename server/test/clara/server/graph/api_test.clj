@@ -138,6 +138,7 @@
           (is (seq fact-types))
           (is (every? :id fact-types) "list payload carries :id")
           (is (not-any? :ancestors fact-types) "list payload omits :ancestors")
+          (is (not-any? :descendants fact-types) "list payload omits :descendants")
           (is (some #{"clara.server.tools.graph.rules.loan_app_facts.Application"} (map :name fact-types))))))
 
     (testing "GET /v1/fact-types/:id (id from list payload)"
@@ -149,7 +150,8 @@
         (let [body (parse-json (:body response))]
           (is (= "clara.server.tools.graph.rules.loan_app_facts.Application" (:name body)))
           (is (seq (:used-by-rules body)))
-          (is (seq (:ancestors body)) "detail carries :ancestors"))))
+          (is (seq (:ancestors body)) "detail carries :ancestors")
+          (is (contains? body :descendants) "detail carries :descendants"))))
 
     (testing "Name-based lookup 404s (id-only resolution)"
       (let [response (handler (mock/request :get "/v1/fact-types/clara.server.tools.graph.rules.loan_app_facts.Application"))]
