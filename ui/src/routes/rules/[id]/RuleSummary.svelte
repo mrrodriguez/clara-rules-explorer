@@ -138,12 +138,16 @@
 						</div>
 					</div>
 				</div>
-
-				<SessionProductionActivity {activity} />
 			{/if}
 
-			<DynamicCallsiteList detection={rule['dynamic-insert-types-detected']} label="Insert" />
-			<DynamicCallsiteList detection={rule['dynamic-retract-types-detected']} label="Retract" />
+			<div class:mt-4={fullView}>
+				<DynamicCallsiteList detection={rule['dynamic-insert-types-detected']} label="Insert" />
+				<DynamicCallsiteList detection={rule['dynamic-retract-types-detected']} label="Retract" />
+			</div>
+
+			{#if fullView}
+				<SessionProductionActivity {activity} />
+			{/if}
 
 			{#if !fullView}
 				<div class="d-flex align-items-center gap-2 mt-3 pt-2 border-top">

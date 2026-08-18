@@ -269,6 +269,12 @@ Proposed functions:
    kondo location otherwise (§8).
 7. Sort deterministically by fq name; return.
 
+For the outside-defrule path (§9.7), `navigate` also accepts
+`{:production nil :token "…"}` (no `:side`) and returns the global consumers of
+the resolved type instead of a scoped `:downstream` — the same
+`{:direction :type :targets …}` shape, so the editor-side popover/jump is
+unchanged.
+
 The client-API never re-serializes types by hand — it reuses
 `serialize/resolve-type`, `serialize/serialize-production-dep`, and the
 `:match` already on the analysis, so kind-explicit names and route ids stay
@@ -426,14 +432,26 @@ Both are `interactive` and delegate to a shared `clara-explorer--navigate side`.
 No keybindings for now — call them via `M-x` (after `M-x eval-buffer` on the
 file) during the spike.
 
+`clara-explorer--navigate side` routes on whether point is inside a
+`defrule`/`defquery`:
+
+- **Inside** → scoped navigation: build fq production name + side + token,
+  call `client/navigate`, feed `:targets` to §9.4.
+- **Outside** (no enclosing production) → global path: only meaningful for
+  `:consumer`. Resolve the ctor token through the cross-production callsite
+  linkage and list the global consumers of `T` (§9.7). `:producer` with no
+  enclosing production messages "not inside a rule/query".
+
 ### 9.2 Structural navigation (elisp)
 
 - `clara-explorer--enclosing-production` — walk up from point to the nearest
   `(r/defrule NAME …)` / `(defrule NAME …)` / `(defquery NAME …)` form (any
   alias prefix). Return the **unqualified** `NAME` and the start/end of the
-  form. Derive the namespace from `cider-current-ns` (the buffer's own ns),
-  and combine to the fq name `ns/NAME`. (The client-API verifies the fq name
-  resolves to a real production and can correct the string/symbol form.)
+  form; derive the namespace from `cider-current-ns` (the buffer's own ns) and
+  combine to the fq name `ns/NAME`. Returns **nil** when point is not inside a
+  `defrule`/`defquery` — the signal the dispatcher uses for the
+  outside-defrule path (§9.7). (The client-API verifies the fq name resolves
+  to a real production and can correct the string/symbol form.)
 - `clara-explorer--side-at-point` — relative to the top-level `=>` inside that
   defrule: point before it → `:lhs`; after → `:rhs`. (Queries have no `=>` →
   always `:lhs`.)
@@ -441,6 +459,10 @@ file) during the spike.
   a leading `:` / `::` and the trailing `.` of a class constructor. Use the
   clojure-mode syntax table carefully (keywords and `Foo.` must read as one
   token, not split).
+- `clara-explorer--context` — one call that gathers `(:production
+  fq-name-or-nil :side :lhs|:rhs|nil :token "…")`; `:production nil` / `:side
+  nil` means the global path. Keeps the two commands thin and the
+  outside-defrule logic in one place.
 
 ### 9.3 Transport + parse
 
@@ -489,15 +511,80 @@ open): jump to the namespace file and search:
 
 Handles the rare macro-emitted / non-classpath-source cases.
 
-### 9.6 Command names
+### 9.6 Function inventory
 
-Two `interactive` commands, nothing else for the spike:
+Public (`interactive`):
 
-- `clara-explorer-navigate-producer`
-- `clara-explorer-navigate-consumer`
+- `clara-explorer-navigate-producer` — scoped producer navigation.
+- `clara-explorer-navigate-consumer` — scoped consumer navigation, or the
+  global path when outside a production (§9.7).
+
+Private helpers:
+
+- `clara-explorer--navigate` — dispatcher (§9.1).
+- `clara-explorer--context` — `(:production fq-or-nil :side :lhs|:rhs|nil
+  :token "…")` (§9.2).
+- `clara-explorer--enclosing-production` / `--side-at-point` /
+  `--token-at-point` — structural navigation (§9.2).
+- `clara-explorer--eval-edn` — nREPL sync eval + `parseedn-read-str` (§9.3).
+- `clara-explorer--edn-get` — keyword lookup in the parsed alist (§9.8).
+- `clara-explorer--choose-target` — `completing-read` popover (§9.4).
+- `clara-explorer--goto` — `cider-find-var` / `find-file`+`goto-char` (§9.4).
+- `clara-explorer--goto-fallback` — `cider-find-ns` + regex (§9.5).
 
 (Optional, later: a `clara-explorer-mode` minor mode + leader keys. Not needed
 to test — `M-x` is enough.)
+
+### 9.7 Outside-defrule path (global consumers)
+
+When the cursor is over a fact-ctor token (e.g. `map->DocumentCheck` inside
+`make-document-check`) and there is no enclosing `defrule`/`defquery`, there is
+no production to scope to. `clara-explorer-navigate-consumer` instead:
+
+1. Resolve the token to a fact type `T` **without** a production context — the
+   client-API matches the token's fully-qualified ctor symbol (and, when
+   available, its `:filename` + row/col) across every production's
+   `:dynamic-insert-types-detected` / `:dynamic-retract-types-detected`
+   callsites (§7.4) and reads `:resolved-types`.
+2. Return the **global** consumers of `T` (the fact-type detail's
+   `used-by-rules` / `used-by-queries`) rather than a production's scoped
+   `:downstream`.
+
+The elisp needs a second client-API entry point (or a `:production nil` variant
+of `navigate` — see §5) plus the same popover/jump handling; targets are
+`ProductionDep`s, so §9.4 reuses unchanged. Token extraction is identical to
+§9.2; only what the server returns differs.
+
+This is the one place the §9.2 structural-navigation assumption breaks: with no
+enclosing form there is no fq name to build, so the consumer command must not
+hard-require one.
+
+### 9.8 Plumbing (connection, EDN, errors)
+
+Necessary glue, in one place:
+
+- **Connection guard.** Every command starts with
+  `(unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))`
+  and captures `(cider-current-connection)` once, passing it as the optional
+  `CONNECTION` arg to `cider-nrepl-sync-request:eval` so navigation never
+  targets the wrong session.
+- **EDN conversion.** `parseedn-read-str` returns an **alist** of keyword→value
+  pairs (not a hash-table). Read fields with a helper
+  `(defun clara-explorer--edn-get (k m) (cdr (assq k m)))`; `:targets` is a
+  list of maps whose `:name`/`:ns`/`:type`/`:via`/`:source` are read the same
+  way.
+- **Error handling.**
+  - `navigate` returns `{:error "…"}` (unknown production, no match) →
+    `(message "%s" error)`, no pop/jump.
+  - `clara-explorer--eval-edn` returns nil (no `"value"` in the nREPL
+    response, e.g. an exception) → relay `"err"`/`"ex"` via
+    `nrepl-dbind-response` first, then give up.
+  - No token at point (`clara-explorer--token-at-point` → nil) → message "not
+    on a fact type".
+- **REPL bootstrap.** The elisp does not start the server; it assumes the
+  user's REPL has already run `(client/register! (server/start! …))`. A missing
+  system surfaces as `{:error "no explorer system registered"}` from the
+  client-API, which the elisp just relays.
 
 ---
 

@@ -25,20 +25,61 @@ const match: FactMatch = {
 	bindings: [{ '?config': { name: 'c1' }, '?item': { tag: 'a' } }]
 };
 
+function twoCategories(): ActivityCategory[] {
+	return [
+		{ title: 'Active Matches', type: 'matches', items: [match] },
+		{ title: 'Inserted Facts', type: 'facts', items: [fact] }
+	];
+}
+
 describe('SessionActivityBlock', () => {
-	it('renders a facts category and a matches category side by side in one block', async () => {
-		const categories: ActivityCategory[] = [
-			{ title: 'Active Matches', type: 'matches', items: [match] },
-			{ title: 'Inserted Facts', type: 'facts', items: [fact] }
-		];
+	it('renders a collapsible header with one tab per active category', async () => {
+		const screen = await render(SessionActivityBlock, {
+			props: { categories: twoCategories() }
+		});
 
-		const screen = await render(SessionActivityBlock, { props: { categories } });
+		const header = screen.getByRole('button', { name: /Current Session Activity/ });
+		await expect.element(header).toBeVisible();
+		await expect.element(header).toHaveAttribute('aria-expanded', 'true');
 
-		// Both categories render their header + one row each.
-		const text = screen.container.textContent ?? '';
-		expect(text).toContain('Active Matches (1)');
-		expect(text).toContain('Inserted Facts (1)');
-		expect(screen.container.querySelectorAll('.session-activity-row')).toHaveLength(2);
+		// Both categories are represented as tabs, each with its count.
+		expect(screen.getByRole('tab').elements()).toHaveLength(2);
+		expect(screen.container.textContent).toContain('Active Matches (1)');
+		expect(screen.container.textContent).toContain('Inserted Facts (1)');
+
+		// Only the active tab's list is rendered.
+		expect(screen.container.querySelectorAll('.session-activity-row')).toHaveLength(1);
+	});
+
+	it('switches to the selected tab', async () => {
+		const screen = await render(SessionActivityBlock, {
+			props: { categories: twoCategories() }
+		});
+
+		// Active Matches is the first tab and is active by default.
+		expect(screen.container.textContent).toContain('Fact ID: 2');
+
+		await screen.getByRole('tab', { name: /Inserted Facts/ }).click();
+
+		expect(screen.container.textContent).toContain('Fact ID: 1');
+		expect(screen.container.textContent).not.toContain('Fact ID: 2');
+		expect(screen.container.querySelectorAll('.session-activity-row')).toHaveLength(1);
+	});
+
+	it('collapses and re-expands the whole block', async () => {
+		const screen = await render(SessionActivityBlock, {
+			props: { categories: twoCategories() }
+		});
+
+		const header = screen.getByRole('button', { name: /Current Session Activity/ });
+
+		await header.click();
+		await expect.element(header).toHaveAttribute('aria-expanded', 'false');
+		expect(screen.container.querySelector('.session-activity-tabs')).toBeNull();
+
+		await header.click();
+		await expect.element(header).toHaveAttribute('aria-expanded', 'true');
+		expect(screen.container.querySelector('.session-activity-tabs')).not.toBeNull();
 	});
 
 	it('renders its empty text when no category has items', async () => {
