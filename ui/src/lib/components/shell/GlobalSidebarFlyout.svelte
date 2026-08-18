@@ -28,6 +28,10 @@
 	});
 
 	let sidebarWidth = $derived(appState.isSidebarMini ? '64px' : '200px');
+
+	// The flyout sizes to its content (fit-content) so long qualified names are
+	// never cropped, but it must never run past the right edge of the viewport.
+	let flyoutMaxWidth = $derived(`calc(100vw - ${sidebarWidth} - 2rem)`);
 </script>
 
 {#snippet header(label: string, icon: string)}
@@ -45,7 +49,10 @@
 {/snippet}
 
 {#if appState.activeContextualMenu}
-	<aside class="contextual-flyout bg-white border-end shadow-lg" style="left: {sidebarWidth};">
+	<aside
+		class="contextual-flyout bg-white border-end shadow-lg"
+		style="left: {sidebarWidth}; max-width: {flyoutMaxWidth};"
+	>
 		<div class="d-flex flex-column h-100">
 			{@render header(activeMenu.label, activeMenu.icon)}
 
@@ -77,9 +84,14 @@
 		position: fixed;
 		top: var(--navbar-height);
 		bottom: 0;
-		width: 300px;
+		/* Grow to the widest row so fully-qualified names render without
+		 * ellipsis; the inline max-width keeps it inside the viewport. */
+		width: fit-content;
+		min-width: 300px;
 		z-index: 1020;
-		transition: left 0.2s ease-in-out;
+		transition:
+			left 0.2s ease-in-out,
+			width 0.2s ease-in-out;
 		animation: slideIn 0.2s ease-out;
 	}
 
