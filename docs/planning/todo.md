@@ -6,4 +6,4 @@
 5. Make "curent session activity" collapsible as well as "active matches" and "inserted
    facts"/"retracted facts"
    sections within.
-6.
+6. why do clojure.lang and java.util types of ancestors/fact types get classified as "no namespace"?
