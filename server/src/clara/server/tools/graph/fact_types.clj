@@ -9,6 +9,7 @@
    on fact-type views.  Production-level logic (dep-graph, rule/query
    summaries) lives in `clara.server.tools.graph.core`."
   (:require [clara.server.tools.graph.serialize :as serialize]
+            [clara.server.tools.graph.utils :as utils]
             [clojure.tools.logging :as log]))
 
 ;; ---------------------------------------------------------------------------
@@ -153,24 +154,46 @@
                per-raw-type)))
 
 ;; ---------------------------------------------------------------------------
-;; Fact-type summary aggregation
-;; ---------------------------------------------------------------------------
 ;; Fact-type summary aggregation helpers
 ;; ---------------------------------------------------------------------------
+
+(defn- ->descendants-index
+  "Inverts `ancestors-index` into {ancestor-name #{descendant-name ...} ...}:
+   a type that lists `ancestor` among its ancestors is registered under that
+   ancestor.  Built imperatively into a local `volatile!` so the nested
+   registration reads as a plain update loop rather than a folded reduce."
+  [ancestors-index]
+  (let [index (volatile! {})]
+    (doseq [[type-name {:keys [ancestors]}] ancestors-index
+            ancestor ancestors]
+      (vswap! index update ancestor (fnil conj #{}) type-name))
+    @index))
+
+(defn- descendant-depth
+  "Distance in hierarchy levels from `root` to `descendant`: the number of
+   ancestors of `descendant` strictly between them (0 → direct descendant).
+   Relies on the ancestors list being deepest-first, so this is the prefix
+   length up to `root`."
+  [ancestors-index root descendant]
+  (count (take-while #(not= % root)
+                     (get-in ancestors-index [descendant :ancestors]))))
+
+(defn- ->ordered-descendants
+  "Serialized descendants of `type-name`, ordered shallowest-first — the
+   opposite direction from the ancestors list — ties broken lexicographically
+   by serialized name."
+  [ancestors-index descendants-index type-name]
+  (->> (get descendants-index type-name #{})
+       (utils/sort-by-key (fn [d] [(descendant-depth ancestors-index type-name d) d]))
+       vec))
 
 (defn- init-fact-type-summary
   "Initial fact-type entry for `type-name`: empty usage vectors, `:ancestors`
    and `:descendants` as hierarchy-ordered `clara.server.graph.api/TypeReference`
-   maps with `known` flags from `known-set`."
+   maps with `known` flags from `known-set`.  Ancestors run deepest-first;
+   descendants run shallowest-first (the reverse direction)."
   [ancestors-index descendants-index known-set type-name]
   (let [{idx-ancestors :ancestors :keys [ns]} (get ancestors-index type-name)
-        idx-descendants (get descendants-index type-name #{})
-        ordered-descendants (reverse
-                             (hierarchy-order idx-descendants
-                                              (fn [d]
-                                                (into #{} (filter idx-descendants)
-                                                      (get-in ancestors-index [d :ancestors])))
-                                              identity))
         ->type-ref (fn [name]
                      {:name name
                       :id (serialize/route-id name)
@@ -183,7 +206,7 @@
      :retracted-by-rules []
      :ns ns
      :ancestors (mapv ->type-ref idx-ancestors)
-     :descendants (mapv ->type-ref ordered-descendants)}))
+     :descendants (mapv ->type-ref (->ordered-descendants ancestors-index descendants-index type-name))}))
 
 (defn- conj-production-ref
   "Adds `production-ref` to the `key` vector of a fact-type summary entry,
@@ -233,14 +256,7 @@
    When a production inserts/retracts type T, all ancestors of T also list
    the production in `inserted-by-rules` / `retracted-by-rules`."
   [{:keys [rules queries ancestors-index known-set]}]
-  (let [descendants-index
-        (reduce-kv (fn [idx type-name {:keys [ancestors]}]
-                     (reduce (fn [idx' ancestor]
-                               (update idx' ancestor (fnil conj #{}) type-name))
-                             idx
-                             ancestors))
-                   {}
-                   ancestors-index)
+  (let [descendants-index (->descendants-index ancestors-index)
         descendants-of (fn [type-name] (get descendants-index type-name #{}))
 
         production-ref-for (fn [p-name ns]
