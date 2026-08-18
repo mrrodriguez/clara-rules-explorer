@@ -87,6 +87,7 @@
 		fullName={type.name}
 		activeColor="#0dcaf0"
 		{active}
+		copyable
 		{actions}
 	/>
 

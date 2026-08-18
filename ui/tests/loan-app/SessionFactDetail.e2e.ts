@@ -14,7 +14,7 @@ test.describe('Session fact detail', () => {
 		await expect(page.locator('h5', { hasText: 'Fact 2' })).toBeVisible();
 
 		// Clicking the name copies the fact type name (cohesive with summary titles).
-		const titleBtn = page.locator('button.copyable-title');
+		const titleBtn = page.locator('.card-header button.copyable-title');
 		await expect(titleBtn).toBeVisible();
 		await titleBtn.click();
 		await expect(titleBtn).toHaveAttribute('title', 'Copied to clipboard');

@@ -92,7 +92,15 @@
 	</a>
 {/snippet}
 
-<ReferenceListItem title={ref.name} fullName={ref.name} {activeColor} {badge} {actions} {active} />
+<ReferenceListItem
+	title={ref.name}
+	fullName={ref.name}
+	{activeColor}
+	{badge}
+	{actions}
+	{active}
+	copyable
+/>
 
 <style>
 	.satisfies-label {
