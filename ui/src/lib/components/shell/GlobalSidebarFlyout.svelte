@@ -20,6 +20,13 @@
 		};
 	});
 
+	const activeTypeRole = $derived.by(() => {
+		const menuId = appState.activeContextualMenu;
+		if (menuId === 'input') return 'input' as const;
+		if (menuId === 'insert' || menuId === 'retract') return 'output' as const;
+		return undefined;
+	});
+
 	let sidebarWidth = $derived(appState.isSidebarMini ? '64px' : '200px');
 </script>
 
@@ -46,7 +53,13 @@
 				<div class="list-group list-group-flush">
 					{#if activeMenu.contentType === 'fact'}
 						{#each activeMenu.items as item (item.id)}
-							<FactTypeReferenceLink type={item as TypeReference} />
+							<FactTypeReferenceLink
+								type={item as TypeReference}
+								fullView={true}
+								role={activeTypeRole}
+								upstream={appState.contextualNav.upstream}
+								downstream={appState.contextualNav.downstream}
+							/>
 						{/each}
 					{:else if activeMenu.contentType === 'production'}
 						{#each activeMenu.items as item (item.id)}

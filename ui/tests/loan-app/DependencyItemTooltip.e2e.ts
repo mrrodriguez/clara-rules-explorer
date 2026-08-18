@@ -14,6 +14,8 @@ test.describe('Dependency item buttons — tooltips', () => {
 		await page.locator('a.list-group-item').filter({ hasText: 'app-outcome-pending?' }).click();
 		await expect(ui.summary.title(page, 'app-outcome-pending?')).toBeVisible();
 
+		await ui.summary.dependenciesTab(page).click();
+
 		const upstreamCard = page
 			.locator('h6', { hasText: 'upstream' })
 			.locator('xpath=ancestor::div[contains(@class,"mb-3")][1]');

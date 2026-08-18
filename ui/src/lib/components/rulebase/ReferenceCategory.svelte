@@ -21,6 +21,10 @@
 		fullView?: boolean;
 		class?: string;
 		maxVisibleItems?: number;
+		/** Role of type items on the production in view (enables expansion). */
+		typeRole?: 'input' | 'output';
+		upstream?: ProductionReference[];
+		downstream?: ProductionReference[];
 		children?: Snippet;
 	}
 
@@ -32,6 +36,9 @@
 		fullView = false,
 		class: className = '',
 		maxVisibleItems = 6,
+		typeRole = undefined,
+		upstream = [],
+		downstream = [],
 		children
 	}: Props = $props();
 
@@ -63,7 +70,13 @@
 		>
 			{#each items as item, i (itemKeys[i])}
 				{#if itemKind === 'type'}
-					<FactTypeReferenceLink type={item as TypeReference} />
+					<FactTypeReferenceLink
+						type={item as TypeReference}
+						{fullView}
+						role={typeRole}
+						{upstream}
+						{downstream}
+					/>
 				{:else}
 					<ProductionReferenceLink ref={item as ProductionReference} {fullView} />
 				{/if}

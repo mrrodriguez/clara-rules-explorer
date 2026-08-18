@@ -4,6 +4,7 @@
 	import RulebaseComponentSummaryDescription from '$lib/components/rulebase/RulebaseComponentSummaryDescription.svelte';
 	import DependencyRow from '$lib/components/rulebase/DependencyRow.svelte';
 	import ReferenceCategory from '$lib/components/rulebase/ReferenceCategory.svelte';
+	import ProductionSummaryTabs from '$lib/components/rulebase/ProductionSummaryTabs.svelte';
 	import LhsTabs from '$lib/components/rulebase/LhsTabs.svelte';
 	import SessionProductionActivity from '$lib/components/rulebase/SessionProductionActivity.svelte';
 	import { queryPath } from '$lib/utils';
@@ -59,19 +60,27 @@
 			<RulebaseComponentSummaryDescription doc={query.doc} />
 
 			{#if !fullView}
-				<DependencyRow upstream={query.upstream} downstream={query.downstream} {fullView} />
-
-				<div class="row g-3">
-					<div class="col-md-12">
-						<ReferenceCategory
-							title="Matched Types"
-							icon="bi-box-arrow-in-right"
-							items={query['lhs-types']}
-							itemKind="type"
-							{fullView}
-						/>
-					</div>
-				</div>
+				<ProductionSummaryTabs>
+					{#snippet types()}
+						<div class="row g-3">
+							<div class="col-md-12">
+								<ReferenceCategory
+									title="Matched Types"
+									icon="bi-box-arrow-in-right"
+									items={query['lhs-types']}
+									itemKind="type"
+									{fullView}
+									typeRole="input"
+									upstream={query.upstream}
+									downstream={query.downstream}
+								/>
+							</div>
+						</div>
+					{/snippet}
+					{#snippet dependencies()}
+						<DependencyRow upstream={query.upstream} downstream={query.downstream} {fullView} />
+					{/snippet}
+				</ProductionSummaryTabs>
 			{/if}
 
 			{#if fullView}

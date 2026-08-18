@@ -27,6 +27,8 @@ test.describe('Type-bridge :match rows (hierarchy ruleset)', () => {
 		await page.locator(`a.list-group-item[title="${INSERT}"]`).click();
 		await expect(ui.summary.title(page, 'insert-income-document')).toBeVisible();
 
+		await ui.summary.dependenciesTab(page).click();
+
 		const downstreamCard = page
 			.locator('h6', { hasText: 'downstream' })
 			.locator('xpath=ancestor::div[contains(@class,"mb-3")][1]');

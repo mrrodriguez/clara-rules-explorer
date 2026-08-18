@@ -1,4 +1,4 @@
-# Problem statement
+# Plan
 
 In the UI when viewing a rule/query production as a summary/full view, the upstream/downstream
 productions are listed in some order independent from the actual fact types they are involved in.
@@ -15,10 +15,22 @@ Once you find the particular fact type of interest in those 2 categories, that i
 know which upstream/downstream production actually satisfies that type and also what concrete type that
 other production actually produces/consumes.
 
-It seems that we may not have a need at all for showing upstream/downstream productions
-independently on production summary/full views.
+A "type" @ui/src/lib/components/rulebase/FactTypeReferenceLink.svelte cannot be just a link for this
+to work right. The way it links needs to be more like @ui/src/lib/components/rulebase/ProductionReferenceLink.svelte 
+where navigating to the type is a dedicated icon. It should be default collapsed, but expandable.
+When expanded it should show the upstream rules that satisfy the LHS types (input) and the
+downstream productions that the insert types (output) satisfies. When the satisfied types are not
+the same as the types directly involved on the production in view, that should be shown too. When
+they are the same, nothing should be shown.
+This concept is similar to the existing "show type matches" popover right now, except we do not need
+to show the satisfies hierarchy linkage when it is the same type.
 
-Instead we can have our input types/insert types be expandable sections and when expanded the
-upstream/downstream are enumerated respectively with navigation to go to their production views, but
-also with information about their concrete type that satisfies/is satisfied by the input/insert
-types in question.
+For the full view, the input/insert/retract types are on the sidebar. However, it should behave the
+same. We can keep the upstream/downstream options in the full screen sidebar for when someone wants
+to navigate that way directly still.
+The current "show type matches" popover though should be fixed to not show the "satifies" part if
+the types are the same, It should just show the type involved standalone instead of "X satisfies X"
+since that just makes it harder to know when a direct type is satisfied vs not.
+
+In the summary view the upstream/downstream dedicated components can also stay, but they should be
+moved to a secondary tab that can be clicked to see them.

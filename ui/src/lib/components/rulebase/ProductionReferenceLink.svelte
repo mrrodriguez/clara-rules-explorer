@@ -2,7 +2,7 @@
 	import type { ProductionReference } from '$lib/types/api';
 	import RulebaseComponentTypeBadge from '$lib/components/rulebase/RulebaseComponentTypeBadge.svelte';
 	import ReferenceListItem from '$lib/components/rulebase/nav/ReferenceListItem.svelte';
-	import FactTypeReferenceLink from '$lib/components/rulebase/FactTypeReferenceLink.svelte';
+	import FactTypeInlineLink from '$lib/components/rulebase/FactTypeInlineLink.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Popover from '$lib/components/ui/Popover.svelte';
 	import { tooltip } from '$lib/actions/tooltip';
@@ -59,17 +59,23 @@
 						>
 					</div>
 					{#each matches as m (m['producer-type'].name + '>' + m['consumer-type'].name)}
-						<div class="d-flex flex-column gap-1 border-start ps-2 pb-1">
-							<FactTypeReferenceLink type={m['producer-type']} compact />
-							<div class="d-flex align-items-center gap-1 text-muted small">
-								<i class="bi bi-arrow-down"></i>
-								<span class="text-uppercase fw-bold satisfies-label">satisfies</span>
-								{#if m.via === 'retract'}
-									<Badge variant="secondary" size="sm">retract</Badge>
-								{/if}
+						{#if m['producer-type'].id === m['consumer-type'].id}
+							<div class="d-flex flex-column gap-1 border-start ps-2 pb-1">
+								<FactTypeInlineLink type={m['producer-type']} />
 							</div>
-							<FactTypeReferenceLink type={m['consumer-type']} compact />
-						</div>
+						{:else}
+							<div class="d-flex flex-column gap-1 border-start ps-2 pb-1">
+								<FactTypeInlineLink type={m['producer-type']} />
+								<div class="d-flex align-items-center gap-1 text-muted small">
+									<i class="bi bi-arrow-down"></i>
+									<span class="text-uppercase fw-bold satisfies-label">satisfies</span>
+									{#if m.via === 'retract'}
+										<Badge variant="secondary" size="sm">retract</Badge>
+									{/if}
+								</div>
+								<FactTypeInlineLink type={m['consumer-type']} />
+							</div>
+						{/if}
 					{/each}
 				</div>
 			{/snippet}

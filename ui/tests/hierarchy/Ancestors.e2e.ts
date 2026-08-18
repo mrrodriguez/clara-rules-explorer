@@ -33,11 +33,18 @@ test.describe('Hierarchy ancestors section (hierarchy ruleset)', () => {
 		await expect(rows.nth(1)).toContainText('loan-document');
 		await expect(rows.nth(2)).toContainText('base-document');
 
-		// supporting/loan are on an LHS → known → linkable via their id.
-		const supportingLink = category.locator(`a.list-group-item[title="${SUPPORTING}"]`);
-		const loanLink = category.locator(`a.list-group-item[title="${LOAN}"]`);
-		await expect(supportingLink).toHaveAttribute('href', /\/fact-types\//);
-		await expect(loanLink).toHaveAttribute('href', /\/fact-types\//);
+		// supporting/loan are on an LHS → known → navigate via the dedicated
+		// open icon, not by making the whole row a link.
+		const supportingRow = category.locator(`div.list-group-item[title="${SUPPORTING}"]`);
+		const loanRow = category.locator(`div.list-group-item[title="${LOAN}"]`);
+		await expect(supportingRow.locator('a[aria-label^="Open "]')).toHaveAttribute(
+			'href',
+			/\/fact-types\//
+		);
+		await expect(loanRow.locator('a[aria-label^="Open "]')).toHaveAttribute(
+			'href',
+			/\/fact-types\//
+		);
 
 		// base-document is never on an LHS → ghost → muted italic row, no link.
 		const ghostRow = category.locator('div.list-group-item').filter({ hasText: 'base-document' });
@@ -55,15 +62,18 @@ test.describe('Hierarchy ancestors section (hierarchy ruleset)', () => {
 		const category = page
 			.locator('div.mb-3')
 			.filter({ has: page.locator('h6', { hasText: 'Hierarchy (Ancestors)' }) });
-		await category.locator(`a.list-group-item[title="${SUPPORTING}"]`).click();
+		await category
+			.locator(`div.list-group-item[title="${SUPPORTING}"]`)
+			.locator('a[aria-label^="Open "]')
+			.click();
 
 		await expect(page).toHaveURL(/\/fact-types\//);
-		await expect(page.locator('.card-header').filter({ hasText: 'supporting-document' })).toBeVisible();
+		await expect(
+			page.locator('.card-header').filter({ hasText: 'supporting-document' })
+		).toBeVisible();
 	});
 
-	test('shows the root-of-hierarchy empty state for types without ancestors', async ({
-		page
-	}) => {
+	test('shows the root-of-hierarchy empty state for types without ancestors', async ({ page }) => {
 		// document-reviewed is an underived keyword — ancestors: [].
 		await page.locator(`a.list-group-item[title="${REVIEWED}"]`).click();
 

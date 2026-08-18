@@ -9,12 +9,12 @@ test.describe('Type match popover on dependency rows', () => {
 		await ui.groupedNav.expandAll(page);
 	});
 
-	test('opens, lists match types as fact-type links, and navigates on click', async ({
-		page
-	}) => {
+	test('opens, lists match types as fact-type links, and navigates on click', async ({ page }) => {
 		// app-outcome-pending? has upstream entries carrying :match type pairs.
 		await page.locator('a.list-group-item').filter({ hasText: 'app-outcome-pending?' }).click();
 		await expect(ui.summary.title(page, 'app-outcome-pending?')).toBeVisible();
+
+		await ui.summary.dependenciesTab(page).click();
 
 		const upstreamCard = page
 			.locator('h6', { hasText: 'upstream' })
@@ -30,13 +30,15 @@ test.describe('Type match popover on dependency rows', () => {
 		await expect(popover).toBeVisible();
 		await expect(popover.locator('h6')).toContainText('Type matches');
 
-		// Match values are TypeReferences — design 2b makes the rows directly
-		// linkable: each producer/consumer name is a link to its fact type.
+		// app-outcome-approved? satisfies app-outcome-pending? with the exact
+		// same type, so the popover shows the type standalone — no "satisfies"
+		// bridge for a direct (non-hierarchy) match.
 		const typeLinks = popover.locator('a[href*="/fact-types/"]');
+		await expect(typeLinks).toHaveCount(1);
 		await expect(typeLinks.first()).toBeVisible();
-		expect(await typeLinks.count()).toBeGreaterThanOrEqual(2);
+		await expect(popover.getByText('satisfies')).toHaveCount(0);
 
-		// Clicking a match type navigates to its fact-type detail.
+		// Clicking the standalone match type navigates to its fact-type detail.
 		await typeLinks.first().click();
 		await expect(page).toHaveURL(/\/fact-types\//);
 		await expect(page.locator('.card-header').first()).toBeVisible();
