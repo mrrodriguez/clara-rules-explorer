@@ -102,7 +102,7 @@
 						</div>
 
 						{#if via}
-							<details class="mt-2">
+							<details class="mt-2" open>
 								<summary class="text-muted small" style="cursor: pointer">
 									<i class="bi bi-diagram-3 me-1"></i>
 									Provenance chain
