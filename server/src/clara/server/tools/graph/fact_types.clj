@@ -43,7 +43,7 @@
 ;; Ancestors-index construction
 ;; ---------------------------------------------------------------------------
 
-(defn- ^:private next-hierarchy-node
+(defn- next-hierarchy-node
   "Picks the next raw ancestor type to emit in the deterministic topological
    order: a node with no remaining descendant (deepest), ties broken
    lexicographically by serialized name.  Falls back to the lexicographically
@@ -59,7 +59,7 @@
            first)
       (first (sort-by serialized remaining))))
 
-(defn- ^:private hierarchy-order
+(defn- hierarchy-order
   "Deterministically orders a set of raw ancestor types: descendants before
    their own ancestors (per `ancestors-set-fn`), ties broken lexicographically
    on the serialized names.  `serialize-fn` maps a raw type to its serialized
@@ -75,53 +75,84 @@
           (recur (disj remaining pick)
                  (conj ordered (serialized pick))))))))
 
-(defn- ^:private warn-serialization-divergence!
+(defn- warn-serialization-divergence!
   "Logs a warning (once per raw type per analysis build) when the same raw
    type serializes to different strings under different production ns
    contexts — only possible for unresolved symbols.  Localized degradation:
    the first (load-order) serialization is kept and the build continues, so
    one bad sidecar symbol cannot take down every analysis endpoint."
-  [raw-type existing-serialized new-serialized warned-types]
+  [{:keys [raw-type existing-serialized new-serialized warned-types]}]
   (when (and (not= existing-serialized new-serialized)
              (not (contains? @warned-types raw-type)))
     (swap! warned-types conj raw-type)
     (log/warnf "type serialization divergence — %s serializes as both %s and %s across production ns contexts; keeping %s"
                raw-type existing-serialized new-serialized existing-serialized)))
 
-(defn- ^:private ->ancestors-index-entry
+(defn- ->ancestors-index-entry
   "Fresh ancestors-index entry for `raw-type`, serialized in `ns-name` context:
    {:serialized kind-explicit name, :ns best-effort namespace, :ancestors
    hierarchy-ordered serialized ancestor names}."
-  [ancestors-set-fn resolve-memo ns-name raw-type]
+  [{:keys [ancestors-set-fn resolve-memo ns-name raw-type]}]
   {:serialized (resolve-memo ns-name raw-type)
    :ns (get-raw-type-ns raw-type)
    :ancestors (hierarchy-order (ancestors-set-fn raw-type)
                                ancestors-set-fn
                                (partial resolve-memo ns-name))})
 
-(defn- ^:private register-ancestors-entry
+(defn- register-ancestors-entry
   "Adds `raw-type` to the per-raw-type index, keyed by its first (load-order)
    serialization.  When the same raw type serializes differently under another
    production's ns context, the first serialization is kept and a warning is
    logged — localized degradation instead of a build-wide failure."
-  [acc resolve-memo ancestors-set-fn warned-types ns-name raw-type]
+  [acc {:keys [resolve-memo ancestors-set-fn warned-types ns-name raw-type]}]
   (if-let [existing (get acc raw-type)]
-    (do (warn-serialization-divergence! raw-type
-                                        (:serialized existing)
-                                        (resolve-memo ns-name raw-type)
-                                        warned-types)
+    (do (warn-serialization-divergence! {:raw-type raw-type
+                                         :existing-serialized (:serialized existing)
+                                         :new-serialized (resolve-memo ns-name raw-type)
+                                         :warned-types warned-types})
         acc)
     (assoc acc raw-type
-           (->ancestors-index-entry ancestors-set-fn resolve-memo ns-name raw-type))))
+           (->ancestors-index-entry {:ancestors-set-fn ancestors-set-fn
+                                     :resolve-memo resolve-memo
+                                     :ns-name ns-name
+                                     :raw-type raw-type}))))
 
-(defn- ^:private register-production-types
+(defn- register-production-types
   "Registers every raw type in one production's consumed/produced types into
    the per-raw-type index."
-  [acc resolve-memo ancestors-set-fn warned-types {:keys [consumed-types produced-types ns-name]}]
+  [acc
+   {:keys [resolve-memo ancestors-set-fn warned-types]}
+   {:keys [consumed-types produced-types ns-name]}]
   (reduce (fn [acc raw-type]
-            (register-ancestors-entry acc resolve-memo ancestors-set-fn warned-types ns-name raw-type))
+            (register-ancestors-entry acc
+                                      {:resolve-memo resolve-memo
+                                       :ancestors-set-fn ancestors-set-fn
+                                       :warned-types warned-types
+                                       :ns-name ns-name
+                                       :raw-type raw-type}))
           acc
           (distinct (concat consumed-types produced-types))))
+
+(defn- register-hierarchy-ancestors
+  "Given `direct-per-raw-type` (raw-type → entry for every directly consumed/produced type), returns
+  an expanded map that also contains an entry for every transitive ancestor raw-type. Hierarchy-only
+  types such as `clojure.lang.IPersistentMap` / `java.lang.Object` are not directly consumed but
+  must still appear in the index so their `:ns` groups correctly and their own
+  `:ancestors`/`:descendants` are populated. Ancestors are Classes/keywords — serialization is
+  ns-independent — so a `nil` ns context is sufficient for the fallback registration."
+  [{:keys [direct-per-raw-type resolve-memo ancestors-set-fn warned-types]}]
+  (let [all-ancestors (into #{} (mapcat ancestors-set-fn) (keys direct-per-raw-type))]
+    (reduce (fn [acc raw-anc]
+              (if (contains? acc raw-anc)
+                acc
+                (register-ancestors-entry acc
+                                          {:resolve-memo resolve-memo
+                                           :ancestors-set-fn ancestors-set-fn
+                                           :warned-types warned-types
+                                           :ns-name nil
+                                           :raw-type raw-anc})))
+            direct-per-raw-type
+            all-ancestors)))
 
 (defn ->ancestors-index
   "Builds {serialized-type-name {:ancestors [hierarchy-ordered serialized
@@ -139,34 +170,26 @@
   [type-analysis-map ancestors-set-fn productions]
   (let [resolve-memo (memoize (fn [ns-name t] (serialize/resolve-type ns-name t)))
         warned-types (atom #{})
-        per-raw-type
+        direct-per-raw-type
         (reduce (fn [acc production]
                   (register-production-types acc
-                                             resolve-memo
-                                             ancestors-set-fn
-                                             warned-types
+                                             {:resolve-memo resolve-memo
+                                              :ancestors-set-fn ancestors-set-fn
+                                              :warned-types warned-types}
                                              (get type-analysis-map (:name production))))
                 {}
                 productions)
-        ;; Hierarchy-only ancestor types (e.g. clojure.lang.IPersistentMap,
-        ;; java.lang.Object) are not directly consumed/produced but must still
-        ;; appear in the index so their :ns groups correctly ("clojure.lang"
-        ;; vs "(no namespace)") and their own ancestors/descendants are
-        ;; populated.  Ancestors are Classes/keywords — serialization is
-        ;; ns-independent — so nil context is sufficient for the fallback
-        ;; registration; divergence handling is still via register-ancestors-entry.
-        per-raw-type
-        (let [all-ancestors (into #{} (mapcat ancestors-set-fn) (keys per-raw-type))]
-          (reduce (fn [acc raw-anc]
-                    (if (contains? acc raw-anc)
-                      acc
-                      (register-ancestors-entry acc resolve-memo ancestors-set-fn warned-types nil raw-anc)))
-                  per-raw-type
-                  all-ancestors))]
-    (reduce-kv (fn [idx _raw-type {:keys [serialized ancestors ns]}]
-                 (assoc idx serialized {:ancestors ancestors :ns ns}))
-               {}
-               per-raw-type)))
+        full-per-raw-type
+        (register-hierarchy-ancestors {:direct-per-raw-type direct-per-raw-type
+                                       :resolve-memo resolve-memo
+                                       :ancestors-set-fn ancestors-set-fn
+                                       :warned-types warned-types})
+        serialized-index
+        (reduce-kv (fn [idx _raw-type {:keys [serialized ancestors ns]}]
+                     (assoc idx serialized {:ancestors ancestors :ns ns}))
+                   {}
+                   full-per-raw-type)]
+    serialized-index))
 
 ;; ---------------------------------------------------------------------------
 ;; Fact-type summary aggregation helpers
@@ -207,7 +230,7 @@
    and `:descendants` as hierarchy-ordered `clara.server.graph.api/TypeReference`
    maps with `known` flags from `known-set`.  Ancestors run deepest-first;
    descendants run shallowest-first (the reverse direction)."
-  [ancestors-index descendants-index known-set type-name]
+  [{:keys [ancestors-index descendants-index known-set type-name]}]
   (let [{:keys [ancestors ns]} (get ancestors-index type-name)
         ->type-ref (fn [name]
                      {:name name
@@ -224,23 +247,27 @@
      :descendants (mapv ->type-ref (->ordered-descendants ancestors-index descendants-index type-name))}))
 
 (defn- conj-production-ref
-  "Adds `production-ref` to the `key` vector of a fact-type summary entry,
+  "Adds `production-ref` to the `property` vector of a fact-type summary entry,
    deduping by `:id`.  When `summary` is nil the entry is initialised from
    `ancestors-index`/`descendants-index`/`known-set`."
-  [ancestors-index descendants-index known-set summary type-name key production-ref]
-  (let [s (or summary (init-fact-type-summary ancestors-index descendants-index known-set type-name))
-        existing (set (map :id (get s key [])))]
+  [{:keys [ancestors-index descendants-index known-set summary type-name property production-ref]}]
+  (let [s (or summary
+              (init-fact-type-summary {:ancestors-index ancestors-index
+                                       :descendants-index descendants-index
+                                       :known-set known-set
+                                       :type-name type-name}))
+        existing (set (map :id (get s property [])))]
     (if (existing (:id production-ref))
       s
-      (assoc s key (conj (get s key []) production-ref)))))
+      (assoc s property (conj (get s property []) production-ref)))))
 
 (defn- production-fact-type-updates
-  "Returns [[type-name key] ...] pairs for `production`: direct type matches
+  "Returns [[type-name property] ...] pairs for `production`: direct type matches
    plus hierarchy-expanded used-by / inserted-by / retracted-by."
-  [ancestors-index descendants-of rules
-   p-name {:keys [lhs-types insert-types retract-types]}]
+  [{:keys [ancestors-index descendants-of rules p-name summary]}]
   (let [is-rule? (contains? rules p-name)
         used-key (if is-rule? :used-by-rules :used-by-queries)
+        {:keys [lhs-types insert-types retract-types]} summary
         direct-used (for [t lhs-types] [(:name t) used-key])
         direct-inserted (for [t insert-types] [(:name t) :inserted-by-rules])
         direct-retracted (for [t retract-types] [(:name t) :retracted-by-rules])
@@ -283,14 +310,21 @@
 
         summary-map
         (reduce (fn [acc [p-name {:keys [ns] :as summary}]]
-                  (let [updates (production-fact-type-updates
-                                 ancestors-index descendants-of rules
-                                 p-name summary)
+                  (let [updates (production-fact-type-updates {:ancestors-index ancestors-index
+                                                               :descendants-of descendants-of
+                                                               :rules rules
+                                                               :p-name p-name
+                                                               :summary summary})
                         pref (production-ref-for p-name ns)]
                     (reduce (fn [a [t k]]
                               (update a t
-                                      #(conj-production-ref
-                                        ancestors-index descendants-index known-set % t k pref)))
+                                      #(conj-production-ref {:ancestors-index ancestors-index
+                                                             :descendants-index descendants-index
+                                                             :known-set known-set
+                                                             :summary %
+                                                             :type-name t
+                                                             :property k
+                                                             :production-ref pref})))
                             acc
                             updates)))
                 {}
