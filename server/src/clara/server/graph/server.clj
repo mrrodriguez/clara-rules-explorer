@@ -459,7 +459,7 @@
    0-arity operates on the default system; 1-arity on an explicit system."
   ([]
    (reload-annotations! (require-system @default-system)))
-  ([{:keys [state-atom] :as _system}]
-   (let [{:keys [cache session annotations memory-analysis]} (swap! state-atom transition-reload)]
+  ([{:keys [cache state-atom] :as _system}]
+   (let [{:keys [session annotations memory-analysis]} (swap! state-atom transition-reload)]
      (cache/warm! cache session annotations memory-analysis)
      annotations)))
