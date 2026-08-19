@@ -182,9 +182,9 @@
                         (not (:no-output-types ann))
                         (rule-is-sink? production dep-graph production-map))
         dynamic-inserts (some-> (:dynamic-insert-types-detected ann)
-                                (serialize/serialize-dynamic-detection p-ns-name known-set))
+                                (serialize/serialize-dynamic-detection p-ns-name known-set (str p-name)))
         dynamic-retracts (some-> (:dynamic-retract-types-detected ann)
-                                 (serialize/serialize-dynamic-detection p-ns-name known-set))
+                                 (serialize/serialize-dynamic-detection p-ns-name known-set (str p-name)))
         summary
         (cond-> {:name      p-name
                  :id        (serialize/route-id (str p-name))

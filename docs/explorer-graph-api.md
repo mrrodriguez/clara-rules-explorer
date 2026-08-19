@@ -293,6 +293,26 @@ List of all rules with lightweight summaries (load order).  Omits
 `dynamic-retract-types-detected`): each carries `:callsites` and a
 `:resolution`; callsite `:resolved-types` / `:fact-type` are TypeReferences.
 
+Each callsite also carries a `provenance-chain` — a flat, display-ready array
+composed server-side from the raw `via` (see `serialize/provenance-chain`).
+The rule heads the chain, followed by the rule→boundary callers, the boundary
+fn, then the constructor-side callers, then the constructor:
+
+```json
+[
+  { "label": "rule",        "sym": "my.ns/cold-rule" },
+  { "label": "boundary",    "sym": "clara.rules/insert!" },
+  { "label": "constructor", "sym": "my.ns/->Cold" }
+]
+```
+
+- `label` ∈ `rule | caller | boundary | constructor`.
+- `sym` is the fully-qualified var name.
+- Heuristic `record-ctor-scan` callsites carry **no** chain (their `via` keeps
+  `{ "source": "record-ctor-scan" }`).
+- The raw `via` object is also retained on every callsite for consumers that
+  need the uncomposed analyzer form.
+
 ---
 
 #### `GET /v1/rules/:id`

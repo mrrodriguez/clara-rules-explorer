@@ -437,10 +437,61 @@
                                             {:var-name-sym 'acme.rules/insert-helper}]
                     :boundary-to-constructor-path [{:var-name-sym 'acme.rules/insert-helper}
                                                    {:var-name-sym 'acme.facts/->fact}]}}
-          out (s/serialize-dynamic-callsite cs 'acme.rules #{})]
+          out (s/serialize-dynamic-callsite cs 'acme.rules #{} "acme.rules/the-rule")]
       (is (= "clara.rules/insert!" (-> out :via :boundary-var-name-sym)))
       (is (= "acme.rules/insert-helper" (-> out :via :boundary-in-var)))
       (is (= ["acme.rules/the-rule" "acme.rules/insert-helper"]
              (mapv :var-name-sym (-> out :via :rule-to-boundary-path))))
       (is (= ["acme.rules/insert-helper" "acme.facts/->fact"]
-             (mapv :var-name-sym (-> out :via :boundary-to-constructor-path)))))))
+             (mapv :var-name-sym (-> out :via :boundary-to-constructor-path))))
+      (is (= [{:label :rule :sym "acme.rules/the-rule"}
+              {:label :caller :sym "acme.rules/insert-helper"}
+              {:label :boundary :sym "clara.rules/insert!"}
+              {:label :constructor :sym "acme.facts/->fact"}]
+             (:provenance-chain out))
+          "full chain: rule → caller → boundary → constructor"))))
+
+(deftest test-serialize-dynamic-callsite-provenance-chain
+  (testing "direct RHS boundary + constructor (no rule-to-boundary-path)"
+    (let [cs {:source-str "(->fact :x m)"
+              :ns-name-sym 'acme.rules
+              :filename "acme/rules.clj"
+              :status :full
+              :resolved-types [:acme/x]
+              :constructor-sym 'acme.facts/->fact
+              :via {:boundary-var-name-sym 'clara.rules/insert!
+                    :boundary-in-var 'acme.rules/the-rule
+                    :boundary-to-constructor-path [{:var-name-sym 'acme.rules/the-rule}
+                                                   {:var-name-sym 'acme.facts/->fact}]}}
+          out (s/serialize-dynamic-callsite cs 'acme.rules #{} "acme.rules/the-rule")]
+      (is (= [{:label :rule :sym "acme.rules/the-rule"}
+              {:label :boundary :sym "clara.rules/insert!"}
+              {:label :constructor :sym "acme.facts/->fact"}]
+             (:provenance-chain out))
+          "the rule heads the chain even though rule-to-boundary-path is absent")))
+
+  (testing "helper boundary, no constructor"
+    (let [cs {:source-str "facts"
+              :ns-name-sym 'acme.rules
+              :filename "acme/rules.clj"
+              :status :none
+              :via {:boundary-var-name-sym 'clara.rules/insert-all!
+                    :boundary-in-var 'acme.rules/insert-facts!
+                    :rule-to-boundary-path [{:var-name-sym 'acme.rules/the-rule}
+                                            {:var-name-sym 'acme.rules/insert-facts!}]}}
+          out (s/serialize-dynamic-callsite cs 'acme.rules #{} "acme.rules/the-rule")]
+      (is (= [{:label :rule :sym "acme.rules/the-rule"}
+              {:label :caller :sym "acme.rules/insert-facts!"}
+              {:label :boundary :sym "clara.rules/insert-all!"}]
+             (:provenance-chain out)))))
+
+  (testing "heuristic record-ctor-scan emits no chain"
+    (let [cs {:source-str "->Foo"
+              :ns-name-sym 'acme.rules
+              :filename "acme/rules.clj"
+              :status :full
+              :resolved-types [:acme/Foo]
+              :via {:source :record-ctor-scan}}
+          out (s/serialize-dynamic-callsite cs 'acme.rules #{} "acme.rules/the-rule")]
+      (is (not (contains? out :provenance-chain))
+          "heuristic callsites carry :via {:source :record-ctor-scan}, not a chain"))))

@@ -98,6 +98,13 @@
    (s/optional-key :rule-to-boundary-path) [ViaEntry]
    (s/optional-key :source) s/Keyword})
 
+(s/defschema ProvenanceChainEntry
+  "One entry in a callsite's `:provenance-chain` — the display-ready chain the
+   server composes from the raw `:via` (see `serialize/provenance-chain`).
+   `:label` marks the hop's role; `:sym` is the fully-qualified var name."
+  {:label (s/enum :rule :caller :boundary :constructor)
+   :sym s/Str})
+
 (s/defschema DynamicCallsiteEntry
   "A single dynamic-insert/retract callsite with source coordinates
    and optional resolution info."
@@ -108,7 +115,8 @@
    (s/optional-key :resolved-types) [TypeReference]
    (s/optional-key :fact-type) TypeReference
    (s/optional-key :constructor-sym) s/Str
-   (s/optional-key :via) ViaChain})
+   (s/optional-key :via) ViaChain
+   (s/optional-key :provenance-chain) [ProvenanceChainEntry]})
 
 (s/defschema DynamicDetectionInfo
   "Info about dynamic insert/retract callsites detected by the analyzer."

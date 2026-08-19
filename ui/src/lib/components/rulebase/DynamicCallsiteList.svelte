@@ -6,7 +6,6 @@
 	import QualifiedName from '$lib/components/ui/QualifiedName.svelte';
 	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
 	import { stableKeys } from '$lib/keys';
-	import { buildViaEntries } from '$lib/components/rulebase/viaChain';
 
 	interface Props {
 		detection?: DynamicDetectionInfo;
@@ -70,8 +69,7 @@
 				{@const types = site['resolved-types']}
 				{@const status = site.status}
 				{@const constructorSym = site['constructor-sym']}
-				{@const via = site.via}
-				{@const viaEntries = via ? buildViaEntries(via) : []}
+				{@const provenanceChain = site['provenance-chain'] ?? []}
 				<div class="card bg-light border mb-2">
 					<div class="card-body p-2">
 						{#if startExpanded}
@@ -101,14 +99,14 @@
 							{/if}
 						</div>
 
-						{#if via}
+						{#if provenanceChain.length > 0}
 							<details class="mt-2" open>
 								<summary class="text-muted small" style="cursor: pointer">
 									<i class="bi bi-diagram-3 me-1"></i>
 									Provenance chain
 								</summary>
 								<div class="mt-2 d-flex flex-wrap align-items-center gap-1">
-									{#each viaEntries as entry, idx (entry.sym + idx)}
+									{#each provenanceChain as entry, idx (entry.sym + idx)}
 										{#if idx > 0}
 											<span class="text-muted small">→</span>
 										{/if}
