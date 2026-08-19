@@ -36,7 +36,7 @@ test.describe('Hierarchy descendants section (hierarchy ruleset)', () => {
 		// All three derive-keyword descendants are known → each carries the
 		// dedicated open icon, not a whole-row link.
 		for (const name of [INCOME, SUPPORTING, LOAN]) {
-			const row = category.locator(`div.list-group-item[title="${name}"]`);
+			const row = category.locator(`div.list-group-item[data-fullname="${name}"]`);
 			await expect(row.locator('a.list-group-item')).toHaveCount(0);
 			await expect(row.locator('a[aria-label^="Open "]')).toHaveAttribute(
 				'href',
@@ -55,7 +55,7 @@ test.describe('Hierarchy descendants section (hierarchy ruleset)', () => {
 			.locator('div.mb-3')
 			.filter({ has: page.locator('h6', { hasText: 'Hierarchy (Descendants)' }) });
 		await category
-			.locator(`div.list-group-item[title="${SUPPORTING}"]`)
+			.locator(`div.list-group-item[data-fullname="${SUPPORTING}"]`)
 			.locator('a[aria-label^="Open "]')
 			.click();
 

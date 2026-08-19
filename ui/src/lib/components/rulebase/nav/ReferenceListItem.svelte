@@ -44,7 +44,7 @@
 	const effectiveTitle = $derived(copyable || muted ? undefined : title);
 </script>
 
-<NavigationListItem {href} title={effectiveTitle} {activeColor} {active}>
+<NavigationListItem {href} title={effectiveTitle} {fullName} {activeColor} {active}>
 	{#if muted}
 		<div class="text-muted fst-italic w-100 min-width-0">{fullName}</div>
 	{:else}

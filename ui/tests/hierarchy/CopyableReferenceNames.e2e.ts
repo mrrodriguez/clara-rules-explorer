@@ -23,7 +23,7 @@ test.describe('Copyable reference names', () => {
 		const insertCategory = page
 			.locator('div.mb-3')
 			.filter({ has: page.locator('h6', { hasText: 'Insert Types (Output)' }) });
-		const incomeRow = insertCategory.locator(`div.list-group-item[title="${INCOME}"]`);
+		const incomeRow = insertCategory.locator(`div.list-group-item[data-fullname="${INCOME}"]`);
 		const nameBtn = incomeRow.locator('button.copyable-title');
 		await expect(nameBtn).toBeVisible();
 

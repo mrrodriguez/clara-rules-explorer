@@ -14,15 +14,25 @@
 		title?: string;
 		activeColor?: string;
 		children: Snippet;
+		/** Stable hook for e2e locators — rendered as `data-fullname` on the outer element. */
+		fullName?: string;
 	}
 
-	let { href, active = false, title, activeColor = '#0d6efd', children }: Props = $props();
+	let {
+		href,
+		active = false,
+		title,
+		activeColor = '#0d6efd',
+		children,
+		fullName
+	}: Props = $props();
 </script>
 
 {#if href}
 	<a
 		href={resolve(href as Pathname)}
 		{title}
+		data-fullname={fullName}
 		class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-3 {active
 			? 'active'
 			: ''}"
@@ -33,6 +43,7 @@
 {:else}
 	<div
 		{title}
+		data-fullname={fullName}
 		class="list-group-item d-flex justify-content-between align-items-center py-2 px-3 {active
 			? 'active'
 			: ''}"

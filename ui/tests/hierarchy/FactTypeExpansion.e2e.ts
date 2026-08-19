@@ -24,7 +24,7 @@ test.describe('Expandable fact-type rows (production summaries)', () => {
 		const insertCategory = page
 			.locator('div.mb-3')
 			.filter({ has: page.locator('h6', { hasText: 'Insert Types (Output)' }) });
-		const incomeRow = insertCategory.locator(`div.list-group-item[title="${INCOME}"]`);
+		const incomeRow = insertCategory.locator(`div.list-group-item[data-fullname="${INCOME}"]`);
 		await expect(incomeRow).toBeVisible();
 
 		// The type row is not a whole-row link; navigation is a dedicated icon.
@@ -68,7 +68,7 @@ test.describe('Expandable fact-type rows (production summaries)', () => {
 		const lhsCategory = page
 			.locator('div.mb-3')
 			.filter({ has: page.locator('h6', { hasText: 'LHS Types (Input)' }) });
-		const supportingRow = lhsCategory.locator(`div.list-group-item[title="${SUPPORTING}"]`);
+		const supportingRow = lhsCategory.locator(`div.list-group-item[data-fullname="${SUPPORTING}"]`);
 		await expect(supportingRow).toBeVisible();
 
 		await supportingRow.locator('button[aria-label="Toggle upstream/downstream"]').click();

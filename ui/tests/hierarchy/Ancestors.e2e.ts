@@ -35,8 +35,8 @@ test.describe('Hierarchy ancestors section (hierarchy ruleset)', () => {
 
 		// supporting/loan are on an LHS → known → navigate via the dedicated
 		// open icon, not by making the whole row a link.
-		const supportingRow = category.locator(`div.list-group-item[title="${SUPPORTING}"]`);
-		const loanRow = category.locator(`div.list-group-item[title="${LOAN}"]`);
+		const supportingRow = category.locator(`div.list-group-item[data-fullname="${SUPPORTING}"]`);
+		const loanRow = category.locator(`div.list-group-item[data-fullname="${LOAN}"]`);
 		await expect(supportingRow.locator('a[aria-label^="Open "]')).toHaveAttribute(
 			'href',
 			/\/fact-types\//
@@ -63,7 +63,7 @@ test.describe('Hierarchy ancestors section (hierarchy ruleset)', () => {
 			.locator('div.mb-3')
 			.filter({ has: page.locator('h6', { hasText: 'Hierarchy (Ancestors)' }) });
 		await category
-			.locator(`div.list-group-item[title="${SUPPORTING}"]`)
+			.locator(`div.list-group-item[data-fullname="${SUPPORTING}"]`)
 			.locator('a[aria-label^="Open "]')
 			.click();
 

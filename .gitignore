@@ -12,6 +12,7 @@ target
 .envrc.local
 docs/internal
 ui/docs/internal
+ui/playwright-report
 
 # IDEs and editors
 .idea/
