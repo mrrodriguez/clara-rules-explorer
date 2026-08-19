@@ -481,7 +481,7 @@
 		{
 			"name": "clojure.lang.Associative",
 			"id": "clojure.lang.Associative-2y6rdpfd",
-			"ns": null,
+			"ns": "clojure.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -558,7 +558,7 @@
 		{
 			"name": "clojure.lang.Counted",
 			"id": "clojure.lang.Counted-iwg2yoz6",
-			"ns": null,
+			"ns": "clojure.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -635,7 +635,7 @@
 		{
 			"name": "clojure.lang.IHashEq",
 			"id": "clojure.lang.IHashEq-bkwe48s5",
-			"ns": null,
+			"ns": "clojure.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -712,7 +712,7 @@
 		{
 			"name": "clojure.lang.IKeywordLookup",
 			"id": "clojure.lang.IKeywordLookup-frx3uu13",
-			"ns": null,
+			"ns": "clojure.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -789,7 +789,7 @@
 		{
 			"name": "clojure.lang.ILookup",
 			"id": "clojure.lang.ILookup-6r9cmuae",
-			"ns": null,
+			"ns": "clojure.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -866,7 +866,7 @@
 		{
 			"name": "clojure.lang.IMeta",
 			"id": "clojure.lang.IMeta-gyperjpp",
-			"ns": null,
+			"ns": "clojure.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -943,7 +943,7 @@
 		{
 			"name": "clojure.lang.IObj",
 			"id": "clojure.lang.IObj-r3vahgt5",
-			"ns": null,
+			"ns": "clojure.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -1020,7 +1020,7 @@
 		{
 			"name": "clojure.lang.IPersistentCollection",
 			"id": "clojure.lang.IPersistentCollection-iftobj0a",
-			"ns": null,
+			"ns": "clojure.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -1097,7 +1097,7 @@
 		{
 			"name": "clojure.lang.IPersistentMap",
 			"id": "clojure.lang.IPersistentMap-l9zfvder",
-			"ns": null,
+			"ns": "clojure.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -1174,7 +1174,7 @@
 		{
 			"name": "clojure.lang.IRecord",
 			"id": "clojure.lang.IRecord-sdijyhha",
-			"ns": null,
+			"ns": "clojure.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -1251,7 +1251,7 @@
 		{
 			"name": "clojure.lang.Seqable",
 			"id": "clojure.lang.Seqable-sqzfy379",
-			"ns": null,
+			"ns": "clojure.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -1328,7 +1328,7 @@
 		{
 			"name": "java.io.Serializable",
 			"id": "java.io.Serializable-kwmretfj",
-			"ns": null,
+			"ns": "java.io",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -1405,7 +1405,7 @@
 		{
 			"name": "java.lang.Iterable",
 			"id": "java.lang.Iterable-ip5jrdp2",
-			"ns": null,
+			"ns": "java.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -1482,7 +1482,7 @@
 		{
 			"name": "java.lang.Object",
 			"id": "java.lang.Object-134c3tkk",
-			"ns": null,
+			"ns": "java.lang",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [
@@ -1559,7 +1559,7 @@
 		{
 			"name": "java.util.Map",
 			"id": "java.util.Map-isuqcqje",
-			"ns": null,
+			"ns": "java.util",
 			"used-by-rules": [],
 			"used-by-queries": [],
 			"inserted-by-rules": [

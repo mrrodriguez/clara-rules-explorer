@@ -11,7 +11,17 @@
 						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-						"status": "none"
+						"status": "none",
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
+							}
+						]
 					}
 				],
 				"fact-instance-derived-types": [":extract-doc-meta"],
@@ -50,6 +60,16 @@
 								"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
 								"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-9kes1f1s",
 								"known": true
+							}
+						],
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
 							}
 						]
 					}
@@ -106,6 +126,16 @@
 								"id": "clara.server.tools.graph.rules.loan-doc-rules.AllIdCardGiven-4xiyfnsl",
 								"known": true
 							}
+						],
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-id-card-given-docs"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
+							}
 						]
 					}
 				],
@@ -156,6 +186,16 @@
 								"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
 								"known": true
 							}
+						],
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
+							}
 						]
 					}
 				],
@@ -205,6 +245,16 @@
 								"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
 								"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
 								"known": true
+							}
+						],
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
 							}
 						]
 					}
@@ -276,6 +326,28 @@
 								"id": "loan-doc-rules-document-check-input-bsfqrt8a",
 								"known": true
 							}
+						],
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
+							},
+							{
+								"label": "caller",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/insert-document-check-input!"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
+							},
+							{
+								"label": "caller",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/->document-check-input"
+							},
+							{
+								"label": "constructor",
+								"sym": "clara.server.tools.graph.rules.helpers/->fact"
+							}
 						]
 					}
 				],
@@ -330,6 +402,16 @@
 								"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
 								"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
 								"known": true
+							}
+						],
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
 							}
 						]
 					}
@@ -392,7 +474,17 @@
 						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-						"status": "none"
+						"status": "none",
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
+							}
+						]
 					}
 				],
 				"fact-instance-derived-types": [
@@ -433,7 +525,17 @@
 						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-						"status": "none"
+						"status": "none",
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
+							}
+						]
 					}
 				],
 				"fact-instance-derived-types": [":compliance-review-result"],
@@ -498,6 +600,16 @@
 								"id": "clara.server.tools.graph.rules.loan-doc-rules.StaleDocumentN-ruqre9or",
 								"known": true
 							}
+						],
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/retract!"
+							}
 						]
 					}
 				],
@@ -517,7 +629,17 @@
 						},
 						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 						"filename": "clara/server/tools/graph/rules/loan_doc_rules.clj",
-						"status": "none"
+						"status": "none",
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
+							}
+						]
 					}
 				],
 				"fact-instance-derived-types": ["clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"],
@@ -562,6 +684,16 @@
 								"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 								"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
 								"known": true
+							}
+						],
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
 							}
 						]
 					}
@@ -622,6 +754,16 @@
 								"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 								"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
 								"known": true
+							}
+						],
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
 							}
 						]
 					}
@@ -687,6 +829,16 @@
 								"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 								"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
 								"known": true
+							}
+						],
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
 							}
 						]
 					}

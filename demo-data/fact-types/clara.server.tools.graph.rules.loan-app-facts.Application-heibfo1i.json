@@ -1,6 +1,8 @@
 {
+	"retracted-by-rules": [],
+	"ns": "clara.server.tools.graph.rules.loan_app_facts",
 	"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
-	"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
+	"used-by-queries": [],
 	"used-by-rules": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
@@ -57,10 +59,7 @@
 			"type": "rule"
 		}
 	],
-	"used-by-queries": [],
-	"inserted-by-rules": [],
-	"retracted-by-rules": [],
-	"ns": "clara.server.tools.graph.rules.loan_app_facts",
+	"descendants": [],
 	"ancestors": [
 		{
 			"name": "clojure.lang.IHashEq",
@@ -137,5 +136,7 @@
 			"id": "java.util.Map-isuqcqje",
 			"known": false
 		}
-	]
+	],
+	"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
+	"inserted-by-rules": []
 }

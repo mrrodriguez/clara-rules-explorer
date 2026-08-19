@@ -78,6 +78,28 @@
 						"id": "loan-doc-rules-document-check-input-bsfqrt8a",
 						"known": true
 					}
+				],
+				"provenance-chain": [
+					{
+						"label": "rule",
+						"sym": "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"
+					},
+					{
+						"label": "caller",
+						"sym": "clara.server.tools.graph.rules.loan-doc-rules/insert-document-check-input!"
+					},
+					{
+						"label": "boundary",
+						"sym": "clara.rules/insert!"
+					},
+					{
+						"label": "caller",
+						"sym": "clara.server.tools.graph.rules.loan-doc-rules/->document-check-input"
+					},
+					{
+						"label": "constructor",
+						"sym": "clara.server.tools.graph.rules.helpers/->fact"
+					}
 				]
 			}
 		],

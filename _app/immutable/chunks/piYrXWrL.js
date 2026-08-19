@@ -1,1 +1,0 @@
-function e(e,t){let n=new Map;return e.map(e=>{let r=t(e),i=n.get(r)??0;return n.set(r,i+1),i===0?r:`${r}__dup-${i}`})}export{e as t};

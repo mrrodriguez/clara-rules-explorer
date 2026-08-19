@@ -98,6 +98,16 @@
 						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
 						"known": true
 					}
+				],
+				"provenance-chain": [
+					{
+						"label": "rule",
+						"sym": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+					},
+					{
+						"label": "boundary",
+						"sym": "clara.rules/insert!"
+					}
 				]
 			}
 		],

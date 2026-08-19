@@ -1,8 +1,95 @@
 {
+	"retracted-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-retrac-seb0d3qq",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	],
+	"ns": "clojure.lang",
 	"name": "clojure.lang.Counted",
-	"id": "clojure.lang.Counted-iwg2yoz6",
-	"used-by-rules": [],
 	"used-by-queries": [],
+	"used-by-rules": [],
+	"descendants": [
+		{
+			"name": "clojure.lang.IPersistentMap",
+			"id": "clojure.lang.IPersistentMap-l9zfvder",
+			"known": false
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-9kes1f1s",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-9sjv10vl",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.GivenDocument-rkkwswy0",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.RequiredDocume-7rfb9pky",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+			"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules.AllIdCardGiven-4xiyfnsl",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules.AuditTrail-ihl0yjcd",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules.ComplianceRevi-nx3kfyoz",
+			"known": true
+		},
+		{
+			"name": "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules.StaleDocumentN-ruqre9or",
+			"known": true
+		}
+	],
+	"ancestors": [],
+	"id": "clojure.lang.Counted-iwg2yoz6",
 	"inserted-by-rules": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
@@ -64,15 +151,5 @@
 			"ns": "clara.server.tools.graph.rules.loan-app-rules",
 			"type": "rule"
 		}
-	],
-	"retracted-by-rules": [
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-retrac-seb0d3qq",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		}
-	],
-	"ns": null,
-	"ancestors": []
+	]
 }

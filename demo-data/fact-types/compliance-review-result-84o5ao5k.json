@@ -1,8 +1,12 @@
 {
+	"retracted-by-rules": [],
+	"ns": null,
 	"name": ":compliance-review-result",
-	"id": "compliance-review-result-84o5ao5k",
-	"used-by-rules": [],
 	"used-by-queries": [],
+	"used-by-rules": [],
+	"descendants": [],
+	"ancestors": [],
+	"id": "compliance-review-result-84o5ao5k",
 	"inserted-by-rules": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata",
@@ -10,8 +14,5 @@
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}
-	],
-	"retracted-by-rules": [],
-	"ns": null,
-	"ancestors": []
+	]
 }
