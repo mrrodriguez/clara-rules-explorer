@@ -2,7 +2,7 @@
 	import type { FactTypeSummary } from '$lib/types/api';
 	import { page } from '$app/state';
 	import GroupedFilterableNavList from '$lib/components/rulebase/nav/GroupedFilterableNavList.svelte';
-	import { factPath } from '$lib/utils';
+	import { factPath, splitDisplayName } from '$lib/utils';
 
 	interface Props {
 		factTypes: FactTypeSummary[];
@@ -11,7 +11,8 @@
 
 	let { factTypes, onFilteredOutChange }: Props = $props();
 
-	const groupKey = (ft: FactTypeSummary) => ft.ns ?? '';
+	const groupKey = (ft: FactTypeSummary) =>
+		ft.ns ?? splitDisplayName(ft.name).namespace.replace(/^:/, '');
 	const activeId = $derived(page.params.id);
 	const hrefPrefix = (ft: FactTypeSummary) => factPath(ft.id);
 </script>

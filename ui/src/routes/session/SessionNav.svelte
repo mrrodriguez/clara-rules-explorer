@@ -2,6 +2,7 @@
 	import type { SessionFactTypeInfo } from '$lib/types/api';
 	import GroupedFilterableNavList from '$lib/components/rulebase/nav/GroupedFilterableNavList.svelte';
 	import { page } from '$app/state';
+	import { splitDisplayName } from '$lib/utils';
 
 	let { onFilteredOutChange }: { onFilteredOutChange?: (filteredOut: boolean) => void } = $props();
 
@@ -19,7 +20,8 @@
 		return page.params.id === type.id;
 	}
 
-	const groupKey = (ft: SessionFactTypeInfo) => ft.ns ?? '';
+	const groupKey = (ft: SessionFactTypeInfo) =>
+		ft.ns ?? splitDisplayName(ft.name).namespace.replace(/^:/, '');
 	const activeId = $derived(page.params.id);
 </script>
 

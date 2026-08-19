@@ -147,7 +147,22 @@
                                              warned-types
                                              (get type-analysis-map (:name production))))
                 {}
-                productions)]
+                productions)
+        ;; Hierarchy-only ancestor types (e.g. clojure.lang.IPersistentMap,
+        ;; java.lang.Object) are not directly consumed/produced but must still
+        ;; appear in the index so their :ns groups correctly ("clojure.lang"
+        ;; vs "(no namespace)") and their own ancestors/descendants are
+        ;; populated.  Ancestors are Classes/keywords — serialization is
+        ;; ns-independent — so nil context is sufficient for the fallback
+        ;; registration; divergence handling is still via register-ancestors-entry.
+        per-raw-type
+        (let [all-ancestors (into #{} (mapcat ancestors-set-fn) (keys per-raw-type))]
+          (reduce (fn [acc raw-anc]
+                    (if (contains? acc raw-anc)
+                      acc
+                      (register-ancestors-entry acc resolve-memo ancestors-set-fn warned-types nil raw-anc)))
+                  per-raw-type
+                  all-ancestors))]
     (reduce-kv (fn [idx _raw-type {:keys [serialized ancestors ns]}]
                  (assoc idx serialized {:ancestors ancestors :ns ns}))
                {}
@@ -193,7 +208,7 @@
    maps with `known` flags from `known-set`.  Ancestors run deepest-first;
    descendants run shallowest-first (the reverse direction)."
   [ancestors-index descendants-index known-set type-name]
-  (let [{idx-ancestors :ancestors :keys [ns]} (get ancestors-index type-name)
+  (let [{:keys [ancestors ns]} (get ancestors-index type-name)
         ->type-ref (fn [name]
                      {:name name
                       :id (serialize/route-id name)
@@ -205,7 +220,7 @@
      :inserted-by-rules []
      :retracted-by-rules []
      :ns ns
-     :ancestors (mapv ->type-ref idx-ancestors)
+     :ancestors (mapv ->type-ref ancestors)
      :descendants (mapv ->type-ref (->ordered-descendants ancestors-index descendants-index type-name))}))
 
 (defn- conj-production-ref
