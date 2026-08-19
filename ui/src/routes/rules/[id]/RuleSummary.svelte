@@ -4,6 +4,7 @@
 	import RulebaseComponentSummaryDescription from '$lib/components/rulebase/RulebaseComponentSummaryDescription.svelte';
 	import DependencyRow from '$lib/components/rulebase/DependencyRow.svelte';
 	import ReferenceCategory from '$lib/components/rulebase/ReferenceCategory.svelte';
+	import ProductionSummaryTabs from '$lib/components/rulebase/ProductionSummaryTabs.svelte';
 	import LhsTabs from '$lib/components/rulebase/LhsTabs.svelte';
 	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
 	import SessionProductionActivity from '$lib/components/rulebase/SessionProductionActivity.svelte';
@@ -71,39 +72,53 @@
 			<RulebaseComponentSummaryDescription doc={rule.doc} />
 
 			{#if !fullView}
-				<DependencyRow upstream={rule.upstream} downstream={rule.downstream} {fullView} />
-
-				<div class="row g-3">
-					<div class="col-md-4">
-						<ReferenceCategory
-							title="LHS Types (Input)"
-							icon="bi-box-arrow-in-right"
-							items={rule['lhs-types']}
-							itemKind="type"
-							{fullView}
-						/>
-					</div>
-					<div class="col-md-4">
-						<ReferenceCategory
-							title="Insert Types (Output)"
-							icon="bi-box-arrow-right"
-							items={rule['insert-types']}
-							itemKind="type"
-							{fullView}
-						/>
-					</div>
-					{#if rule['retract-types'].length > 0}
-						<div class="col-md-4">
-							<ReferenceCategory
-								title="Retract Types"
-								icon="bi-dash-circle"
-								items={rule['retract-types']}
-								itemKind="type"
-								{fullView}
-							/>
+				<ProductionSummaryTabs>
+					{#snippet types()}
+						<div class="row g-3">
+							<div class="col-md-4">
+								<ReferenceCategory
+									title="LHS Types (Input)"
+									icon="bi-box-arrow-in-right"
+									items={rule['lhs-types']}
+									itemKind="type"
+									{fullView}
+									typeRole="input"
+									upstream={rule.upstream}
+									downstream={rule.downstream}
+								/>
+							</div>
+							<div class="col-md-4">
+								<ReferenceCategory
+									title="Insert Types (Output)"
+									icon="bi-box-arrow-right"
+									items={rule['insert-types']}
+									itemKind="type"
+									{fullView}
+									typeRole="output"
+									upstream={rule.upstream}
+									downstream={rule.downstream}
+								/>
+							</div>
+							{#if rule['retract-types'].length > 0}
+								<div class="col-md-4">
+									<ReferenceCategory
+										title="Retract Types"
+										icon="bi-dash-circle"
+										items={rule['retract-types']}
+										itemKind="type"
+										{fullView}
+										typeRole="output"
+										upstream={rule.upstream}
+										downstream={rule.downstream}
+									/>
+								</div>
+							{/if}
 						</div>
-					{/if}
-				</div>
+					{/snippet}
+					{#snippet dependencies()}
+						<DependencyRow upstream={rule.upstream} downstream={rule.downstream} {fullView} />
+					{/snippet}
+				</ProductionSummaryTabs>
 			{/if}
 
 			{#if fullView}
@@ -123,12 +138,16 @@
 						</div>
 					</div>
 				</div>
-
-				<SessionProductionActivity {activity} />
 			{/if}
 
-			<DynamicCallsiteList detection={rule['dynamic-insert-types-detected']} label="Insert" />
-			<DynamicCallsiteList detection={rule['dynamic-retract-types-detected']} label="Retract" />
+			<div class:mt-4={fullView}>
+				<DynamicCallsiteList detection={rule['dynamic-insert-types-detected']} label="Insert" />
+				<DynamicCallsiteList detection={rule['dynamic-retract-types-detected']} label="Retract" />
+			</div>
+
+			{#if fullView}
+				<SessionProductionActivity {activity} />
+			{/if}
 
 			{#if !fullView}
 				<div class="d-flex align-items-center gap-2 mt-3 pt-2 border-top">

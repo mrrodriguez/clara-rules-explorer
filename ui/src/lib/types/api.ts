@@ -88,6 +88,19 @@ export interface ViaChain {
 }
 
 /**
+ * One hop in a callsite's display-ready `provenance-chain`, composed
+ * server-side from the raw `via` (see `serialize/provenance-chain`).
+ * `rule` heads the chain; `constructor` terminates it; `boundary` is the
+ * boundary fn (`insert!`/`retract!`); `caller` is any other hop.
+ */
+export type ProvenanceChainLabel = 'rule' | 'caller' | 'boundary' | 'constructor';
+
+export interface ProvenanceChainEntry {
+	label: ProvenanceChainLabel;
+	sym: string;
+}
+
+/**
  * A single dynamic insert!/retract! callsite detected in rule source.
  */
 export interface DynamicCallsiteEntry {
@@ -99,6 +112,7 @@ export interface DynamicCallsiteEntry {
 	'fact-type'?: TypeReference;
 	'constructor-sym'?: string;
 	via?: ViaChain;
+	'provenance-chain'?: ProvenanceChainEntry[];
 }
 
 /**
@@ -171,6 +185,13 @@ export interface FactTypeSummary {
 	 * render as plain text.
 	 */
 	ancestors?: TypeReference[];
+	/**
+	 * Hierarchy-ordered descendant types (direct descendants first, then their
+	 * descendants, ties broken lexicographically). Detail-only — the list
+	 * endpoint omits it. `known: true` entries link via their id; ghosts
+	 * render as plain text.
+	 */
+	descendants?: TypeReference[];
 }
 
 /**

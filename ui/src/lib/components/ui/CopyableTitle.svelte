@@ -29,6 +29,7 @@
 	type="button"
 	class="copyable-title d-flex align-items-center gap-1 border-0 bg-transparent p-0 text-start min-width-0 {className}"
 	title={copied ? 'Copied to clipboard' : 'Click to copy fully qualified name'}
+	aria-label={`Copy ${fullName}`}
 	onclick={copyName}
 >
 	<QualifiedName {fullName} {size} class="flex-grow-1" />
@@ -40,8 +41,10 @@
 <style>
 	.copyable-title {
 		cursor: pointer;
-		width: fit-content;
+		flex: 1 1 0;
+		min-width: 0;
 		max-width: 100%;
+		overflow: hidden;
 	}
 	.copyable-title:hover {
 		opacity: 0.85;

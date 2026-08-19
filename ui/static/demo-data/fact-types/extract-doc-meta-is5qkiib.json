@@ -1,6 +1,8 @@
 {
+	"retracted-by-rules": [],
+	"ns": null,
 	"name": ":extract-doc-meta",
-	"id": "extract-doc-meta-is5qkiib",
+	"used-by-queries": [],
 	"used-by-rules": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
@@ -9,7 +11,9 @@
 			"type": "rule"
 		}
 	],
-	"used-by-queries": [],
+	"descendants": [],
+	"ancestors": [],
+	"id": "extract-doc-meta-is5qkiib",
 	"inserted-by-rules": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
@@ -17,8 +21,5 @@
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"type": "rule"
 		}
-	],
-	"retracted-by-rules": [],
-	"ns": null,
-	"ancestors": []
+	]
 }

@@ -247,3 +247,13 @@ When `f` calls `g`, the docstring on `f` must not explain what `g` does or how
 docstring — if it needs one at all — and repeating it drifts out of sync the
 moment `g` changes.  Nil-vs-missing-key is not worth calling out in a contract
 between functions; schema optional keys already express it where it matters.
+
+**When a docstring refers to a schema, wrap the reference in backticks with a
+resolvable var name.**  Use the namespace alias where the current namespace
+requires one (e.g. `` `ann.merge/Layer` ``); otherwise use the fully-qualified
+name (e.g. `` `clara.server.graph.api/TypeReference` ``).  Inside the schema's
+defining namespace, the unqualified backticked name resolves (e.g.
+`` `TypeReference` `` in `clara.server.graph.api`).  Never write a bare prose
+name ("TypeReference", "Layer") or an unresolvable shorthand (e.g.
+`annotations/merge-layers` when only `ann.merge` is required).  This keeps
+schema references navigable in every consumer, not just the UI.

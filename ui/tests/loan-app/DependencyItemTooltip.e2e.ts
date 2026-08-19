@@ -14,6 +14,8 @@ test.describe('Dependency item buttons — tooltips', () => {
 		await page.locator('a.list-group-item').filter({ hasText: 'app-outcome-pending?' }).click();
 		await expect(ui.summary.title(page, 'app-outcome-pending?')).toBeVisible();
 
+		await ui.summary.dependenciesTab(page).click();
+
 		const upstreamCard = page
 			.locator('h6', { hasText: 'upstream' })
 			.locator('xpath=ancestor::div[contains(@class,"mb-3")][1]');
@@ -21,7 +23,9 @@ test.describe('Dependency item buttons — tooltips', () => {
 
 		// Info button tooltip names the match count.
 		const infoBtn = firstItem.locator('button[aria-label="Show type matches"]');
-		await infoBtn.hover();
+		await infoBtn.waitFor({ state: 'visible' });
+		await infoBtn.scrollIntoViewIfNeeded();
+		await infoBtn.hover({ force: true });
 		const infoTip = page.locator('.truncation-tooltip');
 		await expect(infoTip).toBeVisible();
 		await expect(infoTip).toHaveText(/Show type matches \(\d+\)/);
@@ -32,7 +36,9 @@ test.describe('Dependency item buttons — tooltips', () => {
 
 		// Jump button tooltip names the production (short name).
 		const jumpBtn = firstItem.locator('a[aria-label^="Open "]');
-		await jumpBtn.hover();
+		await jumpBtn.waitFor({ state: 'visible' });
+		await jumpBtn.scrollIntoViewIfNeeded();
+		await jumpBtn.hover({ force: true });
 		await expect(infoTip).toBeVisible();
 		await expect(infoTip).toHaveText(/^Open .+$/);
 		// The tooltip shows a short name, not a full qualified path.

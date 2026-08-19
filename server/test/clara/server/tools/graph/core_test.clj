@@ -114,6 +114,35 @@
         anns (ann.merge/merge-layers [(ann.merge/props-layer session)])]
     (core/->rulebase-analysis session anns)))
 
+;; Sibling hierarchy: ::sib-root has two direct children, ::sib-b and ::sib-c;
+;; ::sib-b has a child ::sib-d.  Exercises strict-depth descendant ordering
+;; when siblings carry asymmetric subtrees.
+(derive ::sib-b ::sib-root)
+(derive ::sib-c ::sib-root)
+(derive ::sib-d ::sib-b)
+
+(r/defrule sib-d-producer
+  {:clara-rules/insert-types [::sib-d]}
+  [String]
+  =>
+  (r/insert! (with-meta {:x 1} {:type ::sib-d})))
+
+(r/defrule sib-b-consumer
+  [?x <- ::sib-b]
+  =>
+  (r/insert! (with-meta {:y ?x} {:type ::sib-done})))
+
+(r/defrule sib-c-consumer
+  [?x <- ::sib-c]
+  =>
+  (r/insert! (with-meta {:y ?x} {:type ::sib-done-2})))
+
+(defn- sib-analysis
+  []
+  (let [session (r/mk-session [sib-d-producer sib-b-consumer sib-c-consumer])
+        anns (ann.merge/merge-layers [(ann.merge/props-layer session)])]
+    (core/->rulebase-analysis session anns)))
+
 (deftest test-loan-doc-rules-behavior
   (testing "Document check logic"
     (let [session (-> (->test-session)
@@ -617,7 +646,32 @@
             "Descendant-first hierarchy order (supporting <: loan <: base)")
         (is (= [true true false]
                (mapv :known ancestors))
-            "supporting/loan are on an LHS (known), base-document is a ghost")))
+            "supporting/loan are on an LHS (known), base-document is a ghost")
+        (is (empty? (:descendants income))
+            "income-document is a leaf — nothing derives from it")))
+
+    (testing "Keyword derive hierarchy exposes descendants (direct descendants first, lexicographic tie-break)"
+      (let [base (fact-type-by-name analysis
+                                    ":clara.server.tools.graph.rules.loan-hierarchy-rules/base-document")
+            loan (fact-type-by-name analysis
+                                    ":clara.server.tools.graph.rules.loan-hierarchy-rules/loan-document")
+            supporting (fact-type-by-name analysis
+                                          ":clara.server.tools.graph.rules.loan-hierarchy-rules/supporting-document")]
+        (is (= [":clara.server.tools.graph.rules.loan-hierarchy-rules/loan-document"
+                ":clara.server.tools.graph.rules.loan-hierarchy-rules/supporting-document"
+                ":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document"]
+               (mapv :name (:descendants base)))
+            "base-document's descendants ordered direct-first")
+        (is (= [true true true]
+               (mapv :known (:descendants base)))
+            "all derive-keyword descendants are known (on some LHS or insert-type)")
+        (is (= [":clara.server.tools.graph.rules.loan-hierarchy-rules/supporting-document"
+                ":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document"]
+               (mapv :name (:descendants loan)))
+            "loan-document lists its direct descendant before the deeper one")
+        (is (= [":clara.server.tools.graph.rules.loan-hierarchy-rules/income-document"]
+               (mapv :name (:descendants supporting)))
+            "supporting-document lists only income-document")))
 
     (testing "Record type: interface ancestor known, JDK ghosts not"
       (let [app (fact-type-by-name analysis
@@ -643,6 +697,25 @@
           (is (seq (:inserted-by-rules verified)))
           (is (seq (:inserted-by-rules mismatch)))
           (is (seq (:used-by-rules verified))))))))
+
+(deftest test-descendants-sibling-depth-order
+  (testing "Descendants are strict depth order: all direct children before grandchildren, lexicographic within a level"
+    (let [analysis (sib-analysis)
+          root (fact-type-by-name analysis ":clara.server.tools.graph.core-test/sib-root")
+          b (fact-type-by-name analysis ":clara.server.tools.graph.core-test/sib-b")
+          d (fact-type-by-name analysis ":clara.server.tools.graph.core-test/sib-d")]
+      (is (= [":clara.server.tools.graph.core-test/sib-b"
+              ":clara.server.tools.graph.core-test/sib-c"
+              ":clara.server.tools.graph.core-test/sib-d"]
+             (mapv :name (:descendants root)))
+          "sib-b and sib-c (direct children) precede sib-d (grandchild); siblings tie-break lexicographically")
+      (is (= [":clara.server.tools.graph.core-test/sib-b"
+              ":clara.server.tools.graph.core-test/sib-root"]
+             (mapv :name (:ancestors d)))
+          "ancestors stay closest-first (sib-b before sib-root), mirroring descendants")
+      (is (= [":clara.server.tools.graph.core-test/sib-d"]
+             (mapv :name (:descendants b)))
+          "sib-b lists only its direct child"))))
 
 (deftest test-ancestors-missing-meta-fallback
   (testing "A rulebase whose get-alphas-fn meta lacks :ancestors-fn falls back to clojure.core/ancestors"

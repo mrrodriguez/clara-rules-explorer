@@ -14,6 +14,7 @@
             [clara.server.graph.api :as api]
             [clara.server.graph.cache :as cache]
             [clara.server.tools.graph.analyze :as analyze]
+            [clara.server.tools.graph.analyze.callsite :as callsite]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.utils :as utils]
@@ -55,7 +56,12 @@
                  :reuse (keep current annotations, source takes priority),
                  :auto-detect-from-rulebase (props + static analysis on top of source),
                  :auto-detect-from-memory (props + WM enrichment on top of source),
-                 :auto-detect (props + both on top of source)."
+                 :auto-detect (props + both on top of source).
+   :fact-constructors   — optional vector of `analyze/FactConstructorSpec` maps
+                          passed through to the generated analysis layer, declaring
+                          caller-defined constructors of interest.
+   :callsite-resolver-fn — optional fn passed through to the generated analysis
+                           layer as the boundary-callsite escape hatch."
   {(s/optional-key :source) (s/maybe (s/pred (some-fn ann.merge/merged-annotations?
                                                       vector?
                                                       map?
@@ -65,16 +71,21 @@
    (s/optional-key :enrichment) (s/maybe (s/enum :none :reuse
                                                  :auto-detect-from-rulebase
                                                  :auto-detect-from-memory
-                                                 :auto-detect))})
+                                                 :auto-detect))
+   (s/optional-key :fact-constructors) [analyze/FactConstructorSpec]
+   (s/optional-key :callsite-resolver-fn) (s/=> s/Any callsite/CallsiteResolverContext)})
 
 (s/defschema AnnotationsArg
-  "Either an AnnotationsSpec map or a legacy annotation-input form
-   (bare map, MergedAnnotations, vector of Layers, string path, or File)."
+  "Either an `AnnotationsSpec` map or a legacy annotation-input form
+   (bare map, `ann.merge/MergedAnnotations`, vector of `ann.merge/Layer`
+   entries, string path, or File)."
   (s/pred (fn [x]
             (or (nil? x)
                 (and (map? x)
                      (or (contains? x :source)
-                         (contains? x :enrichment)))
+                         (contains? x :enrichment)
+                         (contains? x :fact-constructors)
+                         (contains? x :callsite-resolver-fn)))
                 (ann.merge/merged-annotations? x)
                 (vector? x)
                 (string? x)
@@ -129,9 +140,10 @@
   #{:auto-detect-from-rulebase :auto-detect-from-memory :auto-detect})
 
 (defn- ->source-layer
-  "Coerce one source entry to a Layer.  Path strings / Files are read from
-   disk via `read-layer`; bare rule→annotation maps are wrapped as a source
-   layer; MergedAnnotations are unwrapped first."
+  "Coerce one source entry to a `ann.merge/Layer`.  Path strings / Files are
+   read from disk via `ann.merge/read-layer`; bare rule→annotation maps are
+   wrapped as a source layer; `ann.merge/MergedAnnotations` are unwrapped
+   first."
   [x]
   (cond
     (or (string? x) (instance? File x))
@@ -166,7 +178,7 @@
 
    `analyze-cache-atom` is the temporary atom seeded from and committed
    back to the state map by the calling transition."
-  [session source enrichment analyze-cache-atom]
+  [session source enrichment analyze-cache-atom analysis-opts]
   (let [source-layers (when (some? source)
                         (map ->source-layer
                              (if (vector? source) source [source])))
@@ -179,8 +191,9 @@
                             (ann.merge/layer
                              {:id :clara.tools.graph.analyze/generated
                               :annotations (analyze/->annotations-from-rule-source-analysis
-                                            {:rule-source-analysis analysis
-                                             :session-or-rulebase session})})))
+                                            (merge {:rule-source-analysis analysis
+                                                    :session-or-rulebase session}
+                                                   analysis-opts))})))
         layers (cond-> [(ann.merge/props-layer session)]
                  (seq source-layers) (into source-layers)
                  generated-layer (conj generated-layer))]
@@ -193,13 +206,13 @@
 
    Static layers are merged first so the memory delta is computed against the
    accumulated base — not an empty map."
-  [session source enrichment analyze-cache-atom]
+  [session source enrichment analyze-cache-atom analysis-opts]
   (let [wm? (core/working-memory-available? session)]
     (when (and (#{:auto-detect-from-memory :auto-detect} enrichment)
                (not wm?))
       (log/warnf "[server] %s requested but no working memory available — skipping memory enrichment"
                  enrichment))
-    (let [static-layers (->static-layers session source enrichment analyze-cache-atom)
+    (let [static-layers (->static-layers session source enrichment analyze-cache-atom analysis-opts)
           merged-static (ann.merge/merge-layers static-layers)
           base          (ann.merge/annotations merged-static)
           memory?       (and wm?
@@ -227,22 +240,27 @@
          spec (if (or (nil? annotations-spec)
                       (and (map? annotations-spec)
                            (or (contains? annotations-spec :source)
-                               (contains? annotations-spec :enrichment))))
+                               (contains? annotations-spec :enrichment)
+                               (contains? annotations-spec :fact-constructors)
+                               (contains? annotations-spec :callsite-resolver-fn))))
                 annotations-spec
                 {:source annotations-spec})
          ;; Validate spec-shaped maps at the choke point.
          _ (when (map? spec) (s/validate AnnotationsSpec spec))
-         {:keys [source enrichment]} spec
+         {:keys [source enrichment fact-constructors callsite-resolver-fn]} spec
          ;; `:memory-analysis` exists only on the auto-detect path, where it is
          ;; a dynamic value that may be nil — `remove-nil-vals` below strips it
          ;; when nil.  The other branches omit the key literally (memory
          ;; enrichment never runs there).
+         analysis-opts (cond-> {}
+                         fact-constructors (assoc :fact-constructors fact-constructors)
+                         callsite-resolver-fn (assoc :callsite-resolver-fn callsite-resolver-fn))
          built
          (case enrichment
            :reuse
            (if (some? source)
              {:annotations (-> session
-                               (->static-layers source nil analyze-cache-atom)
+                               (->static-layers source nil analyze-cache-atom analysis-opts)
                                ann.merge/merge-layers
                                ann.merge/annotations)}
              (if (some? current-annotations)
@@ -253,13 +271,13 @@
 
            (:none nil)
            {:annotations (-> session
-                             (->static-layers source nil analyze-cache-atom)
+                             (->static-layers source nil analyze-cache-atom analysis-opts)
                              ann.merge/merge-layers
                              ann.merge/annotations)}
 
            ;; Auto-detect modes — explicit enumeration with fail-fast for unknown values.
            (:auto-detect-from-rulebase :auto-detect-from-memory :auto-detect)
-           (->auto-detect-annotations session source enrichment analyze-cache-atom)
+           (->auto-detect-annotations session source enrichment analyze-cache-atom analysis-opts)
 
            ;; nil enrichment handled above; catch-all is unknown enum values
            (throw (IllegalArgumentException.
@@ -428,8 +446,8 @@
        (:annotations new-state)))))
 
 (defn reload-annotations!
-  "Re-derives annotations from the last effective AnnotationsSpec against the
-   current session.  File-backed sources are re-read from disk; the generated
+  "Re-derives annotations from the last effective `AnnotationsSpec` against
+   the current session.  File-backed sources are re-read from disk; the generated
    (kondo) layer rebuilds from cached per-ns analyses in the state (kondo
    does not re-run).
    0-arity operates on the default system; 1-arity on an explicit system."

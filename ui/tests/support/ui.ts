@@ -7,7 +7,10 @@ import type { Page } from '@playwright/test';
 export const ui = {
 	sidebar: {
 		/** Navigates to a top-level page using the sidebar link */
-		async navigateTo(page: Page, label: 'Dashboard' | 'Rules' | 'Queries' | 'Fact Types' | 'Session') {
+		async navigateTo(
+			page: Page,
+			label: 'Dashboard' | 'Rules' | 'Queries' | 'Fact Types' | 'Session'
+		) {
 			// Use filter with hasText to robustly match the label regardless of icons/whitespace
 			await page.locator('aside.sidebar').getByRole('link').filter({ hasText: label }).click();
 		}
@@ -26,12 +29,18 @@ export const ui = {
 		/** Returns the title element in the summary card (which is a div, not a heading) */
 		title(page: Page, name: string) {
 			return page.locator('.card-header').filter({ hasText: name });
+		},
+		/** Returns the secondary tab that reveals upstream/downstream lists. */
+		dependenciesTab(page: Page) {
+			return page.getByRole('tab', { name: 'Dependencies' });
 		}
 	},
 	indicators: {
 		/** Returns the unlinked RHS warning badge in the rule summary header */
 		unlinkedBadge(page: Page) {
-			return page.locator('.card-header .badge.text-bg-warning').filter({ hasText: 'Unlinked RHS' });
+			return page
+				.locator('.card-header .badge.text-bg-warning')
+				.filter({ hasText: 'Unlinked RHS' });
 		},
 		/** Returns the unlinked RHS warning icon in the rule list */
 		unlinkedIcon(page: Page) {
@@ -53,7 +62,9 @@ export const ui = {
 		},
 		/** The namespace multi-select filter dropdown toggle button */
 		namespaceFilterButton(page: Page) {
-			return page.locator('button.btn-outline-secondary').filter({ has: page.locator('i.bi-funnel') });
+			return page
+				.locator('button.btn-outline-secondary')
+				.filter({ has: page.locator('i.bi-funnel') });
 		},
 		/** The namespace filter dropdown menu (when open) */
 		namespaceFilterDropdown(page: Page) {
@@ -76,7 +87,9 @@ export const ui = {
 		},
 		/** The "Show all namespaces" button in the dropdown */
 		showAllNamespacesButton(page: Page) {
-			return page.locator('.dropdown-menu.show button.dropdown-item').filter({ hasText: 'Show all namespaces' });
+			return page
+				.locator('.dropdown-menu.show button.dropdown-item')
+				.filter({ hasText: 'Show all namespaces' });
 		},
 		/** A namespace group toggle button (button, not anchor) */
 		groupToggle(page: Page, ns: string) {
@@ -98,13 +111,22 @@ export const ui = {
 		 *  already visible (e.g. single-namespace pages auto-expand). */
 		async expandAll(page: Page) {
 			// Fast-path: if items are already visible, nothing to do.
-			if (await page.locator('a.list-group-item').first().isVisible().catch(() => false)) {
+			if (
+				await page
+					.locator('a.list-group-item')
+					.first()
+					.isVisible()
+					.catch(() => false)
+			) {
 				return;
 			}
 			const btn = this.expandAllButton(page);
 			if (await btn.isVisible().catch(() => false)) {
 				await btn.click();
-				await page.locator('a.list-group-item').first().waitFor({ state: 'visible', timeout: 5_000 });
+				await page
+					.locator('a.list-group-item')
+					.first()
+					.waitFor({ state: 'visible', timeout: 5_000 });
 			}
 		},
 		/** Clicks "Collapse all" if the button is present. */
@@ -128,7 +150,9 @@ export const ui = {
 
 		/** The rulebase filter menu toggle button */
 		filterMenuButton(page: Page) {
-			return page.locator('button.btn-outline-secondary').filter({ has: page.locator('i.bi-funnel-fill') });
+			return page
+				.locator('button.btn-outline-secondary')
+				.filter({ has: page.locator('i.bi-funnel-fill') });
 		},
 		/** The rulebase filter dropdown menu (when open) — scoped by its unique content */
 		filterMenuDropdown(page: Page) {
@@ -140,7 +164,9 @@ export const ui = {
 		},
 		/** The "Clear all filters" button inside the filter menu dropdown */
 		clearAllFiltersButton(page: Page) {
-			return page.locator('.dropdown-menu.show button.dropdown-item').filter({ hasText: 'Clear all filters' });
+			return page
+				.locator('.dropdown-menu.show button.dropdown-item')
+				.filter({ hasText: 'Clear all filters' });
 		}
 	}
 };

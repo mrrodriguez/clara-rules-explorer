@@ -82,12 +82,13 @@
     (str (slug s) "-" (subs (sha1-base36 s) 0 8))))
 
 (def route-id
-  "Memoized `route-id*` — the same name recurs in thousands of ProductionDep
-   entries across an analysis build."
+  "Memoized `route-id*` — the same name recurs in thousands of
+   `clara.server.graph.api/ProductionDep` entries across an analysis build."
   (memoize route-id*))
 
 (defn serialize-type-ref
-  "Serializes a raw fact type into a TypeReference map for JSON output:
+  "Serializes a raw fact type into a `clara.server.graph.api/TypeReference` map
+   for JSON output:
    {:name kind-explicit serialized name, :id deterministic route id,
    :known true iff the serialized name is a member of `known-set` (the
    analysis's fact-type names).  `prod-ns` is the production's namespace,
@@ -104,13 +105,13 @@
 
 (defn serialize-match
   "Serializes raw {:producer-type ... :consumer-type ...} pairs (the
-   `matching-type-pairs` output) into TypeReference pairs, each end
-   serialized in its own production's ns context, sorted by producer then
-   consumer :name.  Symmetric shape and meaning on upstream and downstream
-   entries: producer-type is what the producing rule inserts (or retracts),
-   consumer-type is what the consuming rule's LHS requires.  A raw pair's
-   `:via :retract` (producer-type is a retract type) is carried through so
-   the UI can distinguish retraction coupling from production."
+   `matching-type-pairs` output) into `clara.server.graph.api/TypeReference`
+   pairs, each end serialized in its own production's ns context, sorted by
+   producer then consumer :name.  Symmetric shape and meaning on upstream and
+   downstream entries: producer-type is what the producing rule inserts (or
+   retracts), consumer-type is what the consuming rule's LHS requires.  A raw
+   pair's `:via :retract` (producer-type is a retract type) is carried through
+   so the UI can distinguish retraction coupling from production."
   [{:keys [raw-pairs known-set producer-ns consumer-ns]}]
   (->> raw-pairs
        (map (fn [{:keys [producer-type consumer-type via]}]
@@ -199,7 +200,8 @@
     (into (empty coll) (map name) coll)))
 
 (defn serialize-production-dep
-  "Serializes a production reference (ProductionDep): {name, ns, type, id}."
+  "Serializes a production reference (`clara.server.graph.api/ProductionDep`):
+   {name, ns, type, id}."
   [production-map fq-dep-name]
   (let [{p-ns-name :ns-name :keys [rhs]} (get production-map fq-dep-name)
         base
@@ -219,7 +221,8 @@
 
 (defn serialize-condition
   "Serializes a single condition, including pretty-printing its constraints and
-   args and converting its `:type` (raw fact type) into a TypeReference.
+   args and converting its `:type` (raw fact type) into a
+   `clara.server.graph.api/TypeReference`.
    `prod-ns` is the production's namespace, used to resolve symbol types;
    `known-set` is the analysis's serialized fact-type names.
 
@@ -246,7 +249,7 @@
   "Serializes the LHS of a rule.  Condition `:type` values are raw fact types
    here — callers must apply `prune-fns` to the RESULT (not beforehand) so the
    types are still Classes/keywords when `serialize-condition` converts them
-   to TypeReferences.
+   to `clara.server.graph.api/TypeReference` maps.
 
    Form printing is controlled by the dynamic var `*form-printer*`."
   [lhs prod-ns known-set]
@@ -292,6 +295,49 @@
   [rhs-form]
   (*form-printer* rhs-form))
 
+(defn- chain-entry
+  "Builds one `provenance-chain` entry from a raw var symbol."
+  [label var-sym]
+  {:label label :sym (str var-sym)})
+
+(defn- provenance-chain
+  "Composes the display-ready provenance chain for a traced callsite `:via`.
+
+   `rule-name` is the production's own fq name (already a string); the rule is
+   always the chain head.  The analyzer's `:via` paths supply the rest:
+
+     rule-to-boundary-path        [rule … boundary-in-var]
+     boundary-var-name-sym        clara.rules/insert!
+     boundary-to-constructor-path [boundary-in-var … constructor]
+
+   Both paths are inclusive of the shared `boundary-in-var`, so each path's
+   head is skipped: the rule head is replaced by the synthesized `rule-name`
+   (the rule-side path is absent when the boundary call sits in the rule's own
+   RHS), and the ctor-path head is `boundary-in-var`, already emitted as the
+   rule-side tail.
+
+   Returns nil for non-traced `:via` (heuristic `:record-ctor-scan` entries
+   carry no `:boundary-in-var`), so those callsites emit no chain."
+  [rule-name {:keys [boundary-var-name-sym
+                     rule-to-boundary-path
+                     boundary-to-constructor-path] :as via}]
+  (when (:boundary-in-var via)
+    (let [rule-hops (mapv :var-name-sym (rest (or rule-to-boundary-path [])))
+          ctor-hops (rest (or boundary-to-constructor-path []))
+          ctor-count (count ctor-hops)]
+      (cond-> [(chain-entry :rule rule-name)]
+        (seq rule-hops)
+        (into (map (partial chain-entry :caller)) rule-hops)
+
+        boundary-var-name-sym
+        (conj (chain-entry :boundary boundary-var-name-sym))
+
+        (seq ctor-hops)
+        (into (map-indexed (fn [i {:keys [var-name-sym]}]
+                             (chain-entry (if (= i (dec ctor-count)) :constructor :caller)
+                                          var-name-sym)))
+              ctor-hops)))))
+
 (defn serialize-dynamic-callsite
   "Serializes a dynamic callsite entry for JSON output.
    - :ns-name-sym → :ns (string).
@@ -299,9 +345,12 @@
    - :fact-type (var-alias context) serializes like resolved-types tokens;
      :fact-type-spec map values are stringified (e.g. {:aliases-var my.ns/f}
      encodes as {\"aliases-var\": \"my.ns/f\"}).
-   prod-ns is the production's namespace and known-set the analysis's
-   serialized fact-type names, used to resolve and flag types."
-  [callsite prod-ns known-set]
+   - :provenance-chain is composed from `rule-name` + the raw :via (see
+     `provenance-chain`).
+   `rule-name` is the production's fq name — the chain's rule head; prod-ns is
+   the production's namespace and known-set the analysis's serialized
+   fact-type names, used to resolve and flag types."
+  [callsite prod-ns known-set rule-name]
   (cond-> callsite
       ;; rename :ns-name-sym → :ns, convert symbol → string
     true (set/rename-keys {:ns-name-sym :ns})
@@ -348,17 +397,25 @@
 
                        (:rule-to-boundary-path via)
                        (update :rule-to-boundary-path stringify-path)))))
+
+    ;; Compose the display-ready chain from the RAW :via (symbols), before the
+    ;; stringify above — the rule-name head is the one piece the analyzer's
+    ;; :via omits when the boundary call sits in the rule's own RHS.
+    (:via callsite)
+    (assoc :provenance-chain (provenance-chain rule-name (:via callsite)))
     true utils/remove-nil-vals))
 
 (defn serialize-dynamic-detection
   "Serializes a dynamic detection info map (:dynamic-insert-types-detected or
    :dynamic-retract-types-detected) for JSON output.
-   prod-ns is the production's namespace and known-set the analysis's
-   serialized fact-type names, used to resolve type tokens."
-  [detection prod-ns known-set]
+   `rule-name` is the production's fq name, passed through to compose each
+   callsite's :provenance-chain; prod-ns is the production's namespace and
+   known-set the analysis's serialized fact-type names, used to resolve type
+   tokens."
+  [detection prod-ns known-set rule-name]
   (cond-> detection
     (:callsites detection)
-    (update :callsites (fn [callsites] (mapv #(serialize-dynamic-callsite % prod-ns known-set) callsites)))
+    (update :callsites (fn [callsites] (mapv #(serialize-dynamic-callsite % prod-ns known-set rule-name) callsites)))
 
     (:fact-instance-derived-types detection)
     (update :fact-instance-derived-types

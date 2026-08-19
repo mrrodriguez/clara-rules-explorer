@@ -36,10 +36,11 @@
    :working-memory-available s/Bool})
 
 (s/defschema TypeReference
-  "A linkable fact-type reference: `name` is the kind-explicit serialized
-   type string (display), `id` the deterministic route id (linkage), and
-   `known` distinguishes types linkable in this rulebase (`true`) from
-   hierarchy ghosts that render as plain text."
+  "A fact-type reference: `name` is the kind-explicit serialized type string,
+   `id` the deterministic route id, and `known` marks whether the type
+   appears in the analysis fact-types map (`true`) or is a hierarchy ghost
+   that is only present as an ancestor/descendant of a referenced type
+   (`false`)."
   {:name s/Str
    :id s/Str
    :known s/Bool})
@@ -67,9 +68,8 @@
 
 (s/defschema LhsCondition
   "A serialized LHS condition from the Clara Rete network.
-   Known keys mirror the frontend LhsElement type:
-   :type (a TypeReference), :constraints, :args, :accumulator, :from,
-   :result-binding, :fact-binding."
+   Known keys: :type (a `TypeReference`), :constraints, :args, :accumulator,
+   :from, :result-binding, :fact-binding."
   {(s/optional-key :type) TypeReference
    (s/optional-key :constraints) s/Str
    (s/optional-key :args) s/Str
@@ -98,6 +98,13 @@
    (s/optional-key :rule-to-boundary-path) [ViaEntry]
    (s/optional-key :source) s/Keyword})
 
+(s/defschema ProvenanceChainEntry
+  "One entry in a callsite's `:provenance-chain` — the display-ready chain the
+   server composes from the raw `:via` (see `serialize/provenance-chain`).
+   `:label` marks the hop's role; `:sym` is the fully-qualified var name."
+  {:label (s/enum :rule :caller :boundary :constructor)
+   :sym s/Str})
+
 (s/defschema DynamicCallsiteEntry
   "A single dynamic-insert/retract callsite with source coordinates
    and optional resolution info."
@@ -108,7 +115,8 @@
    (s/optional-key :resolved-types) [TypeReference]
    (s/optional-key :fact-type) TypeReference
    (s/optional-key :constructor-sym) s/Str
-   (s/optional-key :via) ViaChain})
+   (s/optional-key :via) ViaChain
+   (s/optional-key :provenance-chain) [ProvenanceChainEntry]})
 
 (s/defschema DynamicDetectionInfo
   "Info about dynamic insert/retract callsites detected by the analyzer."
@@ -176,10 +184,11 @@
 
 (s/defschema FactTypeDetail
   "Full fact-type summary (detail endpoint) — the list shape plus the
-   hierarchy-ordered `:ancestors` (TypeReferences; `known: false` ghosts
-   render as plain text, never links)."
+   hierarchy-ordered `:ancestors` and `:descendants` (`TypeReference` entries;
+   `known: false` ghosts are not part of the rulebase's fact-types map)."
   (merge FactTypeListItem
-         {:ancestors [TypeReference]}))
+         {:ancestors [TypeReference]
+          :descendants [TypeReference]}))
 
 (s/defschema SessionFactTypeItem
   "A fact-type entry in the session fact-types summary."
@@ -232,8 +241,8 @@
 
 ;; Internal atom shape
 (s/defschema AnnotationsMap
-  "Either a MergedAnnotations value (keyword keys, mixed value types) or
-   a bare rule→annotation map (string keys, all values are maps)."
+  "Either a `ann.merge/MergedAnnotations` value (keyword keys, mixed value
+   types) or a bare rule→annotation map (string keys, all values are maps)."
   (s/pred (fn [m]
             (and (map? m)
                  (or (ann.merge/merged-annotations? m)

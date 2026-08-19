@@ -2,13 +2,12 @@
 	import type { ProductionReference } from '$lib/types/api';
 	import RulebaseComponentTypeBadge from '$lib/components/rulebase/RulebaseComponentTypeBadge.svelte';
 	import ReferenceListItem from '$lib/components/rulebase/nav/ReferenceListItem.svelte';
-	import FactTypeReferenceLink from '$lib/components/rulebase/FactTypeReferenceLink.svelte';
+	import FactTypeInlineLink from '$lib/components/rulebase/FactTypeInlineLink.svelte';
+	import OpenReferenceLink from '$lib/components/rulebase/nav/OpenReferenceLink.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Popover from '$lib/components/ui/Popover.svelte';
 	import { tooltip } from '$lib/actions/tooltip';
-	import { getShortName, rulePath, queryPath } from '$lib/utils';
-	import { resolve } from '$app/paths';
-	import type { Pathname } from '$app/types';
+	import { rulePath, queryPath } from '$lib/utils';
 
 	interface Props {
 		ref: ProductionReference;
@@ -19,9 +18,7 @@
 	let { ref, fullView = false, active = false }: Props = $props();
 
 	const path = $derived(
-		resolve(
-			(ref.type === 'rule' ? rulePath(ref.id, fullView) : queryPath(ref.id, fullView)) as Pathname
-		)
+		ref.type === 'rule' ? rulePath(ref.id, fullView) : queryPath(ref.id, fullView)
 	);
 
 	const activeColor = $derived(ref.type === 'rule' ? '#0d6efd' : '#198754');
@@ -59,34 +56,41 @@
 						>
 					</div>
 					{#each matches as m (m['producer-type'].name + '>' + m['consumer-type'].name)}
-						<div class="d-flex flex-column gap-1 border-start ps-2 pb-1">
-							<FactTypeReferenceLink type={m['producer-type']} compact />
-							<div class="d-flex align-items-center gap-1 text-muted small">
-								<i class="bi bi-arrow-down"></i>
-								<span class="text-uppercase fw-bold satisfies-label">satisfies</span>
-								{#if m.via === 'retract'}
-									<Badge variant="secondary" size="sm">retract</Badge>
-								{/if}
+						{#if m['producer-type'].id === m['consumer-type'].id}
+							<div class="d-flex flex-column gap-1 border-start ps-2 pb-1">
+								<FactTypeInlineLink type={m['producer-type']} />
 							</div>
-							<FactTypeReferenceLink type={m['consumer-type']} compact />
-						</div>
+						{:else}
+							<div class="d-flex flex-column gap-1 border-start ps-2 pb-1">
+								<FactTypeInlineLink type={m['producer-type']} />
+								<div class="d-flex align-items-center gap-1 text-muted small">
+									<i class="bi bi-arrow-down"></i>
+									<span class="text-uppercase fw-bold satisfies-label">satisfies</span>
+									{#if m.via === 'retract'}
+										<Badge variant="secondary" size="sm">retract</Badge>
+									{/if}
+								</div>
+								<FactTypeInlineLink type={m['consumer-type']} />
+							</div>
+						{/if}
 					{/each}
 				</div>
 			{/snippet}
 		</Popover>
 	{/if}
 
-	<a
-		href={path}
-		class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 d-flex align-items-center"
-		use:tooltip={`Open ${getShortName(ref.name)}`}
-		aria-label="Open {ref.name}"
-	>
-		<i class="bi bi-box-arrow-up-right"></i>
-	</a>
+	<OpenReferenceLink {path} name={ref.name} />
 {/snippet}
 
-<ReferenceListItem title={ref.name} fullName={ref.name} {activeColor} {badge} {actions} {active} />
+<ReferenceListItem
+	title={ref.name}
+	fullName={ref.name}
+	{activeColor}
+	{badge}
+	{actions}
+	{active}
+	copyable
+/>
 
 <style>
 	.satisfies-label {

@@ -178,6 +178,16 @@
 						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
 						"known": true
 					}
+				],
+				"provenance-chain": [
+					{
+						"label": "rule",
+						"sym": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
+					},
+					{
+						"label": "boundary",
+						"sym": "clara.rules/insert!"
+					}
 				]
 			}
 		],

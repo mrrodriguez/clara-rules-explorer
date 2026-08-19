@@ -265,8 +265,9 @@
           names))
 
 (defn- explanations->fact-match-data
-  "`[{:fact SessionFact :bindings [binding-map …]}]` — one entry per matched
-   fact, carrying every distinct binding set it matched under.  A fact that
+  "`[{:fact clara.server.graph.api/SessionFact :bindings [binding-map …]}]` —
+   one entry per matched fact, carrying every distinct binding set it matched
+   under.  A fact that
    satisfies several conditions of one activation (duplicate pairs) or several
    activations (distinct bindings) appears once; ids the fact table cannot
    describe are dropped, matching `:inserted-facts`.
@@ -353,7 +354,8 @@
   facts in the memory and information about rule/query matches for those facts.
 
   Two-arity takes the rulebase-analysis's serialized fact-type names (`known-set`);
-  session TypeReference `known` flags are honest membership checks against it
+  session `clara.server.graph.api/TypeReference` `known` flags are honest
+  membership checks against it
   (runtime-derived types absent from the analysis are marked unknown).  The
   one-arity defaults to no known types."
   ([session]

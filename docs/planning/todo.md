@@ -1,1 +1,1 @@
-1. hierarchy shows ancestors in UI, but no descendants which is also useful.
+3. DONE why do clojure.lang and java.util types of ancestors/fact types get classified as "no namespace"?

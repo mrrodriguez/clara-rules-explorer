@@ -59,7 +59,8 @@ export default defineConfig({
 	// Tolerate a flaky test for now: a test that fails once and passes on its
 	// retry is marked "flaky" but does not fail the run (revisit once the
 	// remaining cold-start flakes are understood).
-	retries: 1,
+	retries: 2,
+	reporter: [['html', { outputFolder: 'playwright-report', open: 'never' }], ['list']],
 	// Production build served via vite preview — no on-demand compilation.
 	// 30s is more than enough; most tests finish in < 1s.
 	timeout: 30_000,

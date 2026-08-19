@@ -1028,10 +1028,10 @@
   (:annotations (merge-memory-derived-insert-types* annotations session)))
 
 (defn ->memory-layer
-  "Builds a working-memory annotation Layer from `enriched` (the result of
-  merging memory-derived insert types into `base`): the delta of what the
-  merge added over `base`, wrapped as a validated Layer with id
-  `:clara.tools.graph.analyze/memory`.
+  "Builds a working-memory annotation `ann.merge/Layer` from `enriched` (the
+   result of merging memory-derived insert types into `base`): the delta of
+   what the merge added over `base`, wrapped as a validated `ann.merge/Layer`
+   with id `:clara.tools.graph.analyze/memory`.
 
   Returns nil when the session contributed nothing new — the honest result
   for an unfired session, rather than a layer restating the base."

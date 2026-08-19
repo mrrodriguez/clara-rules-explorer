@@ -30,18 +30,18 @@ The session and merged annotations are held in atoms so the host application can
 ;; always included first; additional layers overlay it.
 (def s (server/start! {:session my-session
                        :port    9999
-                       :layers  ["/etc/clara/curated-annotations.edn"]}))
+                       :annotations ["/etc/clara/curated-annotations.edn"]}))
 
 ;; Rulebase-only analysis (no working-memory routes): pass a raw rulebase
 ;; and the session endpoints return 409 with reason :rulebase-input.
 (def s2 (server/start! {:session my-rulebase
                         :port    9999
-                        :layers  ["/etc/clara/curated-annotations.edn"]}))
+                        :annotations ["/etc/clara/curated-annotations.edn"]}))
 
 ;; Explicitly disable working-memory routes on a live session:
 (def s3 (server/start! {:session                   my-session
                         :port                      9999
-                        :layers                    ["/etc/clara/curated-annotations.edn"]
+                        :annotations               ["/etc/clara/curated-annotations.edn"]
                         :working-memory-enabled    false}))
 (server/stop!)  ;; when done
 ```
@@ -52,10 +52,24 @@ The session and merged annotations are held in atoms so the host application can
 |-----|------|---------|-------------|
 | `:session` | session or rulebase | _required_ | Clara session (working memory enabled) or raw Rete rulebase (working memory disabled; session routes return 409 `:rulebase-input`) |
 | `:port` | int | `9999` | HTTP listen port |
-| `:layers` | vector | `[]` | Ordered annotation layers (paths or in-memory maps), folded lowest precedence first |
+| `:annotations` | annotations spec or legacy form | `nil` | Annotation source + enrichment (an `AnnotationsSpec` map, or a legacy vector-of-layers / path string / bare map / `MergedAnnotations`) |
 | `:working-memory-enabled` | boolean | `true` | When `false`, all `/v1/session/*` and `/v1/memory-analysis` routes return 409 `:disabled-by-config` regardless of session type |
 
 **CLI flag:** `--working-memory-enabled BOOL` (passed through `run-explorer-server` → `start!`).
+
+The `:annotations` spec (`server/AnnotationsSpec`) carries `:source` and
+`:enrichment`, plus two optional caller-supplied resolution hooks that are
+forwarded to the generated analysis layer:
+
+- `:fact-constructors` — a vector of `{:match-fn … :type-resolver-fn …}` specs
+  declaring caller-defined constructors of interest.
+- `:callsite-resolver-fn` — the boundary-callsite escape hatch fn.
+
+Both hooks only take effect when the *generated* analysis layer actually runs: a
+pre-generated sidecar layer carrying `:id :clara.tools.graph.analyze/generated`
+suppresses live generation (the explicit source wins). See the
+[Rule Annotations Documentation](../server/docs/rule-annotations.md) for their
+semantics.
 
 ---
 
@@ -94,7 +108,7 @@ Anywhere the API emits a fact type that the UI may hyperlink, the value is a
 | `id` | string | Deterministic route id (linkage) |
 | `known` | boolean | `true` iff the type appears in the analysis `fact-types` map; `false` marks hierarchy ghosts, which render as plain text (their ids are not a supported linking surface) |
 
-`TypeReference` is used for: fact-type `:ancestors` entries, rule/query
+`TypeReference` is used for: fact-type `:ancestors` / `:descendants` entries, rule/query
 `:lhs-types` / `:insert-types` / `:retract-types`, LHS condition `:type`,
 dynamic-callsite `:resolved-types` / `:fact-type`, session fact `:type`, and
 the `:match` pairs below.  `known` is always `true` for the
@@ -279,6 +293,26 @@ List of all rules with lightweight summaries (load order).  Omits
 `dynamic-retract-types-detected`): each carries `:callsites` and a
 `:resolution`; callsite `:resolved-types` / `:fact-type` are TypeReferences.
 
+Each callsite also carries a `provenance-chain` — a flat, display-ready array
+composed server-side from the raw `via` (see `serialize/provenance-chain`).
+The rule heads the chain, followed by the rule→boundary callers, the boundary
+fn, then the constructor-side callers, then the constructor:
+
+```json
+[
+  { "label": "rule",        "sym": "my.ns/cold-rule" },
+  { "label": "boundary",    "sym": "clara.rules/insert!" },
+  { "label": "constructor", "sym": "my.ns/->Cold" }
+]
+```
+
+- `label` ∈ `rule | caller | boundary | constructor`.
+- `sym` is the fully-qualified var name.
+- Heuristic `record-ctor-scan` callsites carry **no** chain (their `via` keeps
+  `{ "source": "record-ctor-scan" }`).
+- The raw `via` object is also retained on every callsite for consumers that
+  need the uncomposed analyzer form.
+
 ---
 
 #### `GET /v1/rules/:id`
@@ -415,14 +449,14 @@ List of all fact types referenced by rules and queries.
 | `inserted-by-rules` | ProductionDep[] | Rules that insert this type |
 | `retracted-by-rules` | ProductionDep[] | Rules that retract this type |
 
-`:ancestors` is detail-only — the list endpoint omits it.
+`:ancestors` and `:descendants` are detail-only — the list endpoint omits them.
 
 ---
 
 #### `GET /v1/fact-types/:id`
 
 Full fact-type detail — the list shape plus the hierarchy-ordered
-`:ancestors`.
+`:ancestors` and `:descendants`.
 
 **Response** `200`:
 ```json
@@ -437,6 +471,9 @@ Full fact-type detail — the list shape plus the hierarchy-ordered
   "ancestors": [
     { "name": "my.ns.IScanMarker", "id": "my.ns.IScanMarker-b2c4d6e8", "known": true },
     { "name": "java.lang.Object", "id": "java.lang.Object-f4g6h8j1", "known": false }
+  ],
+  "descendants": [
+    { "name": "my.ns.MarkerRecord", "id": "my.ns.MarkerRecord-a1b2c3d4", "known": true }
   ]
 }
 ```
@@ -444,6 +481,7 @@ Full fact-type detail — the list shape plus the hierarchy-ordered
 | Key | Type | Description |
 |-----|------|-------------|
 | `ancestors` | TypeReference[] | Ancestor types in deterministic hierarchy order — descendants before their own ancestors, ties broken lexicographically (see `core/hierarchy-order`). `known: true` entries link via their id; `known: false` ghosts render as plain text |
+| `descendants` | TypeReference[] | Descendant types (types that list this type among their ancestors) in deterministic hierarchy order — direct descendants first, then their descendants, ties broken lexicographically. `known: false` ghosts are not part of the rulebase's fact-types map |
 
 `known` is the primary noise filter: Clara's default ancestors-fn
 (`clojure.core/ancestors`) gives every record type a long tail of JDK/CLJ
