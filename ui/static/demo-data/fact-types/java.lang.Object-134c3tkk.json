@@ -7,7 +7,7 @@
 			"type": "rule"
 		}
 	],
-	"ns": null,
+	"ns": "java.lang",
 	"name": "java.lang.Object",
 	"used-by-queries": [],
 	"used-by-rules": [],

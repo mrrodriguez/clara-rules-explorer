@@ -7,7 +7,7 @@
 			"type": "rule"
 		}
 	],
-	"ns": null,
+	"ns": "java.util",
 	"name": "java.util.Map",
 	"used-by-queries": [],
 	"used-by-rules": [],

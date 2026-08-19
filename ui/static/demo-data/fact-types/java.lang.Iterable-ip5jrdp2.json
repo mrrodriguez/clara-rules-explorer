@@ -7,11 +7,16 @@
 			"type": "rule"
 		}
 	],
-	"ns": null,
+	"ns": "java.lang",
 	"name": "java.lang.Iterable",
 	"used-by-queries": [],
 	"used-by-rules": [],
 	"descendants": [
+		{
+			"name": "clojure.lang.IPersistentMap",
+			"id": "clojure.lang.IPersistentMap-l9zfvder",
+			"known": false
+		},
 		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
 			"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",

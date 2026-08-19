@@ -7,7 +7,7 @@
 			"type": "rule"
 		}
 	],
-	"ns": null,
+	"ns": "clojure.lang",
 	"name": "clojure.lang.IKeywordLookup",
 	"used-by-queries": [],
 	"used-by-rules": [],

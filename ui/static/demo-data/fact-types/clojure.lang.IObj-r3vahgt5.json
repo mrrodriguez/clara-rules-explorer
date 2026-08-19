@@ -7,7 +7,7 @@
 			"type": "rule"
 		}
 	],
-	"ns": null,
+	"ns": "clojure.lang",
 	"name": "clojure.lang.IObj",
 	"used-by-queries": [],
 	"used-by-rules": [],
@@ -83,7 +83,13 @@
 			"known": true
 		}
 	],
-	"ancestors": [],
+	"ancestors": [
+		{
+			"name": "clojure.lang.IMeta",
+			"id": "clojure.lang.IMeta-gyperjpp",
+			"known": false
+		}
+	],
 	"id": "clojure.lang.IObj-r3vahgt5",
 	"inserted-by-rules": [
 		{

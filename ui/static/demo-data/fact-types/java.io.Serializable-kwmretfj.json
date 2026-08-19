@@ -7,7 +7,7 @@
 			"type": "rule"
 		}
 	],
-	"ns": null,
+	"ns": "java.io",
 	"name": "java.io.Serializable",
 	"used-by-queries": [],
 	"used-by-rules": [],

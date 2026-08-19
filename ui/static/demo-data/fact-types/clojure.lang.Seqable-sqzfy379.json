@@ -7,11 +7,26 @@
 			"type": "rule"
 		}
 	],
-	"ns": null,
+	"ns": "clojure.lang",
 	"name": "clojure.lang.Seqable",
 	"used-by-queries": [],
 	"used-by-rules": [],
 	"descendants": [
+		{
+			"name": "clojure.lang.IPersistentCollection",
+			"id": "clojure.lang.IPersistentCollection-iftobj0a",
+			"known": false
+		},
+		{
+			"name": "clojure.lang.Associative",
+			"id": "clojure.lang.Associative-2y6rdpfd",
+			"known": false
+		},
+		{
+			"name": "clojure.lang.IPersistentMap",
+			"id": "clojure.lang.IPersistentMap-l9zfvder",
+			"known": false
+		},
 		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
 			"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
