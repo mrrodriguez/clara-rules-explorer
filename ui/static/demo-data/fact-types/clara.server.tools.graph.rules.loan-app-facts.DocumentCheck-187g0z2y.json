@@ -1,6 +1,15 @@
 {
+	"retracted-by-rules": [],
+	"ns": "clara.server.tools.graph.rules.loan_app_facts",
 	"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
-	"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+	"used-by-queries": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/find-document-check",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-find-document--czo18bjs",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "query"
+		}
+	],
 	"used-by-rules": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review",
@@ -45,24 +54,7 @@
 			"type": "rule"
 		}
 	],
-	"used-by-queries": [
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/find-document-check",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-find-document--czo18bjs",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "query"
-		}
-	],
-	"inserted-by-rules": [
-		{
-			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
-			"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
-			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
-			"type": "rule"
-		}
-	],
-	"retracted-by-rules": [],
-	"ns": "clara.server.tools.graph.rules.loan_app_facts",
+	"descendants": [],
 	"ancestors": [
 		{
 			"name": "clojure.lang.IHashEq",
@@ -138,6 +130,15 @@
 			"name": "java.util.Map",
 			"id": "java.util.Map-isuqcqje",
 			"known": false
+		}
+	],
+	"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+	"inserted-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
 		}
 	]
 }

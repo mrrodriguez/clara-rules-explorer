@@ -47,6 +47,16 @@
 						"id": "clara.server.tools.graph.rules.loan-doc-rules.StaleDocumentN-ruqre9or",
 						"known": true
 					}
+				],
+				"provenance-chain": [
+					{
+						"label": "rule",
+						"sym": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
+					},
+					{
+						"label": "boundary",
+						"sym": "clara.rules/retract!"
+					}
 				]
 			}
 		],

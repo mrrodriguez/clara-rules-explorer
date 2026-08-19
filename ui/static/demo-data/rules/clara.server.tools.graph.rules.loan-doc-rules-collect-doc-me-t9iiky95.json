@@ -16,6 +16,16 @@
 						"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-9kes1f1s",
 						"known": true
 					}
+				],
+				"provenance-chain": [
+					{
+						"label": "rule",
+						"sym": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta"
+					},
+					{
+						"label": "boundary",
+						"sym": "clara.rules/insert!"
+					}
 				]
 			}
 		],

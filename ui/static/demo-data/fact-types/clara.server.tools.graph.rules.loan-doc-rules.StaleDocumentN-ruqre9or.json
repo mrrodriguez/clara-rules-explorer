@@ -1,9 +1,4 @@
 {
-	"name": "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice",
-	"id": "clara.server.tools.graph.rules.loan-doc-rules.StaleDocumentN-ruqre9or",
-	"used-by-rules": [],
-	"used-by-queries": [],
-	"inserted-by-rules": [],
 	"retracted-by-rules": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice",
@@ -13,6 +8,10 @@
 		}
 	],
 	"ns": "clara.server.tools.graph.rules.loan_doc_rules",
+	"name": "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice",
+	"used-by-queries": [],
+	"used-by-rules": [],
+	"descendants": [],
 	"ancestors": [
 		{
 			"name": "clojure.lang.IHashEq",
@@ -89,5 +88,7 @@
 			"id": "java.util.Map-isuqcqje",
 			"known": false
 		}
-	]
+	],
+	"id": "clara.server.tools.graph.rules.loan-doc-rules.StaleDocumentN-ruqre9or",
+	"inserted-by-rules": []
 }
