@@ -41,8 +41,10 @@
 <style>
 	.copyable-title {
 		cursor: pointer;
-		width: fit-content;
+		flex: 1 1 0;
+		min-width: 0;
 		max-width: 100%;
+		overflow: hidden;
 	}
 	.copyable-title:hover {
 		opacity: 0.85;

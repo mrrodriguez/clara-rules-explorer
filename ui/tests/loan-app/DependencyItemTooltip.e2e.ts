@@ -23,7 +23,9 @@ test.describe('Dependency item buttons — tooltips', () => {
 
 		// Info button tooltip names the match count.
 		const infoBtn = firstItem.locator('button[aria-label="Show type matches"]');
-		await infoBtn.hover();
+		await infoBtn.waitFor({ state: 'visible' });
+		await infoBtn.scrollIntoViewIfNeeded();
+		await infoBtn.hover({ force: true });
 		const infoTip = page.locator('.truncation-tooltip');
 		await expect(infoTip).toBeVisible();
 		await expect(infoTip).toHaveText(/Show type matches \(\d+\)/);
@@ -34,7 +36,9 @@ test.describe('Dependency item buttons — tooltips', () => {
 
 		// Jump button tooltip names the production (short name).
 		const jumpBtn = firstItem.locator('a[aria-label^="Open "]');
-		await jumpBtn.hover();
+		await jumpBtn.waitFor({ state: 'visible' });
+		await jumpBtn.scrollIntoViewIfNeeded();
+		await jumpBtn.hover({ force: true });
 		await expect(infoTip).toBeVisible();
 		await expect(infoTip).toHaveText(/^Open .+$/);
 		// The tooltip shows a short name, not a full qualified path.
