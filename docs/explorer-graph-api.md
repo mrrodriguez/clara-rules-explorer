@@ -30,18 +30,18 @@ The session and merged annotations are held in atoms so the host application can
 ;; always included first; additional layers overlay it.
 (def s (server/start! {:session my-session
                        :port    9999
-                       :layers  ["/etc/clara/curated-annotations.edn"]}))
+                       :annotations ["/etc/clara/curated-annotations.edn"]}))
 
 ;; Rulebase-only analysis (no working-memory routes): pass a raw rulebase
 ;; and the session endpoints return 409 with reason :rulebase-input.
 (def s2 (server/start! {:session my-rulebase
                         :port    9999
-                        :layers  ["/etc/clara/curated-annotations.edn"]}))
+                        :annotations ["/etc/clara/curated-annotations.edn"]}))
 
 ;; Explicitly disable working-memory routes on a live session:
 (def s3 (server/start! {:session                   my-session
                         :port                      9999
-                        :layers                    ["/etc/clara/curated-annotations.edn"]
+                        :annotations               ["/etc/clara/curated-annotations.edn"]
                         :working-memory-enabled    false}))
 (server/stop!)  ;; when done
 ```
@@ -52,10 +52,24 @@ The session and merged annotations are held in atoms so the host application can
 |-----|------|---------|-------------|
 | `:session` | session or rulebase | _required_ | Clara session (working memory enabled) or raw Rete rulebase (working memory disabled; session routes return 409 `:rulebase-input`) |
 | `:port` | int | `9999` | HTTP listen port |
-| `:layers` | vector | `[]` | Ordered annotation layers (paths or in-memory maps), folded lowest precedence first |
+| `:annotations` | annotations spec or legacy form | `nil` | Annotation source + enrichment (an `AnnotationsSpec` map, or a legacy vector-of-layers / path string / bare map / `MergedAnnotations`) |
 | `:working-memory-enabled` | boolean | `true` | When `false`, all `/v1/session/*` and `/v1/memory-analysis` routes return 409 `:disabled-by-config` regardless of session type |
 
 **CLI flag:** `--working-memory-enabled BOOL` (passed through `run-explorer-server` → `start!`).
+
+The `:annotations` spec (`server/AnnotationsSpec`) carries `:source` and
+`:enrichment`, plus two optional caller-supplied resolution hooks that are
+forwarded to the generated analysis layer:
+
+- `:fact-constructors` — a vector of `{:match-fn … :type-resolver-fn …}` specs
+  declaring caller-defined constructors of interest.
+- `:callsite-resolver-fn` — the boundary-callsite escape hatch fn.
+
+Both hooks only take effect when the *generated* analysis layer actually runs: a
+pre-generated sidecar layer carrying `:id :clara.tools.graph.analyze/generated`
+suppresses live generation (the explicit source wins). See the
+[Rule Annotations Documentation](../server/docs/rule-annotations.md) for their
+semantics.
 
 ---
 

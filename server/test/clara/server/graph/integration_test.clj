@@ -94,6 +94,20 @@
   (some-> (io/resource "clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn")
           .getPath))
 
+(def ^:private compliance-metadata-constructor-sym
+  "Fully-qualified symbol of the opaque with-meta builder called by
+   loan-doc-rules/dynamic-insert-compliance-metadata."
+  'clara.server.tools.graph.rules.loan-doc-rules/build-compliance-via-metadata)
+
+(defn- compliance-metadata-fact-constructor
+  "A `:fact-constructors` spec resolving `build-compliance-via-metadata` to its
+   fact type `:compliance-review-result`.  The type is hardcoded in the
+   builder's body (`(with-meta … {:type :compliance-review-result})`), not
+   derivable from its call form, so the resolver returns it directly."
+  []
+  {:match-fn (fn [sym] (= compliance-metadata-constructor-sym sym))
+   :type-resolver-fn (fn [_] {:resolved-types [:compliance-review-result]})})
+
 (defn start-server!
   "Starts an integration server on `*port*` with the session built by
    `session-fn` and returns it (keeps running until `server/stop!`).
@@ -109,9 +123,17 @@
      declared in rule :props).
    - :enrichment  — annotation enrichment mode, defaulting to :auto-detect so
      the in-memory session mirrors `make demo-run` (working-memory fact types
-     surface as dynamic insert-types).  Pass :none to skip memory enrichment."
+     surface as dynamic insert-types).  Pass :none to skip memory enrichment.
+   - :fact-constructors — optional vector of `analyze/FactConstructorSpec` maps
+     forwarded to the generated analysis layer (see `compliance-metadata-fact-constructor`
+     in the rich comment).  Only effective when live generation runs: the default
+     loan-doc sidecar carries :id :clara.tools.graph.analyze/generated, which
+     suppresses live generation, so pair this with `:layers []`.
+   - :callsite-resolver-fn — optional boundary-callsite escape-hatch fn,
+     forwarded to the generated analysis layer (same :layers caveat)."
   [& [opts]]
-  (let [{:keys [session-fn session-opts layers enrichment]
+  (let [{:keys [session-fn session-opts layers enrichment
+                fact-constructors callsite-resolver-fn]
          :or {session-fn run-loan-app-rules
               session-opts {:with-facts? true}
               layers [loan-doc-annotations-path]
@@ -119,7 +141,9 @@
     (server/start! {:port *port*
                     :session (session-fn session-opts)
                     :annotations (cond-> {:source (vec layers)}
-                                   (some? enrichment) (assoc :enrichment enrichment))})))
+                                   (some? enrichment) (assoc :enrichment enrichment)
+                                   (seq fact-constructors) (assoc :fact-constructors fact-constructors)
+                                   callsite-resolver-fn (assoc :callsite-resolver-fn callsite-resolver-fn))})))
 
 (defn with-server
   "Runs `f` with a server up (see `start-server!` for the session options),
@@ -273,6 +297,19 @@
               inserted-by (set (map #(get % "name") (get audit "inserted-by-rules")))]
           (is (contains? inserted-by "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail")
               "the AuditTrail fact type lists dynamic-insert-audit-trail as an inserter"))))))
+
+(deftest test-loan-doc-fact-constructor-resolution
+  (with-server
+    (fn []
+      (testing "A caller-supplied :fact-constructors spec resolves a dynamic insert! callsite"
+        (let [rule (get-rule "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata")
+              insert-names (set (map #(get % "name") (get rule "insert-types")))
+              dyn (get rule "dynamic-insert-types-detected")]
+          (is (contains? insert-names ":compliance-review-result")
+              "build-compliance-via-metadata resolves to :compliance-review-result")
+          (is (= "full" (get dyn "resolution"))
+              "the callsite resolution is :full once the constructor is declared"))))
+    {:layers [] :fact-constructors [(compliance-metadata-fact-constructor)]}))
 
 (deftest test-loan-doc-session-state-endpoints
   (with-server
@@ -476,6 +513,29 @@
   (get-fact-types)
   (get-memory-analysis)
 
+  ;; Resolve a dynamic insert! callsite with a caller-supplied fact constructor.
+  ;; dynamic-insert-compliance-metadata's RHS inserts
+  ;; (build-compliance-via-metadata ?app-id) — an opaque with-meta builder the
+  ;; static chain cannot type, so by default its insert-types is empty and its
+  ;; callsite is :none:
+  (start-server! {:session-opts {:with-facts? false} :layers []})
+  (get-rule "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata")
+  ;; => insert-types [] and dynamic-insert-types-detected resolution :none.
+
+  ;; Passing a :fact-constructors spec (optional) resolves the builder to
+  ;; :compliance-review-result — start-server! forwards it to the analyzer.
+  ;; NOTE: the default loan-doc sidecar carries :id
+  ;; :clara.tools.graph.analyze/generated, which suppresses live generation —
+  ;; hence :layers [] here (see start-server!'s docstring).
+  (start-server! {:session-opts {:with-facts? false}
+                  :layers []
+                  :fact-constructors [(compliance-metadata-fact-constructor)]})
+  (get-rule "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata")
+  ;; => insert-types [{:name ":compliance-review-result"}] and resolution :full,
+  ;;    with a :via boundary-to-constructor-path
+  ;;    dynamic-insert-compliance-metadata -> build-compliance-via-metadata.
+
+  ;; ---------------------------------------------
   ;; Flip to the loan-hierarchy-rules session (keyword hierarchy + tuples):
   (start-server! {:session-fn run-loan-hierarchy-rules :layers []})
   (get-fact-type income-document)
