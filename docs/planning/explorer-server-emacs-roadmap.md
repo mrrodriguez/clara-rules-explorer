@@ -1,6 +1,7 @@
 # Explorer Server ↔ Emacs Navigation — Roadmap
 
-Status: **Ready to start** · Plan: `docs/planning/explorer-server-emacs-plan.md`
+Status: **Phase 0 + Phase 1 implemented** (Phase 0.5 manual Emacs acceptance
+pending user verification) · Plan: `docs/planning/explorer-server-emacs-plan.md`
 (review 1 applied)
 
 This is the executable checklist for the plan. Work top to bottom; every box
@@ -18,74 +19,80 @@ verification only.
 
 ### 0.1 Server: client-API skeleton
 
-- [ ] Add `server/current-system` (public, returns `@default-system`; keep
+- [x] Add `server/get-current-system` (public, returns `@default-system`; keep
       `default-system` `^:private`) — server.clj
-- [ ] Create `server/src/clara/server/graph/client.clj`:
-  - [ ] `registered-system` atom + `register!` + `current-system`
-        (registered → `server/current-system` fallback)
-  - [ ] Prismatic schemas: `NavigateInput`, `SourceLoc`, `NavigateResult`
-        (`schema.core`, matching `server.clj` conventions)
-  - [ ] `{:error s/Str}` return contract for unknown production / no match /
+- [x] Create `server/src/clara/server/graph/client.clj`:
+  - [x] `registered-system` atom + `register!` + `get-current-system`
+        (registered → `server/get-current-system` fallback)
+  - [x] Prismatic schemas: `NavigateInput`, `SourceLoc`, `NavigateTarget`,
+        `NavigateResult` (`schema.core`, matching `server.clj` conventions)
+  - [x] `{:error s/Str}` return contract for unknown production / no match /
         no registered system
-- [ ] **Gate:** `make lint reflection-check` (`^Class` hint on `.getName`)
+- [x] **Gate:** `make lint reflection-check` (`^Class` hint on `.getName`)
 
 ### 0.2 Server: `navigate` — LHS producer path (simplest first)
 
-- [ ] Normalize `:production` fq string (mirror `ann/normalize-rule-name`)
-- [ ] Pull warmed analysis via `cache/get-rulebase-analysis`
-- [ ] Token resolution §7 steps 1–3 for `:lhs` (keyword / string / imported
+- [x] Normalize `:production` fq string (enforced by `NavigateInput`
+      `s/Str` validation; strings pass through `ann/normalize-rule-name`
+      unchanged)
+- [x] Pull warmed analysis via `cache/get-rulebase-analysis`
+- [x] Token resolution §7 steps 1–3 for `:lhs` (keyword / string / imported
       class / ctor symbol via **`analyze.ctor/resolve-record-type`** — do not
       hand-derive)
-- [ ] Filter `:upstream` `:match` pairs on `consumer-type.name == T`; attach
+- [x] Filter `:upstream` `:match` pairs on `consumer-type.name == T`; attach
       var-metadata `:source`; sort by fq name
-- [ ] **Gate:** REPL smoke test —
-      `(client/navigate {:production "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?" :side :lhs :token "Application"})`
-      returns the expected producer(s)
+- [x] **Gate:** REPL smoke test —
+      `(client/navigate {:production "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?" :side :lhs :token "DocumentCheck"})`
+      returns `app-has-all-required-docs`
 
 ### 0.3 Server: `navigate` — RHS consumer path
 
-- [ ] Anchor token against `:insert-types` ∪ `:retract-types`
-- [ ] Callsite-aware resolution (§7.4): match fq ctor symbol against the
+- [x] Anchor token against `:insert-types` ∪ `:retract-types`
+- [x] Callsite-aware resolution (§7.4): match fq ctor symbol against the
       production's serialized `:dynamic-insert-types-detected` /
       `:dynamic-retract-types-detected` `:constructor-sym` / `:fact-type`,
       read `:resolved-types`
-- [ ] Filter `:downstream` `:match` pairs on `producer-type.name == T`;
+- [x] Filter `:downstream` `:match` pairs on `producer-type.name == T`;
       propagate `:via :insert|:retract`
-- [ ] Outside-defrule global path: `{:production nil :caller-ns … :token …}`
+- [x] Outside-defrule global path: `{:production nil :caller-ns … :token …}`
       → resolve in live ns → `used-by-rules` / `used-by-queries`
-- [ ] **Gate:** REPL smoke tests on `app-outcome-approved?` (record ctor) and
-      `analyze-test-rules` `make-document-check` helper chain
+- [x] **Gate:** REPL smoke tests on `app-outcome-approved?` (record ctor),
+      `rule-retract-java-dot` (`:via :retract`), and `analyze-test-rules`
+      `make-document-check` helper chain (global path)
 
 ### 0.4 Elisp: `editor/emacs/clara-explorer.el`
 
-- [ ] File header: `Package-Requires: ((emacs "28.1") (cider "1.12")
+- [x] File header: `Package-Requires: ((emacs "28.1") (cider "1.12")
       (parseedn "1.2") (clojure-mode "5.18"))` + `featurep` runtime guards +
       self-locating `load-path` (`load-file-name`)
-- [ ] `clara-explorer--eval-edn` — sync eval via
+- [x] `clara-explorer--eval-edn` — sync eval via
       `cider-nrepl-sync-request:eval` with connection captured once via
       `(cider-current-repl 'infer 'ensure)`; form wrapped in
       `(do (require 'clara.server.graph.client) …)`; `parseedn-read-str` result
-- [ ] `clara-explorer--edn-get` alist accessor
-- [ ] Structural navigation:
-  - [ ] `--enclosing-production` — alias-prefix-agnostic (`r/defrule` is the
+- [x] `clara-explorer--edn-get` accessor (hash-table + alist — parseedn
+      20231203 returns hash-tables for maps, not alists)
+- [x] Structural navigation:
+  - [x] `--enclosing-production` — alias-prefix-agnostic (`r/defrule` is the
         common case in the demo rules)
-  - [ ] `--side-at-point` — sexp-aware depth-1 `=>` search; queries → `:lhs`
-  - [ ] `--token-at-point` — `(cider-symbol-at-point 'look-back)`
-  - [ ] `--context` — one-call gather (`:production`/`:kind`/`:side`/
+  - [x] `--side-at-point` — sexp-aware depth-1 `=>` search; queries → `:lhs`
+  - [x] `--token-at-point` — `(cider-symbol-at-point 'look-back)`
+  - [x] `--context` — one-call gather (`:production`/`:kind`/`:side`/
         `:caller-ns`/`:token`)
-- [ ] Commands `clara-explorer-navigate-producer` / `-consumer` (incl. query →
+- [x] Commands `clara-explorer-navigate-producer` / `-consumer` (incl. query →
       "queries have no RHS" early return, outside-defrule global path)
-- [ ] `clara-explorer--choose-target` (`completing-read`, `(retract)` suffix)
+- [x] `clara-explorer--choose-target` (`completing-read`, `(retract)` suffix)
       and `clara-explorer--goto` (`cider-find-var` → §9.5 regex fallback)
-- [ ] **No hard-coded paths/ports anywhere** —
+- [x] **No hard-coded paths/ports anywhere** —
       gate: `grep -R "~/Projects\|/Users/" editor/` is empty
 
 ### 0.5 Spike acceptance (manual)
 
 - [ ] REPL: `(client/register! (server/start! {:session … :port 9999}))`
 - [ ] Emacs: open `editor/emacs/clara-explorer.el`, `M-x eval-buffer`
-- [ ] Cursor on `Application` in `app-outcome-pending?` LHS →
-      `M-x clara-explorer-navigate-producer` jumps to producer(s)
+- [ ] Cursor on `DocumentCheck` in `app-outcome-approved?` LHS →
+      `M-x clara-explorer-navigate-producer` jumps to
+      `app-has-all-required-docs` (and `Application` on any LHS messages
+      "no producer" — it is a source fact type)
 - [ ] Cursor on `map->ApplicationOutcome` in `app-outcome-approved?` RHS →
       `M-x clara-explorer-navigate-consumer` shows fq-name popover / jumps
 - [ ] Multi-target case shows sorted fq names with `(retract)` suffixes
@@ -99,28 +106,28 @@ verification only.
 
 Goal: tested, refreshable, durably installable.
 
-- [ ] `server/test/clara/server/graph/client_test.clj` against
+- [x] `server/test/clara/server/graph/client_test.clj` against
       `loan-app-rules` + `analyze-test-rules`:
-  - [ ] single-target direct result; multi-target deterministic ordering;
+  - [x] single-target direct result; multi-target deterministic ordering;
         zero-target error
-  - [ ] `:via :retract` flag on retract-coupled targets
-  - [ ] alias / `:refer` / `::keyword` resolution
-  - [ ] callsite-linked ctor (`map->DocumentCheck` via `make-document-check`)
-  - [ ] outside-defrule global-consumer path (`:production nil` + `:caller-ns`)
-- [ ] **Gate:** `make test lint reflection-check`
-- [ ] `clara-explorer-refresh` → `server/reload-annotations!` (§9.9)
-- [ ] `clara-explorer-swap-session` → `server/swap-session!` (prompts for the
+  - [x] `:via :retract` flag on retract-coupled targets
+  - [x] alias / `:refer` / `::keyword` resolution
+  - [x] callsite-linked ctor (`map->DocumentCheck` via `make-document-check`)
+  - [x] outside-defrule global-consumer path (`:production nil` + `:caller-ns`)
+- [x] **Gate:** `make test lint reflection-check`
+- [x] `clara-explorer-refresh` → `server/reload-annotations!` (§9.9)
+- [x] `clara-explorer-swap-session` → `server/swap-session!` (prompts for the
       session-rebuild expr, caches last per connection; prefix arg re-prompts)
-- [ ] Manual check of the §5.2 staleness matrix:
-      re-eval a rule → nav unchanged → rebuild + swap → nav updated;
-      edit rule file w/o re-eval → refresh → nav updated
-- [ ] Optional Spacemacs layer skeleton at `editor/emacs/spacemacs-layer/`
+- [x] §5.2 staleness matrix — server-side covered by
+      `test-session-swap-reflected-in-navigation` + existing `server_test`
+      reload coverage; the full manual Emacs flow remains part of 0.5 acceptance
+- [x] Optional Spacemacs layer skeleton at `editor/emacs/spacemacs-layer/`
       (`packages.el` deps, `config.el` `clara-explorer-root` defcustom,
       `keybindings.el` `g p`/`g c`/`g r` scoped to `clojure-mode`,
       `funcs.el`)
-- [ ] README snippet: both install paths (spike `eval-buffer` / layer var),
+- [x] README snippet: both install paths (spike `eval-buffer` / layer var),
       REPL bootstrap, refresh workflow. No absolute paths in examples.
-- [ ] Update plan status to **Implemented (phase 1)**
+- [x] Update plan status to **Implemented (phase 1)**
 
 ---
 
@@ -144,6 +151,6 @@ Goal: tested, refreshable, durably installable.
 | Surface | Gate |
 | --- | --- |
 | Server change | `cd server && make test lint reflection-check` |
-| Elisp change | `M-x eval-buffer` + manual nav against demo rules |
+| Elisp change | `make check-elisp` (automated byte-compile) + `M-x eval-buffer` manual nav |
 | Portability | `grep -R "~/Projects\|/Users/" editor/` empty |
 | API contract | none — no HTTP changes allowed in this work |

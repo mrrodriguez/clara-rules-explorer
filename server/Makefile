@@ -1,4 +1,4 @@
-.PHONY: test lint clean reflection-check format format-check regen-fixture demo-setup demo-run hierarchy-run
+.PHONY: test lint clean reflection-check format format-check regen-fixture demo-setup demo-run hierarchy-run check-elisp
 
 SHELL := /bin/bash
 
@@ -40,3 +40,8 @@ clean:
 
 reflection-check:
 	./bin/ci/check-reflection.sh
+
+# Byte-compile the editor elisp against stubbed cider/parseedn APIs (catches
+# syntax errors / unknown vars / bad arities without a live Emacs session).
+check-elisp:
+	./bin/ci/check-elisp.sh

@@ -1,6 +1,7 @@
 # Explorer Server ↔ Emacs (CIDER) Navigation Plan
 
-Status: **Revised — review 1 applied** (not yet implemented)
+Status: **Implemented (phase 1)** — Phase 0 spike and Phase 1 solidified;
+Phase 0.5 manual Emacs acceptance and Phase 2 extensions remain open.
 
 Related:
 
@@ -220,7 +221,7 @@ find enclosing defrule/defquery   ──┐
 detect LHS vs RHS (sexp-aware)     │
 grab token at point                │   clara.server.graph.client/navigate
 resolve -> EVAL over nREPL ────────┼──▶   (token+side+production|caller-ns) -> EDN
-parseedn-read <- EDN               │   clara.server.graph.client/production-source
+parseedn-read <- EDN               │   clara.server.graph.client/get-production-source
 completing-read popover / jump  ◀──┘   jump: cider-find-var (var) · kondo/regex (non-var)
 M-x clara-explorer-refresh ──────────▶   server/reload-annotations! (+ swap-session!)
 ```
@@ -250,8 +251,8 @@ Malli.
 (s/defn register! :- s/Keyword
   [sys] (reset! registered-system sys) ::ok)
 
-(s/defn current-system []
-  (or @registered-system (server/current-system)))
+(s/defn get-current-system []
+  (or @registered-system (server/get-current-system)))
 ```
 
 Proposed schemas and functions:
@@ -281,10 +282,10 @@ Proposed schemas and functions:
 | Function               | Input                                 | Output                                                              |
 | ---------------------- | ------------------------------------- | ------------------------------------------------------------------- |
 | `register!`            | system map from `server/start!`       | `::ok`                                                              |
-| `current-system`       | —                                     | registered system, else `server/current-system`                     |
+| `get-current-system`       | —                                     | registered system, else `server/get-current-system`                     |
 | `navigate`             | `NavigateInput`                       | `NavigateResult` or `{:error s/Str}`                                |
-| `production-source`    | `"ns/rule"`                           | `SourceLoc`, else `nil`                                             |
-| `production-locations` | —                                     | full `{fq-name location}` index (debugging)                         |
+| `get-production-source`    | `"ns/rule"`                           | `SourceLoc`, else `nil`                                             |
+| `get-production-locations` | —                                     | full `{fq-name location}` index (debugging)                         |
 
 Validation happens at the choke point with `s/validate` (same pattern as
 `server.clj`). Keep `*warn-on-reflection* true`: `Class/.getName` needs a
@@ -348,11 +349,11 @@ today — verified. Two additions:
   (def s (server/start! {:session my-session :port 9999}))
   (client/register! s)
   ```
-- **Convenience:** add a public `server/current-system` (one line:
-  `@default-system`), and have `client/current-system` fall back to it.
+- **Convenience:** add a public `server/get-current-system` (one line:
+  `@default-system`), and have `client/get-current-system` fall back to it.
   `default-system` stays `^:private`.
 
-Do both: `register!` for explicit/test use, `current-system` for the 0-arg
+Do both: `register!` for explicit/test use, `get-current-system` for the 0-arg
 case.
 
 ### 5.2 Lifecycle & staleness contract (no file-watch)
@@ -725,7 +726,7 @@ Necessary glue, in one place:
     on a fact type".
 - **REPL bootstrap.** The elisp does not start the server; it assumes the
   user's REPL has already run `(client/register! (server/start! …))` (or used
-  `server/start!` with the §5.1 `current-system` fallback). A missing system
+  `server/start!` with the §5.1 `get-current-system` fallback). A missing system
   surfaces as `{:error "no explorer system registered"}` from the client-API,
   which the elisp just relays.
 
@@ -814,8 +815,8 @@ Minimal set for the working spike + follow-ups:
 
 | #   | Change                                                                                            | Required for spike?                                             |
 | --- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| 1   | `clara.server.graph.client` namespace (`register!`, `current-system`, `navigate`, `production-source`), Prismatic schemas | ✅ yes                                           |
-| 2   | Public `server/current-system` accessor (keep `default-system` private)                           | ✅ yes (0-arg convenience)                                      |
+| 1   | `clara.server.graph.client` namespace (`register!`, `get-current-system`, `navigate`, `get-production-source`), Prismatic schemas | ✅ yes                                           |
+| 2   | Public `server/get-current-system` accessor (keep `default-system` private)                           | ✅ yes (0-arg convenience)                                      |
 | 3   | Token→type resolution in `client` built on `analyze.ctor/resolve-record-type` (§7)                | ✅ yes — reuse, do not replicate                                |
 | 4   | `client/navigate` callsite-aware RHS resolution via serialized `:dynamic-insert-types-detected` (§7.4) | ✅ yes (§2.2)                                                |
 | 5   | `analyze/->production-source-locations` (kondo tier, non-var productions only)                    | ⚠️ phase 1 (spike uses `cider-find-var` for var-backed targets) |
@@ -877,7 +878,7 @@ checklist. Summary:
 
 **Phase 0 — spike (prove the semantics):**
 
-1. `client/navigate` (LHS producer path first) + `server/current-system` +
+1. `client/navigate` (LHS producer path first) + `server/get-current-system` +
    ctor resolution via `analyze.ctor`.
 2. `editor/emacs/clara-explorer.el` with §9.0–§9.4; jump via `cider-find-var`
    (var-backed targets) with the §9.5 regex fallback.
