@@ -16,6 +16,7 @@
             [clara.server.tools.graph.analyze.ctor :as ctor]
             [clojure.set :as set]
             [clojure.string :as str]
+            [clojure.tools.logging :as log]
             [schema.core :as s]))
 
 ;; ---------------------------------------------------------------------------
@@ -66,6 +67,7 @@
    `server/start-system!`) as the system `navigate` queries."
   [sys]
   (reset! registered-system sys)
+  (log/info "clara.server.graph.client: system registered")
   ::ok)
 
 (defn get-current-system
@@ -449,14 +451,29 @@
    `NavigateResult` or `{:error \"…\"}`.  Input is validated against
    `NavigateInput` at this choke point."
   [input]
-  (s/validate NavigateInput input)
   (let [{:keys [production side caller-ns token]} input]
-    (if-let [sys (get-current-system)]
-      (let [{:keys [state-atom cache]} sys
-            {:keys [session annotations memory-analysis]} @state-atom
-            analysis (cache/get-rulebase-analysis cache session annotations memory-analysis)
-            caller-ns-sym (some-> caller-ns symbol)]
-        (if (nil? production)
-          (navigate-global analysis caller-ns-sym token)
-          (navigate-scoped analysis production side caller-ns-sym token)))
-      {:error "no explorer system registered"})))
+    (log/infof "navigate: production=%s side=%s caller-ns=%s token=%s"
+               production side caller-ns (pr-str token))
+    (try
+      (s/validate NavigateInput input)
+      (let [result
+            (if-let [sys (get-current-system)]
+              (let [{:keys [state-atom cache]} sys
+                    {:keys [session annotations memory-analysis]} @state-atom
+                    analysis (cache/get-rulebase-analysis cache session annotations memory-analysis)
+                    caller-ns-sym (some-> caller-ns symbol)]
+                (if (nil? production)
+                  (navigate-global analysis caller-ns-sym token)
+                  (navigate-scoped analysis production side caller-ns-sym token)))
+              {:error "no explorer system registered"})]
+        (if (:error result)
+          (log/warnf "navigate: %s" (:error result))
+          (log/infof "navigate: direction=%s targets=%d"
+                     (:direction result) (count (:targets result))))
+        result)
+      (catch Exception e
+        (log/errorf e "navigate failed: production=%s side=%s token=%s"
+                    production side (pr-str token))
+        {:error (str "internal error: "
+                     (or (some-> e .getCause .getMessage)
+                         (.getMessage e)))}))))

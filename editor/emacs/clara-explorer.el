@@ -70,19 +70,36 @@
       (setq entries (cddr entries)))
     (concat "{" (mapconcat #'identity (nreverse parts) " ") "}")))
 
+(defun clara-explorer--err-summary (err)
+  "Return a concise single-line summary of an nREPL stack-trace string ERR."
+  (when (and (stringp err) (not (string-empty-p err)))
+    (let ((lines (split-string err "\n" t " "))
+          (out nil)
+          (n 0))
+      (dolist (line lines)
+        (when (< n 3)
+          (push line out)
+          (setq n (1+ n))))
+      (string-join (nreverse out) " | "))))
+
 (defun clara-explorer--eval-edn (code conn)
   "Eval Clojure CODE (a string) over CONN and parse the printed EDN result.
-   Returns the parsed result; signals `user-error' relaying an nREPL
-   exception when the eval failed."
+   Returns the parsed result; signals `user-error' relaying a concise summary
+   of any nREPL exception (class + message), so failures are visible rather
+   than reduced to a bare exception class."
   (let* ((resp (cider-nrepl-sync-request:eval code conn))
          (val  (nrepl-dict-get resp "value"))
          (ex   (nrepl-dict-get resp "ex"))
          (err  (nrepl-dict-get resp "err")))
     (cond
      (val (parseedn-read-str val))
-     (ex  (user-error "clara-explorer: %s" ex))
-     (err (user-error "clara-explorer: %s" err))
-     (t   nil))))
+     ((or ex err)
+      (user-error "clara-explorer: %s%s"
+                  (or ex "eval failed")
+                  (if-let ((summary (clara-explorer--err-summary err)))
+                      (format " — %s" summary)
+                    "")))
+     (t nil))))
 
 ;; ---------------------------------------------------------------------------
 ;; Structural navigation (§9.2)

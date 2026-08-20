@@ -54,3 +54,48 @@ or ports are hard-coded anywhere in the shipped files.
 | --- | --- |
 | Rule source on disk / annotations | `M-x clara-explorer-refresh` |
 | Rules re-evaluated in the REPL (session stale) | rebuild the session, then `M-x clara-explorer-swap-session` |
+| `clara.server.graph.*` source changed (namespace stale) | `(require 'clara.server.graph.client :reload)` in the REPL, or restart it |
+
+A plain `require` is a no-op for already-loaded namespaces, so after the
+`clara.server.graph.client` / `server` sources change, a running REPL must
+reload them (`:reload`) or be restarted — otherwise a freshly-evaluated form
+can fail to compile with a `CompilerException` ("No such var …") against the
+stale namespace.
+
+## Swap the session
+
+`M-x clara-explorer-swap-session` hot-swaps a rebuilt session into the
+running server.  It prompts for a **single Clojure expression** that, when
+evaluated in the REPL, yields the in-memory session (or rulebase) to swap in:
+
+```clojure
+(clara.server.graph.server/swap-session! {:session <expression>})
+```
+
+The simplest workflow: rebuild the session in the REPL and bind it to a var,
+then pass that var as the expression.
+
+```clojure
+;; in the REPL, after re-evaluating the rules:
+(def s2 (clara.rules/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                                'clara.server.tools.graph.rules.loan-app-rules))
+```
+
+then `M-x clara-explorer-swap-session` and enter `s2`.  You can also inline
+the whole form instead of referencing a var:
+
+```clojure
+(clara.rules/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                        'clara.server.tools.graph.rules.loan-app-rules)
+```
+
+The expression runs in the REPL's current namespace, so a bare var like `s2`
+must be resolvable there (it is, when you `def` it in that namespace).  The
+rule namespaces must already be loaded — they are once you have evaluated the
+rule files.  The last expression is remembered per connection; `C-u M-x
+clara-explorer-swap-session` re-prompts.
+
+`swap-session!` with only `:session` re-derives annotations from rule `:props`
+alone, dropping any sidecar / `:enrichment` annotations the server was
+started with.  To keep those, call `server/swap-session!` directly with the
+same `:annotations` options, or restart the server.
