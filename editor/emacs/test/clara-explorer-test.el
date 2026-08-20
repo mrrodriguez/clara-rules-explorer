@@ -10,11 +10,16 @@
 ;; ---------------------------------------------------------------------------
 
 (defmacro with-clara-buffer (content &rest body)
-  "Insert CONTENT into a temp buffer, enable `emacs-lisp-mode' for syntax, then run BODY.
-Point is at `point-min' before BODY.  Stubs `cider-connected-p' to nil unless BODY binds it."
+  "Insert CONTENT into a temp buffer with Clojure-like syntax, then run BODY."
   `(with-temp-buffer
      (insert ,content)
      (emacs-lisp-mode)
+     ;; Make { } [ ] parens for props maps and vectors, keep . : / as symbol
+     (let ((st (syntax-table)))
+       (modify-syntax-entry ?\{ "(}" st)
+       (modify-syntax-entry ?\} "){" st)
+       (modify-syntax-entry ?\[ "(]" st)
+       (modify-syntax-entry ?\] ")[" st))
      (goto-char (point-min))
      ,@body))
 
@@ -268,6 +273,33 @@ Point is at `point-min' before BODY.  Stubs `cider-connected-p' to nil unless BO
     (cl-letf (((symbol-function 'cider-symbol-at-point)
                (lambda (&optional _) (propertize "Application" 'face 'bold))))
       (should (equal (clara-explorer--token-at-point) "Application")))))
+
+(ert-deftest token-at-point-props-insert-type ()
+  (with-clara-buffer "(r/defrule foo {:clara-rules/insert-types [::a ::b]} [?x <- ::a] => 1)"
+    (search-forward "::b")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc))
+           (side (clara-explorer--side-at-point form-start)))
+      (should (eq side :rhs))
+      (should (equal (clara-explorer--token-at-point form-start side) "::b")))))
+
+(ert-deftest token-at-point-props-retract-type ()
+  (with-clara-buffer "(r/defrule foo {:clara-rules/retract-types [::c]} [?x <- ::c] => 1)"
+    (search-forward "::c")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc))
+           (side (clara-explorer--side-at-point form-start)))
+      (should (eq side :rhs))
+      (should (equal (clara-explorer--token-at-point form-start side) "::c")))))
+
+(ert-deftest token-at-point-props-vector-type ()
+  (with-clara-buffer "(r/defrule foo {:clara-rules/insert-types [[:my-thing :qual]]} [?x <- :a] => 1)"
+    (search-forward ":my-thing")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc))
+           (side (clara-explorer--side-at-point form-start)))
+      (should (eq side :rhs))
+      (should (equal (clara-explorer--token-at-point form-start side) "[:my-thing :qual]")))))
 
 ;; ---------------------------------------------------------------------------
 ;; context

@@ -206,13 +206,14 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
         found))))
 
 (defun clara-explorer--side-at-point (form-start)
-  "Return :lhs or :rhs based on whether point is before/after the top-level =>.
-   Queries (no =>) return :lhs."
-  (let ((=>-pos (clara-explorer--top-level-=> form-start)))
-    (cond
-     ((and =>-pos (< (point) =>-pos)) :lhs)
-     (=>-pos :rhs)
-     (t :lhs))))
+  "Return :lhs or :rhs for FORM-START. Props vectors are :rhs."
+  (if (clara-explorer--props-type-at-point form-start)
+      :rhs
+    (let ((=>-pos (clara-explorer--top-level-=> form-start)))
+      (cond
+       ((and =>-pos (< (point) =>-pos)) :lhs)
+       (=>-pos :rhs)
+       (t :lhs)))))
 
 (defun clara-explorer--string-at-point ()
   "String literal at point."
@@ -300,6 +301,53 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
         )
       found)))
 
+
+(defun clara-explorer--props-type-at-point (form-start)
+  "If point in props insert/retract vector, return element at point."
+  (clara-explorer--log "props check at %d form-start %d" (point) form-start)
+  (save-excursion
+    (let ((orig (point)) found)
+      (goto-char form-start)
+      (down-list 1)
+      (forward-sexp 1)
+      (forward-sexp 1)
+      (skip-chars-forward " \t\n,")
+      (clara-explorer--log "props after name char %c at %d" (char-after (point)) (point))
+      (when (eq (char-after) ?\{)
+        (let ((map-beg (point))
+              (map-end (save-excursion (forward-sexp 1) (point))))
+          (when (and (>= orig map-beg) (<= orig map-end))
+            (goto-char map-beg)
+            (down-list 1)
+            (while (and (not found) (< (point) map-end))
+              (skip-chars-forward " \t\n,")
+              (when (< (point) map-end)
+                (let ((k-beg (point)))
+                  (forward-sexp 1)
+                  (let ((k-str (buffer-substring-no-properties k-beg (point))))
+                    (skip-chars-forward " \t\n,")
+                    (let ((v-beg (point))
+                          (v-end (save-excursion (forward-sexp 1) (point))))
+                      (when (and (member k-str '(":clara-rules/insert-types" ":clara-rules/retract-types"
+                                                 ":insert-types" ":retract-types"))
+                                 (eq (char-after v-beg) ?\[)
+                                 (>= orig v-beg) (<= orig v-end))
+                        (goto-char v-beg)
+                        (down-list 1)
+                        (while (and (not found) (< (point) v-end))
+                          (skip-chars-forward " \t\n,")
+                          (when (< (point) v-end)
+                            (let ((e-beg (point))
+                                  (e-end (save-excursion (forward-sexp 1) (point))))
+                              (when (and (>= orig e-beg) (<= orig e-end))
+                                (setq found (cons e-beg e-end)))
+                              (goto-char e-end)
+                              (skip-chars-forward " \t\n,")))))
+                      (goto-char v-end)
+                      (skip-chars-forward " \t\n,")))))))))
+      (when found
+        (buffer-substring-no-properties (car found) (cdr found))))))
+
 (defun clara-explorer--vector-fact-at-point ()
   "Innermost vector fact-type at point, or nil.
 Returns the `[...]` text when point is inside a keyword-led tuple vector such
@@ -330,6 +378,7 @@ Used for RHS and global cases where LHS-structure is not applicable."
 (defun clara-explorer--token-at-point (&optional form-start side)
   "Fact-type token at point."
   (cond
+   ((and form-start (clara-explorer--props-type-at-point form-start)))
    ((and form-start (eq side :lhs) (clara-explorer--lhs-type-at-point form-start)))
    ((clara-explorer--vector-fact-at-point))
    ((clara-explorer--string-at-point))

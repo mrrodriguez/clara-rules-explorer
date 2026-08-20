@@ -62,6 +62,8 @@ see *Jump history* below.
 * **Keyword** — `[?d <- ::supporting-document]` → `::supporting-document` (fully-qualified via `*ns*`)
 * **String** — `[?x <- "my-string"]` or `(r/insert! "my-string")` → `"my-string"` (quoted)
 * **Vector tuple** — `[:loan/status "verified"]`, `[:my-thing]`, `[:my-thing :qual]` → `pr-str`'d vector. Singletons like `[:my-thing]` are supported — the earlier `space`-required heuristic was removed.
+* **Props `{:clara-rules/insert-types [T] :clara-rules/retract-types [T]}`** — the optional rule map (second form after the name) is parsed; point inside its `[T]` vector is treated as an **RHS** producer fact type (same `insert-types`/`retract-types` the server advertises). `[:my-thing]`, `[:my-thing :qual]`, `::kw` and `"str"` all work, and `side` is forced to `:rhs` so `navigate-consumer` finds its consumers (the `no fact type found under cursor in .../insert-income-document` error is now fixed).
+
 * **Accumulator `:from`** — the LHS extractor is `case :fact → :type / :accumulator → :from / :and/:or/:not/:exists → rest` (`core.clj`). The editor walks the condition vector:
   * `[?acc <- (acc/all) :from [:my-thing ...]]` → `:my-thing`
   * `[?acc <- (acc/all) :from [[:my-thing]]]` → `[:my-thing]`
