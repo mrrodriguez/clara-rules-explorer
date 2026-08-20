@@ -6,3 +6,5 @@
    upstream/downstream" while the collapse tooltip is "collapse dependencies". The expand should
    just mirror the collapse as "expand dependencies".
 3. improve elisp tests. do we really have to mock clojure-mode to the extent of a syntax table etc?
+4. elisp not handling defrule/defquery metadata on var name like `(defrule ^:my-meta my-rule-name =>
+:foo)`

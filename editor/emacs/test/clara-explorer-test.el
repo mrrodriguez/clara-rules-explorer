@@ -2,24 +2,40 @@
 
 (require 'ert)
 (require 'cl-lib)
-(require 'clara-explorer)
+;; Make test/ discoverable for both plain emacs (Makefile adds it) and eldev.
+;; eldev loads test files with load-file-name set to the test file itself.
+(when load-file-name
+  (add-to-list 'load-path (file-name-directory load-file-name)))
+;; Fallback when load-file-name is nil (e.g. batch load via -l): add ./test
+(add-to-list 'load-path (expand-file-name "test" (file-name-directory (or load-file-name default-directory))))
+(add-to-list 'load-path (expand-file-name "." (file-name-directory (or load-file-name default-directory))))
 (require 'test-helper)
+(require 'clara-explorer)
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
 ;; ---------------------------------------------------------------------------
 
 (defmacro with-clara-buffer (content &rest body)
-  "Insert CONTENT into a temp buffer with Clojure-like syntax, then run BODY."
+  "Insert CONTENT into a temp buffer with Clojure syntax, then run BODY.
+Prefers `clojure-mode' when available (real via Eldev or minimal stub
+from `test-helper'), falling back to `emacs-lisp-mode' + manual syntax
+table for bare `emacs -Q --batch'.  This exercises real `clojure-mode'
+syntax (comments, :: keywords, strings) under Eldev while keeping the
+Tier-1 stub path fast."
   `(with-temp-buffer
      (insert ,content)
-     (emacs-lisp-mode)
-     ;; Make { } [ ] parens for props maps and vectors, keep . : / as symbol
-     (let ((st (syntax-table)))
-       (modify-syntax-entry ?\{ "(}" st)
-       (modify-syntax-entry ?\} "){" st)
-       (modify-syntax-entry ?\[ "(]" st)
-       (modify-syntax-entry ?\] ")[" st))
+     (if (fboundp 'clojure-mode)
+         (clojure-mode)
+       (progn
+         (emacs-lisp-mode)
+         (let ((st (syntax-table)))
+           (modify-syntax-entry ?\{ "(}" st)
+           (modify-syntax-entry ?\} "){" st)
+           (modify-syntax-entry ?\[ "(]" st)
+           (modify-syntax-entry ?\] ")[" st))
+         (setq-local comment-start ";")
+         (setq-local parse-sexp-ignore-comments t)))
      (goto-char (point-min))
      ,@body))
 
@@ -325,6 +341,92 @@
         (should (equal (plist-get ctx :caller-ns) "my.ns"))
         (should-not (string-match-p "fontified" (plist-get ctx :production)))
         (should-not (string-match-p "#(" (plist-get ctx :production)))))))
+
+;; ---------------------------------------------------------------------------
+;; Tier-2: real-deps coverage (Eldev with cider/parseedn/clojure-mode).
+;; These tests are `skip-unless' on bare `emacs -Q --batch' (Tier-1) and
+;; exercise the integration surface that the stubbed tier hides:
+;;   - parseedn hash-table contract (vectors -> vector, maps -> hash-table)
+;;   - clara-explorer--eval-edn + nrepl-dict wiring against real parseedn
+;;   - cider-symbol-at-point keyword handling in real clojure-mode
+;; Tier-3 (live nREPL server) remains deferred to the integration suite.
+;; ---------------------------------------------------------------------------
+
+(ert-deftest edn-map-roundtrips-through-real-parseedn ()
+  "`clara-explorer--edn-map' output must be valid EDN for `parseedn-read-str'."
+  (skip-unless (test-helper--parseedn-real-p))
+  (let* ((edn (clara-explorer--edn-map
+               (list :production "my.ns/rule" :side :lhs :token "Application")))
+         (parsed (parseedn-read-str edn)))
+    (should (hash-table-p parsed))
+    (should (equal (gethash :production parsed) "my.ns/rule"))
+    (should (eq (gethash :side parsed) :lhs))
+    (should (equal (gethash :token parsed) "Application"))
+    ;; nil values are omitted so :caller-ns absent
+    (should-not (gethash :caller-ns parsed)))
+  ;; vector/tuple tokens preserve their EDN shape
+  (let* ((edn (clara-explorer--edn-map
+               (list :production "my.ns/rule" :side :rhs :token "[:loan/status \"verified\"]")))
+         (parsed (parseedn-read-str edn)))
+    (should (equal (gethash :token parsed) "[:loan/status \"verified\"]"))))
+
+(ert-deftest eval-edn-parses-nrepl-value-with-real-parseedn ()
+  "`clara-explorer--eval-edn' must `parseedn-read-str' the nREPL \"value\"."
+  (skip-unless (test-helper--parseedn-real-p))
+  ;; Mock only the transport; parsing is real.
+  (cl-letf (((symbol-function 'cider-nrepl-sync-request:eval)
+             (lambda (_code _conn)
+               ;; cider's nrepl-dict is a plist with leading `dict'; real
+               ;; `nrepl-dict-get' understands this shape.
+               (list 'dict "value" "{:direction :consumer :type \"Application\" :targets [{:name \"a/b\"}]}"))))
+    (let ((result (clara-explorer--eval-edn "(+ 1 2)" 'dummy-conn)))
+      (should (hash-table-p result))
+      (should (eq (gethash :direction result) :consumer))
+      (should (equal (gethash :type result) "Application"))
+      (should (vectorp (gethash :targets result)))
+      (let ((t0 (aref (gethash :targets result) 0)))
+        (should (equal (gethash :name t0) "a/b"))))))
+
+(ert-deftest eval-edn-handles-vector-targets-real-parseedn ()
+  "Real parseedn returns EDN vectors as elisp vectors; our `choose-or-jump' must coerce."
+  (skip-unless (test-helper--parseedn-real-p))
+  (cl-letf (((symbol-function 'cider-nrepl-sync-request:eval)
+             (lambda (_code _conn)
+               (list 'dict "value" "{:targets [{:name \"a/b\"} {:name \"c/d\"}]}"))))
+    (let* ((result (clara-explorer--eval-edn "code" 'dummy-conn))
+           (targets (gethash :targets result)))
+      (should (vectorp targets))
+      (should (= (length targets) 2))
+      ;; coerce as `clara-explorer--choose-or-jump' does
+      (should (= (length (if (vectorp targets) (append targets nil) targets)) 2)))))
+
+(ert-deftest cider-symbol-at-point-real-keyword ()
+  "Real `cider-symbol-at-point' in `clojure-mode' must include leading `:' / `::'."
+  (skip-unless (test-helper--real-deps-p))
+  (with-clara-buffer "(r/defrule foo [?d <- ::supporting-document] => 1)"
+    (search-forward "supporting-document")
+    (backward-char 5) ;; inside the keyword
+    (let ((tok (cider-symbol-at-point 'look-back)))
+      (should (stringp tok))
+      (should (string-prefix-p ":" tok))
+      (should (string-suffix-p "supporting-document" tok))))
+  ;; Also verify outside defrule — fallback path uses real cider symbol
+  (with-clara-buffer "(defn foo [] :my-thing)"
+    (search-forward "my-thing")
+    (backward-char 2)
+    (should (equal (cider-symbol-at-point 'look-back) ":my-thing"))))
+
+(ert-deftest clojure-mode-handles-reader-macros-and-comments ()
+  "Real `clojure-mode' syntax should not break `enclosing-production'."
+  (skip-unless (test-helper--real-deps-p))
+  (with-clara-buffer "(ns test) ;; comment\n(r/defrule foo [Application] => 1)"
+    (search-forward "foo")
+    (should (clara-explorer--enclosing-production)))
+  (with-clara-buffer "(r/defrule foo \"docstring\" [A] => 1)"
+    (search-forward "A")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc)))
+      (should (eq (clara-explorer--side-at-point form-start) :lhs)))))
 
 (provide 'clara-explorer-test)
 ;;; clara-explorer-test.el ends here

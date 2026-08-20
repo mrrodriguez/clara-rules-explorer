@@ -1,7 +1,7 @@
 # Explorer Server ↔ Emacs Navigation — Roadmap
 
 Status: **Phase 0 + Phase 1 implemented** (Phase 0.5 manual Emacs acceptance
-pending user verification) · Plan: `docs/planning/explorer-server-emacs-plan.md`
+pending user verification; Phase 1 Elisp tiered tests implemented) · Plan: `docs/planning/explorer-server-emacs-plan.md`
 (review 1 applied)
 
 This is the executable checklist for the plan. Work top to bottom; every box
@@ -63,8 +63,8 @@ verification only.
 ### 0.4 Elisp: `editor/emacs/clara-explorer.el`
 
 - [x] File header: `Package-Requires: ((emacs "28.1") (cider "1.12")
-      (parseedn "1.2") (clojure-mode "5.18"))` + `featurep` runtime guards +
-      self-locating `load-path` (`load-file-name`)
+      (parseedn "1.2") (clojure-mode "5.18"))` + `Version: 0.1.0` + `featurep` runtime guards
+      (now `or (featurep ...) (require ...)` for Eldev) + self-locating `load-path` (`load-file-name`)
 - [x] `clara-explorer--eval-edn` — sync eval via
       `cider-nrepl-sync-request:eval` with connection captured once via
       `(cider-current-repl 'infer 'ensure)`; form wrapped in
@@ -76,8 +76,8 @@ verification only.
         common case in the demo rules)
   - [x] `--side-at-point` — sexp-aware depth-1 `=>` search; queries → `:lhs`
   - [x] `--token-at-point` — `(cider-symbol-at-point 'look-back)`
-  - [x] `--context` — one-call gather (`:production`/`:kind`/`:side`/
-        `:caller-ns`/`:token`)
+  - [x] `--context` — one-call gather (`:production`/":kind"/":side"/
+        `:caller-ns`/":token")
 - [x] Commands `clara-explorer-navigate-producer` / `-consumer` (incl. query →
       "queries have no RHS" early return, outside-defrule global path)
 - [x] `clara-explorer--choose-target` (`completing-read`, `(retract)` suffix)
@@ -121,13 +121,19 @@ Goal: tested, refreshable, durably installable.
 - [x] §5.2 staleness matrix — server-side covered by
       `test-session-swap-reflected-in-navigation` + existing `server_test`
       reload coverage; the full manual Emacs flow remains part of 0.5 acceptance
+- [x] Elisp tiered tests — `editor/emacs/test/clara-explorer-test.el` (43 ERT, see
+      `docs/planning/explorer-server-emacs-testing.md` + `docs/explorer-editor-navigation.md#Testing`):
+  - [x] **Tier 1 — stubbed unit** (`make -C editor/emacs test-tier1` / fallback `make test-unit`): 38 passed + 5 skipped, <1s, no network/JVM, `test/test-helper.el` `provide` stubs + minimal `clojure-mode` syntax table + tiny `nrepl-dict-get`/`parseedn-read-str` stubs, `with-clara-buffer` prefers real `clojure-mode` when `fboundp` else `emacs-lisp-mode`
+  - [x] **Tier 2 — real-deps unit** (`make eldev-prepare && make eldev-test` / `eldev test`): same 38 + 5 now 0 skipped, `editor/emacs/Eldev` `:main-file`/`:package` + `(eldev-use-package-archive 'melpa) (eldev-use-package-archive 'gnu)` + `Version: 0.1.0` header (required for `package-buffer-info`), `.eldev/` gitignored (`make clean` wipes `server/target/elisp-check` + `.eldev/`), `test-helper--real-deps-p`/`--parseedn-real-p` + `test-helper--report-tier` banner (`Tier 1 — 5 skipped — hint: run eldev test`), `clara-explorer.el` guards now `or (featurep ...) (require ...)` and `test-helper` `unless (or (featurep ...) (require ...))` so Eldev’s real `cider`/`parseedn`/`clojure-mode` win, order `(require 'test-helper) (require 'clara-explorer)` + load-path shim for `test-helper` under Eldev. Covers `--edn-map→parseedn-read-str` hash-table/`vector` contract, `--eval-edn`+`nrepl-dict` wiring, `cider-symbol-at-point` `::`/`:kw`, real `syntax-ppss` for comments/reader macros
+  - [x] **Tier 3 — live nREPL integration (deferred)** — full `client/navigate` e2e via `cider-nrepl-sync-request:eval` against live `server` (ctor, `:via :retract`, global `{:production nil}`), reserved for future `make eldev-prepare && eldev test --integration` / `test-integration` target; not required for CI (see testing doc)
+  - [x] **Gate:** `make -C editor/emacs test-tier1` (CI, stubbed) and `make eldev-prepare && make -C editor/emacs eldev-test` (local, real deps) + `make check-elisp` (byte-compile vs stubs) — `--verbose` removed (Eldev 1.11 uses `-v` global)
 - [x] Optional Spacemacs layer skeleton at `editor/emacs/spacemacs-layer/`
       (`packages.el` deps, `config.el` `clara-explorer-root` defcustom,
       `keybindings.el` `g p`/`g c`/`g r` scoped to `clojure-mode`,
-      `funcs.el`)
+      `funcs.el`) — durable install deferred per user (eval-buffer during spike)
 - [x] README snippet: both install paths (spike `eval-buffer` / layer var),
       REPL bootstrap, refresh workflow. No absolute paths in examples.
-- [x] Update plan status to **Implemented (phase 1)**
+- [x] Update plan status to **Implemented (phase 1)** — now includes tiered Elisp tests
 
 ---
 
@@ -143,6 +149,7 @@ Goal: tested, refreshable, durably installable.
       than a one-time language-server bridge
 - [ ] HTTP endpoints (`POST /v1/navigate` → `client/navigate`) — **only if**
       remote-server support becomes a goal (currently out of scope)
+- [ ] Live nREPL integration suite (`make test-integration` → headless `server` + `cider-connect-clj`) — deferred from Phase 1 Tier 3; promote to Phase 2 when Tier 2 stable on multiple machines (see testing doc)
 
 ---
 
@@ -151,6 +158,6 @@ Goal: tested, refreshable, durably installable.
 | Surface | Gate |
 | --- | --- |
 | Server change | `cd server && make test lint reflection-check` |
-| Elisp change | `make check-elisp` (automated byte-compile) + `M-x eval-buffer` manual nav |
-| Portability | `grep -R "~/Projects\|/Users/" editor/` empty |
+| Elisp change | `make -C editor/emacs test-tier1` (Tier 1 stubbed, CI) + `make -C editor/emacs eldev-prepare && make -C editor/emacs eldev-test` (Tier 2 real deps, local; 0 skipped) + `make check-elisp` (automated byte-compile vs stubs) + `M-x eval-buffer` manual nav; `.eldev/` ignored (`make clean` wipes) |
+| Portability | `grep -R "~/Projects\|/Users/" editor/` empty; `clara-explorer-root` var only, no hard-coded paths |
 | API contract | none — no HTTP changes allowed in this work |

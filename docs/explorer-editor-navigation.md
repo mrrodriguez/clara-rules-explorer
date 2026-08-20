@@ -133,22 +133,22 @@ Other useful checks:
 
 ## Testing (unit)
 
-The 5 accumulator cases above plus plain/record/keyword/string/tuple/docstring are covered by 35 ERT tests in `editor/emacs/test/clara-explorer-test.el` (see `docs/planning/explorer-server-emacs-testing.md` for the `ERT` vs `Buttercup`/`Eldev` rationale).
+The 5 accumulator cases above plus plain/record/keyword/string/tuple/docstring are covered by ERT tests in `editor/emacs/test/clara-explorer-test.el` (see `docs/planning/explorer-server-emacs-testing.md` for the `ERT` vs `Buttercup`/`Eldev` rationale).
 
-Run without Eldev (stubbed `cider`/`parseedn`):
+Three tiers, fastest first:
+
+| Tier | Command | Deps | What it proves |
+| --- | --- | --- | --- |
+| 1 — stubbed unit | `make test-unit` (no Eldev) | stubbed `cider`/`parseedn`/`clojure-mode` via `test/test-helper.el` + `with-clara-buffer` minimal syntax | structural nav (`enclosing-production`, `side-at-point`, `lhs-type-at-point`, `vector-fact-at-point`), EDN `substring-no-properties` stripping, vector-target coercion — `35+ passed, 0 unexpected` in `<1s`, no network/JVM |
+| 2 — real-deps unit | `eldev test` (or `make test-unit` with Eldev on PATH) | real `cider "1.12"` / `parseedn "1.2"` / `clojure-mode "5.18"` from `Eldev`; `test-helper.el` becomes no-op | Tier 1 + round-trip `clara-explorer--edn-map` → `parseedn-read-str` hash-table, `clara-explorer--eval-edn`+`nrepl-dict` wiring against real `parseedn`, `cider-symbol-at-point` keyword (`::kw`, `:kw`) handling and real `clojure-mode` `syntax-ppss` for `;` comments/reader macros — extra 5 `skip-unless` tests run only here |
+| 3 — live nREPL (deferred) | `make test-integration` (future) | running `clara.server.graph` JVM + `cider-connect-clj` | full `client/navigate` payload against `loan-app-rules`/`analyze-test-rules` (ctor, `:via :retract`, global `{:production nil}`) — deferred; tracked in `docs/planning/explorer-server-emacs-testing.md` |
 
 ```bash
-cd editor/emacs && make test-unit   # or make test
-# => 35 passed, 0 unexpected
+cd editor/emacs && make test-unit   # Tier 1 (stubbed) or Tier 2 if eldev present
+cd editor/emacs && eldev test         # Tier 2 explicitly
 ```
 
-With Eldev (resolves real deps):
-
-```bash
-cd editor/emacs && eldev test
-```
-
-`test-helper.el` provides `(provide 'cider)` etc. and autoloads `cider-*`/`parseedn-read-str` so `M-x eval-buffer` on the test file does not require a live REPL.
+`test-helper.el` provides `(provide 'cider)` etc. and autoloads `cider-*`/`parseedn-read-str` plus a tiny `nrepl-dict-get`/`parseedn-read-str` stub so `M-x eval-buffer` and `make check-elisp` byte-compile pass without a live REPL. Under Eldev the real packages win (guards are `unless (featurep ...)` / `unless (fboundp ...)` and `autoloadp` checks), and `test-helper--parseedn-real-p` / `test-helper--real-deps-p` gate the Tier-2 tests via `skip-unless`. `with-clara-buffer` prefers real `clojure-mode` when `fboundp`, falling back to `emacs-lisp-mode` + manual `{[}` syntax for Tier 1.
 
 ## Refresh workflow
 

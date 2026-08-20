@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 clara-rules-explorer contributors
 
 ;; Author: clara-rules-explorer contributors
+;; Version: 0.1.0
 ;; Keywords: clojure, tools
 ;; Package-Requires: ((emacs "28.1") (cider "1.12") (parseedn "1.2") (clojure-mode "5.18"))
 
@@ -31,9 +32,9 @@
 (require 'cl-lib)
 (require 'xref)
 
-(unless (featurep 'cider)
+(unless (or (featurep 'cider) (ignore-errors (require 'cider nil t)))
   (user-error "clara-explorer requires cider"))
-(unless (featurep 'parseedn)
+(unless (or (featurep 'parseedn) (ignore-errors (require 'parseedn nil t)))
   (user-error "clara-explorer requires parseedn — add to dotspacemacs-additional-packages"))
 
 (defcustom clara-explorer-debug nil
