@@ -1,0 +1,13 @@
+;; Eldev - Elisp Development Tool
+;; https://github.com/doublep/eldev
+;; Run `eldev test` from this directory, or `make test` (which falls back to plain emacs if eldev is missing).
+
+:main-file "clara-explorer.el"
+:package "clara-explorer"
+
+(depends-on 'cider "1.12")
+(depends-on 'parseedn "1.2")
+(depends-on 'clojure-mode "5.18")
+
+;; Tests live in test/ - eldev discovers ert-deftest automatically.
+;; No extra config needed for plain ERT.

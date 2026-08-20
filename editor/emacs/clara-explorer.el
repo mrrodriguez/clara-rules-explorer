@@ -176,7 +176,9 @@
       (down-list 1)
       (let (found)
         (while (and (not found) (< (point) end))
-          (forward-sexp 1)
+          (condition-case nil
+              (forward-sexp 1)
+            (error (goto-char end)))
           (skip-chars-forward " \t\n,")
           (when (and (< (point) end)
                      (looking-at-p "=>"))
