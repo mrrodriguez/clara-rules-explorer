@@ -1,7 +1,7 @@
 # Editor Navigation (Emacs)
 
 Jump between Clara productions from a `.clj` buffer connected to a live CIDER
-REPL running the explorer server.  Point at a fact type in a `defrule`/
+REPL running the explorer server. Point at a fact type in a `defrule`/
 `defquery` and:
 
 - `M-x clara-explorer-navigate-producer` — jump from an **LHS** fact type to
@@ -14,7 +14,8 @@ REPL running the explorer server.  Point at a fact type in a `defrule`/
   re-evaluating rules in the REPL.
 
 All semantics live in `clara.server.graph.client/navigate` (Clojure); the
-editor file is thin transport + UX glue.
+editor file is thin transport + UX glue. No absolute paths or ports are
+hard-coded.
 
 ## REPL bootstrap
 
@@ -45,8 +46,107 @@ Start the server in your CIDER REPL and register it:
 ```
 
 The layer skeleton lives at `editor/emacs/spacemacs-layer/` and adds the
-`editor/emacs` directory to `load-path` from that variable.  No absolute paths
+`editor/emacs` directory to `load-path` from that variable. No absolute paths
 or ports are hard-coded anywhere in the shipped files.
+
+**Evil:** `C-o` (`evil-jump-backward`) / `C-i` work for every navigation —
+see *Jump history* below.
+
+## Fact types and LHS structure
+
+`navigate` resolves the token under point to a kind-explicit type string
+(`core/extract-lhs-fact-types` contract) — class name, `keyword`, `pr-str`'d
+`string`/tuple/map. The editor mirrors that contract:
+
+* **Plain / record / class** — `[Application ...]` or `[?v <- Application]` → `Application`
+* **Keyword** — `[?d <- ::supporting-document]` → `::supporting-document` (fully-qualified via `*ns*`)
+* **String** — `[?x <- "my-string"]` or `(r/insert! "my-string")` → `"my-string"` (quoted)
+* **Vector tuple** — `[:loan/status "verified"]`, `[:my-thing]`, `[:my-thing :qual]` → `pr-str`'d vector. Singletons like `[:my-thing]` are supported — the earlier `space`-required heuristic was removed.
+* **Accumulator `:from`** — the LHS extractor is `case :fact → :type / :accumulator → :from / :and/:or/:not/:exists → rest` (`core.clj`). The editor walks the condition vector:
+  * `[?acc <- (acc/all) :from [:my-thing ...]]` → `:my-thing`
+  * `[?acc <- (acc/all) :from [[:my-thing]]]` → `[:my-thing]`
+  * `[?acc <- (acc/all) :from [[:my-thing] [this] (= ?x ...)]]` → `[:my-thing]`
+  * `[?acc <- (acc/all) :from [[:my-thing :qual]]]` → `[:my-thing :qual]`
+  * `[:my-thing [this] (= ?x (:x this))]` inside the `:from` vector still resolves to `:my-thing` even when point is on `[this]` or a constraint — any point inside the condition returns its fact type.
+
+Implementation in `editor/emacs/clara-explorer.el`:
+
+* `clara-explorer--enclosing-production` — `syntax-ppss` string-start jump so point inside `"verified"` in `[:loan/status "verified"]` still finds `r/defrule`.
+* `clara-explorer--top-level-=>` — `forward-list` from `form-start` (not from `r/`), `condition-case` on `)` so `() =>` scans and `r/defquery` (no `=>`) correctly returns `nil`.
+* `clara-explorer--type-bounds-in-condition` — handles `?var <-`, `(acc/...) :from [Type ...]`, `:and/:or/:not/:exists` groups.
+* `clara-explorer--lhs-type-at-point` — scans top-level LHS `[...]` between `name` and `=>`; if `orig` inside the condition, returns its fact type (vector or keyword/string). Handles docstrings (`r/defrule foo "doc" [A] =>`).
+* `clara-explorer--vector-fact-at-point` / `clara-explorer--string-at-point` — fallback for `RHS` and global (`insert! [:loan/status "verified"]`, `defn` bodies) where LHS structure does not apply.
+
+**EDN transport** strips Emacs text properties (`fontified`, `face`, `cider-*`) via `substring-no-properties` before `prin1-to-string`; otherwise Emacs prints `#("ns/rule" 0 4 (face ...))` which is invalid EDN for `client/navigate`.
+
+**Targets** are `vector`s from `parseedn`; `choose-target`/`choose-or-jump` coerce `(append vec nil)` so `length`/`mapcar`/`nth` never signal `wrong-type-argument listp`.
+
+## Jump history (evil, xref)
+
+Every navigation pushes the *origin* onto both jump lists **before** the jump, so `C-o` (`evil-jump-backward`) / `C-i` and `M-.` / `M-*` (`xref-pop-marker-stack`) work regardless of path:
+
+* `var? t` — `cider-find-var` (which itself pushes `xref`) + explicit `evil-set-jump`/`xref-push-marker-stack`
+* `var? nil` — fallback `cider-find-ns` + `re-search-forward` for `(defrule|defquery name)` — previously had **no** push, now also goes through `clara-explorer--push-jump`
+
+`clara-explorer--push-jump`:
+```elisp
+(when (fboundp 'evil-set-jump) (evil-set-jump))
+(xref-push-marker-stack)
+```
+
+## Debugging
+
+Enable verbose logging to `*Messages*`:
+
+```elisp
+;; via init
+(setq clara-explorer-debug t)
+;; or
+M-x customize-variable RET clara-explorer-debug RET
+```
+
+With `clara-explorer-debug` non-nil, every navigation logs:
+
+```
+clara-explorer[debug]: goto: name="my.ns/my-rule" var?=t source={:var? t ...}
+clara-explorer[debug]: push evil jump at foo.clj:12
+clara-explorer[debug]: push xref marker at foo.clj:12
+clara-explorer[debug]: goto: cider-find-var "my.ns/my-rule"
+
+clara-explorer[debug]: goto: name="my.ns/other-rule" var?=nil ...
+clara-explorer[debug]: push evil jump at foo.clj:12
+clara-explorer[debug]: goto: fallback path
+clara-explorer[debug]: fallback: name="my.ns/other-rule" ns="my.ns" rule-name="other-rule"
+clara-explorer[debug]: fallback: cider-find-ns "my.ns"
+clara-explorer[debug]: fallback: search "other-rule" -> found at 1
+```
+
+*If you see `fallback:` you are on the `var? nil` path* (non-var production, or tuple/string type whose var has no `:file`/`:line`). If `var?=t` but `C-o` still fails, check `evil-jump-list` (`M-: (evil-jump-list)`) and `*Messages*` for `push` lines — the origin should appear before `cider-find-*`.
+
+Other useful checks:
+
+* `M-: (featurep 'cider)` / `(featurep 'parseedn)` — both must be `t` (Spacemacs layer ensures it).
+* `M-x cider-current-ns` — buffer ns used for `::` resolution and `caller-ns` in `client/navigate`.
+* `*nrepl-messages*` / `*Messages*` — `nREPL error:` with `Caused by:` is printed on `client/navigate` `CompilerException`.
+
+## Testing (unit)
+
+The 5 accumulator cases above plus plain/record/keyword/string/tuple/docstring are covered by 35 ERT tests in `editor/emacs/test/clara-explorer-test.el` (see `docs/planning/explorer-server-emacs-testing.md` for the `ERT` vs `Buttercup`/`Eldev` rationale).
+
+Run without Eldev (stubbed `cider`/`parseedn`):
+
+```bash
+cd editor/emacs && make test-unit   # or make test
+# => 35 passed, 0 unexpected
+```
+
+With Eldev (resolves real deps):
+
+```bash
+cd editor/emacs && eldev test
+```
+
+`test-helper.el` provides `(provide 'cider)` etc. and autoloads `cider-*`/`parseedn-read-str` so `M-x eval-buffer` on the test file does not require a live REPL.
 
 ## Refresh workflow
 
