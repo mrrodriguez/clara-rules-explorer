@@ -71,31 +71,32 @@
     (concat "{" (mapconcat #'identity (nreverse parts) " ") "}")))
 
 (defun clara-explorer--err-summary (err)
-  "Return a concise single-line summary of an nREPL stack-trace string ERR."
+  "Return a concise summary of an nREPL stack-trace string ERR: the leading
+   message line plus any \"Caused by:\" root-cause line."
   (when (and (stringp err) (not (string-empty-p err)))
-    (let ((lines (split-string err "\n" t " "))
-          (out nil)
-          (n 0))
-      (dolist (line lines)
-        (when (< n 3)
-          (push line out)
-          (setq n (1+ n))))
-      (string-join (nreverse out) " | "))))
+    (let* ((lines (split-string err "\n" t " "))
+           (head (car lines))
+           (cause (cl-find-if (lambda (l) (string-prefix-p "Caused by:" l)) lines)))
+      (concat head (when cause (concat " | " cause))))))
 
 (defun clara-explorer--eval-edn (code conn)
   "Eval Clojure CODE (a string) over CONN and parse the printed EDN result.
-   Returns the parsed result; signals `user-error' relaying a concise summary
-   of any nREPL exception (class + message), so failures are visible rather
-   than reduced to a bare exception class."
+   On failure, logs the full nREPL stack trace (plus CODE) to the *Messages*
+   buffer and signals a concise `user-error' with the exception class and
+   root-cause message, so a navigation failure is never reduced to a bare
+   exception class."
   (let* ((resp (cider-nrepl-sync-request:eval code conn))
          (val  (nrepl-dict-get resp "value"))
          (ex   (nrepl-dict-get resp "ex"))
+         (root (nrepl-dict-get resp "root-ex"))
          (err  (nrepl-dict-get resp "err")))
     (cond
      (val (parseedn-read-str val))
      ((or ex err)
+      (when (and err (not (string-empty-p err)))
+        (message "clara-explorer nREPL error:\n%s\n--- code ---\n%s" err code))
       (user-error "clara-explorer: %s%s"
-                  (or ex "eval failed")
+                  (or ex root "eval failed")
                   (if-let ((summary (clara-explorer--err-summary err)))
                       (format " — %s" summary)
                     "")))
@@ -212,8 +213,11 @@
 ;; ---------------------------------------------------------------------------
 
 (defun clara-explorer--navigate-code (production side caller-ns token)
-  "Build the Clojure form string that calls `client/navigate`."
-  (format "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/navigate %s))"
+  "Build the Clojure form string that calls `client/navigate`.
+   Uses `requiring-resolve` so the namespace is loaded at runtime rather than
+   resolved at compile time (which would fail if the namespace is not yet
+   loaded in the REPL)."
+  (format "((requiring-resolve 'clara.server.graph.client/navigate) %s)"
           (clara-explorer--edn-map
            (list :production production
                  :side side
