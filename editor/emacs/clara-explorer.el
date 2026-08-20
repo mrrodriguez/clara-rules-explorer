@@ -144,6 +144,9 @@
    NAME is the unqualified production name, KIND is `rule' or `query', and
    FORM-START is the buffer position of the opening paren."
   (save-excursion
+    (let ((ppss (syntax-ppss)))
+      (when (nth 3 ppss)
+        (goto-char (nth 8 ppss))))
     (catch 'found
       (condition-case nil
           (while t
@@ -169,16 +172,16 @@
   "Buffer position of the top-level => in the form at FORM-START, or nil."
   (save-excursion
     (goto-char form-start)
-    (down-list 1)
-    (let ((end (save-excursion (forward-list 1) (point)))
-          found)
-      (while (and (not found) (< (point) end))
-        (forward-sexp 1)
-        (skip-chars-forward " \t\n,")
-        (when (and (< (point) end)
-                   (looking-at-p "=>"))
-          (setq found (point))))
-      found)))
+    (let ((end (save-excursion (forward-list 1) (point))))
+      (down-list 1)
+      (let (found)
+        (while (and (not found) (< (point) end))
+          (forward-sexp 1)
+          (skip-chars-forward " \t\n,")
+          (when (and (< (point) end)
+                     (looking-at-p "=>"))
+            (setq found (point))))
+        found))))
 
 (defun clara-explorer--side-at-point (form-start)
   "Return :lhs or :rhs based on whether point is before/after the top-level =>.
@@ -190,8 +193,7 @@
      (t :lhs))))
 
 (defun clara-explorer--string-at-point ()
-  "String literal (including quotes) at point, or nil.
-Handles cursor inside the string and cursor directly on its opening quote."
+  "String literal at point."
   (save-excursion
     (let* ((ppss (syntax-ppss))
            (in-str (nth 3 ppss))
@@ -207,64 +209,110 @@ Handles cursor inside the string and cursor directly on its opening quote."
           (buffer-substring-no-properties beg (point))))
        (t nil)))))
 
-(defun clara-explorer--enclosing-vector-at-point ()
-  "Innermost [...] sexp enclosing point, or nil.  Handles point inside a string
-that is itself inside a vector (so a cursor on \"verified\" in
-`[:loan/status \"verified\"]` still yields the vector)."
+(defun clara-explorer--type-bounds-in-condition (beg)
+  "For condition vector at BEG return (BEG . END) of its fact-type."
+  (save-excursion
+    (goto-char beg)
+    (condition-case nil
+        (progn
+          (down-list 1)
+          (skip-chars-forward " \t\n,")
+          (when (and (eq (char-after) ?\?)
+                     (save-excursion
+                       (forward-sexp 1)
+                       (skip-chars-forward " \t\n,")
+                       (looking-at-p "<-")))
+            (forward-sexp 1)
+            (skip-chars-forward " \t\n,")
+            (forward-sexp 1)
+            (skip-chars-forward " \t\n,"))
+          (cond
+           ((eq (char-after) ?\()
+            (forward-sexp 1)
+            (skip-chars-forward " \t\n,")
+            (when (looking-at-p ":from")
+              (forward-sexp 1)
+              (skip-chars-forward " \t\n,")
+              (when (eq (char-after) ?\[)
+                (down-list 1)
+                (skip-chars-forward " \t\n,")
+                (let ((type-beg (point)))
+                  (forward-sexp 1)
+                  (cons type-beg (point))))))
+           ((looking-at-p ":[a-z]")
+            (let ((kw-start (point)))
+              (forward-sexp 1)
+              (let ((kw (buffer-substring-no-properties kw-start (point))))
+                (if (or (string= kw ":and") (string= kw ":or") (string= kw ":not") (string= kw ":exists"))
+                    nil
+                  (cons kw-start (point))))))
+           (t
+            (let ((type-beg (point)))
+              (forward-sexp 1)
+              (cons type-beg (point))))))
+      (error nil))))
+
+(defun clara-explorer--lhs-type-at-point (form-start)
+  (save-excursion
+    (let* ((orig (point))
+           (=>-pos (clara-explorer--top-level-=> form-start))
+           (lhs-end (or =>-pos (point-max)))
+           (found nil))
+      (goto-char form-start)
+      (down-list 1)
+      (forward-sexp 1)
+      (forward-sexp 1)
+      (skip-chars-forward " \t\n,")
+      (while (and (not found) (< (point) lhs-end))
+        (skip-chars-forward " \t\n,")
+        (when (>= (point) lhs-end) (error "end"))
+        (let ((cond-beg (point))
+              (cond-end (save-excursion (forward-sexp 1) (point))))
+          (when (and (eq (char-after cond-beg) ?\[)
+                     (>= orig cond-beg) (<= orig cond-end))
+            (let ((bounds (clara-explorer--type-bounds-in-condition cond-beg)))
+              (when bounds
+                (setq found (buffer-substring-no-properties (car bounds) (cdr bounds))))))
+          (goto-char cond-end)
+          (skip-chars-forward " \t\n,"))
+        )
+      found)))
+
+(defun clara-explorer--vector-fact-at-point ()
+  "Innermost vector fact-type at point, or nil.
+Returns the `[...]` text when point is inside a keyword-led tuple vector such
+as `[:loan/status \"verified\"]` or `[:my-thing]` / `[:my-thing :qual]`.
+Used for RHS and global cases where LHS-structure is not applicable."
   (save-excursion
     (let* ((orig (point))
            (ppss (syntax-ppss))
            (in-str (nth 3 ppss))
            (probe (if in-str (nth 8 ppss) orig))
-           (found nil))
-      ;; char directly under cursor is '[' — that vector itself
-      (when (and (not found) (eq (char-after orig) ?\[))
-        (goto-char orig)
-        (condition-case nil
-            (progn (forward-sexp 1)
-                   (setq found (buffer-substring-no-properties orig (point))))
-          (error nil)))
-      ;; innermost [...] via syntax-ppss from probe
-      (unless found
-        (goto-char probe)
-        (condition-case nil
-            (let ((open (nth 1 (syntax-ppss))))
-              (when (and open (eq (char-after open) ?\[))
-                (goto-char open)
-                (let ((beg open))
-                  (forward-sexp 1)
-                  (when (and (>= orig beg) (<= orig (point)))
-                    (setq found (buffer-substring-no-properties beg (point)))))))
-          (error nil)))
+           found)
+      (goto-char probe)
+      (condition-case nil
+          (let ((open (nth 1 (syntax-ppss))))
+            (when (and open (eq (char-after open) ?\[))
+              (goto-char open)
+              (let ((beg open)
+                    (end (save-excursion (forward-sexp 1) (point))))
+                (when (and (>= orig beg) (<= orig end))
+                  (let ((s (buffer-substring-no-properties beg end)))
+                    (when (and (string-match-p "\\`\\[\\s-*:" s)
+                               (not (string-match-p "[()?]" s))
+                               (not (string-match-p "=" s)))
+                      (setq found s)))))))
+        (error nil))
       found)))
 
-(defun clara-explorer--vector-fact-type-p (s)
-  "Heuristic: is S a tuple fact-type vector (e.g. `[:loan/status \"verified\"]`)?
-Tuple types are keyword-led vectors with 2+ literals (e.g. keyword + string)
-and contain no Clara constraint forms — no parens, no `=` and no `?` variable
-prefix.  This avoids treating a normal condition vector like
-`[Application (= ?x y)]` or a single-keyword condition `[::supporting-document]`
-as the token."
-  (and (stringp s)
-       (string-match-p "\\`\\[\\s-*:" s)
-       ;; at least two tokens (keyword + string/keyword) => contains a space
-       (string-match-p " " s)
-       (not (string-match-p "[()?]" s))
-       (not (string-match-p "=" s))))
-
-(defun clara-explorer--token-at-point ()
-  "The fact-type token at point, or nil.
-Prefers a tuple vector fact type when inside one, then a string literal,
-then a symbol/keyword (via CIDER).  This covers plain symbols, keywords,
-strings and vector-tuple types such as `[:loan/status \"verified\"]`."
-  (let ((vec (clara-explorer--enclosing-vector-at-point)))
-    (cond
-     ((and vec (clara-explorer--vector-fact-type-p vec))
-      (substring-no-properties vec))
-     ((clara-explorer--string-at-point))
-     (t (let ((tok (cider-symbol-at-point 'look-back)))
-          (when tok
-            (substring-no-properties tok)))))))
+(defun clara-explorer--token-at-point (&optional form-start side)
+  "Fact-type token at point."
+  (cond
+   ((and form-start (eq side :lhs) (clara-explorer--lhs-type-at-point form-start)))
+   ((clara-explorer--vector-fact-at-point))
+   ((clara-explorer--string-at-point))
+   (t (let ((tok (cider-symbol-at-point 'look-back)))
+        (when tok (substring-no-properties tok))))))
 
 (defun clara-explorer--context ()
   "Gather navigation context at point.
@@ -281,7 +329,7 @@ strings and vector-tuple types such as `[:loan/status \"verified\"]`."
          (production (and name caller-ns
                           (substring-no-properties (format "%s/%s" caller-ns name))))
          (side (and form-start (clara-explorer--side-at-point form-start)))
-         (token (clara-explorer--token-at-point)))
+         (token (clara-explorer--token-at-point form-start side)))
     (list :production production :kind kind :side side
           :caller-ns caller-ns :token token)))
 
