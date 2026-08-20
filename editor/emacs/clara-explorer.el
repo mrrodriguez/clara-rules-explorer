@@ -53,8 +53,8 @@
   (cond
    ((null x) "nil")
    ((eq x t) "true")
-   ((stringp x) (prin1-to-string x))
-   ((symbolp x) (symbol-name x))
+   ((stringp x) (prin1-to-string (substring-no-properties x)))
+   ((symbolp x) (substring-no-properties (symbol-name x)))
    (t (prin1-to-string x))))
 
 (defun clara-explorer--edn-map (entries)
@@ -191,7 +191,9 @@
 
 (defun clara-explorer--token-at-point ()
   "The fact-type token at point, or nil."
-  (cider-symbol-at-point 'look-back))
+  (let ((tok (cider-symbol-at-point 'look-back)))
+    (when tok
+      (substring-no-properties tok))))
 
 (defun clara-explorer--context ()
   "Gather navigation context at point.
@@ -201,8 +203,12 @@
          (name (nth 0 enclosing))
          (kind (nth 1 enclosing))
          (form-start (nth 2 enclosing))
-         (caller-ns (and (cider-connected-p) (cider-current-ns)))
-         (production (and name caller-ns (format "%s/%s" caller-ns name)))
+         (caller-ns (when (cider-connected-p)
+                      (let ((ns (cider-current-ns)))
+                        (when ns
+                          (substring-no-properties ns)))))
+         (production (and name caller-ns
+                          (substring-no-properties (format "%s/%s" caller-ns name))))
          (side (and form-start (clara-explorer--side-at-point form-start)))
          (token (clara-explorer--token-at-point)))
     (list :production production :kind kind :side side
@@ -270,7 +276,8 @@
 
 (defun clara-explorer--choose-target (direction targets)
   "completing-read popover over fq target names, then jump to the choice."
-  (let* ((labels (mapcar #'clara-explorer--target-label targets))
+  (let* ((targets (if (vectorp targets) (append targets nil) targets))
+         (labels (mapcar #'clara-explorer--target-label targets))
          (prompt (format "%s: " (capitalize (clara-explorer--direction-word direction))))
          (choice (completing-read prompt labels nil t))
          (idx (cl-position choice labels :test #'string=)))
@@ -279,7 +286,8 @@
 
 (defun clara-explorer--choose-or-jump (direction type targets)
   "Dispatch on target count: message, direct jump, or popover."
-  (let ((n (length targets)))
+  (let* ((targets (if (vectorp targets) (append targets nil) targets))
+         (n (length targets)))
     (cond
      ((= n 0) (message "No %s of %s" (clara-explorer--direction-word direction) type))
      ((= n 1) (clara-explorer--goto (elt targets 0)))
