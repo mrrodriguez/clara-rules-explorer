@@ -189,11 +189,82 @@
      (=>-pos :rhs)
      (t :lhs))))
 
+(defun clara-explorer--string-at-point ()
+  "String literal (including quotes) at point, or nil.
+Handles cursor inside the string and cursor directly on its opening quote."
+  (save-excursion
+    (let* ((ppss (syntax-ppss))
+           (in-str (nth 3 ppss))
+           (start (nth 8 ppss)))
+      (cond
+       (in-str
+        (goto-char start)
+        (forward-sexp 1)
+        (buffer-substring-no-properties start (point)))
+       ((eq (char-after) ?\")
+        (let ((beg (point)))
+          (forward-sexp 1)
+          (buffer-substring-no-properties beg (point))))
+       (t nil)))))
+
+(defun clara-explorer--enclosing-vector-at-point ()
+  "Innermost [...] sexp enclosing point, or nil.  Handles point inside a string
+that is itself inside a vector (so a cursor on \"verified\" in
+`[:loan/status \"verified\"]` still yields the vector)."
+  (save-excursion
+    (let* ((orig (point))
+           (ppss (syntax-ppss))
+           (in-str (nth 3 ppss))
+           (probe (if in-str (nth 8 ppss) orig))
+           (found nil))
+      ;; char directly under cursor is '[' — that vector itself
+      (when (and (not found) (eq (char-after orig) ?\[))
+        (goto-char orig)
+        (condition-case nil
+            (progn (forward-sexp 1)
+                   (setq found (buffer-substring-no-properties orig (point))))
+          (error nil)))
+      ;; innermost [...] via syntax-ppss from probe
+      (unless found
+        (goto-char probe)
+        (condition-case nil
+            (let ((open (nth 1 (syntax-ppss))))
+              (when (and open (eq (char-after open) ?\[))
+                (goto-char open)
+                (let ((beg open))
+                  (forward-sexp 1)
+                  (when (and (>= orig beg) (<= orig (point)))
+                    (setq found (buffer-substring-no-properties beg (point)))))))
+          (error nil)))
+      found)))
+
+(defun clara-explorer--vector-fact-type-p (s)
+  "Heuristic: is S a tuple fact-type vector (e.g. `[:loan/status \"verified\"]`)?
+Tuple types are keyword-led vectors with 2+ literals (e.g. keyword + string)
+and contain no Clara constraint forms — no parens, no `=` and no `?` variable
+prefix.  This avoids treating a normal condition vector like
+`[Application (= ?x y)]` or a single-keyword condition `[::supporting-document]`
+as the token."
+  (and (stringp s)
+       (string-match-p "\\`\\[\\s-*:" s)
+       ;; at least two tokens (keyword + string/keyword) => contains a space
+       (string-match-p " " s)
+       (not (string-match-p "[()?]" s))
+       (not (string-match-p "=" s))))
+
 (defun clara-explorer--token-at-point ()
-  "The fact-type token at point, or nil."
-  (let ((tok (cider-symbol-at-point 'look-back)))
-    (when tok
-      (substring-no-properties tok))))
+  "The fact-type token at point, or nil.
+Prefers a tuple vector fact type when inside one, then a string literal,
+then a symbol/keyword (via CIDER).  This covers plain symbols, keywords,
+strings and vector-tuple types such as `[:loan/status \"verified\"]`."
+  (let ((vec (clara-explorer--enclosing-vector-at-point)))
+    (cond
+     ((and vec (clara-explorer--vector-fact-type-p vec))
+      (substring-no-properties vec))
+     ((clara-explorer--string-at-point))
+     (t (let ((tok (cider-symbol-at-point 'look-back)))
+          (when tok
+            (substring-no-properties tok)))))))
 
 (defun clara-explorer--context ()
   "Gather navigation context at point.
