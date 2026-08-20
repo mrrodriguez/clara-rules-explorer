@@ -29,11 +29,31 @@
   (add-to-list 'load-path (file-name-directory load-file-name)))
 
 (require 'cl-lib)
+(require 'xref)
 
 (unless (featurep 'cider)
   (user-error "clara-explorer requires cider"))
 (unless (featurep 'parseedn)
   (user-error "clara-explorer requires parseedn — add to dotspacemacs-additional-packages"))
+
+(defcustom clara-explorer-debug nil
+  "When non-nil, log navigation decisions to *Messages*.
+Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
+  :type 'boolean
+  :group 'clara-explorer)
+
+(defun clara-explorer--log (fmt &rest args)
+  "Log FMT/ARGS to *Messages* when `clara-explorer-debug' is non-nil."
+  (when clara-explorer-debug
+    (apply #'message (concat "clara-explorer[debug]: " fmt) args)))
+
+(defun clara-explorer--push-jump ()
+  "Push current position onto `evil' and `xref' jump lists."
+  (when (fboundp 'evil-set-jump)
+    (clara-explorer--log "push evil jump at %s:%d" (buffer-name) (point))
+    (evil-set-jump))
+  (xref-push-marker-stack)
+  (clara-explorer--log "push xref marker at %s:%d" (buffer-name) (point)))
 
 ;; ---------------------------------------------------------------------------
 ;; EDN transport (§9.3, §9.8)
@@ -378,21 +398,30 @@ Used for RHS and global cases where LHS-structure is not applicable."
   (let* ((name (clara-explorer--edn-get :name target))
          (ns (clara-explorer--edn-get :ns target))
          (rule-name (clara-explorer--unqualified-name name)))
+    (clara-explorer--log "fallback: name=%S ns=%S rule-name=%S" name ns rule-name)
     (when (and ns rule-name)
+      (clara-explorer--log "fallback: cider-find-ns %S" ns)
       (cider-find-ns nil ns)
       (goto-char (point-min))
-      (re-search-forward
-       (format "(%sdef\\(rule\\|query\\)[[:space:]\n]+%s\\b"
-               "[^ \t\n()]*" rule-name)
-       nil t))))
+      (let ((found (re-search-forward
+                    (format "(%sdef\\(rule\\|query\\)[[:space:]\n]+%s\\b"
+                            "[^ \t\n()]*" rule-name)
+                    nil t)))
+        (clara-explorer--log "fallback: search %S -> %s at %d" rule-name (if found "found" "NOT-FOUND") (point))
+        found))))
 
 (defun clara-explorer--goto (target)
-  "Jump to a target production's source."
+  "Jump to target.  Pushes evil/xref jumps for C-o."
   (let* ((name (clara-explorer--edn-get :name target))
          (source (clara-explorer--edn-get :source target))
          (var? (clara-explorer--edn-get :var? source)))
+    (clara-explorer--log "goto: name=%S var?=%S source=%S" name var? source)
+    (clara-explorer--push-jump)
     (if var?
-        (cider-find-var nil name)
+        (progn
+          (clara-explorer--log "goto: cider-find-var %S" name)
+          (cider-find-var nil name))
+      (clara-explorer--log "goto: fallback path")
       (clara-explorer--goto-fallback target))))
 
 (defun clara-explorer--choose-target (direction targets)
