@@ -7,6 +7,11 @@ node_modules
 .cache
 .nrepl-port
 target
+
+# Eldev (Emacs) — local cache, not committed (see editor/emacs/Eldev)
+.eldev/
+**/.eldev/
+.eldev
 /server/demo-data/
 .direnv
 .envrc.local

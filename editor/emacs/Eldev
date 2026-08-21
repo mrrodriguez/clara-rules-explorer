@@ -1,0 +1,20 @@
+;; Eldev - Elisp Development Tool
+;; https://github.com/doublep/eldev
+;; Run `eldev test` from this directory, or `make test` (which falls back to plain emacs if eldev is missing).
+
+:main-file "clara-explorer.el"
+:package "clara-explorer"
+
+
+;; Package archives for Eldev to resolve cider/parseedn/clojure-mode.
+;; cider/clojure-mode are on MELPA (unstable); use the stable/unstable pair so
+;; both MELPA Stable and MELPA are available (prefer unstable with --unstable).
+(eldev-use-package-archive 'melpa)
+(eldev-use-package-archive 'gnu)
+
+;; Dependencies are declared in clara-explorer.el's Package-Requires header
+;; (emacs "28.1" cider "1.12" parseedn "1.2" clojure-mode "5.18").
+;; No explicit depends-on needed — Eldev reads the header automatically.
+
+;; Tests live in test/ - eldev discovers ert-deftest automatically.
+;; No extra config needed for plain ERT.

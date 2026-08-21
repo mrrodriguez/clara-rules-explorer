@@ -1,8 +1,13 @@
 # Explorer Server ↔ Emacs (CIDER) Navigation Plan
 
-Status: **Proposed** (not yet implemented)
+Status: **Implemented (phase 1)** — Phase 0 spike and Phase 1 solidified;
+Phase 0.5 manual Emacs acceptance and Phase 2 extensions remain open.
 
 Related:
+
+- Review 1: `docs/planning/explorer-server-emacs-plan-review-1.md` (all items
+  applied or answered inline)
+- Roadmap / checklist: `docs/planning/explorer-server-emacs-roadmap.md`
 
 Goal: from a `.clj` buffer connected to a live CIDER REPL that is running the
 explorer server (`clara.server.graph.server/start!`), point at a fact type in a
@@ -15,18 +20,24 @@ type, using the dependency graph the server has already computed.
 
 **Goals**
 
-- Two editor commands:
+- Three editor commands:
   1. **Navigate to producer** — cursor over a **LHS** fact type → jump to the
      upstream production that inserts (or retracts) a fact satisfying it.
   2. **Navigate to consumer** — cursor over a **RHS** fact type → jump to a
      downstream production whose LHS consumes a fact that type satisfies.
-- Direct jump when exactly one candidate; a **popover** (helm/ivy
-  `completing-read`) when there is more than one. Popover options are
-  **fully-qualified** production names, never truncated.
+  3. **Refresh analysis** — explicitly re-warm the server's analysis (and, when
+     the session itself was rebuilt, swap it in) after re-evaling rules in the
+     REPL. No file-watching (§5.2).
+- Direct jump when exactly one candidate; a **popover** (`completing-read`,
+  advised by helm in the user's setup) when there is more than one. Popover
+  options are **fully-qualified** production names, never truncated.
 - Resolution of shorthand tokens to their fully-qualified, kind-explicit fact
   type before matching (imported class, `:refer`'d symbol, `:as` alias,
   `::auto-resolved` keyword, record constructor `->Foo` / `map->Foo` / `Foo.`).
-- Ship a single loadable `.el` file as the starting point for testing.
+- **Machine-agnostic**: no hard-coded absolute paths (`~/Projects/...`), home
+  directories, or ports anywhere in shipped elisp or docs (§10).
+- Ship a single loadable `.el` file with explicit dependencies (§9.0) as the
+  starting point for testing.
 - Leave a clean seam for a future neovim (Conjure) client.
 
 **Non-goals**
@@ -36,6 +47,7 @@ type, using the dependency graph the server has already computed.
   (remote-server support is out of scope — see §4.2).
 - No LSP integration in the first cut (see §4.3 for the reasoning and the path
   that would justify it).
+- No file-watch / hot-reload of analysis (§5.2).
 - Not implementing — this document is the plan only.
 
 ---
@@ -81,7 +93,8 @@ code that produces `P`'s inserts/retracts. That includes both:
   helper functions the RHS reaches (`:boundary-to-constructor-path`
   provenance), and var-as-fact aliases (`:fact-type-spec-fn`).
 
-Only rules have an RHS; queries never do.
+Only rules have an RHS; queries never do. On a query the consumer command
+messages "queries have no RHS" and stops (no server round trip).
 
 `T` may be a record constructor (`map->ApplicationOutcome`,
 `->ApplicationOutcome`, `ApplicationOutcome.`), a user-defined ctor var, an
@@ -93,23 +106,23 @@ linkage (§7.4).
 Result set = the downstream productions of `P` (from `P`'s `:downstream`
 entries) whose `:match` includes a `producer-type` equal to `T`. Retraction
 coupling is distinguishable — the `:match` pair carries `:via :retract` — and
-should be surfaced in the popover (e.g. `(retract)` suffix) rather than hidden.
+is surfaced in the popover as a `(retract)` suffix rather than hidden.
 
 - 0 / 1 / N results behave as in §2.1.
 
 When the cursor is over a ctor **outside** any `defrule` (e.g. in the helper
 fn's own definition), there is no enclosing `P` to scope to: resolve the ctor
-to `T` via the same callsite linkage in reverse (which productions' callsites
-match this `:constructor-sym` / source location), then answer with the global
-consumers of `T` rather than `P`'s scoped `:downstream` (§7.4).
+to `T` against the **live REPL namespace** (§7.4 — nREPL ns resolution, not
+filename/row/col matching), then answer with the global consumers of `T`
+rather than `P`'s scoped `:downstream` (§9.7).
 
 ### 2.3 Popover contents
 
 Every option is the **fully-qualified** production name
-(`ns/rule-name`), the only label we show. The client API also returns `:ns`,
-`:type` (`"rule"` / `"query"`), `:via` (`:insert` / `:retract`), and the
-source location; the popover uses the fq name, and the jump uses the source
-location.
+(`ns/rule-name`), the only label we show, plus a `(retract)` suffix when
+`:via :retract`. The client API also returns `:ns`, `:type`
+(`"rule"` / `"query"`), `:via` (`:insert` / `:retract`), and the source
+location; the popover uses the fq name, and the jump uses the source location.
 
 ---
 
@@ -122,11 +135,15 @@ an editor-shaped query surface and one missing index.
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
 | Producers/consumers per production, with type-bridge evidence     | `core/->dep-graph` + `:match` on `:upstream`/`:downstream` (`core/get-production-deps-summary`)                                             | ✅ done                                 |
 | Hierarchy satisfaction (inserted subtype satisfies read ancestor) | `core/downstream?` via session `:ancestors-fn`                                                                                              | ✅ done                                 |
-| Kind-explicit type serialization + alias/refer/`::` resolution    | `serialize/resolve-type`                                                                                                                    | ✅ done (one gap: constructor vars, §7) |
+| Kind-explicit type serialization + alias/refer/`::` resolution    | `serialize/resolve-type` (serialize.clj:25)                                                                                                 | ✅ done (ctor vars go through `analyze.ctor`, §7) |
+| Constructor → record-type resolution (`->Foo`/`map->Foo`/`Foo.`)  | `analyze.ctor/resolve-record-type` (ctor.clj:23), `resolve-ctor-form` (ctor.clj:54), `constructor-fn-name?` (ctor.clj:11)                  | ✅ done — **reuse, do not replicate**   |
+| RHS callsite linkage (`:constructor-sym` → `:resolved-types`)     | `analyze.callsite` (schema at callsite.clj:334-358); surfaced per production as serialized `:dynamic-insert-types-detected` / `:dynamic-retract-types-detected` (core.clj:184-186, 235) | ✅ done |
+| Global consumers of a type                                        | `fact_types` `used-by-rules` / `used-by-queries` (fact_types.clj:241-269, 373)                                                              | ✅ done                                 |
 | Deterministic ids                                                 | `serialize/route-id`                                                                                                                        | ✅ done                                 |
 | Warm, cached analysis on the running system                       | `cache/get-rulebase-analysis` (`server/start!` warms it)                                                                                    | ✅ done                                 |
+| Explicit refresh primitives                                       | `server/reload-annotations!` (server.clj:448), `server/swap-session!` (server.clj:429)                                                      | ✅ done (elisp commands wrap them, §9.9) |
 | **Source location (file/row/col) of each production**             | var `:file`/`:line`/`:column` metadata for `defrule`/`defquery` (most productions); kondo `:var-definitions` for non-var productions (rare) | ✅ var tier; ⚠️ kondo tier (§8)         |
-| An editor-facing query surface (HTTP or Clojure)                  | —                                                                                                                                           | ❌ to be added (§6)                     |
+| An editor-facing query surface (HTTP or Clojure)                  | —                                                                                                                                           | ❌ to be added (§5)                     |
 
 The rulebase analysis is a **pure function**
 (`core/->rulebase-analysis` of `(:session state)` and `(:annotations state)`),
@@ -139,16 +156,19 @@ cache; there is no hidden mutation to worry about.
 
 ### 4.1 How much needs to be in elisp?
 
-A thin but real layer — roughly **120–180 lines**. Its responsibilities:
+A thin but real layer — roughly **150–200 lines**. Its responsibilities:
 
-1. **Structural navigation** — find the enclosing `(defrule|defquery NAME …)`,
-   decide whether point is left or right of the top-level `=>` (LHS vs RHS),
-   and grab the fact-type token at point.
+1. **Structural navigation** — find the enclosing `(defrule|defquery NAME …)`
+   (including aliased prefixes like `r/defrule` — the demo rules use them, so
+   this is the common case, not an edge), decide whether point is left or
+   right of the top-level `=>` (LHS vs RHS), and grab the fact-type token at
+   point.
 2. **Transport** — eval one Clojure form over the CIDER connection
    (`cider-nrepl-sync-request:eval`) and `parseedn-read-str` the printed EDN
-   result. (`parseedn` is already in the user's Spacemacs package set.)
-3. **UX** — `completing-read` popover (helm/ivy) for N > 1, and
-   `cider-find-var` (var) / `find-file`+`goto-char` (non-var) for the jump.
+   result.
+3. **UX** — `completing-read` popover (helm advises it in the user's setup) for
+   N > 1, and `cider-find-var` (var) / `find-file`+`goto-char` (non-var) for
+   the jump.
 4. **Commands** — named `interactive` functions (`M-x …`); keybindings later.
 
 Everything semantic — which type, which producers/consumers, hierarchy
@@ -195,14 +215,15 @@ is a phase of its own, not the spike.
 ### 4.4 Resulting shape
 
 ```
-editor (elisp, ~150 LOC)                 Clojure (shared core)
+editor (elisp, ~180 LOC)                 Clojure (shared core)
 ────────────────────────                 ──────────────────────
 find enclosing defrule/defquery   ──┐
-detect LHS vs RHS                  │
+detect LHS vs RHS (sexp-aware)     │
 grab token at point                │   clara.server.graph.client/navigate
-resolve -> EVAL over nREPL ────────┼──▶   (token+side+production) -> EDN targets
-parseedn-read <- EDN               │   clara.server.graph.client/production-source
+resolve -> EVAL over nREPL ────────┼──▶   (token+side+production|caller-ns) -> EDN
+parseedn-read <- EDN               │   clara.server.graph.client/get-production-source
 completing-read popover / jump  ◀──┘   jump: cider-find-var (var) · kondo/regex (non-var)
+M-x clara-explorer-refresh ──────────▶   server/reload-annotations! (+ swap-session!)
 ```
 
 ---
@@ -210,37 +231,73 @@ completing-read popover / jump  ◀──┘   jump: cider-find-var (var) · kon
 ## 5. The shared core: `clara.server.graph.client`
 
 New namespace `server/src/clara/server/graph/client.clj`. Small, stable,
-EDN-in/EDN-out. It is the **contract**; both editors target it.
+EDN-in/EDN-out. It is the **contract**; both editors target it. Schemas use
+**Prismatic Schema** (`schema.core`), matching `server.clj` / `api.clj` — not
+Malli.
 
 ```clojure
 (ns clara.server.graph.client
   "Editor-facing query surface. Pure EDN in, EDN out. No HTTP."
   (:require [clara.server.graph.cache :as cache]
             [clara.server.graph.server :as server]
+            [clara.server.tools.graph.analyze.ctor :as ctor]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.serialize :as serialize]
+            [schema.core :as s]
             ...))
 
-(defonce ^:private system (atom nil))
-(defn register! [sys] (reset! system sys) ::ok)
-(defn system [] @system)
+(defonce ^:private registered-system (atom nil))
+
+(s/defn register! :- s/Keyword
+  [sys] (reset! registered-system sys) ::ok)
+
+(s/defn get-current-system []
+  (or @registered-system (server/get-current-system)))
 ```
 
-Proposed functions:
-
-| Function               | Input                                                 | Output                                                                                                    |
-| ---------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `register!`            | system map from `server/start!`                       | `::ok`                                                                                                    |
-| `navigate`             | `{:production "ns/rule" :side :lhs\|:rhs :token "…"}` | see below                                                                                                 |
-| `production-source`    | `"ns/rule"`                                           | var: `{:var? true :file … :line … :column …}`; non-var: `{:var? false :file … :row … :col …}`; else `nil` |
-| `production-locations` | —                                                     | full `{fq-name location}` index (debugging)                                                               |
-
-`navigate` result (EDN, one round trip):
+Proposed schemas and functions:
 
 ```clojure
-{:direction :producer        ;; or :consumer
+(s/defschema NavigateInput
+  {(s/optional-key :production) (s/maybe s/Str)   ; fq "ns/rule"; nil = global path
+   (s/optional-key :side)       (s/enum :lhs :rhs)
+   (s/optional-key :caller-ns)  s/Str             ; buffer ns, for global path + ctor resolution
+   :token                       s/Str})
+
+(s/defschema SourceLoc
+  {:var?   s/Bool
+   :file   (s/maybe s/Str)
+   :line   (s/maybe s/Int)
+   :column (s/maybe s/Int)})
+
+(s/defschema NavigateResult
+  {:direction  (s/enum :producer :consumer :type)
+   :production (s/maybe s/Str)
+   :type       s/Str
+   :targets    [{:name s/Str :ns s/Str :type s/Str
+                 :via (s/enum :insert :retract)
+                 :source SourceLoc}]})
+```
+
+| Function               | Input                                 | Output                                                              |
+| ---------------------- | ------------------------------------- | ------------------------------------------------------------------- |
+| `register!`            | system map from `server/start!`       | `::ok`                                                              |
+| `get-current-system`       | —                                     | registered system, else `server/get-current-system`                     |
+| `navigate`             | `NavigateInput`                       | `NavigateResult` or `{:error s/Str}`                                |
+| `get-production-source`    | `"ns/rule"`                           | `SourceLoc`, else `nil`                                             |
+| `get-production-locations` | —                                     | full `{fq-name location}` index (debugging)                         |
+
+Validation happens at the choke point with `s/validate` (same pattern as
+`server.clj`). Keep `*warn-on-reflection* true`: `Class/.getName` needs a
+`^Class` hint, as in `serialize.clj`. Gate: `make test lint reflection-check`.
+
+`navigate` result (EDN, one round trip, **pure EDN only** — strings, keywords,
+maps, vectors, ints, booleans, nil; a `Class` object never crosses the wire):
+
+```clojure
+{:direction :consumer
  :production "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
- :type       "clara.server.tools.graph.rules.loan_app_facts.Application"
+ :type       "clara.server.tools.graph.rules.loan_app_facts.ApplicationOutcome"
  :targets
  [{:name "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
    :ns   "clara.server.tools.graph.rules.loan-app-rules"
@@ -257,7 +314,7 @@ Proposed functions:
 2. Get the warmed analysis:
    `(cache/get-rulebase-analysis (:cache sys) (:session state) (:annotations state)
                                (:memory-analysis state))`.
-3. Confirm `P` exists (rules **or** queries map), else return a
+3. Confirm `P` exists (rules **or** queries map), else return
    `{:error "…"}` the editor can message.
 4. Resolve `:token` against `P`'s namespace and `:side` (§7) → canonical
    kind-explicit name `T`, including the callsite-aware path for RHS fact-ctor
@@ -269,11 +326,12 @@ Proposed functions:
    kondo location otherwise (§8).
 7. Sort deterministically by fq name; return.
 
-For the outside-defrule path (§9.7), `navigate` also accepts
-`{:production nil :token "…"}` (no `:side`) and returns the global consumers of
-the resolved type instead of a scoped `:downstream` — the same
+For the outside-defrule path (§9.7), `navigate` accepts
+`{:production nil :caller-ns "my.app.rules" :token "map->Foo"}` (no `:side`)
+and returns the global consumers of the resolved type — the same
 `{:direction :type :targets …}` shape, so the editor-side popover/jump is
-unchanged.
+unchanged. **Identity is nREPL namespace resolution** (`ns-resolve` inside the
+live session against `caller-ns`), never filename/row/col matching (§7.4).
 
 The client-API never re-serializes types by hand — it reuses
 `serialize/resolve-type`, `serialize/serialize-production-dep`, and the
@@ -282,7 +340,8 @@ consistent with the HTTP API.
 
 ### 5.1 Accessing the running system
 
-`server/default-system` is `^:private`. Two options:
+`server/default-system` is `^:private` (server.clj:33) with no public accessor
+today — verified. Two additions:
 
 - **Preferred:** the REPL user binds the result of `start!` and registers it:
   ```clojure
@@ -290,25 +349,47 @@ consistent with the HTTP API.
   (def s (server/start! {:session my-session :port 9999}))
   (client/register! s)
   ```
-- **Fallback:** add a public accessor to `server` (e.g. `current-system`) that
-  returns `@default-system`, and have `client/navigate` default to it. One-line
-  addition, removes the manual `register!` step for the common single-server
-  case. Recommend doing both: `register!` for explicit/test use, `current-system`
-  for the 0-arg convenience.
+- **Convenience:** add a public `server/get-current-system` (one line:
+  `@default-system`), and have `client/get-current-system` fall back to it.
+  `default-system` stays `^:private`.
+
+Do both: `register!` for explicit/test use, `get-current-system` for the 0-arg
+case.
+
+### 5.2 Lifecycle & staleness contract (no file-watch)
+
+Navigation answers reflect the **session the server was started with**, not
+the current REPL state. Re-evaling a `defrule` in the REPL changes the REPL's
+vars but not the server's `(:session state)`. There are exactly two staleness
+levels, each with an explicit, user-initiated fix:
+
+| What changed                                        | Stale data                          | Fix (explicit command, §9.9)                       |
+| --------------------------------------------------- | ----------------------------------- | -------------------------------------------------- |
+| Rule source on disk / annotations / kondo view      | annotations + warmed analysis       | `M-x clara-explorer-refresh` → `server/reload-annotations!` (server.clj:448; re-derives annotations, rebuilds generated layer from cached per-ns kondo analyses, re-warms cache) |
+| Rules re-eval'd in the REPL (session itself stale)  | the session the graph is built from | rebuild session in the REPL, then `M-x clara-explorer-swap-session` → `server/swap-session!` (server.clj:429) |
+
+There is **no** `after-save-hook`, no filesystem watch, no mtime-keyed cache
+invalidation. The workflow is documented in the README snippet: after
+re-defining rules, rebuild the session and swap; after editing rule files
+without re-evaling, refresh. If the kondo tier (§8) is added later, its per-ns
+analysis is cached under `[::source ns-sym]` keyed by **cache identity**, and
+`reload-annotations!` is the invalidation point.
 
 ---
 
 ## 6. Split of responsibility
 
-| Concern                                                     | Where                                                   | Why                                            |
-| ----------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------- |
-| Dep graph, producers/consumers, hierarchy                   | Clojure (existing `core`)                               | already computed + cached                      |
-| Kind-explicit resolution of alias/refer/`::`                | Clojure (`serialize/resolve-type` + client)             | one source of truth for the kind vocabulary    |
-| Constructor→fact-type mapping (`->Foo`, `map->Foo`, `Foo.`) | Clojure (client: callsite `:constructor-sym`→`:resolved-types`, reusing `analyze.ctor` where possible) | fiddly, must match annotations' resolved types |
-| Source location of productions                              | Clojure (new kondo extraction)                          | kondo already has row/col/filename             |
-| Enclosing production, LHS/RHS side, token-at-point          | elisp                                                   | editor structural knowledge                    |
-| nREPL eval + EDN parse                                      | elisp                                                   | CIDER + `parseedn` already present             |
-| Popover / direct-jump                                       | elisp                                                   | helm/ivy + `find-file`                         |
+| Concern                                                     | Where                                                                            | Why                                            |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Dep graph, producers/consumers, hierarchy                   | Clojure (existing `core`)                                                        | already computed + cached                      |
+| Kind-explicit resolution of alias/refer/`::`                | Clojure (`serialize/resolve-type` + client)                                      | one source of truth for the kind vocabulary    |
+| Constructor→fact-type mapping (`->Foo`, `map->Foo`, `Foo.`) | Clojure — **`analyze.ctor/resolve-record-type` / `resolve-ctor-form`, reused**   | subtle (hyphen/underscore, class-load check); must match annotations' resolved types |
+| RHS callsite linkage (`:constructor-sym` → `:resolved-types`) | Clojure (client reads serialized `:dynamic-insert-types-detected` on the production summary) | already computed by `analyze.callsite` |
+| Source location of productions                              | Clojure (var metadata; new kondo extraction only if needed)                      | kondo already has row/col/filename             |
+| Refresh / session swap                                      | Clojure (`server/reload-annotations!`, `swap-session!`), wrapped by elisp commands | explicit, no watchers                          |
+| Enclosing production, LHS/RHS side, token-at-point          | elisp                                                                            | editor structural knowledge                    |
+| nREPL eval + EDN parse                                      | elisp                                                                            | CIDER + `parseedn` already present             |
+| Popover / direct-jump                                       | elisp                                                                            | `completing-read` + `find-file`                |
 
 ---
 
@@ -318,19 +399,31 @@ This is the one genuinely hard part, and it must live in Clojure so it can be
 refined without touching either editor. Input is the **raw token text** at
 point plus `P`'s namespace and side. Steps:
 
-1. **Read the token in context.** Use `clojure.core/read-string` with `*ns*`
-   bound to `P`'s namespace so `::kw` auto-resolves and symbols read normally.
-   (Not `edn/read-string`, which does not resolve `::`.)
+1. **Read the token in context.** Prefer `clojure.edn/read-string` plus
+   explicit `::`-resolution: look up `(ns-aliases caller-ns)` and resolve
+   `::alias/kw` / `::kw` manually — this avoids `read-string` entirely.
+   Acceptable alternative: `clojure.core/read-string` with `*ns*` bound to the
+   caller ns (which auto-resolves `::`) — in that case bind
+   `*read-eval* false` and wrap in `try`, with a comment recording the trust
+   context: the token is trusted editor state eval'd inside the user's own
+   nREPL session (same trust boundary as `cider-eval-last-sexp`), not
+   untrusted file or network input. Do not apply blanket read-safety rules
+   without that context.
 2. **Resolve by kind** (mirrors `serialize/resolve-type`):
-   - keyword → `(str kw)` (`::foo` already read as `:ns/foo`).
+   - keyword → `(str kw)` (`::foo` already resolved in step 1).
    - string → `(pr-str s)`.
    - symbol:
-     - `ns-resolve` → `Class` → `.getName` (imported/`:refer`'d class).
-     - `ns-resolve` → `var` whose name is `->X` / `map->X` → derive class name
-       `(str var-ns "." X)`; a trailing-dot symbol `X.` → strip the dot then
-       class name. **This is the gap in `serialize/resolve-type` today** (it
-       returns the var's `ns/name`, not the fact type's class name), and the
-       client must close it.
+     - `ns-resolve` in the caller ns → `Class` → `(.getName ^Class c)`
+       (imported/`:refer`'d class; hint required for reflection).
+     - `ns-resolve` → ctor-ish var or symbol (`->X`, `map->X`, `X.`, `X/new`,
+       `new X`) → **delegate to `analyze.ctor/resolve-record-type`**
+       (ctor.clj:23) / `resolve-ctor-form` (ctor.clj:54). Do **not** hand-derive
+       class names: `resolve-record-type` already handles the `map->`/`->`
+       prefixes, `-`→`_` in package segments, and verifies the class actually
+       loads (`resolvable-fact-class`). This closes the gap in
+       `serialize/resolve-type` (which returns the var's `ns/name`, not the
+       fact type's class name) by reusing the analyzer's own logic, so nav
+       resolution can never drift from what the annotations computed.
      - unresolved → `symbol[<value>]` (then it will not match any `:lhs-types`
        / `:insert-types`, and we message "no fact type found under cursor").
 3. **Match against the production's declared types** for the side:
@@ -339,27 +432,34 @@ point plus `P`'s namespace and side. Steps:
      so a token resolves only if it _is_ one of the production's own types.
 4. **Callsite-aware resolution (primary for RHS, co-equal with step 2).** A
    token that names a *user-defined* ctor or a ctor reached through helper fns
-   will not resolve by name derivation alone. The production's
-   `:dynamic-insert-types-detected` / `:dynamic-retract-types-detected` carry
-   the callsites its RHS is linked to — `:constructor-sym`, `:resolved-types`,
-   `:fact-type` (var-as-fact), `:source-str`, `:filename`, `:ns`, and the
-   `:via` provenance chain. Fully-qualify the token to a ctor symbol and match
-   it against callsite `:constructor-sym` (or `:fact-type`); the matching
-   callsite's `:resolved-types` is `T`. This is what makes user-defined ctors
+   will not resolve by name derivation alone. Read the production's serialized
+   `:dynamic-insert-types-detected` / `:dynamic-retract-types-detected` entries
+   from its analysis summary (core.clj:184-186, 235 — sourced from the
+   `:clara-rules/dynamic-insert-types-detected` annotation and serialized by
+   `serialize/serialize-dynamic-detection`, so the shape matches what the HTTP
+   API returns). Fully-qualify the token to a ctor symbol **via `ns-resolve`
+   in the caller namespace** and match it against callsite `:constructor-sym`
+   (or `:fact-type` for var-as-fact aliases); the matching callsite's
+   `:resolved-types` is `T`. This is what makes user-defined ctors
    (`:fact-constructors`), helper-function chains
    (`:boundary-to-constructor-path`), and var-as-fact aliases
    (`:fact-type-spec-fn`) resolvable instead of assuming an inline `insert!`
    argument.
 
+   **Identity is namespace resolution, not source position.** We have a live
+   REPL: `:constructor-sym` resolves against the ns it was found in. Do not
+   match on `:filename`/row/col; source position is only ever a display aid.
+
    For the **outside-the-defrule** case (§2.2), run the same match *across*
-   productions: find callsites whose `:constructor-sym`/`:source-str`/position
-   match the cursor, read their `:resolved-types` as `T`, and return the
-   global consumers of `T` rather than `P`'s scoped `:downstream`.
+   productions: fully-qualify the token in `:caller-ns`, find callsites whose
+   `:constructor-sym` / `:fact-type` match that fq symbol, read their
+   `:resolved-types` as `T`, and return the global consumers of `T`
+   (`used-by-rules` / `used-by-queries`) rather than `P`'s scoped `:downstream`.
 
 Example — cursor over `map->ApplicationOutcome` in
 `app-outcome-approved?` (RHS): token reads as the symbol
-`map->ApplicationOutcome`; `ns-resolve` finds the record constructor var;
-step 2 derives `clara.server.tools.graph.rules.loan_app_facts.ApplicationOutcome`;
+`map->ApplicationOutcome`; step 2's `ctor/resolve-record-type` resolves it to
+`clara.server.tools.graph.rules.loan_app_facts.ApplicationOutcome`;
 step 3 finds it in `:insert-types`. LHS cursor over `Application` resolves the
 imported class to the same-style name and filters `:upstream` matches.
 
@@ -387,16 +487,18 @@ assembled production maps — do **not** intern production vars, so `ns-resolve`
 returns nil. For these, clj-kondo's `defrule`/`defquery` hooks rewrite the forms
 to `(def name {:production …})` and emit `:var-definitions` with
 `:ns`/`:name`/`:row`/`:col`/`:end-row`/`:end-col`/`:filename`. But
-`analyze/prune-and-rename-analysis` **removes** those real-source definitions
-during source synthesis (they'd collide with the synthetic snippet defs); only
-the pruned form is cached. Additive fix (only if a real non-var case bites):
+`analyze/prune-and-rename-analysis` (analyze.clj:432 — note: currently
+**private**, `defn-`) **removes** those real-source definitions during source
+synthesis (they'd collide with the synthetic snippet defs); only the pruned
+form is cached. Additive fix (only if a real non-var case bites):
 
 - **A (recommended):** a dedicated cached pass
   `analyze/->production-source-locations` running clj-kondo over each
-  rule-owning namespace's **real** source (via `analyze/find-ns-resource`, no
-  synth, no pruning) with only `:var-definitions` analysis, extracting
-  `{fq-name {:filename :row :col :end-row :end-col}}` under a separate cache
-  key (`[::source ns-sym]`).
+  rule-owning namespace's **real** source (via `analyze/find-ns-resource`,
+  analyze.clj:386 — no synth, no pruning) with only `:var-definitions`
+  analysis, extracting `{fq-name {:filename :row :col :end-row :end-col}}`
+  under a separate cache key (`[::source ns-sym]`, keyed by cache identity —
+  see §5.2).
 - **B:** stash the pre-prune `:var-definitions` for production vars as a side
   map (e.g. `::production-locations`) on the returned analysis in
   `->rule-source-analysis-from-namespaces`, then thread it through the cache.
@@ -418,84 +520,126 @@ production actually needs it.
 ## 9. The elisp layer
 
 Single file: `editor/emacs/clara-explorer.el` (new `editor/` top-level dir;
-`editor/neovim/` later). No package dependency beyond what Spacemacs already
-loads (`cider`, `parseedn`, `dash`/`f`/`s`, `clojure-mode`, helm/ivy).
+`editor/neovim/` later; optional Spacemacs layer skeleton alongside at
+`editor/emacs/spacemacs-layer/`, §10). No machine-specific paths anywhere in
+the file.
+
+### 9.0 Dependencies (explicit contract)
+
+File header:
+
+```elisp
+;; Package-Requires: ((emacs "28.1") (cider "1.12") (parseedn "1.2") (clojure-mode "5.18"))
+```
+
+- **Hard deps:** `cider` (`cider-nrepl-sync-request:eval`,
+  `cider-current-repl`, `cider-current-ns`, `cider-connected-p`,
+  `cider-symbol-at-point`, `cider-find-var`, `cider-find-ns`), `parseedn`
+  (`parseedn-read-str`), `clojure-mode` (syntax table, `clojure-find-ns`),
+  Emacs 28.1 (Spacemacs baseline).
+- **Not deps:** `dash`/`f`/`s` (nothing in ~180 LOC needs them), `helm`/`ivy`
+  (built-in `completing-read` is sufficient — helm advises it in the user's
+  setup; never `(require 'helm)`).
+- **Runtime guard** at top of file, so a bare `load-file` fails loudly:
+
+  ```elisp
+  (unless (featurep 'cider)    (user-error "clara-explorer requires cider"))
+  (unless (featurep 'parseedn) (user-error "clara-explorer requires parseedn — add to dotspacemacs-additional-packages"))
+  ```
+
+Verified in the user's install: `cider-20260402.444`,
+`parseedn-20231203.1909`, `clojure-mode-20260325.811`, helm present, ivy absent.
 
 ### 9.1 Commands
 
 ```elisp
 (clara-explorer-navigate-producer)   ; M-x clara-explorer-navigate-producer
 (clara-explorer-navigate-consumer)   ; M-x clara-explorer-navigate-consumer
+(clara-explorer-refresh)             ; M-x clara-explorer-refresh  (§9.9)
+(clara-explorer-swap-session)        ; M-x clara-explorer-swap-session (§9.9)
 ```
 
-Both are `interactive` and delegate to a shared `clara-explorer--navigate side`.
-No keybindings for now — call them via `M-x` (after `M-x eval-buffer` on the
-file) during the spike.
+All `interactive`. The two navigate commands delegate to a shared
+`clara-explorer--navigate side`. No keybindings for now — call them via `M-x`
+(after `M-x eval-buffer` on the file) during the spike.
 
 `clara-explorer--navigate side` routes on whether point is inside a
 `defrule`/`defquery`:
 
 - **Inside** → scoped navigation: build fq production name + side + token,
-  call `client/navigate`, feed `:targets` to §9.4.
+  call `client/navigate`, feed `:targets` to §9.4. If the enclosing form is a
+  `defquery` and `side` is `:rhs`/consumer, message "queries have no RHS" and
+  stop without a round trip.
 - **Outside** (no enclosing production) → global path: only meaningful for
-  `:consumer`. Resolve the ctor token through the cross-production callsite
-  linkage and list the global consumers of `T` (§9.7). `:producer` with no
-  enclosing production messages "not inside a rule/query".
+  `:consumer`. Resolve the ctor token against the live ns
+  (`{:production nil :caller-ns … :token …}`) and list the global consumers
+  of `T` (§9.7). `:producer` with no enclosing production messages "not inside
+  a rule/query".
 
 ### 9.2 Structural navigation (elisp)
 
 - `clara-explorer--enclosing-production` — walk up from point to the nearest
-  `(r/defrule NAME …)` / `(defrule NAME …)` / `(defquery NAME …)` form (any
-  alias prefix). Return the **unqualified** `NAME` and the start/end of the
-  form; derive the namespace from `cider-current-ns` (the buffer's own ns) and
-  combine to the fq name `ns/NAME`. Returns **nil** when point is not inside a
-  `defrule`/`defquery` — the signal the dispatcher uses for the
-  outside-defrule path (§9.7). (The client-API verifies the fq name resolves
-  to a real production and can correct the string/symbol form.)
-- `clara-explorer--side-at-point` — relative to the top-level `=>` inside that
-  defrule: point before it → `:lhs`; after → `:rhs`. (Queries have no `=>` →
-  always `:lhs`.)
-- `clara-explorer--token-at-point` — the symbol/keyword under point, including
-  a leading `:` / `::` and the trailing `.` of a class constructor. Use the
-  clojure-mode syntax table carefully (keywords and `Foo.` must read as one
-  token, not split).
-- `clara-explorer--context` — one call that gathers `(:production
-  fq-name-or-nil :side :lhs|:rhs|nil :token "…")`; `:production nil` / `:side
-  nil` means the global path. Keeps the two commands thin and the
-  outside-defrule logic in one place.
+  `defrule`/`defquery` form **with any alias prefix** (`defrule`, `r/defrule`,
+  `rules/defrule`, …). The demo rules use `r/defrule`
+  (loan_app_rules.clj:15-84), so alias handling is the common case, not an
+  edge: match the head symbol's `name` against `defrule|defquery` regardless
+  of its namespace prefix. Return the **unqualified** `NAME`, the kind
+  (`rule`/`query`), and the form bounds; derive the namespace from
+  `cider-current-ns` and combine to the fq name `ns/NAME`. Returns **nil**
+  when point is not inside one — the signal for the outside-defrule path
+  (§9.7). (The client-API verifies the fq name resolves to a real production.)
+- `clara-explorer--side-at-point` — **sexp-aware**, not string search: find
+  the top-level `=>` at depth 1 under the enclosing defrule form (walk
+  forward-sexp from the form start, skipping the name/docstring/attr-map),
+  then compare point to its position. Queries have no `=>` → always `:lhs`.
+- `clara-explorer--token-at-point` — `(cider-symbol-at-point 'look-back)`,
+  the same helper the user's dotfiles already use (`.spacemacs:799`). It
+  reads `::kw`, `Foo.`, `map->Foo`, and alias-prefixed `laf/map->Foo` as one
+  token. Do not hand-roll syntax-table hacks.
+- `clara-explorer--context` — one call that gathers
+  `(:production fq-name-or-nil :kind rule|query|nil :side :lhs|:rhs|nil
+    :caller-ns "…" :token "…")`; `:production nil` means the global path.
+  Keeps the two commands thin and the outside-defrule logic in one place.
 
 ### 9.3 Transport + parse
 
+`cider-nrepl-sync-request:eval` has signature
+`(input &optional connection ns)` (cider-client.el:245 — verified).
+**There is no `cider-current-connection`**; capture the connection once per
+command with `(cider-current-repl 'infer 'ensure)` and pass it in, so
+navigation never targets the wrong session when several REPLs are connected
+(sesman cross-talk).
+
 ```elisp
-(defun clara-explorer--eval-edn (form)
-  (let* ((code (prin1-to-string form))     ; EDN form the elisp already built
-         (resp (cider-nrepl-sync-request:eval code))
+(defun clara-explorer--eval-edn (form conn)
+  (let* ((code (format "%S" form))   ; elisp-printed form; strings print as valid EDN
+         (resp (cider-nrepl-sync-request:eval code conn))
          (val  (nrepl-dict-get resp "value")))
     (when val (parseedn-read-str val))))
 ```
 
-`cider-nrepl-sync-request:eval` is present in the user's CIDER
-(`cider-client.el`) — confirmed. Sync eval keeps the command a single,
-synchronous round trip.
-
-The elisp builds one form:
+The elisp builds one form — and **requires the client namespace first**, so a
+REPL that predates `clara.server.graph.client` still works:
 
 ```clojure
-(clara.server.graph.client/navigate
-  {:production "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
-   :side :rhs
-   :token "map->ApplicationOutcome"})
+(do (require 'clara.server.graph.client)
+    (clara.server.graph.client/navigate
+      {:production "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+       :side :rhs
+       :token "map->ApplicationOutcome"}))
 ```
 
-and the value comes back as the EDN map in §5.
+The server returns `(pr-str result)` as the nREPL `"value"` — a parsable EDN
+string, guaranteed pure EDN per §5 (a `Class` never crosses the wire).
 
 ### 9.4 Popover + jump
 
 - 0 targets → `(message "No %s of %s" direction type)`.
 - 1 target → `clara-explorer--goto` directly.
-- N targets → `(completing-read "Producer: " fq-names nil t)` (helm or ivy as
-  configured), then `clara-explorer--goto` the chosen one.
-- `clara-explorer--goto` — for a var-backed target (`:var? true`, the common
+- N targets → `(completing-read "Producer: " labels nil t)` (helm advises it),
+  where labels are fq names with a `" (retract)"` suffix when `:via :retract`;
+  then `clara-explorer--goto` the chosen one.
+- `clara-explorer--goto` — for a var-backed target (`:var? t`, the common
   case) call `(cider-find-var nil fq-name)`, which resolves the resource path
   and lands on the `defrule`/`defquery` form. Otherwise use `:file` +
   `:row`/`:col` from the kondo tier, then fall back to §9.5.
@@ -506,8 +650,10 @@ Last resort (non-var target with no kondo location, or a `jar:` file we cannot
 open): jump to the namespace file and search:
 
 1. `(cider-find-ns ns)` (or `clojure-find-ns`) to open the file.
-2. `(goto-char (point-min))`, then
-   `(re-search-forward (format "(def\\(rule\\|query\\)[[:space:]\n]+%s\\b" name) nil t)`.
+2. `(goto-char (point-min))`, then search for `(defrule|defquery` with any
+   alias prefix followed by `NAME` — e.g.
+   `(re-search-forward (format "(%sdef\\(rule\\|query\\)[[:space:]\n]+%s\\b"
+                        "[^ \t\n()]*" name) nil t)`.
 
 Handles the rare macro-emitted / non-classpath-source cases.
 
@@ -518,12 +664,14 @@ Public (`interactive`):
 - `clara-explorer-navigate-producer` — scoped producer navigation.
 - `clara-explorer-navigate-consumer` — scoped consumer navigation, or the
   global path when outside a production (§9.7).
+- `clara-explorer-refresh` — re-warm annotations/analysis (§9.9).
+- `clara-explorer-swap-session` — swap in a rebuilt session (§9.9).
 
 Private helpers:
 
 - `clara-explorer--navigate` — dispatcher (§9.1).
-- `clara-explorer--context` — `(:production fq-or-nil :side :lhs|:rhs|nil
-  :token "…")` (§9.2).
+- `clara-explorer--context` — `(:production fq-or-nil :kind … :side …
+  :caller-ns … :token "…")` (§9.2).
 - `clara-explorer--enclosing-production` / `--side-at-point` /
   `--token-at-point` — structural navigation (§9.2).
 - `clara-explorer--eval-edn` — nREPL sync eval + `parseedn-read-str` (§9.3).
@@ -539,25 +687,21 @@ to test — `M-x` is enough.)
 
 When the cursor is over a fact-ctor token (e.g. `map->DocumentCheck` inside
 `make-document-check`) and there is no enclosing `defrule`/`defquery`, there is
-no production to scope to. `clara-explorer-navigate-consumer` instead:
+no production to scope to. `clara-explorer-navigate-consumer` instead sends
+`{:production nil :caller-ns (cider-current-ns) :token "map->DocumentCheck"}`.
+The client-API:
 
-1. Resolve the token to a fact type `T` **without** a production context — the
-   client-API matches the token's fully-qualified ctor symbol (and, when
-   available, its `:filename` + row/col) across every production's
-   `:dynamic-insert-types-detected` / `:dynamic-retract-types-detected`
-   callsites (§7.4) and reads `:resolved-types`.
-2. Return the **global** consumers of `T` (the fact-type detail's
+1. Fully-qualifies the token in `caller-ns` (`ns-resolve` in the live
+   session — the REPL already has the class/var loaded) and matches it across
+   every production's `:dynamic-insert-types-detected` /
+   `:dynamic-retract-types-detected` callsites' `:constructor-sym` /
+   `:fact-type` (§7.4), reading `:resolved-types` as `T`.
+2. Returns the **global** consumers of `T` (the fact-type detail's
    `used-by-rules` / `used-by-queries`) rather than a production's scoped
    `:downstream`.
 
-The elisp needs a second client-API entry point (or a `:production nil` variant
-of `navigate` — see §5) plus the same popover/jump handling; targets are
-`ProductionDep`s, so §9.4 reuses unchanged. Token extraction is identical to
-§9.2; only what the server returns differs.
-
-This is the one place the §9.2 structural-navigation assumption breaks: with no
-enclosing form there is no fq name to build, so the consumer command must not
-hard-require one.
+Targets are `ProductionDep`s, so §9.4 reuses unchanged. Token extraction is
+identical to §9.2; only what the server returns differs.
 
 ### 9.8 Plumbing (connection, EDN, errors)
 
@@ -565,7 +709,7 @@ Necessary glue, in one place:
 
 - **Connection guard.** Every command starts with
   `(unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))`
-  and captures `(cider-current-connection)` once, passing it as the optional
+  and captures `(cider-current-repl 'infer 'ensure)` once, passing it as the
   `CONNECTION` arg to `cider-nrepl-sync-request:eval` so navigation never
   targets the wrong session.
 - **EDN conversion.** `parseedn-read-str` returns an **alist** of keyword→value
@@ -576,32 +720,92 @@ Necessary glue, in one place:
 - **Error handling.**
   - `navigate` returns `{:error "…"}` (unknown production, no match) →
     `(message "%s" error)`, no pop/jump.
-  - `clara-explorer--eval-edn` returns nil (no `"value"` in the nREPL
-    response, e.g. an exception) → relay `"err"`/`"ex"` via
-    `nrepl-dbind-response` first, then give up.
+  - `clara-explorer--eval-edn` gets no `"value"` (e.g. an exception) → relay
+    `"err"`/`"ex"` from the nREPL response dict first, then give up.
   - No token at point (`clara-explorer--token-at-point` → nil) → message "not
     on a fact type".
 - **REPL bootstrap.** The elisp does not start the server; it assumes the
-  user's REPL has already run `(client/register! (server/start! …))`. A missing
-  system surfaces as `{:error "no explorer system registered"}` from the
-  client-API, which the elisp just relays.
+  user's REPL has already run `(client/register! (server/start! …))` (or used
+  `server/start!` with the §5.1 `get-current-system` fallback). A missing system
+  surfaces as `{:error "no explorer system registered"}` from the client-API,
+  which the elisp just relays.
+
+### 9.9 Refresh commands (explicit, no watch)
+
+```elisp
+(defun clara-explorer-refresh ()
+  "Re-derive annotations and re-warm the explorer analysis."
+  (interactive)
+  (unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))
+  (clara-explorer--eval-edn
+   '(do (require 'clara.server.graph.server)
+        (clara.server.graph.server/reload-annotations!))
+   (cider-current-repl 'infer 'ensure))
+  (message "clara-explorer: analysis refreshed"))
+```
+
+`clara-explorer-swap-session` is the session-level counterpart: it evals a
+user-supplied expression that rebuilds the session (prompted with
+`read-string`, defaulting to the last used) wrapped in
+`(server/swap-session! …)`. Document the §5.2 table as the workflow:
+re-eval'd rules → rebuild + swap; edited files without re-eval → refresh.
 
 ---
 
-## 10. Spacemacs integration
+## 10. Spacemacs integration (machine-agnostic)
 
-The user's dotfiles live at `~/emacs-dotfiles/.spacemacs` (Spacemacs install at
-`~/.emacs.d`). Custom elisp belongs in `dotspacemacs/user-config`:
+The user's dotfiles live in a Spacemacs config (install at `~/.emacs.d`), but
+**nothing in the shipped file or docs may hard-code a path, home directory, or
+port.** The editor never needs to know where the server's Clojure source lives
+on disk — at nav time it talks to a live nREPL where `clara.server.graph.*` is
+already on the classpath (via `cider-jack-in` / `clojure -M`). The only path
+the editor ever needs is the **elisp file itself**, and that is supplied by
+the installer, not baked into the repo.
+
+**Spike workflow (no config change at all):** open
+`editor/emacs/clara-explorer.el`, `M-x eval-buffer` (or `M-x load-file` with
+completion), then call the commands with `M-x`. Keep
+`dotspacemacs/user-config` out of the PR.
+
+**Durable install — two portable patterns:**
 
 ```elisp
-;; in dotspacemacs/user-config
-(load-file "~/Projects/clara-rules-explorer/editor/emacs/clara-explorer.el")
+;; A: self-locating — at the top of clara-explorer.el, works wherever the file lives
+(when load-file-name
+  (add-to-list 'load-path (file-name-directory load-file-name)))
+
+;; B: Spacemacs private layer — the checkout path is a layer *variable*
+;; dotspacemacs-configuration-layers
+;;   '(... (clara-explorer :variables clara-explorer-root "~/src/clara-rules-explorer"))
 ```
 
-For the **spike**, no `.spacemacs` change is needed: open the file and
-`M-x eval-buffer`, then call the two commands with `M-x`. Keybindings
-(`, g p` / `, g c`, matching the existing `, g f`) come later, after the
-commands feel right.
+Both transfer across machines because the path comes from `load-file-name` or
+a per-machine layer variable, never from the repo.
+
+**What a Spacemacs layer buys** (vs. a bare `load-file` in
+`dotspacemacs/user-config`) — pure integration, no semantics change:
+
+1. **Dependency declaration** — the layer's `packages.el` lists
+   `(cider parseedn clojure-mode)`; Spacemacs installs/loads them before
+   config runs. No ordering bug where `user-config` runs before `cider`
+   lazy-loads.
+2. **Toggle** — removing `clara-explorer` from
+   `dotspacemacs-configuration-layers` fully unloads it; `user-config`
+   requires manual editing.
+3. **Per-mode keybindings** — `spacemacs/set-leader-keys-for-major-mode`
+   scopes `g p` / `g c` / `g r` to `clojure-mode` only, matching the user's
+   existing `, g f` pattern (`.spacemacs:865`). Bare `global-set-key` pollutes
+   every buffer.
+4. **Load-path isolation** — the layer adds
+   `(add-to-list 'load-path (expand-file-name "editor/emacs" clara-explorer-root))`.
+
+For the spike, skip the layer. For the PR, ship `editor/emacs/clara-explorer.el`
+plus an optional `editor/emacs/spacemacs-layer/` skeleton
+(`packages.el`, `config.el`, `keybindings.el`, `funcs.el`) and document both
+install paths.
+
+**Portability guard:** add a CI check that
+`grep -R "~/Projects\|/Users/" editor/` is empty.
 
 ---
 
@@ -609,25 +813,27 @@ commands feel right.
 
 Minimal set for the working spike + follow-ups:
 
-| #   | Change                                                                               | Required for spike?                                             |
-| --- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| 1   | `clara.server.graph.client` namespace (`register!`, `navigate`, `production-source`) | ✅ yes                                                          |
-| 2   | Public accessor for the running system (`server/current-system`)                     | ✅ yes (0-arg convenience)                                      |
-| 3   | Constructor→class-name resolution helper (close the `serialize/resolve-type` gap)    | ✅ yes (§7)                                                     |
-| 4   | `analyze/->production-source-locations` (kondo tier, non-var productions only)       | ⚠️ phase 1 (spike uses `cider-find-var` for var-backed targets) |
-| 5   | HTTP endpoints wrapping `client/navigate`                                            | ❌ not planned (no remote-server support)                       |
-| 6   | `client/navigate` callsite-aware RHS resolution (§7.4)                                       | ✅ yes (§2.2)                                                  |
+| #   | Change                                                                                            | Required for spike?                                             |
+| --- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| 1   | `clara.server.graph.client` namespace (`register!`, `get-current-system`, `navigate`, `get-production-source`), Prismatic schemas | ✅ yes                                           |
+| 2   | Public `server/get-current-system` accessor (keep `default-system` private)                           | ✅ yes (0-arg convenience)                                      |
+| 3   | Token→type resolution in `client` built on `analyze.ctor/resolve-record-type` (§7)                | ✅ yes — reuse, do not replicate                                |
+| 4   | `client/navigate` callsite-aware RHS resolution via serialized `:dynamic-insert-types-detected` (§7.4) | ✅ yes (§2.2)                                                |
+| 5   | `analyze/->production-source-locations` (kondo tier, non-var productions only)                    | ⚠️ phase 1 (spike uses `cider-find-var` for var-backed targets) |
+| 6   | HTTP endpoints wrapping `client/navigate`                                                         | ❌ not planned (no remote-server support)                       |
 
-Tests: `client/navigate` gets unit tests in `server/test` against the existing
-demo rules (`clara.server.tools.graph.rules.loan-app-rules` is ideal — it has
-imported classes, a record constructor in the RHS, an accumulator `:from`, and
-a `:not`), asserting: single-target direct result, multi-target ordering, retract
-`:via` flag, alias/refer resolution, `::keyword` resolution, and the
-no-match error. Add a callsite-linked case from
+Tests: `client/navigate` gets unit tests in
+`server/test/clara/server/graph/client_test.clj` against the existing demo
+rules (`clara.server.tools.graph.rules.loan-app-rules` is ideal — it has
+imported classes, a record constructor in the RHS, an accumulator `:from`, a
+`:not`, and uses aliased `r/defrule` throughout), asserting: single-target
+direct result, multi-target ordering, retract `:via` flag, alias/refer
+resolution, `::keyword` resolution, and the no-match error. Add a
+callsite-linked case from
 `clara.server.tools.graph.rules.analyze-test-rules` (its `make-document-check`
 helper wraps `laf/map->DocumentCheck`, so a cursor over `map->DocumentCheck`
 resolves through the recorded callsite linkage, not a literal `insert!`
-argument).
+argument). Gate: `cd server && make test lint reflection-check`.
 
 ---
 
@@ -667,55 +873,77 @@ language-server adapter that bridges to the running server's in-memory graph.
 
 ## 14. Execution order
 
+See `docs/planning/explorer-server-emacs-roadmap.md` for the full phase
+checklist. Summary:
+
 **Phase 0 — spike (prove the semantics):**
 
-1. `client/navigate` + `server/current-system` + constructor-resolution helper.
-2. `editor/emacs/clara-explorer.el` with §9.2–§9.4; jump via `cider-find-var`
+1. `client/navigate` (LHS producer path first) + `server/get-current-system` +
+   ctor resolution via `analyze.ctor`.
+2. `editor/emacs/clara-explorer.el` with §9.0–§9.4; jump via `cider-find-var`
    (var-backed targets) with the §9.5 regex fallback.
-3. Manual test via `M-x eval-buffer` +
-   `M-x clara-explorer-navigate-{producer,consumer}` against the demo rules;
-   verify producer/consumer filtering, popover FQ names, alias/refer/`::`/
-   constructor resolution.
+3. RHS consumer path with callsite-aware resolution (§7.4); outside-defrule
+   global path (§9.7).
+4. Manual test via `M-x eval-buffer` +
+   `M-x clara-explorer-navigate-{producer,consumer}` against the demo rules.
 
 **Phase 1 — solidify:**
 
-4. `analyze/->production-source-locations` (kondo tier) for **non-var**
-   productions; `client/navigate` attaches `:source` for them; elisp keeps
-   `cider-find-var` for var-backed targets.
-5. Unit tests for `client/navigate`; add a small README snippet for `.spacemacs`
-   and a REPL bootstrap snippet (`(client/register! (server/start! …))`).
+5. `clara-explorer-refresh` / `clara-explorer-swap-session` (§9.9).
+6. Unit tests (`client_test.clj`); `make test lint reflection-check`.
+7. Spacemacs layer skeleton + portable install docs (§10); README snippet with
+   REPL bootstrap (`(client/register! (server/start! …))`).
 
-**Phase 2 — neovim (optional):**
+**Phase 2 — optional:**
 
-6. neovim client (Conjure) against the same Clojure `client/navigate` surface.
+8. `analyze/->production-source-locations` (kondo tier) **only if** a real
+   non-var production case bites.
+9. neovim client (Conjure) against the same Clojure surface.
 
 (HTTP endpoints are not planned — no remote-server support.)
 
 Verification gates: `cd server && make test lint reflection-check` after
-server changes; `M-x eval-buffer` + manual navigation for the elisp.
+server changes; `M-x eval-buffer` + manual navigation for the elisp;
+`grep -R "~/Projects\|/Users/" editor/` empty.
 
 ---
 
 ## 15. Decisions (resolved)
 
 1. **Transport = nREPL eval over the existing CIDER connection.** No HTTP
-   endpoints (no remote-server support).
-2. **Elisp is glue (~150 lines); all semantics live in a new
-   `clara.server.graph.client` namespace** that both editors share.
+   endpoints (no remote-server support). Connection captured once per command
+   via `cider-current-repl`; `cider-current-connection` does not exist.
+2. **Elisp is glue (~180 lines); all semantics live in a new
+   `clara.server.graph.client` namespace** that both editors share. Schemas
+   are **Prismatic** (`s/defschema`/`s/defn`/`s/validate`), matching the
+   server.
 3. **Not LSP now.** Revisit when cross-editor cost outweighs a language-server
    adapter (§13).
 4. **Source location is var metadata first** (`cider-find-var` for
    `defrule`/`defquery`), with a kondo tier for non-var productions and an
    elisp regex fallback (§8).
 5. **Popover labels are always fully-qualified production names**; retraction
-   coupling is surfaced via `:via :retract`.
+   coupling is surfaced via `:via :retract` as a `(retract)` suffix.
+6. **Constructor resolution reuses `analyze.ctor/resolve-record-type` /
+   `resolve-ctor-form`** — never re-derived in `client` (§7).
+7. **Symbol identity is nREPL namespace resolution** (`ns-resolve` in
+   `caller-ns`), never filename/row/col matching (§7.4).
+8. **Refresh is explicit** — `clara-explorer-refresh` → `reload-annotations!`,
+   `clara-explorer-swap-session` → `swap-session!`; no file-watch, no
+   `after-save-hook` (§5.2, §9.9).
+9. **Machine-agnostic install** — no hard-coded paths/ports; spike uses
+   `eval-buffer`, durable install uses `load-file-name` or a layer variable
+   (§10).
+10. **Explicit elisp deps** — `Package-Requires` header + runtime `featurep`
+    guards; no `dash`/`f`/`s`/`helm` hard deps (§9.0).
 
 ## 16. Open questions
 
-- Whether to prefer the public `server/current-system` accessor or require an
-  explicit `client/register!` — implement both, default to the accessor.
 - Popover ordering: sort by fq name (chosen) vs. by load order / dependency
   distance. Start with fq name; load order is trivially available if desired.
 - Whether the kondo source-location tier (§8) is worth building at all, given
   non-var productions are rare — start with `cider-find-var` + regex fallback
   and add the kondo tier only if a real non-var case bites.
+- Whether `clara-explorer-swap-session` should prompt for a session-rebuild
+  expression every time, or cache the last one per REPL connection (leaning:
+  cache, prompt with prefix arg).

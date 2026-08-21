@@ -58,7 +58,7 @@
 		<button
 			type="button"
 			class="btn btn-sm btn-outline-secondary border-0 py-0 px-1 d-flex align-items-center"
-			use:tooltip={expanded ? 'Collapse dependencies' : 'Show upstream/downstream'}
+			use:tooltip={expanded ? 'Collapse dependencies' : 'Expand dependencies'}
 			aria-expanded={expanded}
 			aria-label="Toggle upstream/downstream"
 			onclick={() => (expanded = !expanded)}

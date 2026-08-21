@@ -32,6 +32,13 @@
 
 (defonce ^:private default-system (atom nil))
 
+(defn get-current-system
+  "Returns the default system (the most recently started server), or nil.
+   Kept as the 0-arg convenience accessor for editor clients; the atom
+   itself stays private."
+  []
+  @default-system)
+
 (defn- require-system
   "Returns system or throws with a clear message."
   [system]
@@ -347,21 +354,20 @@
       :analyze-cache    @tmp})))
 
 (s/defn ^:private transition-reload :- ServerState
-  "State -> State.  Re-derives :annotations from (:annotations-spec state)
-   against the current session.  File-backed sources are re-read from disk;
-   the generated (kondo) layer rebuilds from cached per-ns analyses in the
-   state (kondo does not re-run)."
-  [state :- ServerState]
-  (let [tmp   (atom (:analyze-cache state))
-        built (->resolved-annotations* (:session state)
-                                       (:annotations-spec state)
-                                       (:annotations state)
+  "State -> State. Re-derives :annotations from (:annotations-spec state) against the current
+   session. File-backed sources are re-read from disk; the generated (kondo) layer rebuilds from
+   cached per-ns analyses in the state (kondo does not re-run)."
+  [{:keys [session annotations-spec annotations analyze-cache] :as state} :- ServerState]
+  (let [tmp   (atom analyze-cache)
+        built (->resolved-annotations* session
+                                       annotations-spec
+                                       annotations
                                        tmp)]
-    (utils/remove-nil-vals
-     (assoc state
-            :annotations (:annotations built)
-            :memory-analysis (:memory-analysis built)
-            :analyze-cache @tmp))))
+    (-> state
+        (assoc :annotations (:annotations built)
+               :memory-analysis (:memory-analysis built)
+               :analyze-cache @tmp)
+        utils/remove-nil-vals)))
 
 ;; ---------------------------------------------------------------------------
 ;; System lifecycle
@@ -453,8 +459,7 @@
    0-arity operates on the default system; 1-arity on an explicit system."
   ([]
    (reload-annotations! (require-system @default-system)))
-  ([system]
-   (let [new-state (swap! (:state-atom system) transition-reload)]
-     (cache/warm! (:cache system) (:session new-state) (:annotations new-state)
-                  (:memory-analysis new-state))
-     (:annotations new-state))))
+  ([{:keys [cache state-atom] :as _system}]
+   (let [{:keys [session annotations memory-analysis]} (swap! state-atom transition-reload)]
+     (cache/warm! cache session annotations memory-analysis)
+     annotations)))
