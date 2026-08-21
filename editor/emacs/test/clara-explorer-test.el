@@ -598,5 +598,25 @@ Tier-1 stub path fast."
            (form-start (nth 2 enc)))
       (should (equal (clara-explorer--docstring-token-at-point form-start) ":my-type")))))
 
+(ert-deftest fallback-regexp-enumeration ()
+  "Independent test for `clara-explorer--fallback-regexp` - succinct enumeration of expected matches."
+  (cl-labels ((should-match (s rule) (should (string-match-p (clara-explorer--fallback-regexp rule) s)))
+              (should-not-match (s rule) (should-not (string-match-p (clara-explorer--fallback-regexp rule) s))))
+    ;; primary rx should match plain, aliased, and ^:meta forms
+    (should-match "(defrule my-rule [A] => 1)" "my-rule")
+    (should-match "(r/defrule my-rule [A] => 1)" "my-rule")
+    (should-match "(my.alias/defrule my-rule [A] => 1)" "my-rule")
+    (should-match "(defrule ^:my-meta my-rule [A] => 1)" "my-rule")
+    (should-match "(defrule ^:a ^:b my-rule [A] => 1)" "my-rule")
+    (should-match "(defrule ^String my-rule [A] => 1)" "my-rule")
+    (should-match "(defquery my-query [?x] [A])" "my-query")
+    (should-match "(defquery ^:m my-query [?x] [A])" "my-query")
+    ;; negative: wrong head or wrong name
+    (should-not-match "(def my-rule [A] => 1)" "my-rule")
+    (should-not-match "(defrule other-rule [A] => 1)" "my-rule")
+    ;; ^{:map} contains space, so primary truncates - goto-fallback then uses \\b fallback
+    (should-not-match "(defrule ^{:doc \"hi\"} my-rule [A] => 1)" "my-rule")
+    (should (string-match-p "\\bmy-rule\\b" "(defrule ^{:doc \"hi\"} my-rule [A] => 1)"))))
+
 (provide 'clara-explorer-test)
 ;;; clara-explorer-test.el ends here

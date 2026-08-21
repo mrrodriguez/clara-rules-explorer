@@ -522,6 +522,17 @@ Used for RHS and global cases where LHS-structure is not applicable."
       (match-string 1 fq-name)
     fq-name))
 
+(defconst clara-explorer--fallback-head-rx
+  (rx "(" (* (not (any " \t\n()"))) "def" (or "rule" "query"))
+  "Rx for \"(alias/defrule\" prefix up to head, without rule name.")
+
+(defun clara-explorer--fallback-regexp (rule-name)
+  "Regexp for fallback search: (defrule/defquery [^meta]* RULE-NAME\\b."
+  (concat clara-explorer--fallback-head-rx
+          (rx (* (seq (+ (any " \t\n")) "^" (+ (not (any " \t\n")))))
+              (+ (any " \t\n")))
+          (regexp-quote rule-name) "\\b"))
+
 (defun clara-explorer--goto-fallback (target)
   "Last resort: open the ns file and search for the defrule/defquery form."
   (let* ((name (clara-explorer--edn-get :name target))
@@ -533,8 +544,7 @@ Used for RHS and global cases where LHS-structure is not applicable."
       (cider-find-ns nil ns)
       (goto-char (point-min))
       (let ((found (or (re-search-forward
-                      (format "(%sdef\\(rule\\|query\\)\\(?:[[:space:]\n]+\\^[^[:space:]\n]+\\)*[[:space:]\n]+%s\\b"
-                              "[^ \t\n()]*" rule-name)
+                      (clara-explorer--fallback-regexp rule-name)
                       nil t)
                      ;; fallback for ^{:map} metadata or other forms
                      (re-search-forward
