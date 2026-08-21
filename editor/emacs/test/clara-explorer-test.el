@@ -428,5 +428,175 @@ Tier-1 stub path fast."
            (form-start (nth 2 enc)))
       (should (eq (clara-explorer--side-at-point form-start) :lhs)))))
 
+;; ---------------------------------------------------------------------------
+;; Metadata on var name — ^:meta before rule/query name
+;; ---------------------------------------------------------------------------
+
+(ert-deftest enclosing-production-with-single-metadata ()
+  (with-clara-buffer "(r/defrule ^:my-meta my-rule [Application] => 1)"
+    (search-forward "my-rule")
+    (let ((enc (clara-explorer--enclosing-production)))
+      (should (equal (nth 0 enc) "my-rule"))
+      (should (eq (nth 1 enc) 'rule))))
+  (with-clara-buffer "(r/defquery ^:my-meta my-query [?x] [Application])"
+    (search-forward "my-query")
+    (let ((enc (clara-explorer--enclosing-production)))
+      (should (equal (nth 0 enc) "my-query"))
+      (should (eq (nth 1 enc) 'query)))))
+
+(ert-deftest enclosing-production-with-multiple-metadata ()
+  (with-clara-buffer "(r/defrule ^:a ^:b my-rule [Application] => 1)"
+    (search-forward "my-rule")
+    (let ((enc (clara-explorer--enclosing-production)))
+      (should (equal (nth 0 enc) "my-rule"))))
+  (with-clara-buffer "(r/defrule ^:a ^{:doc \"hi\"} my-rule [Application] => 1)"
+    (search-forward "my-rule")
+    (let ((enc (clara-explorer--enclosing-production)))
+      (should (equal (nth 0 enc) "my-rule")))))
+
+(ert-deftest enclosing-production-with-map-metadata ()
+  (with-clara-buffer "(r/defrule ^{:doc \"hi\"} my-rule [Application] => 1)"
+    (search-forward "my-rule")
+    (let ((enc (clara-explorer--enclosing-production)))
+      (should (equal (nth 0 enc) "my-rule"))))
+  (with-clara-buffer "(r/defrule ^String my-rule [Application] => 1)"
+    (search-forward "my-rule")
+    (let ((enc (clara-explorer--enclosing-production)))
+      (should (equal (nth 0 enc) "my-rule")))))
+
+(ert-deftest enclosing-production-with-metadata-and-alias ()
+  (with-clara-buffer "(my.alias/defrule ^:my-meta my-rule [Application] => 1)"
+    (search-forward "my-rule")
+    (let ((enc (clara-explorer--enclosing-production)))
+      (should (equal (nth 0 enc) "my-rule"))
+      (should (eq (nth 1 enc) 'rule))))
+  (with-clara-buffer "(r/defrule ^:my-meta my-rule \"doc\" [Application] => 1)"
+    (search-forward "my-rule")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc)))
+      (should (equal (nth 0 enc) "my-rule"))
+      (should (clara-explorer--docstring-bounds form-start)))))
+
+(ert-deftest lhs-type-with-metadata ()
+  (with-clara-buffer "(r/defrule ^:my-meta my-rule [Application] => 1)"
+    (should (equal (test--search-token "Application") "Application")))
+  (with-clara-buffer "(r/defrule ^:a ^:b my-rule [?d <- ::supporting-document] => 1)"
+    (should (equal (test--search-token "supporting-document") "::supporting-document"))))
+
+(ert-deftest lhs-type-with-metadata-and-docstring ()
+  (with-clara-buffer "(r/defrule ^:my-meta my-rule \"docstring\" [Application] => 1)"
+    (should (equal (test--search-token "Application") "Application")))
+  (with-clara-buffer "(r/defrule ^:m my-rule \"doc\" {:clara-rules/insert-types [::a]} [::a] => 1)"
+    (search-forward "::a")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc))
+           (side (clara-explorer--side-at-point form-start)))
+      (should (eq side :rhs))
+      (should (equal (clara-explorer--token-at-point form-start side) "::a")))))
+
+(ert-deftest props-type-with-metadata-and-docstring ()
+  (with-clara-buffer "(r/defrule ^:my-meta my-rule \"doc\" {:clara-rules/insert-types [::a ::b]} [?x <- ::a] => 1)"
+    (search-forward "::b")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc))
+           (side (clara-explorer--side-at-point form-start)))
+      (should (eq side :rhs))
+      (should (equal (clara-explorer--token-at-point form-start side) "::b")))))
+
+;; ---------------------------------------------------------------------------
+;; Docstring fact-type references — "inserts a :my-type when …"
+;; ---------------------------------------------------------------------------
+
+(ert-deftest docstring-bounds-with-and-without-docstring ()
+  (with-clara-buffer "(r/defrule my-rule \"my doc\" [Application] => 1)"
+    (let* ((enc (progn (search-forward "my-rule") (clara-explorer--enclosing-production)))
+           (form-start (nth 2 enc))
+           (bounds (clara-explorer--docstring-bounds form-start)))
+      (should bounds)
+      (should (eq (char-after (car bounds)) ?\"))))
+  (with-clara-buffer "(r/defrule my-rule [Application] => 1)"
+    (let* ((enc (progn (search-forward "my-rule") (clara-explorer--enclosing-production)))
+           (form-start (nth 2 enc)))
+      (should-not (clara-explorer--docstring-bounds form-start))))
+  (with-clara-buffer "(r/defrule ^:m my-rule \"doc\" [Application] => 1)"
+    (let* ((enc (progn (search-forward "my-rule") (clara-explorer--enclosing-production)))
+           (form-start (nth 2 enc)))
+      (should (clara-explorer--docstring-bounds form-start)))))
+
+(ert-deftest docstring-token-plain-keyword ()
+  (with-clara-buffer "(r/defrule my-rule \"inserts a :my-type when something\" [Application] => 1)"
+    (search-forward ":my-type")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc))
+           (tok (clara-explorer--docstring-token-at-point form-start)))
+      (should (equal tok ":my-type"))))
+  (with-clara-buffer "(r/defrule my-rule \"uses ::supporting-document\" [Application] => 1)"
+    (search-forward "supporting-document")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc))
+           (tok (clara-explorer--docstring-token-at-point form-start)))
+      (should (equal tok "::supporting-document"))))
+  (with-clara-buffer "(r/defrule my-rule \"mentions my.ns/MyType\" [Application] => 1)"
+    (search-forward "MyType")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc)))
+      (should (equal (clara-explorer--docstring-token-at-point form-start) "my.ns/MyType")))))
+
+(ert-deftest docstring-token-qualified-and-class ()
+  (with-clara-buffer "(r/defrule my-rule \"see clojure.lang.PersistentVector\" [Application] => 1)"
+    (search-forward "PersistentVector")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc)))
+      (should (equal (clara-explorer--docstring-token-at-point form-start) "clojure.lang.PersistentVector"))))
+  (with-clara-buffer "(r/defrule my-rule \"inserts :loan/status\" [Application] => 1)"
+    (search-forward ":loan/status")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc)))
+      (should (equal (clara-explorer--docstring-token-at-point form-start) ":loan/status")))))
+
+(ert-deftest docstring-token-nil-cases ()
+  (with-clara-buffer "(r/defrule my-rule \"hello world\" [Application] => 1)"
+    (search-forward "world")
+    (backward-char 2)
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc)))
+      ;; point is on whitespace inside docstring — no token
+      (goto-char (+ (car (clara-explorer--docstring-bounds form-start)) 7)) ;; inside "hello world" on space
+      (should-not (clara-explorer--docstring-token-at-point form-start))))
+  (with-clara-buffer "(r/defrule my-rule \"inserts :my-type\" [Application] => 1)"
+    (let* ((enc (progn (search-forward "my-rule") (clara-explorer--enclosing-production)))
+           (form-start (nth 2 enc)))
+      ;; point on the opening quote — not inside content
+      (goto-char (car (clara-explorer--docstring-bounds form-start)))
+      (should-not (clara-explorer--docstring-token-at-point form-start))))
+  (with-clara-buffer "(r/defrule my-rule [Application] => 1)"
+    (search-forward "Application")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc)))
+      (should-not (clara-explorer--docstring-token-at-point form-start)))))
+
+(ert-deftest token-at-point-prefers-docstring ()
+  (with-clara-buffer "(r/defrule my-rule \"inserts a :my-type\" [Application] => 1)"
+    (search-forward ":my-type")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc))
+           (side (clara-explorer--side-at-point form-start))
+           (tok (clara-explorer--token-at-point form-start side)))
+      (should (equal tok ":my-type"))))
+  ;; with metadata + docstring, docstring token still preferred
+  (with-clara-buffer "(r/defrule ^:my-meta my-rule \"see :my-type\" [Application] => 1)"
+    (search-forward ":my-type")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc))
+           (side (clara-explorer--side-at-point form-start)))
+      (should (equal (clara-explorer--token-at-point form-start side) ":my-type")))))
+
+(ert-deftest docstring-token-with-metadata ()
+  (with-clara-buffer "(r/defrule ^:my-meta my-rule \"inserts :my-type\" [Application] => 1)"
+    (search-forward ":my-type")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc)))
+      (should (equal (clara-explorer--docstring-token-at-point form-start) ":my-type")))))
+
 (provide 'clara-explorer-test)
 ;;; clara-explorer-test.el ends here

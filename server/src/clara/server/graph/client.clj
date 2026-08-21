@@ -325,41 +325,89 @@
        vec))
 
 ;; ---------------------------------------------------------------------------
+;; Forward declarations for global helpers used in scoped fallbacks
+;; ---------------------------------------------------------------------------
+
+(declare global-producer-targets global-consumer-targets)
+
+;; ---------------------------------------------------------------------------
 ;; Scoped navigation (inside a defrule/defquery)
 ;; ---------------------------------------------------------------------------
 
 (defn- lhs-navigate
-  [summary production resolve-ns token]
+  [analysis summary production resolve-ns token]
   (let [token-name (resolve-token resolve-ns token)]
-    (if (or (nil? token-name)
-            (not (contains? (declared-lhs-type-names summary) token-name)))
+    (cond
+      (nil? token-name)
       {:error (str "no fact type found under cursor in " production)}
+
+      (contains? (declared-lhs-type-names summary) token-name)
       (let [targets (deps->targets (:upstream summary)
                                    :consumer-type
                                    #{token-name})]
         (if (empty? targets)
-          {:error (str "no producer of " token-name " for " production)}
+          (let [global (global-producer-targets analysis token-name)]
+            (if (seq global)
+              {:direction  :producer
+               :production production
+               :type       token-name
+               :targets    global}
+              {:error (str "no producer of " token-name " for " production)}))
           {:direction  :producer
            :production production
            :type       token-name
-           :targets    targets})))))
+           :targets    targets}))
+
+      :else
+      (if (contains? (:fact-types analysis) token-name)
+        (let [global (global-producer-targets analysis token-name)]
+          (if (seq global)
+            {:direction  :producer
+             :production production
+             :type       token-name
+             :targets    global}
+            {:error (str "no producer of " token-name " for " production)}))
+        {:error (str "no fact type found under cursor in " production)}))))
 
 (defn- rhs-navigate
-  [summary production resolve-ns token]
+  [analysis summary production resolve-ns token]
   (let [candidates (resolve-rhs-types summary resolve-ns token)
         matched-types (set/intersection candidates (declared-rhs-type-names summary))]
-    (if (empty? matched-types)
-      {:error (str "no fact type found under cursor in " production)}
+    (if (seq matched-types)
       (let [targets (deps->targets (:downstream summary)
                                    :producer-type
                                    matched-types)
             type-name (first (sort matched-types))]
         (if (empty? targets)
-          {:error (str "no consumer of " type-name " for " production)}
+          (let [global (->> matched-types
+                            (mapcat #(global-consumer-targets analysis %))
+                            (sort-by :name)
+                            vec)]
+            (if (seq global)
+              {:direction  :consumer
+               :production production
+               :type       type-name
+               :targets    global}
+              {:error (str "no consumer of " type-name " for " production)}))
           {:direction  :consumer
            :production production
            :type       type-name
-           :targets    targets})))))
+           :targets    targets}))
+      (let [known-types (set (keys (:fact-types analysis)))
+            global-candidates (set/intersection candidates known-types)]
+        (if (seq global-candidates)
+          (let [type-name (first (sort global-candidates))
+                global (->> global-candidates
+                            (mapcat #(global-consumer-targets analysis %))
+                            (sort-by :name)
+                            vec)]
+            (if (seq global)
+              {:direction  :consumer
+               :production production
+               :type       type-name
+               :targets    global}
+              {:error (str "no fact type found under cursor in " production)}))
+          {:error (str "no fact type found under cursor in " production)})))))
 
 (defn- navigate-scoped
   [analysis production side caller-ns-sym token]
@@ -374,9 +422,9 @@
            (not (contains? (:rules analysis) production)))
       {:error (str production " has no RHS (queries have no RHS)")}
 
-      (= :lhs side) (lhs-navigate summary production resolve-ns token)
+      (= :lhs side) (lhs-navigate analysis summary production resolve-ns token)
 
-      (= :rhs side) (rhs-navigate summary production resolve-ns token)
+      (= :rhs side) (rhs-navigate analysis summary production resolve-ns token)
 
       :else {:error "a :side is required for scoped navigation"})))
 
@@ -404,6 +452,18 @@
            (keep :name)
            set))))
 
+(defn- global-producer-targets
+  "Builds `NavigateTarget`s from a fact type's `inserted-by-rules` /
+   `retracted-by-rules` production refs (hierarchy-aware producers)."
+  [analysis type-name]
+  (let [fact-type (get-in analysis [:fact-types type-name])
+        inserted (:inserted-by-rules fact-type)
+        retracted (:retracted-by-rules fact-type)]
+    (->> (concat (map #(dep->target % :insert) inserted)
+                 (map #(dep->target % :retract) retracted))
+         (sort-by :name)
+         vec)))
+
 (defn- global-consumer-targets
   "Builds `NavigateTarget`s from a fact type's `used-by-rules` /
    `used-by-queries` production refs (hierarchy-aware consumers)."
@@ -417,7 +477,7 @@
          vec)))
 
 (defn- navigate-global
-  [analysis caller-ns-sym token]
+  [analysis caller-ns-sym token side]
   (let [direct (resolve-token caller-ns-sym token)
         fq-sym (token->fq-sym caller-ns-sym token)
         callsite-names (global-callsite-resolved-types analysis fq-sym)
@@ -431,13 +491,20 @@
 
       :else
       (let [type-name (first (sort matched))
-            targets (->> matched
-                         (mapcat #(global-consumer-targets analysis %))
-                         (sort-by :name)
-                         vec)]
+            producer? (= :lhs side)
+            targets (if producer?
+                      (->> matched
+                           (mapcat #(global-producer-targets analysis %))
+                           (sort-by :name)
+                           vec)
+                      (->> matched
+                           (mapcat #(global-consumer-targets analysis %))
+                           (sort-by :name)
+                           vec))
+            direction (if producer? :producer :type)]
         (if (empty? targets)
-          {:error (str "no consumer of " type-name)}
-          {:direction  :type
+          {:error (str "no " (if producer? "producer" "consumer") " of " type-name)}
+          {:direction  direction
            :production nil
            :type       type-name
            :targets    targets})))))
@@ -463,7 +530,7 @@
                     analysis (cache/get-rulebase-analysis cache session annotations memory-analysis)
                     caller-ns-sym (some-> caller-ns symbol)]
                 (if (nil? production)
-                  (navigate-global analysis caller-ns-sym token)
+                  (navigate-global analysis caller-ns-sym token side)
                   (navigate-scoped analysis production side caller-ns-sym token)))
               {:error "no explorer system registered"})]
         (if (:error result)

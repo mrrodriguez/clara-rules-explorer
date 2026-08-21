@@ -160,6 +160,77 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
               (buffer-substring-no-properties head-start (point)))
           (error nil))))))
 
+(defun clara-explorer--skip-metadata ()
+  "Skip Clojure metadata forms at point (^ + form)."
+  (while (looking-at-p "\\^")
+    (forward-char 1)
+    (skip-chars-forward " \t\n,")
+    (condition-case nil
+        (forward-sexp 1)
+      (error (forward-char 1)))
+    (skip-chars-forward " \t\n,")))
+
+(defun clara-explorer--after-head-point (form-start)
+  "Point after the production name at FORM-START, skipping metadata and name."
+  (save-excursion
+    (goto-char form-start)
+    (down-list 1)
+    (forward-sexp 1)
+    (skip-chars-forward " \t\n,")
+    (clara-explorer--skip-metadata)
+    (condition-case nil (forward-sexp 1) (error nil))
+    (point)))
+
+(defun clara-explorer--docstring-bounds (form-start)
+  "Docstring bounds after production name at FORM-START, or nil."
+  (save-excursion
+    (goto-char (clara-explorer--after-head-point form-start))
+    (skip-chars-forward " \t\n,")
+    (when (eq (char-after) ?\")
+      (let ((beg (point)))
+        (forward-sexp 1)
+        (cons beg (point))))))
+
+(defun clara-explorer--docstring-token-at-point (form-start)
+  "Inner fact-type token when point is in docstring."
+  (let ((bounds (clara-explorer--docstring-bounds form-start)))
+    (when (and bounds (>= (point) (car bounds)) (<= (point) (cdr bounds)))
+      (let* ((str-beg (car bounds))
+             (str-end (cdr bounds))
+             (content-beg (1+ str-beg))
+             (content-end (1- str-end)))
+        (when (and (>= (point) content-beg) (<= (point) (1+ content-end)))
+          (let* ((inner (buffer-substring-no-properties content-beg content-end))
+                 (offset (- (point) content-beg))
+                 (len (length inner))
+                 (tok-chars "A-Za-z0-9._:/!?*+<>-"))
+            (when (and (> offset 0) (<= offset len)
+                       (or (= offset len)
+                           (not (string-match-p (format "[%s]" tok-chars)
+                                                (substring inner offset (1+ offset)))))
+                       (string-match-p (format "[%s]" tok-chars)
+                                       (substring inner (1- offset) offset)))
+              (setq offset (1- offset)))
+            (when (and (>= offset 0) (< offset len)
+                       (string-match-p (format "[%s]" tok-chars)
+                                       (substring inner offset (1+ offset))))
+              (let ((start offset) (end (1+ offset)))
+                (while (and (> start 0)
+                            (string-match-p (format "[%s]" tok-chars)
+                                            (substring inner (1- start) start)))
+                  (setq start (1- start)))
+                (while (and (< end len)
+                            (string-match-p (format "[%s]" tok-chars)
+                                            (substring inner end (1+ end))))
+                  (setq end (1+ end)))
+                (let ((tok (substring inner start end)))
+                  (when (and tok (not (string-empty-p tok))
+                             (or (string-match-p "[:/.]" tok)
+                                 (let ((case-fold-search nil))
+                                   (string-match-p "^[A-Z]" tok))
+                                 (string-match-p "->" tok)))
+                    tok))))))))))
+
 (defun clara-explorer--enclosing-production ()
   "Return (NAME KIND FORM-START) of the enclosing defrule/defquery form, or nil.
    NAME is the unqualified production name, KIND is `rule' or `query', and
@@ -181,8 +252,11 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
                     (skip-chars-forward " \t\n,")
                     (forward-sexp 1)          ; skip the head
                     (skip-chars-forward " \t\n,")
+                    (clara-explorer--skip-metadata)
                     (let ((name-start (point)))
-                      (forward-sexp 1)
+                      (condition-case nil
+                          (forward-sexp 1)
+                        (error (throw 'found nil)))
                       (throw 'found
                              (list (buffer-substring-no-properties name-start (point))
                                    (clara-explorer--production-kind head)
@@ -282,10 +356,14 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
            (=>-pos (clara-explorer--top-level-=> form-start))
            (lhs-end (or =>-pos (point-max)))
            (found nil))
-      (goto-char form-start)
-      (down-list 1)
-      (forward-sexp 1)
-      (forward-sexp 1)
+      (goto-char (clara-explorer--after-head-point form-start))
+      (skip-chars-forward " \t\n,")
+      (when (eq (char-after) ?\")
+        (forward-sexp 1)
+        (skip-chars-forward " \t\n,"))
+      (when (eq (char-after) ?\{)
+        (forward-sexp 1)
+        (skip-chars-forward " \t\n,"))
       (skip-chars-forward " \t\n,")
       (while (and (not found) (< (point) lhs-end))
         (skip-chars-forward " \t\n,")
@@ -308,11 +386,11 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
   (clara-explorer--log "props check at %d form-start %d" (point) form-start)
   (save-excursion
     (let ((orig (point)) found)
-      (goto-char form-start)
-      (down-list 1)
-      (forward-sexp 1)
-      (forward-sexp 1)
+      (goto-char (clara-explorer--after-head-point form-start))
       (skip-chars-forward " \t\n,")
+      (when (eq (char-after) ?\")
+        (forward-sexp 1)
+        (skip-chars-forward " \t\n,"))
       (clara-explorer--log "props after name char %c at %d" (char-after (point)) (point))
       (when (eq (char-after) ?\{)
         (let ((map-beg (point))
@@ -379,6 +457,7 @@ Used for RHS and global cases where LHS-structure is not applicable."
 (defun clara-explorer--token-at-point (&optional form-start side)
   "Fact-type token at point."
   (cond
+   ((and form-start (clara-explorer--docstring-token-at-point form-start)))
    ((and form-start (clara-explorer--props-type-at-point form-start)))
    ((and form-start (eq side :lhs) (clara-explorer--lhs-type-at-point form-start)))
    ((clara-explorer--vector-fact-at-point))
@@ -453,10 +532,14 @@ Used for RHS and global cases where LHS-structure is not applicable."
       (clara-explorer--log "fallback: cider-find-ns %S" ns)
       (cider-find-ns nil ns)
       (goto-char (point-min))
-      (let ((found (re-search-forward
-                    (format "(%sdef\\(rule\\|query\\)[[:space:]\n]+%s\\b"
-                            "[^ \t\n()]*" rule-name)
-                    nil t)))
+      (let ((found (or (re-search-forward
+                      (format "(%sdef\\(rule\\|query\\)\\(?:[[:space:]\n]+\\^[^[:space:]\n]+\\)*[[:space:]\n]+%s\\b"
+                              "[^ \t\n()]*" rule-name)
+                      nil t)
+                     ;; fallback for ^{:map} metadata or other forms
+                     (re-search-forward
+                      (format "\\b%s\\b" (regexp-quote rule-name))
+                      nil t))))
         (clara-explorer--log "fallback: search %S -> %s at %d" rule-name (if found "found" "NOT-FOUND") (point))
         found))))
 
@@ -519,7 +602,7 @@ Used for RHS and global cases where LHS-structure is not applicable."
      ((and (null production) (eq side :lhs))
       (message "not inside a rule/query"))
      (t
-      (let* ((eff-side (if production side nil))
+      (let* ((eff-side side)
              (result (clara-explorer--eval-edn
                       (clara-explorer--navigate-code production eff-side caller-ns token)
                       conn)))
