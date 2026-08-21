@@ -56,6 +56,27 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
   (xref-push-marker-stack)
   (clara-explorer--log "push xref marker at %s:%d" (buffer-name) (point)))
 
+(defun clara-explorer--skip-ws ()
+  "Skip Clojure whitespace, commas and line comments at point.
+Skips spaces, tabs, carriage returns, newlines, commas and any `;' line
+comment to end of line, repeatedly until point stops moving.  Uses
+`forward-comment' when the buffer syntax table supports it
+\(clojure-mode) and falls back to a manual newline skip."
+  (let (moved)
+    (while (progn
+             (setq moved nil)
+             (when (/= 0 (skip-chars-forward " \t\r\n,"))
+               (setq moved t))
+             (when (eq (char-after) ?\;)
+               (if (ignore-errors (forward-comment 1))
+                   (setq moved t)
+                 (skip-chars-forward "^\n")
+                 (when (eq (char-after) ?\n)
+                   (forward-char 1))
+                 (setq moved t)))
+             moved))))
+
+
 ;; ---------------------------------------------------------------------------
 ;; EDN transport (§9.3, §9.8)
 ;; ---------------------------------------------------------------------------
@@ -152,7 +173,7 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
     (goto-char start)
     (when (looking-at-p "(")
       (forward-char 1)
-      (skip-chars-forward " \t\n,")
+      (clara-explorer--skip-ws)
       (let ((head-start (point)))
         (condition-case nil
             (progn
@@ -164,11 +185,11 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
   "Skip Clojure metadata forms at point (^ + form)."
   (while (looking-at-p "\\^")
     (forward-char 1)
-    (skip-chars-forward " \t\n,")
+    (clara-explorer--skip-ws)
     (condition-case nil
         (forward-sexp 1)
       (error (forward-char 1)))
-    (skip-chars-forward " \t\n,")))
+    (clara-explorer--skip-ws)))
 
 (defun clara-explorer--after-head-point (form-start)
   "Point after the production name at FORM-START, skipping metadata and name."
@@ -176,7 +197,7 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
     (goto-char form-start)
     (down-list 1)
     (forward-sexp 1)
-    (skip-chars-forward " \t\n,")
+    (clara-explorer--skip-ws)
     (clara-explorer--skip-metadata)
     (condition-case nil (forward-sexp 1) (error nil))
     (point)))
@@ -185,7 +206,7 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
   "Docstring bounds after production name at FORM-START, or nil."
   (save-excursion
     (goto-char (clara-explorer--after-head-point form-start))
-    (skip-chars-forward " \t\n,")
+    (clara-explorer--skip-ws)
     (when (eq (char-after) ?\")
       (let ((beg (point)))
         (forward-sexp 1)
@@ -249,9 +270,9 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
                   (when (clara-explorer--def-head-p head)
                     (goto-char start)
                     (forward-char 1)
-                    (skip-chars-forward " \t\n,")
+                    (clara-explorer--skip-ws)
                     (forward-sexp 1)          ; skip the head
-                    (skip-chars-forward " \t\n,")
+                    (clara-explorer--skip-ws)
                     (clara-explorer--skip-metadata)
                     (let ((name-start (point)))
                       (condition-case nil
@@ -274,7 +295,7 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
           (condition-case nil
               (forward-sexp 1)
             (error (goto-char end)))
-          (skip-chars-forward " \t\n,")
+          (clara-explorer--skip-ws)
           (when (and (< (point) end)
                      (looking-at-p "=>"))
             (setq found (point))))
@@ -329,29 +350,43 @@ Assumes point is just inside the condition vector after `down-list`."
   (when (and (eq (char-after) ?\?)
              (save-excursion
                (forward-sexp 1)
-               (skip-chars-forward " \t\n,")
+               (clara-explorer--skip-ws)
                (looking-at-p "<-")))
     (forward-sexp 1)
-    (skip-chars-forward " \t\n,")
+    (clara-explorer--skip-ws)
     (forward-sexp 1)
-    (skip-chars-forward " \t\n,")))
+    (clara-explorer--skip-ws)))
 
 (defun clara-explorer--accumulator-type-bounds ()
-  "If point is at `(<accum> :from [TYPE])`, return TYPE bounds.
-Assumes point is at the opening `(` of the accumulator.
-Returns (TYPE-BEG . TYPE-END) or nil."
-  (when (eq (char-after) ?\()
-    (forward-sexp 1)
-    (skip-chars-forward " \t\n,")
-    (when (looking-at-p ":from")
-      (forward-sexp 1)
-      (skip-chars-forward " \t\n,")
-      (when (eq (char-after) ?\[)
-        (down-list 1)
-        (skip-chars-forward " \t\n,")
-        (let ((type-beg (point)))
-          (forward-sexp 1)
-          (cons type-beg (point)))))))
+  "Return TYPE bounds for an accumulator condition at point, or nil.
+Point must be at the start of the accumulator expression, which may be
+either a parenthesized form `(<accum> ...)` — e.g. `(acc/all)` or
+`(my-sort-by-acc :x)` — or a bare symbol referencing a predefined
+accumulator, e.g. `my-shared-accum`.  In either case the expression is
+followed by `:from [TYPE ...]`; on success return `(TYPE-BEG . TYPE-END)`
+for the first element inside the `:from` vector, otherwise return nil
+without moving point."
+  ;; Use `save-excursion` so failure leaves point unchanged for the
+  ;; caller’s fallback (plain fact-type) branch in
+  ;; `clara-explorer--type-bounds-in-condition`.
+  (let ((bounds
+         (save-excursion
+           (when (not (eobp))
+             (ignore-errors
+               (let ((start (point)))
+                 (forward-sexp 1)
+                 (when (> (point) start)
+                   (clara-explorer--skip-ws)
+                   (when (looking-at-p ":from")
+                     (forward-sexp 1)
+                     (clara-explorer--skip-ws)
+                     (when (eq (char-after) ?\[)
+                       (down-list 1)
+                       (clara-explorer--skip-ws)
+                       (let ((type-beg (point)))
+                         (forward-sexp 1)
+                         (cons type-beg (point))))))))))))
+    bounds))
 
 (defun clara-explorer--logical-operator-p (kw)
   "Non-nil when KW is exactly `:and', `:or', `:not' or `:exists'."
@@ -365,10 +400,10 @@ BEG must be a vector whose first element is a logical operator
                        (goto-char beg)
                        (forward-sexp 1)
                        (point))))
-    (skip-chars-forward " \t\n,")
+    (clara-explorer--skip-ws)
     (catch 'found
       (while (< (point) wrapper-end)
-        (skip-chars-forward " \t\n,")
+        (clara-explorer--skip-ws)
         (when (>= (point) wrapper-end)
           (throw 'found nil))
         (cond
@@ -382,7 +417,7 @@ BEG must be a vector whose first element is a logical operator
           (forward-sexp 1))
          (t
           (forward-sexp 1)))
-        (skip-chars-forward " \t\n,"))
+        (clara-explorer--skip-ws))
       nil)))
 
 (defun clara-explorer--type-bounds-in-condition (beg)
@@ -392,7 +427,7 @@ BEG must be a vector whose first element is a logical operator
     (condition-case nil
         (progn
           (down-list 1)
-          (skip-chars-forward " \t\n,")
+          (clara-explorer--skip-ws)
           (clara-explorer--skip-fact-binding)
           (or (clara-explorer--accumulator-type-bounds)
               (if (looking-at-p ":[a-z]")
@@ -417,7 +452,7 @@ fact-type or nil."
     (condition-case nil
         (progn
           (down-list 1)
-          (skip-chars-forward " \t\n,")
+          (clara-explorer--skip-ws)
           (clara-explorer--skip-fact-binding)
           (or (clara-explorer--accumulator-type-bounds)
               (if (looking-at-p ":[a-z]")
@@ -439,16 +474,16 @@ fact-type or nil."
            (lhs-end (or =>-pos (point-max)))
            (found nil))
       (goto-char (clara-explorer--after-head-point form-start))
-      (skip-chars-forward " \t\n,")
+      (clara-explorer--skip-ws)
       (when (eq (char-after) ?\")
         (forward-sexp 1)
-        (skip-chars-forward " \t\n,"))
+        (clara-explorer--skip-ws))
       (when (eq (char-after) ?\{)
         (forward-sexp 1)
-        (skip-chars-forward " \t\n,"))
-      (skip-chars-forward " \t\n,")
+        (clara-explorer--skip-ws))
+      (clara-explorer--skip-ws)
       (while (and (not found) (< (point) lhs-end))
-        (skip-chars-forward " \t\n,")
+        (clara-explorer--skip-ws)
         (when (>= (point) lhs-end) (error "end"))
         (let ((cond-beg (point))
               (cond-end (save-excursion (forward-sexp 1) (point))))
@@ -458,7 +493,7 @@ fact-type or nil."
               (when bounds
                 (setq found (buffer-substring-no-properties (car bounds) (cdr bounds))))))
           (goto-char cond-end)
-          (skip-chars-forward " \t\n,"))
+          (clara-explorer--skip-ws))
         )
       found)))
 
@@ -469,10 +504,10 @@ fact-type or nil."
   (save-excursion
     (let ((orig (point)) found)
       (goto-char (clara-explorer--after-head-point form-start))
-      (skip-chars-forward " \t\n,")
+      (clara-explorer--skip-ws)
       (when (eq (char-after) ?\")
         (forward-sexp 1)
-        (skip-chars-forward " \t\n,"))
+        (clara-explorer--skip-ws))
       (clara-explorer--log "props after name char %c at %d" (char-after (point)) (point))
       (when (eq (char-after) ?\{)
         (let ((map-beg (point))
@@ -481,12 +516,12 @@ fact-type or nil."
             (goto-char map-beg)
             (down-list 1)
             (while (and (not found) (< (point) map-end))
-              (skip-chars-forward " \t\n,")
+              (clara-explorer--skip-ws)
               (when (< (point) map-end)
                 (let ((k-beg (point)))
                   (forward-sexp 1)
                   (let ((k-str (buffer-substring-no-properties k-beg (point))))
-                    (skip-chars-forward " \t\n,")
+                    (clara-explorer--skip-ws)
                     (let ((v-beg (point))
                           (v-end (save-excursion (forward-sexp 1) (point))))
                       (when (and (member k-str '(":clara-rules/insert-types" ":clara-rules/retract-types"
@@ -496,16 +531,16 @@ fact-type or nil."
                         (goto-char v-beg)
                         (down-list 1)
                         (while (and (not found) (< (point) v-end))
-                          (skip-chars-forward " \t\n,")
+                          (clara-explorer--skip-ws)
                           (when (< (point) v-end)
                             (let ((e-beg (point))
                                   (e-end (save-excursion (forward-sexp 1) (point))))
                               (when (and (>= orig e-beg) (<= orig e-end))
                                 (setq found (cons e-beg e-end)))
                               (goto-char e-end)
-                              (skip-chars-forward " \t\n,")))))
+                              (clara-explorer--skip-ws)))))
                       (goto-char v-end)
-                      (skip-chars-forward " \t\n,")))))))))
+                      (clara-explorer--skip-ws)))))))))
       (when found
         (buffer-substring-no-properties (car found) (cdr found))))))
 
@@ -627,12 +662,12 @@ Used for RHS and global cases where LHS-structure is not applicable."
       (cider-find-ns nil ns)
       (goto-char (point-min))
       (let ((found (or (re-search-forward
-                      (clara-explorer--fallback-regexp rule-name)
-                      nil t)
-                     ;; fallback for ^{:map} metadata or other forms
-                     (re-search-forward
-                      (format "\\b%s\\b" (regexp-quote rule-name))
-                      nil t))))
+                        (clara-explorer--fallback-regexp rule-name)
+                        nil t)
+                       ;; fallback for ^{:map} metadata or other forms
+                       (re-search-forward
+                        (format "\\b%s\\b" (regexp-quote rule-name))
+                        nil t))))
         (clara-explorer--log "fallback: search %S -> %s at %d" rule-name (if found "found" "NOT-FOUND") (point))
         found))))
 
@@ -742,8 +777,8 @@ Used for RHS and global cases where LHS-structure is not applicable."
    (list (if (or current-prefix-arg
                  (null (gethash (cider-current-repl 'infer 'ensure)
                                 clara-explorer--swap-session-exprs)))
-           (read-string "Session expression: ")
-         nil)))
+             (read-string "Session expression: ")
+           nil)))
   (unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))
   (let* ((conn (cider-current-repl 'infer 'ensure))
          (expr (or expr (gethash conn clara-explorer--swap-session-exprs))))

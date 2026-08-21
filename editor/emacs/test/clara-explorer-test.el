@@ -197,6 +197,53 @@ Tier-1 stub path fast."
       (let ((tb (clara-explorer--type-bounds-in-condition beg)))
         (should (equal (buffer-substring-no-properties (car tb) (cdr tb)) "[:my-thing]"))))))
 
+(ert-deftest type-bounds-accumulator-param-args ()
+  "Parameterized accumulator fn call: (my-sort-by-acc :x) :from [...]"
+  (with-clara-buffer "(r/defrule foo [?acc <- (my-sort-by-acc :x) :from [:my-thing [this] (= ?x 1)]] => 1)"
+    (search-forward "[?acc")
+    (search-backward "[")
+    (let ((beg (point)))
+      (let ((tb (clara-explorer--type-bounds-in-condition beg)))
+        (should (equal (buffer-substring-no-properties (car tb) (cdr tb)) ":my-thing")))))
+  ;; vector type with parameterized accumulator
+  (with-clara-buffer "(r/defrule foo [?acc <- (my-sort-by-acc :x) :from [[:my-thing]]] => 1)"
+    (search-forward "[?acc")
+    (search-backward "[")
+    (let ((beg (point)))
+      (let ((tb (clara-explorer--type-bounds-in-condition beg)))
+        (should (equal (buffer-substring-no-properties (car tb) (cdr tb)) "[:my-thing]"))))))
+
+(ert-deftest type-bounds-accumulator-bare-symbol ()
+  "Bare-symbol accumulator reference: my-shared-accum :from [...]"
+  (with-clara-buffer "(r/defrule foo [?acc <- my-shared-accum :from [:my-thing [this] (= ?x 1)]] => 1)"
+    (search-forward "[?acc")
+    (search-backward "[")
+    (let ((beg (point)))
+      (let ((tb (clara-explorer--type-bounds-in-condition beg)))
+        (should (equal (buffer-substring-no-properties (car tb) (cdr tb)) ":my-thing")))))
+  (with-clara-buffer "(r/defrule foo [?acc <- my-shared-accum :from [[:my-thing]]] => 1)"
+    (search-forward "[?acc")
+    (search-backward "[")
+    (let ((beg (point)))
+      (let ((tb (clara-explorer--type-bounds-in-condition beg)))
+        (should (equal (buffer-substring-no-properties (car tb) (cdr tb)) "[:my-thing]")))))
+  ;; qualified bare symbol
+  (with-clara-buffer "(r/defrule foo [?acc <- my.ns/my-shared-accum :from [:my-thing]] => 1)"
+    (search-forward "[?acc")
+    (search-backward "[")
+    (let ((beg (point)))
+      (let ((tb (clara-explorer--type-bounds-in-condition beg)))
+        (should (equal (buffer-substring-no-properties (car tb) (cdr tb)) ":my-thing"))))))
+
+(ert-deftest type-bounds-plain-not-misidentified-as-accumulator ()
+  "Plain fact type must not be confused when next sexp happens to be :from inside constraints."
+  (with-clara-buffer "(r/defrule foo [Application (= ?x 1)] => 1)"
+    (search-forward "[Application")
+    (search-backward "[")
+    (let ((beg (point)))
+      (let ((tb (clara-explorer--type-bounds-in-condition beg)))
+        (should (equal (buffer-substring-no-properties (car tb) (cdr tb)) "Application"))))))
+
 (ert-deftest type-bounds-boolean-group-returns-nil ()
   (with-clara-buffer "(r/defrule foo [:and [A] [B]] => 1)"
     (search-forward "[:and")
@@ -280,6 +327,34 @@ Tier-1 stub path fast."
 (ert-deftest lhs-type-acc-case5-qualified-vector ()
   (with-clara-buffer "(ns test) (r/defrule foo\n  [?acc <- (acc/all) :from [[:my-thing :qualifier]]]\n  =>\n  (println 1))"
     (should (equal (test--search-token ":my-thing") "[:my-thing :qualifier]"))))
+
+(ert-deftest lhs-type-acc-param-args ()
+  "Parameterized accumulator: (my-sort-by-acc :x) :from [...]"
+  (with-clara-buffer "(ns test) (r/defrule foo\n  [?acc <- (my-sort-by-acc :x) :from [:my-thing [this] (= ?x 1)]]\n  =>\n  (println 1))"
+    (should (equal (test--search-token ":my-thing") ":my-thing")))
+  (with-clara-buffer "(ns test) (r/defrule foo\n  [?acc <- (my-sort-by-acc :x) :from [[:my-thing]]]\n  =>\n  (println 1))"
+    (should (equal (test--search-token ":my-thing") "[:my-thing]")))
+  ;; point on accumulator symbol itself should still resolve to :from type
+  (with-clara-buffer "(ns test) (r/defrule foo\n  [?acc <- (my-sort-by-acc :x) :from [:my-thing]]\n  =>\n  (println 1))"
+    (should (equal (test--search-token "my-sort-by-acc") ":my-thing"))))
+
+(ert-deftest lhs-type-acc-bare-symbol ()
+  "Bare-symbol accumulator reference: my-shared-accum :from [...]"
+  (with-clara-buffer "(ns test) (r/defrule foo\n  [?acc <- my-shared-accum :from [:my-thing [this] (= ?x 1)]]\n  =>\n  (println 1))"
+    (should (equal (test--search-token ":my-thing") ":my-thing")))
+  (with-clara-buffer "(ns test) (r/defrule foo\n  [?acc <- my-shared-accum :from [[:my-thing]]]\n  =>\n  (println 1))"
+    (should (equal (test--search-token ":my-thing") "[:my-thing]")))
+  (with-clara-buffer "(ns test) (r/defrule foo\n  [?acc <- my.ns/my-shared-accum :from [[:my-thing :qual]]]\n  =>\n  (println 1))"
+    (should (equal (test--search-token ":my-thing") "[:my-thing :qual]")))
+  ;; point on the bare accumulator symbol itself resolves to :from type
+  (with-clara-buffer "(ns test) (r/defrule foo\n  [?acc <- my-shared-accum :from [:my-thing]]\n  =>\n  (println 1))"
+    (should (equal (test--search-token "my-shared-accum") ":my-thing"))))
+
+(ert-deftest lhs-type-acc-bare-symbol-with-constraints ()
+  "Bare-symbol with vector type and constraints still yields vector type."
+  (with-clara-buffer "(ns test) (r/defrule foo\n  [?acc <- my-shared-accum :from [[:my-thing] [this] (= ?x 1)]]\n  =>\n  (println 1))"
+    (should (equal (test--search-token "[:my-thing]") "[:my-thing]"))
+    (should (equal (test--search-token "[this]") "[:my-thing]"))))
 
 (ert-deftest lhs-type-plain-application ()
   (with-clara-buffer "(ns test) (r/defrule foo\n  [Application (= ?x 1)]\n  =>\n  (println 1))"
@@ -662,6 +737,116 @@ Tier-1 stub path fast."
     ;; ^{:map} contains space, so primary truncates - goto-fallback then uses \\b fallback
     (should-not-match "(defrule ^{:doc \"hi\"} my-rule [A] => 1)" "my-rule")
     (should (string-match-p "\\bmy-rule\\b" "(defrule ^{:doc \"hi\"} my-rule [A] => 1)"))))
+
+
+;; ---------------------------------------------------------------------------
+;; Whitespace and comment skipping (clara-explorer--skip-ws)
+;; ---------------------------------------------------------------------------
+
+(ert-deftest skip-ws-skips-all-clojure-whitespace ()
+  "Direct unit test for `clara-explorer--skip-ws` across all whitespace chars."
+  (with-clara-buffer "  \t\r\n,,  \nnext"
+    (goto-char (point-min))
+    (clara-explorer--skip-ws)
+    (should (looking-at-p "next")))
+  (with-clara-buffer ",,,next"
+    (goto-char (point-min))
+    (clara-explorer--skip-ws)
+    (should (looking-at-p "next")))
+  (with-clara-buffer "\r\n\t next"
+    (goto-char (point-min))
+    (clara-explorer--skip-ws)
+    (should (looking-at-p "next")))
+  (with-clara-buffer "   next"
+    (goto-char (point-min))
+    (clara-explorer--skip-ws)
+    (should (looking-at-p "next")))
+  ;; no whitespace — point stays
+  (with-clara-buffer "next"
+    (goto-char (point-min))
+    (clara-explorer--skip-ws)
+    (should (looking-at-p "next"))))
+
+(ert-deftest skip-ws-skips-line-comments ()
+  "Line comments `;` are treated as whitespace, including trailing newline."
+  (with-clara-buffer "  ; comment\nnext"
+    (goto-char (point-min))
+    (clara-explorer--skip-ws)
+    (should (looking-at-p "next")))
+  (with-clara-buffer "; comment\nnext"
+    (goto-char (point-min))
+    (clara-explorer--skip-ws)
+    (should (looking-at-p "next")))
+  (with-clara-buffer " , ; comment 1\n ; comment 2\n next"
+    (goto-char (point-min))
+    (clara-explorer--skip-ws)
+    (should (looking-at-p "next")))
+  ;; comment without trailing newline (EOB)
+  (with-clara-buffer "  ; comment"
+    (goto-char (point-min))
+    (clara-explorer--skip-ws)
+    (should (eobp)))
+  ;; comment between commas and spaces
+  (with-clara-buffer ",; c1\n,; c2\nnext"
+    (goto-char (point-min))
+    (clara-explorer--skip-ws)
+    (should (looking-at-p "next"))))
+
+(ert-deftest type-bounds-accumulator-with-extra-whitespace ()
+  "Accumulator `:from` parsing must tolerate extra whitespace, commas and \\r."
+  ;; extra spaces, tabs, commas between accumulator and :from
+  (with-clara-buffer "(r/defrule foo [?acc <- (acc/all)   ,,,  \t  :from    [:my-thing]] => 1)"
+    (search-forward "[?acc")
+    (search-backward "[")
+    (let ((beg (point)))
+      (let ((tb (clara-explorer--type-bounds-in-condition beg)))
+        (should (equal (buffer-substring-no-properties (car tb) (cdr tb)) ":my-thing")))))
+  ;; CR + newline between :from and vector
+  (with-clara-buffer "(r/defrule foo [?acc <- (acc/all) :from \r\n [:my-thing]] => 1)"
+    (search-forward "[?acc")
+    (search-backward "[")
+    (let ((beg (point)))
+      (let ((tb (clara-explorer--type-bounds-in-condition beg)))
+        (should (equal (buffer-substring-no-properties (car tb) (cdr tb)) ":my-thing")))))
+  ;; commas and newlines inside the :from vector's leading whitespace
+  (with-clara-buffer "(r/defrule foo [?acc <- my-shared-accum  , :from  , \n [  :my-thing ]] => 1)"
+    (search-forward "[?acc")
+    (search-backward "[")
+    (let ((beg (point)))
+      (let ((tb (clara-explorer--type-bounds-in-condition beg)))
+        (should (equal (buffer-substring-no-properties (car tb) (cdr tb)) ":my-thing")))))
+  ;; bare-symbol with vector type and extra whitespace
+  (with-clara-buffer "(r/defrule foo [?acc <- my-shared-accum :from \t [[:my-thing]]] => 1)"
+    (search-forward "[?acc")
+    (search-backward "[")
+    (let ((beg (point)))
+      (let ((tb (clara-explorer--type-bounds-in-condition beg)))
+        (should (equal (buffer-substring-no-properties (car tb) (cdr tb)) "[:my-thing]"))))))
+
+(ert-deftest lhs-type-accumulator-with-comments ()
+  "Comments `;` between accumulator parts must be ignored for LHS type."
+  (with-clara-buffer "(r/defrule foo [?acc <- (acc/all) ; leading comment\n :from [:my-thing]] => 1)"
+    (should (equal (test--search-token ":my-thing") ":my-thing")))
+  (with-clara-buffer "(r/defrule foo [?acc <- (acc/all) :from ; between\n [:my-thing]] => 1)"
+    (should (equal (test--search-token ":my-thing") ":my-thing")))
+  (with-clara-buffer "(r/defrule foo [?acc <- my-shared-accum ; comment\n :from ; another\n [:my-thing]] => 1)"
+    (should (equal (test--search-token ":my-thing") ":my-thing")))
+  (with-clara-buffer "(r/defrule foo [?acc <- (my-sort-by-acc :x) ; c\n :from ; c2\n [[:my-thing]]] => 1)"
+    (should (equal (test--search-token ":my-thing") "[:my-thing]")))
+  ;; comment inside the :from vector before the type
+  (with-clara-buffer "(r/defrule foo [?acc <- (acc/all) :from [ ; inner\n :my-thing]] => 1)"
+    (should (equal (test--search-token ":my-thing") ":my-thing"))))
+
+(ert-deftest lhs-type-with-extra-commas-and-whitespace ()
+  "Clojure commas are whitespace — LHS type must be found through them."
+  (with-clara-buffer "(r/defrule foo [?acc <- (acc/all) , :from , [:my-thing]] => 1)"
+    (should (equal (test--search-token ":my-thing") ":my-thing")))
+  (with-clara-buffer "(r/defrule foo [?acc <- my-shared-accum ,, :from ,, [[:my-thing :qual]]] => 1)"
+    (should (equal (test--search-token ":my-thing") "[:my-thing :qual]")))
+  ;; plain fact with commas (non-accumulator) should still work
+  (with-clara-buffer "(r/defrule foo [Application ,, (= ?x 1)] => 1)"
+    (should (equal (test--search-token "Application") "Application"))))
+
 
 (provide 'clara-explorer-test)
 ;;; clara-explorer-test.el ends here
