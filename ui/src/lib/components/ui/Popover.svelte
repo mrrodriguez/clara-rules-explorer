@@ -13,6 +13,15 @@
 	let anchorEl = $state<HTMLDivElement>();
 	let panelEl = $state<HTMLDivElement>();
 
+	function portal(node: HTMLElement) {
+		document.body.appendChild(node);
+		return {
+			destroy() {
+				node.remove();
+			}
+		};
+	}
+
 	$effect(() => {
 		if (!open) return;
 		position();
@@ -81,7 +90,7 @@
 </div>
 
 {#if open}
-	<div class="popover-panel" bind:this={panelEl}>
+	<div class="popover-panel" bind:this={panelEl} use:portal>
 		{@render content()}
 	</div>
 {/if}

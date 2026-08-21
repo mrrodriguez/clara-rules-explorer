@@ -82,8 +82,6 @@
 		overflow: hidden;
 	}
 	.actions-col {
-		position: relative;
-		z-index: 1;
 		flex: 0 0 auto;
 	}
 </style>

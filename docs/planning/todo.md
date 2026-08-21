@@ -5,6 +5,5 @@
 2. production summary In "fact types" tab in the "LHS types (input)" the expand tooltip is "show
    upstream/downstream" while the collapse tooltip is "collapse dependencies". The expand should
    just mirror the collapse as "expand dependencies".
-3. DONE improve elisp tests. do we really have to mock clojure-mode to the extent of a syntax table etc?
-4. DONE elisp not handling defrule/defquery metadata on var name like `(defrule ^:my-meta my-rule-name =>
-:foo)`
+3. `(defrule x-rule [:not [:my-ns/my-type]] => 1)` does not detect :my-ns/my-type as a fact type
+   under cursor when `clara-explorer-navigate-to-producer`. same issue for `[:exists [:my-type]]`
