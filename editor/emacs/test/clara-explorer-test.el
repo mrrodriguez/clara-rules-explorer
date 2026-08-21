@@ -205,6 +205,51 @@ Tier-1 stub path fast."
       (should (null (clara-explorer--type-bounds-in-condition beg))))))
 
 ;; ---------------------------------------------------------------------------
+;; lhs `:not`/`:exists` wrappers — fact type inside logical groups
+;; ---------------------------------------------------------------------------
+
+(ert-deftest lhs-type-not-wrapper-keyword ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [:not [:my-ns/my-type]] => 1)"
+    (should (equal (test--search-token ":my-ns/my-type") ":my-ns/my-type"))))
+
+(ert-deftest lhs-type-exists-wrapper-keyword ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [:exists [:my-type]] => 1)"
+    (should (equal (test--search-token ":my-type") ":my-type"))))
+
+(ert-deftest lhs-type-not-wrapper-with-constraints ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [:not [MyType (= ?x 1)]] => 1)"
+    (should (equal (test--search-token "MyType") "MyType"))))
+
+(ert-deftest lhs-type-exists-wrapper-class ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [:exists [MyType]] => 1)"
+    (should (equal (test--search-token "MyType") "MyType"))))
+
+(ert-deftest lhs-type-and-containing-not-and-exists ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [:and [:not [:my-ns/my-type]] [:exists [:my-type]]] => 1)"
+    (should (equal (test--search-token ":my-ns/my-type") ":my-ns/my-type"))
+    (should (equal (test--search-token ":my-type") ":my-type"))))
+
+(ert-deftest lhs-type-nested-not-around-and ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [:not [:and [P] [Q]]] => 1)"
+    ;; use P/Q (not in "and"/"or"/"not"/"exists") to avoid case-fold
+    ;; "A" would match the `a' in ":and" when `case-fold-search' is t
+    (should (equal (test--search-token "[P]") "P"))
+    (should (equal (test--search-token "[Q]") "Q"))))
+
+(ert-deftest lhs-type-not-outside-binding ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [?a <- MyType] [:not [OtherType]] => 1)"
+    (should (equal (test--search-token "OtherType") "OtherType"))))
+
+(ert-deftest vector-fact-rejects-logical-wrapper ()
+  (with-clara-buffer "(r/defrule foo [:not [:my-ns/my-type]] => 1)"
+    (search-forward ":not")
+    ;; point on the wrapper operator itself must not be treated as a fact vector
+    (should (null (clara-explorer--vector-fact-at-point)))
+    ;; still finds the inner keyword vector when point is on the inner
+    (search-forward ":my-ns/my-type")
+    (should (equal (clara-explorer--vector-fact-at-point) "[:my-ns/my-type]"))))
+
+;; ---------------------------------------------------------------------------
 ;; lhs-type-at-point — the 5 accumulator cases + tuple/string/plain
 ;; ---------------------------------------------------------------------------
 

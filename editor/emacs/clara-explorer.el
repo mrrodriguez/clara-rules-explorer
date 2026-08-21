@@ -307,6 +307,84 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
           (buffer-substring-no-properties beg (point))))
        (t nil)))))
 
+(defconst clara-explorer--logical-operator-rx
+  (rx bos ":" (or "and" "or" "not" "exists") eos)
+  "Regexp matching exactly `:and', `:or', `:not' or `:exists'.")
+
+(defconst clara-explorer--fact-vector-prefix-rx
+  (rx bos "[" (* (any " \t\n")) ":")
+  "Regexp matching a vector that starts with a keyword.")
+
+(defconst clara-explorer--logical-wrapper-vector-rx
+  (rx bos "[" (* (any " \t\n")) ":" (or "and" "or" "not" "exists") word-boundary)
+  "Regexp matching a vector whose first element is a logical wrapper.")
+
+(defconst clara-explorer--fact-forbidden-chars-rx
+  (rx (any "()?"))
+  "Chars that disqualify a vector from being a plain fact vector.")
+
+(defun clara-explorer--skip-fact-binding ()
+  "Skip a leading `?var <-` binding at point, if present.
+Assumes point is just inside the condition vector after `down-list`."
+  (when (and (eq (char-after) ?\?)
+             (save-excursion
+               (forward-sexp 1)
+               (skip-chars-forward " \t\n,")
+               (looking-at-p "<-")))
+    (forward-sexp 1)
+    (skip-chars-forward " \t\n,")
+    (forward-sexp 1)
+    (skip-chars-forward " \t\n,")))
+
+(defun clara-explorer--accumulator-type-bounds ()
+  "If point is at `(<accum> :from [TYPE])`, return TYPE bounds.
+Assumes point is at the opening `(` of the accumulator.
+Returns (TYPE-BEG . TYPE-END) or nil."
+  (when (eq (char-after) ?\()
+    (forward-sexp 1)
+    (skip-chars-forward " \t\n,")
+    (when (looking-at-p ":from")
+      (forward-sexp 1)
+      (skip-chars-forward " \t\n,")
+      (when (eq (char-after) ?\[)
+        (down-list 1)
+        (skip-chars-forward " \t\n,")
+        (let ((type-beg (point)))
+          (forward-sexp 1)
+          (cons type-beg (point)))))))
+
+(defun clara-explorer--logical-operator-p (kw)
+  "Non-nil when KW is exactly `:and', `:or', `:not' or `:exists'."
+  (string-match-p clara-explorer--logical-operator-rx kw))
+
+(defun clara-explorer--wrapper-inner-type-bounds (beg orig)
+  "For wrapper vector at BEG, return fact-type bounds of inner containing ORIG.
+BEG must be a vector whose first element is a logical operator
+\(`:and'/`:or'/`:not'/`:exists').  Recurses for nested wrappers."
+  (let ((wrapper-end (save-excursion
+                       (goto-char beg)
+                       (forward-sexp 1)
+                       (point))))
+    (skip-chars-forward " \t\n,")
+    (catch 'found
+      (while (< (point) wrapper-end)
+        (skip-chars-forward " \t\n,")
+        (when (>= (point) wrapper-end)
+          (throw 'found nil))
+        (cond
+         ((eq (char-after) ?\[)
+          (let ((inner-beg (point))
+                (inner-end (save-excursion (forward-sexp 1) (point))))
+            (if (and (>= orig inner-beg) (<= orig inner-end))
+                (throw 'found (clara-explorer--type-bounds-in-condition-at-point inner-beg orig))
+              (goto-char inner-end))))
+         ((eq (char-after) ?\()
+          (forward-sexp 1))
+         (t
+          (forward-sexp 1)))
+        (skip-chars-forward " \t\n,"))
+      nil)))
+
 (defun clara-explorer--type-bounds-in-condition (beg)
   "For condition vector at BEG return (BEG . END) of its fact-type."
   (save-excursion
@@ -315,39 +393,43 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
         (progn
           (down-list 1)
           (skip-chars-forward " \t\n,")
-          (when (and (eq (char-after) ?\?)
-                     (save-excursion
-                       (forward-sexp 1)
-                       (skip-chars-forward " \t\n,")
-                       (looking-at-p "<-")))
-            (forward-sexp 1)
-            (skip-chars-forward " \t\n,")
-            (forward-sexp 1)
-            (skip-chars-forward " \t\n,"))
-          (cond
-           ((eq (char-after) ?\()
-            (forward-sexp 1)
-            (skip-chars-forward " \t\n,")
-            (when (looking-at-p ":from")
-              (forward-sexp 1)
-              (skip-chars-forward " \t\n,")
-              (when (eq (char-after) ?\[)
-                (down-list 1)
-                (skip-chars-forward " \t\n,")
+          (clara-explorer--skip-fact-binding)
+          (or (clara-explorer--accumulator-type-bounds)
+              (if (looking-at-p ":[a-z]")
+                  (let ((kw-start (point)))
+                    (forward-sexp 1)
+                    (let ((kw (buffer-substring-no-properties kw-start (point))))
+                      (if (clara-explorer--logical-operator-p kw)
+                          nil
+                        (cons kw-start (point)))))
                 (let ((type-beg (point)))
                   (forward-sexp 1)
                   (cons type-beg (point))))))
-           ((looking-at-p ":[a-z]")
-            (let ((kw-start (point)))
-              (forward-sexp 1)
-              (let ((kw (buffer-substring-no-properties kw-start (point))))
-                (if (or (string= kw ":and") (string= kw ":or") (string= kw ":not") (string= kw ":exists"))
-                    nil
-                  (cons kw-start (point))))))
-           (t
-            (let ((type-beg (point)))
-              (forward-sexp 1)
-              (cons type-beg (point))))))
+      (error nil))))
+
+(defun clara-explorer--type-bounds-in-condition-at-point (beg orig)
+  "Like `clara-explorer--type-bounds-in-condition' but ORIG-aware.
+Handles `:not', `:exists', `:and', `:or' wrappers by recursing to the
+inner condition that contains ORIG.  Returns (BEG . END) of the
+fact-type or nil."
+  (save-excursion
+    (goto-char beg)
+    (condition-case nil
+        (progn
+          (down-list 1)
+          (skip-chars-forward " \t\n,")
+          (clara-explorer--skip-fact-binding)
+          (or (clara-explorer--accumulator-type-bounds)
+              (if (looking-at-p ":[a-z]")
+                  (let ((kw-start (point)))
+                    (forward-sexp 1)
+                    (let ((kw (buffer-substring-no-properties kw-start (point))))
+                      (if (clara-explorer--logical-operator-p kw)
+                          (clara-explorer--wrapper-inner-type-bounds beg orig)
+                        (cons kw-start (point)))))
+                (let ((type-beg (point)))
+                  (forward-sexp 1)
+                  (cons type-beg (point))))))
       (error nil))))
 
 (defun clara-explorer--lhs-type-at-point (form-start)
@@ -372,7 +454,7 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
               (cond-end (save-excursion (forward-sexp 1) (point))))
           (when (and (eq (char-after cond-beg) ?\[)
                      (>= orig cond-beg) (<= orig cond-end))
-            (let ((bounds (clara-explorer--type-bounds-in-condition cond-beg)))
+            (let ((bounds (clara-explorer--type-bounds-in-condition-at-point cond-beg orig)))
               (when bounds
                 (setq found (buffer-substring-no-properties (car bounds) (cdr bounds))))))
           (goto-char cond-end)
@@ -447,8 +529,9 @@ Used for RHS and global cases where LHS-structure is not applicable."
                     (end (save-excursion (forward-sexp 1) (point))))
                 (when (and (>= orig beg) (<= orig end))
                   (let ((s (buffer-substring-no-properties beg end)))
-                    (when (and (string-match-p "\\`\\[\\s-*:" s)
-                               (not (string-match-p "[()?]" s))
+                    (when (and (string-match-p clara-explorer--fact-vector-prefix-rx s)
+                               (not (string-match-p clara-explorer--logical-wrapper-vector-rx s))
+                               (not (string-match-p clara-explorer--fact-forbidden-chars-rx s))
                                (not (string-match-p "=" s)))
                       (setq found s)))))))
         (error nil))
