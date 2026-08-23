@@ -98,6 +98,16 @@ Rationale:
 4. **No jsonista in the editor path.** Eval the existing function directly;
    nothing extra to get right.
 
+**Why hand-roll it: there is no viable off-the-shelf Lua EDN parser.** Neovim's
+Clojure support delegates parsing to the JVM rather than reimplementing it in
+Lua — Conjure evals code over nREPL and displays the raw `pr-str` value (its
+`conjure.client.clojure.nrepl.parse` module only strips `^meta`/comments/shebang,
+it does not read EDN), and clojure-lsp is a GraalVM binary that parses EDN
+internally but exposes it only over LSP. The only Lua EDN library on GitHub
+(`raystubbs/edn.lua`, ~10 stars, no license) is self-described as "very dumb,
+low-effort" and unmaintained — not something we can vendor. So the reader is a
+first-class, isolated unit we write and test ourselves (§5.1).
+
 The EDN reader is **not** a general parser. It targets the closed
 `NavigateResponse` grammar (§4.3) and is a small, pure, unit-tested module.
 
@@ -261,10 +271,16 @@ Notes (each is a correction to the previous draft):
 - Guard with `require("conjure.client.clojure.nrepl.server").connected?()`
   before evaling, mirroring `cider-connected-p`.
 
-### 5.1 EDN subset reader (`lua/clara-explorer/edn.lua`)
+### 5.1 EDN subset reader (`lua/clara-explorer/edn.lua`) — an isolated unit
 
-A pure function `edn.decode(s) -> table` for the closed `NavigateResponse`
-grammar:
+`edn.lua` is a **self-contained, dependency-free** module exposing exactly one
+function, `edn.decode(s) -> table`, for the closed `NavigateResponse` grammar.
+It depends on nothing but the Lua standard library — no Conjure, no Tree-sitter,
+no `vim.json` — and it is the **only** module that knows the wire format; every
+other module consumes its output as plain Lua tables. This isolation is
+deliberate: the reader is written and tested on its own (`edn_spec.lua`), and if
+a mature, licensed Lua EDN library ever appears, it is a drop-in swap behind
+this one function without touching transport or UI.
 
 - maps `{…}`, vectors `[…]`, keywords `:kw` (→ Lua string `"kw"`), strings
   `"…"` (with Clojure/EDN escapes: `\\` `\"` `\n` `\t` `\r` `\b` `\f`
@@ -474,8 +490,14 @@ Server work is **done**; every box here is Lua + tests, verified top to bottom.
 
 ## 11. Decisions (resolved)
 
-1. **Transport is EDN over Conjure eval**, parsed by a minimal subset reader —
-   not JSON, not a general EDN parser. `client/navigate` is unchanged.
+1. **Transport is EDN over Conjure eval**, parsed by an isolated, dependency-free
+   subset reader (`edn.lua`) — not JSON, not a general EDN parser.
+   `client/navigate` is unchanged. (The JSON alternative — `print`ing jsonista
+   output to the nREPL `out` channel and `vim.json.decode`-ing it, which avoids
+   the `pr-str` double-encoding — was considered; it matches the ecosystem's
+   "JVM parses, Lua consumes JSON" convention but was rejected in favor of EDN
+   contract parity with the Emacs client and losslessness. It is the documented
+   fallback if the reader ever becomes a burden.)
 2. **Tree-sitter supplies only the structural skeleton** (enclosing form, `=>`,
    node text); the Clara-specific token resolution is an engine-agnostic port of
    the Emacs heuristics and is the bulk of the work.
