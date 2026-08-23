@@ -2,8 +2,8 @@
 
 ;;; Commentary:
 ;;; Declares the clara-explorer layer's package dependencies.  The
-;;; clara-explorer.el file itself is loaded from the checkout via
-;;; `clara-explorer-root` (see config.el) rather than from a package archive.
+;;; clara-explorer.el file itself is not a published package; it is loaded
+;;; from the checkout via `clara-explorer-root' (see config.el).
 
 ;;; Code:
 

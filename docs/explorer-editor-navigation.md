@@ -38,16 +38,58 @@ Start the server in your CIDER REPL and register it:
 **Spike (no config change):** open `editor/emacs/clara-explorer.el`,
 `M-x eval-buffer`, then call the commands with `M-x`.
 
-**Durable (Spacemacs):** add the private layer and set its checkout variable:
+**Durable (Spacemacs layer — unpublished, installed from a local directory):**
+Spacemacs discovers a layer by its directory name, so the layer is
+`editor/spacemacs/clara-explorer/` (the directory name *is* the layer
+symbol). Two equivalent ways to install it without publishing anything:
 
 ```elisp
+;; A: point Spacemacs at the repo's layer parent dir (live — no copy).
+;; add-to-list keeps any other layer paths you already have; a bare `setq'
+;; would replace them. Trailing slash required.
+;; ~/.spacemacs
+(add-to-list 'dotspacemacs-configuration-layer-path
+             "~/src/clara-rules-explorer/editor/spacemacs/")
+
 ;; dotspacemacs-configuration-layers
 '((clara-explorer :variables clara-explorer-root "~/src/clara-rules-explorer"))
 ```
 
-The layer skeleton lives at `editor/emacs/spacemacs-layer/` and adds the
-`editor/emacs` directory to `load-path` from that variable. No absolute paths
-or ports are hard-coded anywhere in the shipped files.
+```sh
+# B: copy (or symlink) the layer dir into Spacemacs' private layers dir
+mkdir -p ~/.spacemacs.d/layers
+cp -R ~/src/clara-rules-explorer/editor/spacemacs/clara-explorer ~/.spacemacs.d/layers/
+# or, to keep edits live:
+#   ln -s ~/src/clara-rules-explorer/editor/spacemacs/clara-explorer \
+#         ~/.spacemacs.d/layers/clara-explorer
+```
+
+Then reload with `SPC f e R` (or `M-m f e R`). Either way the layer declares
+the `cider`/`parseedn`/`clojure-mode` dependencies and loads `clara-explorer.el`
+from the checkout via the `clara-explorer-root` variable. No absolute paths or
+ports are hard-coded anywhere in the shipped files.
+
+**Plain package (no Spacemacs):** the same `editor/emacs/clara-explorer.el` is
+already package-shaped (`Package-Requires`/`Version` headers). Two options:
+
+```sh
+# build a package tarball, then in Emacs: M-x package-install-file RET dist/clara-explorer-0.1.0.tar RET
+cd editor/emacs && eldev prepare && eldev package
+```
+
+```elisp
+;; or load straight from the checkout with use-package
+(use-package clara-explorer
+  :load-path "~/src/clara-rules-explorer/editor/emacs"
+  :commands (clara-explorer-navigate-producer
+             clara-explorer-navigate-consumer
+             clara-explorer-refresh
+             clara-explorer-swap-session))
+```
+
+`package-install-file` resolves the `cider`/`parseedn`/`clojure-mode`
+dependencies from your configured archives (MELPA), so it needs MELPA added
+the same way any Emacs package does.
 
 **Evil:** `C-o` (`evil-jump-backward`) / `C-i` work for every navigation —
 see *Jump history* below.

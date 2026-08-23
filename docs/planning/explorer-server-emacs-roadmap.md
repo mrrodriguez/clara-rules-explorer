@@ -1,7 +1,8 @@
 # Explorer Server ↔ Emacs Navigation — Roadmap
 
-Status: **Phase 0 + Phase 1 implemented** (Phase 0.5 manual Emacs acceptance
-pending user verification; Phase 1 Elisp tiered tests implemented) · Plan: `docs/planning/explorer-server-emacs-plan.md`
+Status: **Phase 0 + Phase 1 + Phase 1.5 implemented** (Phase 0.5 manual Emacs
+acceptance and the Phase 1.5 manual install gate pending user verification;
+Phase 1 Elisp tiered tests implemented) · Plan: `docs/planning/explorer-server-emacs-plan.md`
 (review 1 applied)
 
 This is the executable checklist for the plan. Work top to bottom; every box
@@ -127,13 +128,55 @@ Goal: tested, refreshable, durably installable.
   - [x] **Tier 2 — real-deps unit** (`make eldev-prepare && make eldev-test` / `eldev test`): same 38 + 5 now 0 skipped, `editor/emacs/Eldev` `:main-file`/`:package` + `(eldev-use-package-archive 'melpa) (eldev-use-package-archive 'gnu)` + `Version: 0.1.0` header (required for `package-buffer-info`), `.eldev/` gitignored (`make clean` wipes `server/target/elisp-check` + `.eldev/`), `test-helper--real-deps-p`/`--parseedn-real-p` + `test-helper--report-tier` banner (`Tier 1 — 5 skipped — hint: run eldev test`), `clara-explorer.el` guards now `or (featurep ...) (require ...)` and `test-helper` `unless (or (featurep ...) (require ...))` so Eldev’s real `cider`/`parseedn`/`clojure-mode` win, order `(require 'test-helper) (require 'clara-explorer)` + load-path shim for `test-helper` under Eldev. Covers `--edn-map→parseedn-read-str` hash-table/`vector` contract, `--eval-edn`+`nrepl-dict` wiring, `cider-symbol-at-point` `::`/`:kw`, real `syntax-ppss` for comments/reader macros
   - [x] **Tier 3 — live nREPL integration (deferred)** — full `client/navigate` e2e via `cider-nrepl-sync-request:eval` against live `server` (ctor, `:via :retract`, global `{:production nil}`), reserved for future `make eldev-prepare && eldev test --integration` / `test-integration` target; not required for CI (see testing doc)
   - [x] **Gate:** `make -C editor/emacs test-tier1` (CI, stubbed) and `make eldev-prepare && make -C editor/emacs eldev-test` (local, real deps) + `make check-elisp` (byte-compile vs stubs) — `--verbose` removed (Eldev 1.11 uses `-v` global)
-- [x] Optional Spacemacs layer skeleton at `editor/emacs/spacemacs-layer/`
+- [x] Optional Spacemacs layer skeleton at `editor/spacemacs/clara-explorer/`
       (`packages.el` deps, `config.el` `clara-explorer-root` defcustom,
       `keybindings.el` `g p`/`g c`/`g r` scoped to `clojure-mode`,
       `funcs.el`) — durable install deferred per user (eval-buffer during spike)
 - [x] README snippet: both install paths (spike `eval-buffer` / layer var),
       REPL bootstrap, refresh workflow. No absolute paths in examples.
 - [x] Update plan status to **Implemented (phase 1)** — now includes tiered Elisp tests
+
+---
+
+## Phase 1.5 — Durable install (package + local Spacemacs layer)
+
+Goal: the same `editor/emacs/clara-explorer.el` installable two ways — as an
+unpublished Spacemacs layer from a local directory, and as a plain Emacs
+package. No publishing, no hard-coded paths. (The Tier 3 live-nREPL
+integration test remains deferred; this phase does not need it.)
+
+- [x] Rename layer dir `editor/emacs/spacemacs-layer/` →
+      `editor/spacemacs/clara-explorer/` — Spacemacs uses the directory
+      name as the layer symbol (`configuration-layer/discover-layers`
+      interns `file-name-nondirectory`), so the old name would register as
+      layer `spacemacs-layer`, not `clara-explorer`; moved out of the
+      `editor/emacs/` Eldev project so `eldev package` does not sweep the
+      layer `.el` files into the package tarball (Eldev's default `*.el` glob
+      is recursive)
+- [x] Fix layer wiring — the previous `config.el`/`keybindings.el` each
+      defined `clara-explorer/init-clara-explorer`, but `clara-explorer` was
+      not in `clara-explorer-packages`, so Spacemacs never dispatched the
+      `init-*` fn (owner detection requires the package to be listed +
+      `fboundp`). Now: `config.el` holds the `clara-explorer-root` defcustom
+      and loads `clara-explorer.el` via `with-eval-after-load 'cider` (CIDER
+      transitively loads parseedn + clojure-mode, so the guards pass);
+      `keybindings.el` only binds `g p`/`g c`/`g r`
+- [x] Plain-package path — `editor/emacs/Makefile` `package` target
+      (`eldev package` → `dist/clara-explorer-<version>.tar`), independent
+      of the Spacemacs layer (which lives outside the Eldev project),
+      `package-install-file` + `use-package :load-path` recipes documented in
+      `docs/explorer-editor-navigation.md#Install`; `dist/` gitignored +
+      removed by `make clean`
+- [x] Local-layer recipes documented — `dotspacemacs-configuration-layer-path`
+      via `add-to-list` (not `setq`, which would replace other layer paths),
+      and copy/symlink into `~/.spacemacs.d/layers/`, both with
+      `clara-explorer-root` set in `dotspacemacs-configuration-layers`
+- [ ] **Gate:** manual verify — install the layer on this machine, `SPC f e R`,
+      confirm `cider`/`parseedn`/`clojure-mode` resolve and `, g p`/`, g c`/
+      `, g r` are bound in `clojure-mode`; then `M-x package-install-file` on
+      the built tarball in a plain-Emacs profile
+- [ ] **Gate:** `make -C editor/emacs test-tier1` + `make check-elisp` +
+      `make -C editor/emacs package` (builds tarball; `dist/` gitignored)
 
 ---
 

@@ -521,7 +521,7 @@ production actually needs it.
 
 Single file: `editor/emacs/clara-explorer.el` (new `editor/` top-level dir;
 `editor/neovim/` later; optional Spacemacs layer skeleton alongside at
-`editor/emacs/spacemacs-layer/`, §10). No machine-specific paths anywhere in
+`editor/spacemacs/clara-explorer/`, §10). No machine-specific paths anywhere in
 the file.
 
 ### 9.0 Dependencies (explicit contract)
@@ -800,7 +800,7 @@ a per-machine layer variable, never from the repo.
    `(add-to-list 'load-path (expand-file-name "editor/emacs" clara-explorer-root))`.
 
 For the spike, skip the layer. For the PR, ship `editor/emacs/clara-explorer.el`
-plus an optional `editor/emacs/spacemacs-layer/` skeleton
+plus an optional `editor/spacemacs/clara-explorer/` skeleton
 (`packages.el`, `config.el`, `keybindings.el`, `funcs.el`) and document both
 install paths.
 

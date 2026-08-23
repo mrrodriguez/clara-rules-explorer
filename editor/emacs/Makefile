@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-tier1 eldev-prepare eldev-test check-elisp lint clean
+.PHONY: test test-unit test-tier1 eldev-prepare eldev-test check-elisp lint clean package
 
 SHELL := /bin/bash
 ROOT := $(shell cd ../.. && pwd)
@@ -6,6 +6,7 @@ EL := $(ROOT)/editor/emacs/clara-explorer.el
 TEST_DIR := $(ROOT)/editor/emacs/test
 OUT := $(ROOT)/server/target/elisp-check
 ELDEV_CACHE := $(ROOT)/editor/emacs/.eldev
+DIST := $(ROOT)/editor/emacs/dist
 
 # Prefer eldev if available (resolves cider/parseedn/clojure-mode for you),
 # otherwise fall back to plain emacs batch with stubbed deps (same as check-elisp).
@@ -50,6 +51,16 @@ test-unit:
 	  $(MAKE) test-tier1; \
 	fi
 
+# Build a package tarball (dist/clara-explorer-<version>.tar) for
+# `M-x package-install-file'.  Requires eldev (see eldev-prepare).
+package: eldev-prepare
+	@if command -v eldev >/dev/null 2>&1; then \
+	  echo "==> eldev package (builds dist/clara-explorer-*.tar)"; \
+	  eldev package; \
+	else \
+	  echo "eldev not found — cannot build package"; exit 1; \
+	fi
+
 # Byte-compile against stubbed APIs — catches syntax/arity errors without cider installed.
 check-elisp:
 	@$(ROOT)/server/bin/ci/check-elisp.sh
@@ -57,5 +68,5 @@ check-elisp:
 lint: check-elisp
 
 clean:
-	rm -rf $(OUT) $(ELDEV_CACHE) .eldev
-	@echo "cleaned $(OUT) and $(ELDEV_CACHE) (eldev cache)"
+	rm -rf $(OUT) $(ELDEV_CACHE) $(DIST) .eldev
+	@echo "cleaned $(OUT), $(ELDEV_CACHE) and $(DIST) (eldev cache + package dist)"

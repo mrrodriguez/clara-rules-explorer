@@ -8,10 +8,11 @@ node_modules
 .nrepl-port
 target
 
-# Eldev (Emacs) — local cache, not committed (see editor/emacs/Eldev)
+# Eldev (Emacs) — local cache + package build output, not committed (see editor/emacs/Eldev)
 .eldev/
 **/.eldev/
 .eldev
+/editor/emacs/dist/
 /server/demo-data/
 .direnv
 .envrc.local
