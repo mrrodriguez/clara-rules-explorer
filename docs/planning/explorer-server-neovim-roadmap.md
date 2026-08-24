@@ -103,9 +103,11 @@ issues):
 - [x] `swap_session` bang/cache — `plugin/clara-explorer.vim` now passes
       `<bang>` (not `<bang>0`, which expands to Lua `!0`), and `init.lua` tests
       `bang ~= "!"`. No-bang reuses the per-buffer cache; bang re-prompts.
-- [x] `jump.lua` — named `fallback_regex` (alias-agnostic
-      `(defrule|defquery NAME`, optional `^meta`, a local `vim_regex_escape`
-      instead of over-escaping `vim.pesc`); dropped the garbled first `search`;
+- [x] `jump.lua` — fallback search isolated into two tested regex helpers
+      (`fallback_regex`, `symbol_token_regex`) built from Lua long-bracket
+      strings + Vim `\v`/`\V` switches; rule names with punctuation
+      (`my-thing?`, `fact*`, `done!`) match as whole Clojure symbols rather
+      than Vim `\<`/`\>` word boundaries; dropped the garbled first `search`;
       `open_resource` converts `jar:file:` URLs to Neovim `zipfile://` URLs.
 - [x] `token.lua` — de-duplicated `type_bounds_in_condition` /
       `type_bounds_in_condition_at_point` into `condition_type_or_logical`;
@@ -115,7 +117,8 @@ issues):
 - [x] Tests — new `jump_spec.lua`; extended `edn_spec.lua` (unsupported/invalid
       escapes, unterminated map/vector, non-keyword map key), `token_spec.lua`
       (docstring end-of-string look-back), `transport_spec.lua` (`connected`,
-      `current_ns`, eval-unavailable, navigate guards, `swap_session`).
+      `current_ns`, eval-unavailable, navigate guards, `swap_session`), and
+      `jump_spec.lua` punctuation coverage for the fallback regexes.
 - [x] Docs — `explorer-editor-navigation.md` swap section describes the EDN
       opts-map prompt; `explorer-editor-navigation-neovim.md` Tier 2 lists
       `jump_spec.lua`; test counts are no longer hard-coded.

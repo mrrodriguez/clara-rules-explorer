@@ -24,20 +24,29 @@ function M.push_jump()
   end
 end
 
---- Escape a literal string for a Vim magic-mode regex (only the characters
--- that are magic outside character classes — `vim.pesc` also escapes `-`,
--- which would break names like `app-outcome-approved?`).
-local function vim_regex_escape(s) return (s:gsub("([\\^$.*~%[%]])", "\\%1")) end
+-- Vim regexes are built from Lua long-bracket strings (no `\\` doubling in
+-- source) and Vim's `\v` (very magic) / `\V` (very nomagic) switches: `\v`
+-- makes the structural metacharacters readable, and `\V` matches the rule name
+-- literally without escaping its punctuation.  Rule names are Clojure symbols,
+-- so they never contain a backslash.
 
---- Vim regex for the last-resort search: `(alias/defrule NAME` / `(defquery NAME`,
--- with optional `^meta` between the head and the name.  The name is matched
--- literally and must be followed by whitespace, `)` or end-of-line.
-function M.fallback_regex(rule_name)
-  return "(\\([^ \\t\\n()]*/\\)\\?def\\(rule\\|query\\)"
-    .. "\\(\\s\\+\\^[^ \\t\\n()]*\\)*"
-    .. "\\s\\+"
-    .. vim_regex_escape(rule_name)
-    .. "\\ze\\(\\s\\|$\\|)\\)"
+-- Same symbol character class as `token.lua`'s TOKEN_CHARS.
+local SYMBOL_CHARS = "A-Za-z0-9._:/!?*+<>-"
+local NON_SYMBOL = "[^" .. SYMBOL_CHARS .. "]"
+
+-- `(alias/defrule` / `(defquery` head, optional `^meta` tokens, then whitespace.
+local PRODUCTION_HEAD = [[\v\(([^ \t\n()]*/)?def(rule|query)(\s+\^[^ \t\n()]*)*\s+]]
+
+--- Vim regex for the definition-site search: `(alias/defrule NAME` /
+-- `(defquery NAME`, with optional `^meta` between the head and the name.  The
+-- name must be followed by whitespace, `)` or end-of-line.
+function M.fallback_regex(rule_name) return PRODUCTION_HEAD .. [[\V]] .. rule_name .. [[\v\ze(\s|$|\))]] end
+
+--- Vim regex matching `rule_name` as a whole Clojure symbol — bounded by
+-- non-symbol characters (or line start/end), so trailing `?`/`!`/`*`/`+` are
+-- part of the name (Vim's `\<`/`\>` word boundaries would split on them).
+function M.symbol_token_regex(rule_name)
+  return [[\v(^|]] .. NON_SYMBOL .. [[)\zs\V]] .. rule_name .. [[\v\ze(]] .. NON_SYMBOL .. [[|$)]]
 end
 
 --- Convert a `jar:file:/…!/entry` resource URL to Neovim's `zipfile://…::entry`
@@ -83,7 +92,7 @@ function M.goto_fallback(target, eval_edn)
     if open_resource(url) then
       vim.cmd.normal({ "gg", bang = true })
       local found = vim.fn.search(M.fallback_regex(unqualified), "w")
-      if not found or found == 0 then found = vim.fn.search("\\<" .. vim_regex_escape(unqualified) .. "\\>", "w") end
+      if not found or found == 0 then found = vim.fn.search(M.symbol_token_regex(unqualified), "w") end
       if not found or found == 0 then
         vim.notify("clara-explorer: production " .. name .. " not found in " .. ns, vim.log.levels.WARN)
       end

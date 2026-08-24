@@ -104,7 +104,8 @@ as Emacs:
   parsed, 0/1/N dispatch works, the jump path is invoked with the right
   target, and the `cb` error path surfaces nREPL errors.
 - `jump_spec.lua` asserts the var-vs-non-var jump dispatch, the
-  `(defrule|defquery NAME)` fallback regex, and `file:`/`jar:` resource
+  `(defrule|defquery NAME)` and whole-symbol fallback regexes (including
+  punctuation-bearing names like `my-thing?`), and `file:`/`jar:` resource
   resolution.
 - Tier 3 is reserved for a future `make test-integration`; not required for CI.
 

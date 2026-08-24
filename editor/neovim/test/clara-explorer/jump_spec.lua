@@ -29,6 +29,32 @@ describe("jump.fallback_regex", function()
     "does not match a different name",
     function() assert.is_false(matches(jump.fallback_regex("my-rule"), "(r/defrule other-rule [A] => 1)")) end
   )
+
+  it("matches names ending in punctuation", function()
+    assert.is_true(matches(jump.fallback_regex("app-outcome-approved?"), "(r/defrule app-outcome-approved? [A] => 1)"))
+    assert.is_true(matches(jump.fallback_regex("process-loan!"), "(r/defquery process-loan! [] [A])"))
+  end)
+end)
+
+describe("jump.symbol_token_regex", function()
+  local function matches(pattern, text) return vim.regex(pattern):match_str(text) ~= nil end
+
+  it("matches whole symbols ending in punctuation", function()
+    assert.is_true(matches(jump.symbol_token_regex("my-thing?"), "x my-thing? y"))
+    assert.is_true(matches(jump.symbol_token_regex("fact*"), "x fact* y"))
+    assert.is_true(matches(jump.symbol_token_regex("done!"), "x done! y"))
+  end)
+
+  it("does not match a prefix of a longer symbol", function()
+    assert.is_false(matches(jump.symbol_token_regex("my-thing"), "x my-thing? y"))
+    assert.is_false(matches(jump.symbol_token_regex("fact"), "x fact* y"))
+  end)
+
+  it("matches a bare symbol bounded by delimiters or line edges", function()
+    assert.is_true(matches(jump.symbol_token_regex("my-thing"), "x my-thing y"))
+    assert.is_true(matches(jump.symbol_token_regex("my-thing"), "(my-thing)"))
+    assert.is_true(matches(jump.symbol_token_regex("my-thing?"), "my-thing?"))
+  end)
 end)
 
 describe("jump.jump", function()
@@ -70,6 +96,26 @@ describe("jump.goto_fallback", function()
     end)
     assert.are.same("/repo/src/my/ns.clj", edited)
     assert.are.same(jump.fallback_regex("my-rule"), searched)
+  end)
+
+  it("falls back to the whole-symbol search when the head search misses", function()
+    local patterns = {}
+    with_restore(vim.cmd, "edit", function() end, function()
+      with_restore(vim.cmd, "normal", function() end, function()
+        with_restore(vim.fn, "search", function(pattern)
+          patterns[#patterns + 1] = pattern
+          return 0
+        end, function()
+          jump.goto_fallback(
+            { name = "my.ns/app-outcome-approved?", ns = "my.ns" },
+            function(o) o.on_value("file:/repo/src/my/ns.clj") end
+          )
+        end)
+      end)
+    end)
+    assert.are.same(2, #patterns)
+    assert.are.same(jump.fallback_regex("app-outcome-approved?"), patterns[1])
+    assert.are.same(jump.symbol_token_regex("app-outcome-approved?"), patterns[2])
   end)
 
   it("converts a jar: resource to a zipfile: URL", function()
