@@ -64,7 +64,7 @@ verification only.
 ### 0.4 Elisp: `editor/emacs/clara-explorer.el`
 
 - [x] File header: `Package-Requires: ((emacs "28.1") (cider "1.12")
-      (parseedn "1.2") (clojure-mode "5.18"))` + `Version: 0.1.0` + `featurep` runtime guards
+    (parseedn "1.2") (clojure-mode "5.18"))` + `Version: 0.1.0` + `featurep` runtime guards
       (now `or (featurep ...) (require ...)` for Eldev) + self-locating `load-path` (`load-file-name`)
 - [x] `clara-explorer--eval-edn` — sync eval via
       `cider-nrepl-sync-request:eval` with connection captured once via
@@ -171,11 +171,11 @@ integration test remains deferred; this phase does not need it.)
       via `add-to-list` (not `setq`, which would replace other layer paths),
       and copy/symlink into `~/.spacemacs.d/layers/`, both with
       `clara-explorer-root` set in `dotspacemacs-configuration-layers`
-- [ ] **Gate:** manual verify — install the layer on this machine, `SPC f e R`,
+- [x] **Gate:** manual verify — install the layer on this machine, `SPC f e R`,
       confirm `cider`/`parseedn`/`clojure-mode` resolve and `, g p`/`, g c`/
       `, g r` are bound in `clojure-mode`; then `M-x package-install-file` on
       the built tarball in a plain-Emacs profile
-- [ ] **Gate:** `make -C editor/emacs test-tier1` + `make check-elisp` +
+- [x] **Gate:** `make -C editor/emacs test-tier1` + `make check-elisp` +
       `make -C editor/emacs package` (builds tarball; `dist/` gitignored)
 
 ---
@@ -198,9 +198,9 @@ integration test remains deferred; this phase does not need it.)
 
 ## Standing gates (every phase)
 
-| Surface | Gate |
-| --- | --- |
-| Server change | `cd server && make test lint reflection-check` |
-| Elisp change | `make -C editor/emacs test-tier1` (Tier 1 stubbed, CI) + `make -C editor/emacs eldev-prepare && make -C editor/emacs eldev-test` (Tier 2 real deps, local; 0 skipped) + `make check-elisp` (automated byte-compile vs stubs) + `M-x eval-buffer` manual nav; `.eldev/` ignored (`make clean` wipes) |
-| Portability | `grep -R "~/Projects\|/Users/" editor/` empty; `clara-explorer-root` var only, no hard-coded paths |
-| API contract | none — no HTTP changes allowed in this work |
+| Surface       | Gate                                                                                                                                                                                                                                                                                                |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Server change | `cd server && make test lint reflection-check`                                                                                                                                                                                                                                                      |
+| Elisp change  | `make -C editor/emacs test-tier1` (Tier 1 stubbed, CI) + `make -C editor/emacs eldev-prepare && make -C editor/emacs eldev-test` (Tier 2 real deps, local; 0 skipped) + `make check-elisp` (automated byte-compile vs stubs) + `M-x eval-buffer` manual nav; `.eldev/` ignored (`make clean` wipes) |
+| Portability   | `grep -R "~/Projects\|/Users/" editor/` empty; `clara-explorer-root` var only, no hard-coded paths                                                                                                                                                                                                  |
+| API contract  | none — no HTTP changes allowed in this work                                                                                                                                                                                                                                                         |
