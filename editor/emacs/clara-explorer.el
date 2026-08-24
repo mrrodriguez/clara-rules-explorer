@@ -765,29 +765,42 @@ Used for RHS and global cases where LHS-structure is not applicable."
   (message "clara-explorer: analysis refreshed"))
 
 (defvar clara-explorer--swap-session-exprs (make-hash-table :test 'eq)
-  "Map of CIDER connection -> last session-rebuild expression.")
+  "Map of CIDER connection -> last swap opts expression.
+Each value is the raw EDN string the user entered for
+`clara.server.graph.client/swap-session!` (the full opts map,
+not just the session form).  Used to repeat the last swap without
+re-prompting.  When `client/register-session-swap-opts-fn` is set,
+calling with no opts delegates to that fn via the 0-arity.")
 
 ;;;###autoload
-(defun clara-explorer-swap-session (expr)
-  "Swap in a rebuilt session.  EXPR is a Clojure expression that rebuilds the
-   session, wrapped in `(server/swap-session! {:session ...})`.  With a prefix
-   argument, always prompt; otherwise reuse the last expression for the
-   current connection."
+(defun clara-explorer-swap-session (&optional opts)
+  "Swap the explorer session.
+OPTS is the full opts EDN for `client/swap-session!`
+(e.g. \"{:session my-session}\").
+When supplied, call \"(client/swap-session! OPTS)\";
+when nil/empty, call the 0-arity which delegates to
+the fn registered via `register-session-swap-opts-fn`.
+Prefix arg always prompts; otherwise reuse the last
+opts for the connection.  Empty input at the prompt
+means use the registered default (0-arity)."
   (interactive
    (list (if (or current-prefix-arg
                  (null (gethash (cider-current-repl 'infer 'ensure)
                                 clara-explorer--swap-session-exprs)))
-             (read-string "Session expression: ")
+             (read-string "Swap opts (EDN map, empty for default): ")
            nil)))
   (unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))
   (let* ((conn (cider-current-repl 'infer 'ensure))
-         (expr (or expr (gethash conn clara-explorer--swap-session-exprs))))
-    (when (string-empty-p (or expr ""))
-      (user-error "No session expression"))
-    (puthash conn expr clara-explorer--swap-session-exprs)
+         (raw (or opts (gethash conn clara-explorer--swap-session-exprs)))
+         (trimmed (string-trim (or raw "")))
+         (use-default (string-empty-p trimmed)))
+    (unless use-default
+      (puthash conn trimmed clara-explorer--swap-session-exprs))
     (clara-explorer--eval-edn
-     (format "(do (require 'clara.server.graph.server)\n     (clara.server.graph.server/swap-session! {:session %s}))"
-             expr)
+     (if use-default
+         "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/swap-session!))"
+       (format "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/swap-session! %s))"
+               trimmed))
      conn)
     (message "clara-explorer: session swapped")))
 

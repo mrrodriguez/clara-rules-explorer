@@ -76,6 +76,38 @@
   (or @registered-system (server/get-current-system)))
 
 ;; ---------------------------------------------------------------------------
+;; Session swap — opts-fn indirection for editor clients
+;; ---------------------------------------------------------------------------
+
+(defonce ^:private session-swap-opts-fn-atom (atom nil))
+
+(defn register-session-swap-opts-fn
+  "Registers a 0-arg fn that returns the opts map for `swap-session!`.
+   The elisp `clara-explorer-swap-session` calls the 0-arity `swap-session!`
+   when no explicit opts are given, which delegates to this fn."
+  [f]
+  (reset! session-swap-opts-fn-atom f)
+  ::ok)
+
+(defn current-session-swap-opts-fn
+  "Returns the currently registered session-swap opts fn, or nil."
+  []
+  @session-swap-opts-fn-atom)
+
+(defn swap-session!
+  "Hot-swap the explorer session.  1-arity is the direct opts path
+   (full `server/swap-session!` opts, not just `:session`); 0-arity
+   delegates to the fn registered via `register-session-swap-opts-fn`.
+   Both arities return `::ok` so the nREPL result stays small."
+  ([]
+   (if-let [f @session-swap-opts-fn-atom]
+     (swap-session! (f))
+     (throw (ex-info "No session-swap opts fn registered — call register-session-swap-opts-fn first" {}))))
+  ([opts]
+   (server/swap-session! (get-current-system) opts)
+   ::ok))
+
+;; ---------------------------------------------------------------------------
 ;; Source location (var metadata tier)
 ;; ---------------------------------------------------------------------------
 
