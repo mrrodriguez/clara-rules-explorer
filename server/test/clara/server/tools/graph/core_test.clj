@@ -785,7 +785,7 @@
     (let [session (->test-session)
           anns (ann.merge/merge-layers
                 [(ann.merge/props-layer session)
-                 (ann.merge/layer
+                 (ann.merge/->layer
                   {:id :divergent
                    :annotations
                    {"clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"

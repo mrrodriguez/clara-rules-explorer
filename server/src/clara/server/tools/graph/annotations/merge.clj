@@ -86,15 +86,9 @@
                                     (ann.callsite/derive-ids-in-rule-annotation v)]))
                   anns))))
 
-(defn layer
-  "Constructs and validates an in-memory `Layer`.  Layers are plain values — an
-   in-memory layer is a first-class input everywhere a file-backed one is."
-  [m]
-  (s/validate Layer (normalize-layer m)))
-
-(defn read-layer
-  "Reads an EDN file into a `Layer`.  `:source` defaults to the path; entries
-   in `m` override file content.  Rule-name keys are normalized to strings."
+(defn- read-layer
+  "Reads an EDN file into a raw layer map (no normalization/validation).
+   `:source` defaults to the path; entries in `m` override file content."
   ([path] (read-layer path {}))
   ([path m]
    (let [f (io/file path)]
@@ -102,9 +96,20 @@
        (throw (ex-info (format "annotation layer file does not exist: %s" path)
                        {:path (str path)})))
      (with-open [r (io/reader f)]
-       (layer (merge {:source (str path)}
-                     (edn/read (java.io.PushbackReader. r))
-                     m))))))
+       (merge {:source (str path)}
+              (edn/read (java.io.PushbackReader. r))
+              m)))))
+
+(defn ->layer
+  "Coerces `x` to a `Layer`.
+   - A string path or `File` is read from disk (via private `read-layer`)
+     then normalized and validated.
+   - A map is normalized (rule-name keys → strings, callsite ids derived) and validated."
+  [x]
+  (cond
+    (or (string? x) (instance? java.io.File x)) (s/validate Layer (normalize-layer (read-layer x)))
+    (map? x) (s/validate Layer (normalize-layer x))
+    :else (throw (IllegalArgumentException. (format "Cannot coerce to Layer: %s" (pr-str (type x)))))))
 
 (def ^:dynamic *edn-printer*
   "Dynamic EDN printer for artifact writing.  (fn [value writer] ...)
@@ -155,7 +160,7 @@
                            (when (seq (:props p))
                              [(:name p) (:props p)])))
                    (:productions rulebase))]
-    (layer {:id :props :source :rulebase :annotations anns})))
+    (->layer {:id :props :source :rulebase :annotations anns})))
 
 ;; ---------------------------------------------------------------------------
 ;; Merge internals
@@ -587,13 +592,24 @@
 (defn merged-annotations?
   "True when `x` is a `MergedAnnotations` value — a map with both
    `:annotations` and `:provenance` keys.  Key membership is tested with
-   `some` because bare maps may have string keys and `contains?` throws
-   ClassCastException on those."
+   `some` because bare maps may have string keys and `contains?`/`get`
+   on a `sorted-map` with string keys would throw `ClassCastException`
+   when comparing a keyword key."
   [x]
   (boolean
    (and (map? x)
         (some #{:annotations} (keys x))
         (some #{:provenance} (keys x)))))
+
+(defn layer?
+  "True when `x` is a `Layer` — a map with `:id` and `:annotations`.
+   Uses `some` over `keys` like `merged-annotations?` to avoid
+   `ClassCastException` on `sorted-map` string-keyed bare maps."
+  [x]
+  (boolean
+   (and (map? x)
+        (some #{:id} (keys x))
+        (some #{:annotations} (keys x)))))
 
 (defn ->bare-annotations
   "Unwraps a `MergedAnnotations` to its bare rule→annotation map; bare maps
@@ -613,17 +629,9 @@
   this layer re-claim every key the base already owns, defeating the
   provenance the split exists to preserve."
   [id source delta-annotations]
-  (layer {:id id
-          :source source
-          :annotations delta-annotations}))
-
-(defn ->layer
-  "Coerces `x` to a `Layer`: a path string or File is read from disk via
-   `read-layer`; a map is validated as an in-memory layer via `layer`."
-  [x]
-  (if (or (string? x) (instance? java.io.File x))
-    (read-layer x)
-    (layer x)))
+  (->layer {:id id
+            :source source
+            :annotations delta-annotations}))
 
 (defn coerce-to-bare-annotations
   "Coerces an annotations input to a bare rule→annotation map.

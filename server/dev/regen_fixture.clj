@@ -43,8 +43,8 @@
 
 (let [path "test-resources/clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn"]
   (ann.merge/write-layer! path
-                          (ann.merge/layer {:id :clara.tools.graph.analyze/generated
-                                            :source {:generated-from "clara.server.tools.graph.rules.loan-doc-rules"}
-                                            :annotations generated}))
+                          (ann.merge/->layer {:id :clara.tools.graph.analyze/generated
+                                              :source {:generated-from "clara.server.tools.graph.rules.loan-doc-rules"}
+                                              :annotations generated}))
   (println "wrote" path)
   (println (with-out-str (pprint/pprint generated))))

@@ -10,6 +10,7 @@
             [clj-http.client :as client]
             [jsonista.core :as json]
             [clojure.java.io :as io]
+            [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [schema.test :as st]))
 
@@ -150,6 +151,31 @@
             result (server/swap-session! {:annotations {:source f}})]
         (is (map? result))
         (is (contains? result sidecar-rule))))))
+
+(deftest test-swap-session-vector-of-layers
+  (testing "legacy bare vector of Layers — each Layer validated via ->layer"
+    (let [l1 (ann.merge/->layer {:id :test/l1 :annotations {"my.rule/a" {:clara-rules/notes "a"}}})
+          l2 (ann.merge/->layer {:id :test/l2 :annotations {"my.rule/b" {:clara-rules/notes "b"}}})
+          result (server/swap-session! {:annotations [l1 l2]})]
+      (is (contains? result "my.rule/a") "first Layer rule present")
+      (is (contains? result "my.rule/b") "second Layer rule present")
+      (is (= "a" (get-in result ["my.rule/a" :clara-rules/notes])))
+      (is (= "b" (get-in result ["my.rule/b" :clara-rules/notes])))
+      (is (contains? result rule-app-outcome) "props layer still present")))
+  (testing "spec :source vector of Layers"
+    (let [l1 (ann.merge/->layer {:id :test/l3 :annotations {"my.rule/c" {:clara-rules/notes "c"}}})
+          result (server/swap-session! {:annotations {:source [l1] :enrichment :none}})]
+      (is (contains? result "my.rule/c"))
+      (is (= "c" (get-in result ["my.rule/c" :clara-rules/notes])))))
+  (testing "vector with :clara.tools.graph.analyze/generated id preserves id and skips live generation"
+    (let [gen-layer (ann.merge/->layer {:id :clara.tools.graph.analyze/generated
+                                        :annotations {"my.gen/rule" {:clara-rules/notes "gen"}}})
+          result (server/swap-session! {:session (->test-session)
+                                        :annotations {:source [gen-layer]
+                                                      :enrichment :auto-detect-from-rulebase}})]
+      (is (contains? result "my.gen/rule") "custom generated Layer preserved")
+      (is (not (contains? result rule-collect-given-docs))
+          "live generation skipped when custom generated Layer supplied"))))
 
 ;; ---------------------------------------------------------------------------
 ;; 3. No enrichment (:none or nil) — source as-is, clear when absent

@@ -121,4 +121,4 @@
                                         rule-ann
                                         ann.callsite/detection-keys)]))
                         anns)))
-        ann.merge/layer)))
+        ann.merge/->layer)))
