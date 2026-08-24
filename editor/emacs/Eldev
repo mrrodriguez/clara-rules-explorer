@@ -13,7 +13,7 @@
 (eldev-use-package-archive 'gnu)
 
 ;; Dependencies are declared in clara-explorer.el's Package-Requires header
-;; (emacs "28.1" cider "1.12" parseedn "1.2" clojure-mode "5.18").
+;; (emacs "x.x" cider "x.x" parseedn "x.x" clojure-mode "x.x").
 ;; No explicit depends-on needed — Eldev reads the header automatically.
 
 ;; Tests live in test/ - eldev discovers ert-deftest automatically.
