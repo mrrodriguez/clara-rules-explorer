@@ -33,7 +33,9 @@ test.describe('Type match popover on dependency rows', () => {
 		// app-outcome-approved? satisfies app-outcome-pending? with the exact
 		// same type, so the popover shows the type standalone — no "satisfies"
 		// bridge for a direct (non-hierarchy) match.
-		const typeLinks = popover.locator('a[href*="/fact-types/"]');
+		// FactTypeInlineLink renders both a name link and an open-icon link to
+		// the same fact type, so filter to the primary name links for the count.
+		const typeLinks = popover.locator('a.text-decoration-none[href*="/fact-types/"]');
 		await expect(typeLinks).toHaveCount(1);
 		await expect(typeLinks.first()).toBeVisible();
 		await expect(popover.getByText('satisfies')).toHaveCount(0);

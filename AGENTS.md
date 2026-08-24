@@ -35,6 +35,7 @@ make clean            # remove target and .cpcache
   [clojure-engineering skill](.agents/skills/clojure-engineering/SKILL.md).
 - The server API is defined in `server/src/clara/server/graph/api.clj`.
 - Demo rules live under `server/test/clara/server/tools/graph/rules/`.
+- **Temporary files:** Write any scratch/tmp files to `server/target/` (e.g. `server/target/tmp/`) instead of the system `/tmp`. The sandbox may restrict `/tmp` access and `make clean` in `server/` automatically removes `target/` and `.cpcache`.
 
 ### Annotation Key Normalization
 

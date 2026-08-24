@@ -93,7 +93,7 @@ Annotations can be declared directly in the Clojure source code within the rule'
   (insert! (->Cold)))
 ```
 
-`clara.server.tools.graph.annotations.merge/props-layer` reads every production's whole `:props` map off the
+`clara.server.tools.graph.annotations.merge/->props-layer` reads every production's whole `:props` map off the
 compiled rulebase — nothing is filtered.  Folded first (the convention), it
 is the base that generated and curated layers add to; a higher layer can
 still overrule a props value with `:replace` or a tombstone (below).
@@ -117,8 +117,8 @@ by the rule's fully qualified name:
 ```
 
 Layers are **sparse**: omitting a key means "no opinion" — the lower layer's
-value survives.  Layers are read with `read-layer` and written
-with `write-layer!`; in-memory layers are first-class (`layer`).
+value survives.  Layers are read via `->layer` and written
+with `write-layer!`; in-memory layers are first-class (`->layer`).
 
 ---
 
@@ -195,7 +195,7 @@ The library is split into a namespace group under
 |---|---|
 | `…graph.annotations` | Rule-name normalization (`normalize-rule-name`, `normalize-annotations`, `get-annotation`) and per-production lookup (`production-annotation`) |
 | `…graph.annotations.callsite` | Callsite format and identity: `callsite-id`, `assign-callsite-ids`, `aggregate-resolution` |
-| `…graph.annotations.merge` | Layers and merging: `layer`, `read-layer`, `write-layer!`, `props-layer`, `merge-layers`, `derive-conclusions`, `annotations`, `provenance` |
+| `…graph.annotations.merge` | Layers and merging: `->layer`, `write-layer!`, `->props-layer`, `merge-layers`, `derive-conclusions`, `annotations`, `provenance` |
 | `…graph.annotations.report` | `unresolved-report` (the curation work list) and `validate-layers` (pure lint) |
 | `…graph.annotations.rebase` | `rebase-layer` — remap a layer across a namespace rename |
 

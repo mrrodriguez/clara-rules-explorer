@@ -14,5 +14,5 @@
    layer plus the generated layer fixture (the same fold the server
    performs)."
   [session]
-  (ann.merge/merge-layers [(ann.merge/props-layer session)
-                           (ann.merge/read-layer loan-doc-layer-path)]))
+  (ann.merge/merge-layers [(ann.merge/->props-layer session)
+                           (ann.merge/->layer loan-doc-layer-path)]))

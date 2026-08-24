@@ -401,7 +401,7 @@
                       (r/fire-rules))
           analysis (core/->rulebase-analysis
                     session
-                    (ann.merge/merge-layers [(ann.merge/props-layer session)]))
+                    (ann.merge/merge-layers [(ann.merge/->props-layer session)]))
           known-set (set (keys (:fact-types analysis)))
           memory-analysis (memory/->memory-analysis session known-set)
           fact-types (map :type (vals (:facts memory-analysis)))]
@@ -427,7 +427,7 @@
                       (r/fire-rules))
           analysis (core/->rulebase-analysis
                     session
-                    (ann.merge/merge-layers [(ann.merge/props-layer session)]))
+                    (ann.merge/merge-layers [(ann.merge/->props-layer session)]))
           known-set (set (keys (:fact-types analysis)))
           ;; The reuse path: enrichment builds a 1-arity memory-analysis (all unknown).
           enrichment-memory-analysis (memory/->memory-analysis session)]
@@ -467,7 +467,7 @@
           memory-analysis (memory/->memory-analysis session)
           analysis (core/->rulebase-analysis
                     session
-                    (ann.merge/merge-layers [(ann.merge/props-layer session)]))
+                    (ann.merge/merge-layers [(ann.merge/->props-layer session)]))
           analysis-types (:fact-types analysis)]
       (doseq [{type-name :name type-id :id} (vals (:fact-types memory-analysis))]
         (is (= (serialize/route-id type-name) type-id)
@@ -576,7 +576,7 @@
                       (r/fire-rules))
           analysis (core/->rulebase-analysis
                     session
-                    (ann.merge/merge-layers [(ann.merge/props-layer session)]))]
+                    (ann.merge/merge-layers [(ann.merge/->props-layer session)]))]
       (is (map? analysis))
       (is (contains? analysis :rules))
       (is (contains? analysis :fact-types)))))

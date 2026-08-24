@@ -1,6 +1,6 @@
 (ns clara.server.tools.graph.annotations-test
   "Tests for rule-name normalization, `production-annotation`,
-   `annotations-delta`, and `props-layer`.  Merge semantics, callsite
+   `annotations-delta`, and `->props-layer`.  Merge semantics, callsite
    identity, reporting, validation, and derivation are covered in
    annotations_merge_test.clj."
   (:require [clara.rules :as r]
@@ -169,7 +169,7 @@
 
 (deftest test-props-layer
   (let [session (r/mk-session 'clara.server.tools.graph.rules.loan-app-rules)
-        layer (ann.merge/props-layer session)
+        layer (ann.merge/->props-layer session)
         outcome-class (Class/forName "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome")]
     (testing "layer identity"
       (is (= :props (:id layer)))

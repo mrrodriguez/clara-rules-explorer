@@ -237,7 +237,7 @@
                  {:rule-source-analysis rule-source-analysis
                   :session-or-rulebase loaded-session})))
 
-            generated-layer (ann.merge/layer
+            generated-layer (ann.merge/->layer
                              {:id :clara.tools.graph.analyze/generated
                               :source {:generated-from (str session)}
                               :annotations generated})
@@ -245,8 +245,8 @@
             ;; Curation-aware analysis: the rule-:props base, the freshly
             ;; generated discovery layer, then any caller-supplied layers
             ;; folded over it (lowest precedence first).
-            layers (into [(ann.merge/props-layer loaded-session) generated-layer]
-                         (map ann.merge/read-layer)
+            layers (into [(ann.merge/->props-layer loaded-session) generated-layer]
+                         (map ann.merge/->layer)
                          (:layer options))
 
             _ (log/info "Running rulebase analysis...")

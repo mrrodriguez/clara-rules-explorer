@@ -32,6 +32,13 @@
 
 (defonce ^:private default-system (atom nil))
 
+(defn get-current-system
+  "Returns the default system (the most recently started server), or nil.
+   Kept as the 0-arg convenience accessor for editor clients; the atom
+   itself stays private."
+  []
+  @default-system)
+
 (defn- require-system
   "Returns system or throws with a clear message."
   [system]
@@ -139,22 +146,49 @@
 (def ^:private auto-detect-modes
   #{:auto-detect-from-rulebase :auto-detect-from-memory :auto-detect})
 
+(def ^:private annotation-spec-keys
+  #{:source :enrichment :fact-constructors :callsite-resolver-fn})
+
+(defn- annotations-spec?
+  "True when `x` looks like an `AnnotationsSpec` map — contains at least one
+   of the spec keys. Uses `some` over `contains?` to distinguish a spec map
+   (keyword keys) from a bare rule→annotation map (string keys)."
+  [x]
+  (and (map? x)
+       (boolean (some #(contains? x %) annotation-spec-keys))))
+
+(defn- normalize-annotations-spec
+  "Normalizes an `AnnotationsArg` to an `AnnotationsSpec` map.
+   - nil passes through
+   - an `AnnotationsSpec` map (has a spec key) passes through as-is
+   - any other `AnnotationsArg` form (bare map, vector of Layers,
+     `MergedAnnotations`, path string, `File`) is wrapped as `{:source <form>}`."
+  [annotations-spec]
+  (cond
+    (nil? annotations-spec) nil
+    (annotations-spec? annotations-spec) annotations-spec
+    :else {:source annotations-spec}))
+
 (defn- ->source-layer
   "Coerce one source entry to a `ann.merge/Layer`.  Path strings / Files are
-   read from disk via `ann.merge/read-layer`; bare rule→annotation maps are
+   read from disk via `ann.merge/->layer`; bare rule→annotation maps are
    wrapped as a source layer; `ann.merge/MergedAnnotations` are unwrapped
-   first."
+   first.  A `Layer` map (`:id` + `:annotations`) is validated as-is via
+   `ann.merge/->layer` (preserving its `:id`)."
   [x]
   (cond
     (or (string? x) (instance? File x))
-    (ann.merge/read-layer x)
+    (ann.merge/->layer x)
 
     (ann.merge/merged-annotations? x)
-    (ann.merge/layer {:id :source :annotations (ann.merge/annotations x)})
+    (ann.merge/->layer {:id :source :annotations (ann.merge/annotations x)})
+
+    (ann.merge/layer? x)
+    (ann.merge/->layer x)
 
     (map? x)
     ;; A bare rule→annotation map — wrap as a source layer.
-    (ann.merge/layer {:id :source :annotations x})
+    (ann.merge/->layer {:id :source :annotations x})
 
     :else
     (throw (IllegalArgumentException.
@@ -188,13 +222,13 @@
                           (let [analysis (analyze/->rule-source-analysis
                                           {:session-or-rulebase session
                                            :cache-atom analyze-cache-atom})]
-                            (ann.merge/layer
+                            (ann.merge/->layer
                              {:id :clara.tools.graph.analyze/generated
                               :annotations (analyze/->annotations-from-rule-source-analysis
                                             (merge {:rule-source-analysis analysis
                                                     :session-or-rulebase session}
                                                    analysis-opts))})))
-        layers (cond-> [(ann.merge/props-layer session)]
+        layers (cond-> [(ann.merge/->props-layer session)]
                  (seq source-layers) (into source-layers)
                  generated-layer (conj generated-layer))]
     layers))
@@ -236,15 +270,7 @@
   ([session annotations-spec current-annotations]
    (->resolved-annotations* session annotations-spec current-annotations (atom {})))
   ([session annotations-spec current-annotations analyze-cache-atom]
-   (let [;; Normalize legacy forms to {:source ...}
-         spec (if (or (nil? annotations-spec)
-                      (and (map? annotations-spec)
-                           (or (contains? annotations-spec :source)
-                               (contains? annotations-spec :enrichment)
-                               (contains? annotations-spec :fact-constructors)
-                               (contains? annotations-spec :callsite-resolver-fn))))
-                annotations-spec
-                {:source annotations-spec})
+   (let [spec (normalize-annotations-spec annotations-spec)
          ;; Validate spec-shaped maps at the choke point.
          _ (when (map? spec) (s/validate AnnotationsSpec spec))
          {:keys [source enrichment fact-constructors callsite-resolver-fn]} spec
@@ -266,7 +292,7 @@
              (if (some? current-annotations)
                {:annotations current-annotations}
                {:annotations (-> session
-                                 ann.merge/props-layer
+                                 ann.merge/->props-layer
                                  ann.merge/annotations)}))
 
            (:none nil)
@@ -347,21 +373,20 @@
       :analyze-cache    @tmp})))
 
 (s/defn ^:private transition-reload :- ServerState
-  "State -> State.  Re-derives :annotations from (:annotations-spec state)
-   against the current session.  File-backed sources are re-read from disk;
-   the generated (kondo) layer rebuilds from cached per-ns analyses in the
-   state (kondo does not re-run)."
-  [state :- ServerState]
-  (let [tmp   (atom (:analyze-cache state))
-        built (->resolved-annotations* (:session state)
-                                       (:annotations-spec state)
-                                       (:annotations state)
+  "State -> State. Re-derives :annotations from (:annotations-spec state) against the current
+   session. File-backed sources are re-read from disk; the generated (kondo) layer rebuilds from
+   cached per-ns analyses in the state (kondo does not re-run)."
+  [{:keys [session annotations-spec annotations analyze-cache] :as state} :- ServerState]
+  (let [tmp   (atom analyze-cache)
+        built (->resolved-annotations* session
+                                       annotations-spec
+                                       annotations
                                        tmp)]
-    (utils/remove-nil-vals
-     (assoc state
-            :annotations (:annotations built)
-            :memory-analysis (:memory-analysis built)
-            :analyze-cache @tmp))))
+    (-> state
+        (assoc :annotations (:annotations built)
+               :memory-analysis (:memory-analysis built)
+               :analyze-cache @tmp)
+        utils/remove-nil-vals)))
 
 ;; ---------------------------------------------------------------------------
 ;; System lifecycle
@@ -453,8 +478,7 @@
    0-arity operates on the default system; 1-arity on an explicit system."
   ([]
    (reload-annotations! (require-system @default-system)))
-  ([system]
-   (let [new-state (swap! (:state-atom system) transition-reload)]
-     (cache/warm! (:cache system) (:session new-state) (:annotations new-state)
-                  (:memory-analysis new-state))
-     (:annotations new-state))))
+  ([{:keys [cache state-atom] :as _system}]
+   (let [{:keys [session annotations memory-analysis]} (swap! state-atom transition-reload)]
+     (cache/warm! cache session annotations memory-analysis)
+     annotations)))
