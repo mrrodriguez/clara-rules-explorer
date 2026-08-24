@@ -301,6 +301,12 @@ describe("docstring_token_at_point", function()
     local fs = first(src, "(r/defrule my-rule")
     assert.is_nil(token.docstring_token_at_point(src, fs, after(src, "world")))
   end)
+
+  it("resolves the token at the end of the docstring", function()
+    local src = '(r/defrule my-rule "inserts a :my-type" [Application] => 1)'
+    local fs = first(src, "(r/defrule my-rule")
+    assert.are.same(":my-type", token.docstring_token_at_point(src, fs, after(src, ":my-type")))
+  end)
 end)
 
 describe("vector_fact_at_point", function()

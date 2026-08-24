@@ -1,7 +1,7 @@
 # Explorer Server ↔ Neovim (Conjure) Navigation Plan
 
-Status: **Planned** (revised — transport reverted to EDN; structural navigation
-and testing expanded; Conjure API corrected)
+Status: **Spec** — the Neovim client design. Execution and gate tracking live
+in `docs/planning/explorer-server-neovim-roadmap.md`.
 
 Related:
 
@@ -377,7 +377,8 @@ editor/neovim/
         ├── edn_spec.lua
         ├── token_spec.lua
         ├── structural_spec.lua
-        └── transport_spec.lua
+        ├── transport_spec.lua
+        └── jump_spec.lua
 ```
 
 **Runtime deps:** `conjure` (nREPL transport), `nvim-treesitter` (clojure
@@ -441,7 +442,7 @@ cd editor/neovim && make test
   and plenary; run `make check`. Gate on Tiers 1–2 only; Tier 3 is
   local/nightly (port-sensitive, JVM + connection timing).
 
-### GitHub Actions recipe (learned, to reuse)
+### GitHub Actions recipe
 
 `mise` is **local-dev only** — CI installs its own pinned binaries directly,
 no mise. One command runs the whole gate: `make -C editor/neovim check`
@@ -534,13 +535,3 @@ Server work is **done**; every box here is Lua + tests, verified top to bottom.
 6. **Machine-agnostic** — `grep -R "~/Projects\|/Users/" editor/` empty; refresh/
    swap-session mirror the Emacs staleness contract.
 
-## 12. Open questions
-
-- Picker ordering: fq-name sort (chosen, matches the server's deterministic
-  `sort-by :name`) vs. load order. Start with fq name.
-- Whether the clojure tree-sitter grammar's error recovery on partial forms is
-  good enough in practice, or whether `searchpairpos` becomes the primary engine
-  after the spike (Phase 2 fallback).
-- Whether to fold `editor/neovim` into a top-level CI workflow or keep a
-  dedicated `editor-neovim.yml` (server/ui have their own — recommend a separate
-  file).

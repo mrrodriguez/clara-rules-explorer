@@ -99,9 +99,10 @@ stale namespace.
 ## Swap the session (shared)
 
 The swap command hot-swaps a rebuilt session into the running server. It
-prompts for a **single Clojure expression** that, when evaluated in the REPL,
-yields the in-memory session (or rulebase) to swap in. The simplest workflow:
-rebuild the session in the REPL and bind it to a var, then pass that var.
+prompts for a single EDN **opts map** (the argument to
+`clara.server.graph.client/swap-session!`), e.g. `{:session s2}`. The simplest
+workflow: rebuild the session in the REPL and bind it to a var, then enter
+`{:session s2}` at the prompt.
 
 ```clojure
 ;; in the REPL, after re-evaluating the rules:
@@ -109,9 +110,10 @@ rebuild the session in the REPL and bind it to a var, then pass that var.
                                 'clara.server.tools.graph.rules.loan-app-rules))
 ```
 
-The expression runs in the REPL's current namespace, so a bare var like `s2`
-must be resolvable there. The rule namespaces must already be loaded. The last
-expression is remembered per connection/buffer; a prefix arg / bang re-prompts.
+The opts map is read as EDN in the REPL's current namespace, so a bare var
+like `s2` inside it must be resolvable there. The rule namespaces must already
+be loaded. The last opts map is remembered per connection/buffer; a prefix arg
+/ bang re-prompts.
 
 `swap-session!` with only `:session` re-derives annotations from rule `:props`
 alone, dropping any sidecar / `:enrichment` annotations the server was

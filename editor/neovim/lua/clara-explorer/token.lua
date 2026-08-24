@@ -273,13 +273,15 @@ local function wrapper_inner_type_bounds(src, i, orig, wrapper_end)
   return nil
 end
 
---- Fact-type bounds for the condition vector at `beg`, recursing into logical
--- wrappers to the inner condition containing `orig`.
-function M.type_bounds_in_condition_at_point(src, beg, orig)
-  local i = M.skip_ws(src, M.skip_ws(src, beg + 1))
+--- Parse the fact type of the condition vector at `beg`, after skipping the
+-- leading binding.  Returns `{ bounds = {beg, end_} }` for a concrete type, or
+-- `{ logical = <offset after the keyword> }` when the condition is a logical
+-- wrapper (`:and`/`:or`/`:not`/`:exists`), or nil on malformed input.
+local function condition_type_or_logical(src, beg)
+  local i = M.skip_ws(src, beg + 1)
   i = skip_fact_binding(src, i)
   local acc = M.accumulator_type_bounds(src, i)
-  if acc then return acc end
+  if acc then return { bounds = acc } end
   local c = byte_at(src, i)
   local c2 = byte_at(src, i + 1)
   if c == ":" and c2:match("[a-z]") then
@@ -287,37 +289,32 @@ function M.type_bounds_in_condition_at_point(src, beg, orig)
     local kw_end = forward_sexp(src, i)
     if not kw_end then return nil end
     local kw = slice(src, kw_start, kw_end)
-    if M.logical_operator_p(kw) then
-      local wrapper_end = match_paren(src, beg)
-      if not wrapper_end then return nil end
-      return wrapper_inner_type_bounds(src, kw_end, orig, wrapper_end)
-    end
-    return { beg = kw_start, end_ = kw_end }
+    if M.logical_operator_p(kw) then return { logical = kw_end } end
+    return { bounds = { beg = kw_start, end_ = kw_end } }
   end
   local type_end = forward_sexp(src, i)
   if not type_end then return nil end
-  return { beg = i, end_ = type_end }
+  return { bounds = { beg = i, end_ = type_end } }
+end
+
+--- Fact-type bounds for the condition vector at `beg`, recursing into logical
+-- wrappers to the inner condition containing `orig`.
+function M.type_bounds_in_condition_at_point(src, beg, orig)
+  local parsed = condition_type_or_logical(src, beg)
+  if not parsed then return nil end
+  if parsed.logical then
+    local wrapper_end = match_paren(src, beg)
+    if not wrapper_end then return nil end
+    return wrapper_inner_type_bounds(src, parsed.logical, orig, wrapper_end)
+  end
+  return parsed.bounds
 end
 
 --- Non-orig-aware variant (logical wrappers return nil) — used directly by tests.
 function M.type_bounds_in_condition(src, beg)
-  local i = M.skip_ws(src, beg + 1)
-  i = skip_fact_binding(src, i)
-  local acc = M.accumulator_type_bounds(src, i)
-  if acc then return acc end
-  local c = byte_at(src, i)
-  local c2 = byte_at(src, i + 1)
-  if c == ":" and c2:match("[a-z]") then
-    local kw_start = i
-    local kw_end = forward_sexp(src, i)
-    if not kw_end then return nil end
-    local kw = slice(src, kw_start, kw_end)
-    if M.logical_operator_p(kw) then return nil end
-    return { beg = kw_start, end_ = kw_end }
-  end
-  local type_end = forward_sexp(src, i)
-  if not type_end then return nil end
-  return { beg = i, end_ = type_end }
+  local parsed = condition_type_or_logical(src, beg)
+  if not parsed then return nil end
+  return parsed.bounds
 end
 
 --- LHS fact type at point: the fact type of the condition containing the cursor.
@@ -408,9 +405,8 @@ local function innermost_open_delim(src, probe)
   local stack = {}
   local i = 0
   local n = #src
-  local found
   while i < n do
-    if found == nil and i >= probe then found = stack[#stack] end
+    if i >= probe then return stack[#stack] end
     local c = byte_at(src, i)
     if c == '"' then
       local e = skip_string(src, i)
@@ -437,7 +433,7 @@ local function innermost_open_delim(src, probe)
       i = i + 1
     end
   end
-  return found
+  return nil
 end
 
 local function string_span_at(src, cursor)

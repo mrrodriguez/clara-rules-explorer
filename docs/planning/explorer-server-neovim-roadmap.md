@@ -1,7 +1,7 @@
 # Explorer Server ↔ Neovim Navigation — Roadmap
 
-Status: **Phase 0 + Phase 1 implemented (local)** · Phase 2 (CI) is next, after
-reviewing the local build/test · Plan:
+Status: **Phase 0 + Phase 1 implemented (local), reviewed** · Phase 2 (CI) is
+next · Plan:
 `docs/planning/explorer-server-neovim-plan.md`
 
 This is the executable checklist for the plan. Work top to bottom; every box
@@ -13,7 +13,7 @@ Standing gates (every phase):
 | Surface | Gate |
 | ------- | ---- |
 | Lua change | `make -C editor/neovim check` (format-check + lint + test) |
-| Lua change | 85 tests: 16 edn + 49 token + 6 structural + 14 transport, via stylua 2.5.2 + selene 0.31.0 |
+| Lua change | all suites pass (edn, token, structural, transport, jump), via stylua 2.5.2 + selene 0.31.0 |
 | Portability | `grep -R "~/Projects\|/Users/" editor/` empty; `grep -R "eval\.eval_str\|on_result" editor/neovim/` empty |
 | API contract | none — no `client/navigate` or HTTP changes allowed in this work |
 
@@ -35,12 +35,12 @@ Standing gates (every phase):
 ## Phase 1 — Solidify (done, local)
 
 - [x] Tier 1 + Tier 2 test suites (`edn_spec`, `token_spec`, `structural_spec`,
-      `transport_spec`) sharing the Emacs fixture corpus.
+      `transport_spec`, `jump_spec`) sharing the Emacs fixture corpus.
 - [x] `Makefile` (`format`/`format-check`/`lint`/`test`/`check`/`clean`) +
       `.stylua.toml`/`selene.toml` + vendored `neovim.yml` selene std.
 - [x] `editor/neovim/.mise.toml` (stylua + selene, local dev only) + README +
       docs with Neovim version and dependency requirements.
-- [x] **Gate:** `make -C editor/neovim check` (85 pass, 0 lint errors/warnings);
+- [x] **Gate:** `make -C editor/neovim check` (all suites pass, 0 lint errors/warnings);
       `grep -R "~/Projects\|/Users/" editor/` empty;
       `grep -R "eval\.eval_str\|on_result" editor/neovim/` empty.
 
@@ -49,8 +49,9 @@ Standing gates (every phase):
 Full GHA recipe (pinned versions, asset names, no-mise approach) is captured
 in the plan: `explorer-server-neovim-plan.md` §9 "GitHub Actions recipe".
 
-- [ ] Review the local Phase 0 + Phase 1 output end-to-end (code, tests, docs,
-      `make check`, manual Conjure acceptance if available).
+- [x] Review the local Phase 0 + Phase 1 output end-to-end (code, tests, docs,
+      `make check`); fixes below. Manual Conjure acceptance still pending a
+      live session (Phase 0 gate).
 - [ ] CI workflow `editor-neovim.yml` — install pinned Neovim (0.10+),
       `stylua`, `selene`, and plenary **directly** (no mise — mise is
       local-dev only); run `make check`; gate on Tiers 1–2.
@@ -92,3 +93,29 @@ in the plan: `explorer-server-neovim-plan.md` §9 "GitHub Actions recipe".
   Consumers who don't use mise bring their own `stylua`/`selene` on `PATH`.
   GitHub Actions must not use mise — CI installs its own pinned binaries
   directly.
+
+## Review fixes (Phase 2 review — done)
+
+End-to-end review of the local Phase 0 + Phase 1 output. Fixes applied, each
+gated by `make check` (format-check + lint + test; all suites green, 0 lint
+issues):
+
+- [x] `swap_session` bang/cache — `plugin/clara-explorer.vim` now passes
+      `<bang>` (not `<bang>0`, which expands to Lua `!0`), and `init.lua` tests
+      `bang ~= "!"`. No-bang reuses the per-buffer cache; bang re-prompts.
+- [x] `jump.lua` — named `fallback_regex` (alias-agnostic
+      `(defrule|defquery NAME`, optional `^meta`, a local `vim_regex_escape`
+      instead of over-escaping `vim.pesc`); dropped the garbled first `search`;
+      `open_resource` converts `jar:file:` URLs to Neovim `zipfile://` URLs.
+- [x] `token.lua` — de-duplicated `type_bounds_in_condition` /
+      `type_bounds_in_condition_at_point` into `condition_type_or_logical`;
+      `innermost_open_delim` stops scanning at `probe`.
+- [x] `conjure.lua` — `cb` error handler now covers `root-ex`-only responses
+      and drops the dead `resp.value` check.
+- [x] Tests — new `jump_spec.lua`; extended `edn_spec.lua` (unsupported/invalid
+      escapes, unterminated map/vector, non-keyword map key), `token_spec.lua`
+      (docstring end-of-string look-back), `transport_spec.lua` (`connected`,
+      `current_ns`, eval-unavailable, navigate guards, `swap_session`).
+- [x] Docs — `explorer-editor-navigation.md` swap section describes the EDN
+      opts-map prompt; `explorer-editor-navigation-neovim.md` Tier 2 lists
+      `jump_spec.lua`; test counts are no longer hard-coded.

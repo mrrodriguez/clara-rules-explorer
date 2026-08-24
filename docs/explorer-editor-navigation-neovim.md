@@ -95,7 +95,7 @@ as Emacs:
 | Tier | Scope                          | Files              | Deps                                        |
 | ---- | ------------------------------ | ------------------ | ------------------------------------------- |
 | 1    | pure-Lua unit                  | `edn_spec.lua`, `token_spec.lua`, `structural_spec.lua` | none (structural skips without the clojure parser) |
-| 2    | real modules, mocked transport | `transport_spec.lua` | stubbed `conjure.eval`, `vim.ui.select`, `jump.jump` |
+| 2    | real modules, mocked transport | `transport_spec.lua`, `jump_spec.lua` | stubbed `conjure.eval`, `vim.ui.select`, `jump.jump`, `vim.cmd.edit`, `vim.fn.search` |
 | 3    | live nREPL integration         | (future)           | headless `server` + a live Conjure nREPL    |
 
 - `token_spec.lua` shares the Emacs fixture corpus (the same rule snippets),
@@ -103,6 +103,9 @@ as Emacs:
 - `transport_spec.lua` asserts the Clojure payload is built correctly, EDN is
   parsed, 0/1/N dispatch works, the jump path is invoked with the right
   target, and the `cb` error path surfaces nREPL errors.
+- `jump_spec.lua` asserts the var-vs-non-var jump dispatch, the
+  `(defrule|defquery NAME)` fallback regex, and `file:`/`jar:` resource
+  resolution.
 - Tier 3 is reserved for a future `make test-integration`; not required for CI.
 
 ```bash

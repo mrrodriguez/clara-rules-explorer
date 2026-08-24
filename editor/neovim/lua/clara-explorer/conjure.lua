@@ -99,18 +99,18 @@ function M.eval_edn(opts)
     end,
     cb = function(resp)
       if settled then return end
-      if resp.value then return end
-      if resp.err and resp.err ~= "" then
-        local head = resp.ex or resp["root-ex"] or "eval failed"
-        local summary = M.err_summary(resp.err)
+      local err = resp.err
+      local ex = resp.ex or resp["root-ex"]
+      if err and err ~= "" then
+        local summary = M.err_summary(err)
         finish(
           opts.on_error or function() end,
-          "clara-explorer: " .. head .. (summary ~= "" and (" — " .. summary) or ""),
+          "clara-explorer: " .. (ex or "eval failed") .. (summary ~= "" and (" — " .. summary) or ""),
           bufnr,
           win
         )
-      elseif resp.ex and resp.ex ~= "" then
-        finish(opts.on_error or function() end, "clara-explorer: " .. resp.ex, bufnr, win)
+      elseif ex and ex ~= "" then
+        finish(opts.on_error or function() end, "clara-explorer: " .. ex, bufnr, win)
       end
     end,
   })

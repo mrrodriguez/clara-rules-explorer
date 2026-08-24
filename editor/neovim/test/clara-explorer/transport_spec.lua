@@ -179,3 +179,139 @@ describe("init.perform_swap", function()
     )
   end)
 end)
+
+describe("conjure.connected", function()
+  it("is false when the nrepl server module is unavailable", function() assert.is_false(conjure.connected()) end)
+
+  it("reflects the server connected? result", function()
+    with_restore(
+      package.loaded,
+      "conjure.client.clojure.nrepl.server",
+      { ["connected?"] = function() return true end },
+      function() assert.is_true(conjure.connected()) end
+    )
+  end)
+end)
+
+describe("conjure.current_ns", function()
+  it("reads the buffer namespace from conjure.extract", function()
+    with_restore(
+      package.loaded,
+      "conjure.extract",
+      { context = function() return "my.ns" end },
+      function() assert.are.same("my.ns", conjure.current_ns()) end
+    )
+  end)
+
+  it("falls back to the conjure#context buffer var", function()
+    with_restore(package.loaded, "conjure.extract", { context = function() return nil end }, function()
+      with_restore(
+        vim.b,
+        "conjure#context",
+        "other.ns",
+        function() assert.are.same("other.ns", conjure.current_ns()) end
+      )
+    end)
+  end)
+end)
+
+describe("conjure.eval_edn unavailable", function()
+  it("surfaces an error when conjure.eval is missing", function()
+    with_restore(package.loaded, "conjure.eval", nil, function()
+      local err_msg
+      conjure.eval_edn({
+        code = "x",
+        bufnr = 1,
+        win = 2,
+        on_value = function() error("should not produce a value") end,
+        on_error = function(m) err_msg = m end,
+      })
+      assert.are.same("clara-explorer: conjure.eval unavailable", err_msg)
+    end)
+  end)
+end)
+
+describe("init.navigate guards", function()
+  local function with_nav_env(ctx, side, notify_cb)
+    with_restore(conjure, "connected", function() return true end, function()
+      with_restore(vim.api, "nvim_get_current_buf", function() return 1 end, function()
+        with_restore(vim.api, "nvim_get_current_win", function() return 1 end, function()
+          with_restore(vim.api, "nvim_win_get_cursor", function() return { 1, 0 } end, function()
+            with_restore(init, "context", function() return ctx end, function()
+              with_restore(vim, "notify", notify_cb, function() init.navigate(side) end)
+            end)
+          end)
+        end)
+      end)
+    end)
+  end
+
+  it("notifies when not on a fact type", function()
+    with_nav_env(
+      { token = nil, kind = "rule", production = "ns/r" },
+      "lhs",
+      function(msg) assert.are.same("not on a fact type", msg) end
+    )
+  end)
+
+  it("rejects RHS navigation on a query", function()
+    with_nav_env(
+      { token = "X", kind = "query", production = "ns/q" },
+      "rhs",
+      function(msg) assert.are.same("queries have no RHS", msg) end
+    )
+  end)
+
+  it("rejects LHS navigation outside a rule/query", function()
+    with_nav_env(
+      { token = "X", kind = nil, production = nil },
+      "lhs",
+      function(msg) assert.are.same("not inside a rule/query", msg) end
+    )
+  end)
+end)
+
+describe("init.swap_session", function()
+  local function prime_swap_cache(bufnr, raw)
+    with_restore(conjure, "eval_edn", function() end, function() init.perform_swap(raw, bufnr) end)
+  end
+
+  local function with_swap_env(bufnr, fn)
+    with_restore(conjure, "connected", function() return true end, function()
+      with_restore(vim.api, "nvim_get_current_buf", function() return bufnr end, fn)
+    end)
+  end
+
+  it("reuses the cached opts without re-prompting", function()
+    prime_swap_cache(71, "{:session foo}")
+    local prompted = false
+    with_swap_env(71, function()
+      with_restore(vim.ui, "input", function() prompted = true end, function()
+        with_restore(
+          conjure,
+          "eval_edn",
+          function(o) assert.truthy(o.code:find("swap-session! {:session foo}", 1, true)) end,
+          function() init.swap_session(nil) end
+        )
+      end)
+    end)
+    assert.is_false(prompted)
+  end)
+
+  it("re-prompts on bang even when cached", function()
+    prime_swap_cache(72, "{:session foo}")
+    local prompted = false
+    with_swap_env(72, function()
+      with_restore(vim.ui, "input", function() prompted = true end, function() init.swap_session("!") end)
+    end)
+    assert.is_true(prompted)
+  end)
+
+  it("prompts when there is no cached opts", function()
+    local prompted = false
+    with_swap_env(73, function()
+      with_restore(vim.ui, "input", function() prompted = true end, function() init.swap_session(nil) end)
+    end)
+    assert.is_true(prompted)
+  end)
+end)

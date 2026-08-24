@@ -24,24 +24,51 @@ function M.push_jump()
   end
 end
 
---- Open a resolved `file:`/`jar:` resource URL string, if possible.
+--- Escape a literal string for a Vim magic-mode regex (only the characters
+-- that are magic outside character classes — `vim.pesc` also escapes `-`,
+-- which would break names like `app-outcome-approved?`).
+local function vim_regex_escape(s) return (s:gsub("([\\^$.*~%[%]])", "\\%1")) end
+
+--- Vim regex for the last-resort search: `(alias/defrule NAME` / `(defquery NAME`,
+-- with optional `^meta` between the head and the name.  The name is matched
+-- literally and must be followed by whitespace, `)` or end-of-line.
+function M.fallback_regex(rule_name)
+  return "(\\([^ \\t\\n()]*/\\)\\?def\\(rule\\|query\\)"
+    .. "\\(\\s\\+\\^[^ \\t\\n()]*\\)*"
+    .. "\\s\\+"
+    .. vim_regex_escape(rule_name)
+    .. "\\ze\\(\\s\\|$\\|)\\)"
+end
+
+--- Convert a `jar:file:/…!/entry` resource URL to Neovim's `zipfile://…::entry`
+-- form (mirrors Conjure's own jar-path handling in
+-- `conjure.client.clojure.nrepl.action`).
+local function zipfile_url(url)
+  local zip, entry = url:match("^jar:file:(.+)!/(.+)$")
+  if not zip or not entry then return nil end
+  local ver = tonumber((vim.g.loaded_zipPlugin or "v0"):sub(2)) or 0
+  if ver > 31 then return "zipfile://" .. zip .. "::" .. entry end
+  return "zipfile:" .. zip .. "::" .. entry
+end
+
+--- Open a resolved `file:`/`jar:` resource URL string, or false when the URL
+-- cannot be opened by Neovim.
 local function open_resource(url)
   if not url or url == "" or url == "nil" then return false end
-  -- `(some-> (clojure.java.io/resource …) str)` yields `file:/…` or `jar:…`.
   if url:match("^file:") then
-    local path = url:gsub("^file:", "")
-    vim.cmd.edit(path)
+    vim.cmd.edit(url:gsub("^file:", ""))
     return true
-  elseif url:match("^jar:") then
-    -- Let Conjure's own jar handling (zipfile://) take over via edit.
-    vim.cmd.edit(url:gsub("^jar:", ""))
+  end
+  local zip = zipfile_url(url)
+  if zip then
+    vim.cmd.edit(zip)
     return true
   end
   return false
 end
 
 --- Regex fallback: open the namespace file and search for `(defrule|defquery NAME`.
-function M.goto_fallback(target, eval_str)
+function M.goto_fallback(target, eval_edn)
   local ns = target.ns
   local name = target.name
   if not ns or not name then
@@ -55,9 +82,8 @@ function M.goto_fallback(target, eval_str)
   local function on_value(url)
     if open_resource(url) then
       vim.cmd.normal({ "gg", bang = true })
-      local found = vim.fn.search("(.*def" .. "rule\\|def" .. "query" .. ".*" .. vim.pesc(unqualified), "w")
-      -- simpler, robust: search for the bare name as a whole word
-      if not found or found == 0 then found = vim.fn.search("\\<" .. vim.pesc(unqualified) .. "\\>", "w") end
+      local found = vim.fn.search(M.fallback_regex(unqualified), "w")
+      if not found or found == 0 then found = vim.fn.search("\\<" .. vim_regex_escape(unqualified) .. "\\>", "w") end
       if not found or found == 0 then
         vim.notify("clara-explorer: production " .. name .. " not found in " .. ns, vim.log.levels.WARN)
       end
@@ -65,7 +91,7 @@ function M.goto_fallback(target, eval_str)
       vim.notify("clara-explorer: cannot resolve namespace " .. ns, vim.log.levels.WARN)
     end
   end
-  eval_str({
+  eval_edn({
     code = resource_form,
     on_value = on_value,
     on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
@@ -84,8 +110,8 @@ function M.jump(target, opts)
       return
     end
   end
-  local eval_str = opts.eval_str or function(o) conjure.eval_edn(o) end
-  M.goto_fallback(target, eval_str)
+  local eval_edn = opts.eval_edn or function(o) conjure.eval_edn(o) end
+  M.goto_fallback(target, eval_edn)
 end
 
 return M

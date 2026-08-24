@@ -141,7 +141,8 @@ function M.perform_swap(raw, bufnr)
   })
 end
 
---- `:ClaraExplorerSwapSession` — prompt (re-prompt on bang), cache last per buffer.
+--- `:ClaraExplorerSwapSession` — prompt (re-prompt when `bang` is `"!"`), cache
+-- last per buffer.
 function M.swap_session(bang)
   if not conjure.connected() then
     vim.notify("Not connected to a Conjure Clojure REPL", vim.log.levels.WARN)
@@ -149,7 +150,7 @@ function M.swap_session(bang)
   end
   local bufnr = vim.api.nvim_get_current_buf()
   local cached = swap_opts_by_buf[bufnr]
-  if not bang and cached ~= nil then
+  if bang ~= "!" and cached ~= nil then
     M.perform_swap(cached, bufnr)
     return
   end
