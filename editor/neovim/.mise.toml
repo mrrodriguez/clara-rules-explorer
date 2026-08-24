@@ -1,0 +1,7 @@
+# Editor-tooling deps for the Neovim client (formatter + linter), managed by
+# mise. Install with:  cd editor/neovim && mise install
+# (`stylua` resolves via the aqua backend; selene has no short registry alias,
+# so use its full aqua path.)
+[tools]
+stylua = "2.5.2"
+"aqua:Kampfkarren/selene" = "0.31.0"

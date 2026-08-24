@@ -37,7 +37,7 @@ independent sub-projects:
 |-----------|-------------|
 | [`server/`](./server/) | Clojure HTTP server — graph analysis engine and REST API. See [server/README.md](./server/README.md). |
 | [`ui/`](./ui/) | SvelteKit 2 + Svelte 5 web interface. See [ui/README.md](./ui/README.md). |
-| [`editor/`](./editor/) | Editor clients (Emacs/CIDER today; neovim/Conjure later) for in-editor navigation. See [Editor Navigation](./docs/explorer-editor-navigation.md). |
+| [`editor/`](./editor/) | Editor clients (Emacs/CIDER and neovim/Conjure) for in-editor navigation. See [Editor Navigation](./docs/explorer-editor-navigation.md). |
 | [`docs/`](./docs/) | Cross-cutting documentation — API reference, demo setup, CI. |
 
 ## Getting Started
@@ -53,8 +53,10 @@ See the sub-project READMEs for detailed prerequisites and instructions:
 
 - [Explorer Graph API](./docs/explorer-graph-api.md) — HTTP API endpoints,
   request/response shapes, and JSON schemas.
-- [Editor Navigation (Emacs)](./docs/explorer-editor-navigation.md) —
-  in-editor navigation between Clara productions from CIDER.
+- [Editor Navigation](./docs/explorer-editor-navigation.md) —
+  in-editor navigation between Clara productions, shared across
+  [Emacs/CIDER](./docs/explorer-editor-navigation-emacs.md) and
+  [Neovim/Conjure](./docs/explorer-editor-navigation-neovim.md).
 - [Static Demo Setup](./docs/static-demo-setup.md) — build and host a fully
   static demo on GitHub Pages.
 - [GitHub Actions Setup](./docs/gha-setup.md) — CI workflow configuration.
