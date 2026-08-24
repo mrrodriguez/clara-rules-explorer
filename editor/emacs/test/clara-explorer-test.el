@@ -463,6 +463,33 @@ Tier-1 stub path fast."
         (should-not (string-match-p "#(" (plist-get ctx :production)))))))
 
 ;; ---------------------------------------------------------------------------
+;; navigate dispatch — producer outside a rule/query uses the global path
+;; ---------------------------------------------------------------------------
+
+(ert-deftest navigate-producer-outside-production-uses-global-path ()
+  "Producer navigation outside a defrule/defquery must still reach the server
+   (global path) instead of bailing with \"not inside a rule/query\"."
+  (with-clara-buffer "(ns test) (defn build [] (r/insert! (->LoanApplication {:a 1})))"
+    (search-forward "LoanApplication")
+    (let (code-seen)
+      (cl-letf (((symbol-function 'cider-connected-p) (lambda () t))
+                ((symbol-function 'cider-current-repl) (lambda (&rest _) 'dummy-conn))
+                ((symbol-function 'cider-current-ns) (lambda () "test"))
+                ((symbol-function 'cider-symbol-at-point)
+                 (lambda (&optional _) "->LoanApplication"))
+                ((symbol-function 'clara-explorer--eval-edn)
+                 (lambda (code _conn)
+                   (setq code-seen code)
+                   (let ((h (make-hash-table :test 'equal)))
+                     (puthash :error "test-complete" h)
+                     h))))
+        (clara-explorer--navigate :lhs))
+      (should code-seen)
+      (should (string-match-p ":side :lhs" code-seen))
+      (should-not (string-match-p ":production" code-seen))
+      (should (string-match-p ":token \"->LoanApplication\"" code-seen)))))
+
+;; ---------------------------------------------------------------------------
 ;; Tier-2: real-deps coverage (Eldev with cider/parseedn/clojure-mode).
 ;; These tests are `skip-unless' on bare `emacs -Q --batch' (Tier-1) and
 ;; exercise the integration surface that the stubbed tier hides:

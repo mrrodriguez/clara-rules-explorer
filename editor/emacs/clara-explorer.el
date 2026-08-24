@@ -727,8 +727,6 @@ Used for RHS and global cases where LHS-structure is not applicable."
      ((null token) (message "not on a fact type"))
      ((and (eq side :rhs) (eq kind 'query))
       (message "queries have no RHS"))
-     ((and (null production) (eq side :lhs))
-      (message "not inside a rule/query"))
      (t
       (let* ((eff-side side)
              (result (clara-explorer--eval-edn
