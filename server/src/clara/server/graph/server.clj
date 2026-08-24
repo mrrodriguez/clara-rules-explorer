@@ -228,7 +228,7 @@
                                             (merge {:rule-source-analysis analysis
                                                     :session-or-rulebase session}
                                                    analysis-opts))})))
-        layers (cond-> [(ann.merge/props-layer session)]
+        layers (cond-> [(ann.merge/->props-layer session)]
                  (seq source-layers) (into source-layers)
                  generated-layer (conj generated-layer))]
     layers))
@@ -292,7 +292,7 @@
              (if (some? current-annotations)
                {:annotations current-annotations}
                {:annotations (-> session
-                                 ann.merge/props-layer
+                                 ann.merge/->props-layer
                                  ann.merge/annotations)}))
 
            (:none nil)

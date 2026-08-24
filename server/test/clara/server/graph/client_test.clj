@@ -68,7 +68,7 @@
                 :fact-type-fn lhr/fact-type-fn))
 
 (def ^:private hierarchy-annotations
-  (ann.merge/merge-layers [(ann.merge/props-layer hierarchy-session)]))
+  (ann.merge/merge-layers [(ann.merge/->props-layer hierarchy-session)]))
 
 ;; ---------------------------------------------------------------------------
 ;; Producer path (LHS)

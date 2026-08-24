@@ -106,10 +106,16 @@
      then normalized and validated.
    - A map is normalized (rule-name keys → strings, callsite ids derived) and validated."
   [x]
-  (cond
-    (or (string? x) (instance? java.io.File x)) (s/validate Layer (normalize-layer (read-layer x)))
-    (map? x) (s/validate Layer (normalize-layer x))
-    :else (throw (IllegalArgumentException. (format "Cannot coerce to Layer: %s" (pr-str (type x)))))))
+  (let [raw-layer (cond
+                    (or (string? x) (instance? java.io.File x)) (read-layer x)
+                    (map? x) x
+                    :else (throw (ex-info (format "Cannot coerce to Layer: %s" (pr-str (type x)))
+                                          {:invalid-type (type x)
+                                           :x x})))]
+
+    (->> raw-layer
+         normalize-layer
+         (s/validate Layer))))
 
 (def ^:dynamic *edn-printer*
   "Dynamic EDN printer for artifact writing.  (fn [value writer] ...)
@@ -144,7 +150,7 @@
        (write-layer!* path layer))
      (write-layer!* path layer))))
 
-(defn props-layer
+(defn ->props-layer
   "The rule-:props layer: annotations authored on the rule form itself, read
    off the compiled productions.  The whole `:props` map is copied — nothing
    is filtered; unknown keys are preserved through every merge and reach
@@ -640,8 +646,8 @@
      - A bare rule→annotation map (passes through)
      - A `MergedAnnotations` value (unwrapped to its `:annotations` payload)
      - A vector of `Layer` maps (merged via `merge-layers`, with
-       `props-layer` from `session` folded in first as the base)
-     - A string path to a layer file (read via `read-layer` and merged).
+       `->props-layer` from `session` folded in first as the base)
+     - A string path to a layer file (read via `->layer` and merged).
 
    `session` is only needed when `annotations-input` is a vector of layers
    or a string path."
@@ -653,9 +659,8 @@
                  (vector? annotations-input) annotations-input
                  :else nil)]
     (if layers
-      (:annotations
-       (merge-layers
-        (into [(props-layer session)]
-              (map ->layer)
-              layers)))
+      (->> layers
+           (into [(->props-layer session)] (map ->layer))
+           merge-layers
+           :annotations)
       (->bare-annotations annotations-input))))

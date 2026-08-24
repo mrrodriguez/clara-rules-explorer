@@ -162,7 +162,7 @@
                               :fact-type-fn lhr/fact-type-fn)
         handler (:handler (api/app (atom {:session session
                                           :annotations (ann.merge/merge-layers
-                                                        [(ann.merge/props-layer session)])})
+                                                        [(ann.merge/->props-layer session)])})
                                    true))]
     (testing "Every fact type (class, keyword, tuple) resolves by its server-issued id"
       (let [items (:fact-types (parse-json (:body (handler (mock/request :get "/v1/fact-types")))))]

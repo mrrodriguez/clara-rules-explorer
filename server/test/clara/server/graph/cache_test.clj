@@ -24,9 +24,9 @@
       (r/fire-rules)))
 
 (defn- ->annotations
-  "Bare props-layer annotations — the same shape the server threads through state."
+  "Bare ->props-layer annotations — the same shape the server threads through state."
   [session]
-  (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/props-layer session)])))
+  (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/->props-layer session)])))
 
 (deftest test-warm-reuses-enrichment-memory-analysis
   (testing "warm! with a memory-analysis stores a re-stamped memory-analysis equal to a fresh build"

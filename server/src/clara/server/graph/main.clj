@@ -245,7 +245,7 @@
             ;; Curation-aware analysis: the rule-:props base, the freshly
             ;; generated discovery layer, then any caller-supplied layers
             ;; folded over it (lowest precedence first).
-            layers (into [(ann.merge/props-layer loaded-session) generated-layer]
+            layers (into [(ann.merge/->props-layer loaded-session) generated-layer]
                          (map ann.merge/->layer)
                          (:layer options))
 

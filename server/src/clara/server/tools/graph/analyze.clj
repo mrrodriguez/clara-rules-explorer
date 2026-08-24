@@ -954,7 +954,7 @@
 
         merged-annotations
         (ann.merge/annotations
-         (ann.merge/merge-layers [(ann.merge/props-layer rulebase)
+         (ann.merge/merge-layers [(ann.merge/->props-layer rulebase)
                                   (ann.merge/->layer {:id :enriched
                                                       :annotations enriched})]))
 

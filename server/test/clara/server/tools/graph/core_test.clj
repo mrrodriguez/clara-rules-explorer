@@ -57,7 +57,7 @@
   "Props-layer annotations for the loan-hierarchy fixture (its rules declare
    :clara-rules/insert-types in props)."
   [session]
-  (ann.merge/merge-layers [(ann.merge/props-layer session)]))
+  (ann.merge/merge-layers [(ann.merge/->props-layer session)]))
 
 (defn- fact-type-by-name
   "Fact-type entry by its exact serialized name."
@@ -105,13 +105,13 @@
 (defn- intra-analysis
   []
   (let [session (r/mk-session [intra-producer intra-consumer])
-        anns (ann.merge/merge-layers [(ann.merge/props-layer session)])]
+        anns (ann.merge/merge-layers [(ann.merge/->props-layer session)])]
     (core/->rulebase-analysis session anns)))
 
 (defn- cyc-analysis
   []
   (let [session (r/mk-session [cyc-producer cyc-consumer] :ancestors-fn cycle-ancestors)
-        anns (ann.merge/merge-layers [(ann.merge/props-layer session)])]
+        anns (ann.merge/merge-layers [(ann.merge/->props-layer session)])]
     (core/->rulebase-analysis session anns)))
 
 ;; Sibling hierarchy: ::sib-root has two direct children, ::sib-b and ::sib-c;
@@ -140,7 +140,7 @@
 (defn- sib-analysis
   []
   (let [session (r/mk-session [sib-d-producer sib-b-consumer sib-c-consumer])
-        anns (ann.merge/merge-layers [(ann.merge/props-layer session)])]
+        anns (ann.merge/merge-layers [(ann.merge/->props-layer session)])]
     (core/->rulebase-analysis session anns)))
 
 (deftest test-loan-doc-rules-behavior
@@ -425,7 +425,7 @@
 (deftest test-dep-graph-hierarchy
   (testing "Dependency graph edges with type hierarchy (ancestor-fn)"
     (let [session (r/mk-session [car-producer vehicle-consumer])
-          analysis (core/->rulebase-analysis session (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/props-layer session)])))
+          analysis (core/->rulebase-analysis session (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/->props-layer session)])))
           graph (:dep-graph analysis)]
       (is (contains? (get-in graph ["clara.server.tools.graph.core-test/car-producer" :downstream])
                      "clara.server.tools.graph.core-test/vehicle-consumer"))
@@ -784,7 +784,7 @@
   (testing "A full ->rulebase-analysis over a divergent annotation set still builds (no throw)"
     (let [session (->test-session)
           anns (ann.merge/merge-layers
-                [(ann.merge/props-layer session)
+                [(ann.merge/->props-layer session)
                  (ann.merge/->layer
                   {:id :divergent
                    :annotations
@@ -944,7 +944,7 @@
   [rules]
   (let [session (r/mk-session rules)]
     (core/->rulebase-analysis session
-                              (ann.merge/merge-layers [(ann.merge/props-layer session)]))))
+                              (ann.merge/merge-layers [(ann.merge/->props-layer session)]))))
 
 (defn- dep-by-name [deps name]
   (first (filter #(= name (:name %)) deps)))
@@ -1025,7 +1025,7 @@
                     [(r/mk-session [match-multi-producer match-multi-consumer
                                     match-direct-producer match-direct-consumer
                                     match-dedup-producer match-dedup-consumer])
-                     (fn [s] (ann.merge/merge-layers [(ann.merge/props-layer s)]))]]]
+                     (fn [s] (ann.merge/merge-layers [(ann.merge/->props-layer s)]))]]]
       (doseq [[session annotations-fn] sessions
               :let [analysis (core/->rulebase-analysis session (annotations-fn session))]]
         (doseq [[p-name summary] (concat (:rules analysis) (:queries analysis))]
