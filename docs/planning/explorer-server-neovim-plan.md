@@ -426,20 +426,44 @@ Emacs Tier-3 suite would run — the point is one contract, two editors.
 ```bash
 cd editor/neovim && make test
 # = nvim --headless --noplugin -u test/minimal_init.lua \
-#     -c "PlenaryBustedDirectory test/ { minimal_init = 'test/minimal_init.lua' }"
+#     -c "lua require('plenary.test_harness').test_directory('test', { minimal_init = 'test/minimal_init.lua' })"
 ```
 
 - `test/minimal_init.lua` bootstraps `plenary.nvim` (adds it to `runtimepath`)
   and, for Tier-1 tree-sitter cases, ensures the clojure parser is loadable
   (skip otherwise). It must **not** load the user's full AstroNvim config
   (`--noplugin`).
-- `Makefile` targets: `format` (stylua), `lint` (selene, `std = "neovim"`),
-  `test` (plenary busted), `clean`.
+- `Makefile` targets: `format` (stylua), `format-check` (stylua --check),
+  `lint` (selene, `std = "neovim"`), `test` (plenary busted), `check`
+  (format-check + lint + test), `clean`.
 - CI: add `editor/neovim` to a workflow (the repo has `server.yml`/`ui.yml` but
-  no editor workflow yet). Install pinned Neovim (stable/nightly), `stylua`,
-  `selene`, and `tree-sitter-cli`; run `format --check`, `lint`, `test`. Gate on
-  Tiers 1–2 only; Tier 3 is local/nightly (port-sensitive, JVM + connection
-  timing).
+  no editor workflow yet). Install pinned Neovim (stable), `stylua`, `selene`,
+  and plenary; run `make check`. Gate on Tiers 1–2 only; Tier 3 is
+  local/nightly (port-sensitive, JVM + connection timing).
+
+### GitHub Actions recipe (learned, to reuse)
+
+`mise` is **local-dev only** — CI installs its own pinned binaries directly,
+no mise. One command runs the whole gate: `make -C editor/neovim check`
+(format-check + lint + test), with `PLENARY_DIR` pointing at a cloned
+`plenary.nvim` (the test harness resolves it from that env var).
+
+Pinned tool versions (match the local mise versions): stylua `2.5.2`, selene
+`0.31.0`, Neovim `0.10+` (developed/tested on `0.12.4`). Release assets to
+fetch on `ubuntu-latest`:
+
+- Neovim `v0.10.4` → `nvim-linux64.tar.gz` (extracts to `nvim-linux64/bin/nvim`;
+  newer releases rename the asset to `nvim-linux-x86_64.tar.gz`).
+- stylua `v2.5.2` → `stylua-linux-x86_64.zip` (contains the `stylua` binary).
+- selene `0.31.0` → `selene-0.31.0-linux.zip` (contains the `selene` binary).
+- plenary.nvim → `git clone --depth 1 https://github.com/nvim-lua/plenary.nvim`,
+  then set `PLENARY_DIR` to that checkout.
+
+Add each extracted binary's dir to `$GITHUB_PATH`. The structural tests skip
+cleanly when the clojure parser is absent; installing the parser in CI
+(`nvim-treesitter` + `TSInstallSync clojure`, or compile the grammar and drop
+`clojure.so` into `~/.local/share/nvim/site/parser/`) is an optional follow-up
+for full structural coverage.
 
 ---
 

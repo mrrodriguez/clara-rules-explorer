@@ -46,6 +46,9 @@ Standing gates (every phase):
 
 ## Phase 2 — CI (next, after reviewing the local build/test)
 
+Full GHA recipe (pinned versions, asset names, no-mise approach) is captured
+in the plan: `explorer-server-neovim-plan.md` §9 "GitHub Actions recipe".
+
 - [ ] Review the local Phase 0 + Phase 1 output end-to-end (code, tests, docs,
       `make check`, manual Conjure acceptance if available).
 - [ ] CI workflow `editor-neovim.yml` — install pinned Neovim (0.10+),
