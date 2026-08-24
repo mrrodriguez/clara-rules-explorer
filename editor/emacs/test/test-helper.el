@@ -14,7 +14,7 @@
 ;;            running `clara.server.graph` JVM + `cider-connect-clj`.
 ;;
 ;; Real deps are preferred when present; stubs exist only for the
-;; bare-batch fallback and for `server/bin/ci/check-elisp.sh` byte-compile.
+;; bare-batch fallback and for `editor/emacs/bin/ci/check-elisp.sh` byte-compile.
 
 (require 'cl-lib)
 

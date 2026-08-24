@@ -44,7 +44,7 @@ Test the Emacs Lisp code in isolation without a running server or a real CIDER c
 
 | Tier | Command | Deps | Coverage |
 | --- | --- | --- | --- |
-| **A1 — stubbed unit** | `make test-unit` w/o Eldev (`emacs -Q --batch`) | `test-helper.el` `provide`s stubs + `with-clara-buffer` minimal `clojure-mode` + tiny `nrepl-dict-get`/`parseedn-read-str` stubs; `server/bin/ci/check-elisp.sh` byte-compiles against same stubs | 35+ ERT: LHS accumulator cases, `enclosing-production` alias-agnostic, `syntax-ppss` string jump, `props` insert/retract, EDN `substring-no-properties` stripping, vector-target coercion |
+| **A1 — stubbed unit** | `make test-unit` w/o Eldev (`emacs -Q --batch`) | `test-helper.el` `provide`s stubs + `with-clara-buffer` minimal `clojure-mode` + tiny `nrepl-dict-get`/`parseedn-read-str` stubs; `editor/emacs/bin/ci/check-elisp.sh` byte-compiles against same stubs | 35+ ERT: LHS accumulator cases, `enclosing-production` alias-agnostic, `syntax-ppss` string jump, `props` insert/retract, EDN `substring-no-properties` stripping, vector-target coercion |
 | **A2 — real-deps unit** | `eldev test` (or `make test-unit` with Eldev on PATH) | real `cider`/`parseedn`/`clojure-mode` (Eldev); `test-helper.el` guards become no-ops; `with-clara-buffer` calls real `clojure-mode`; `nrepl-dict-get`/`parseedn-read-str` are real | A1 + 5 `skip-unless` tests gated on `test-helper--parseedn-real-p` / `test-helper--real-deps-p`: `clara-explorer--edn-map` → `parseedn-read-str` round-trip (hash-table contract, vectors → `vector`), `clara-explorer--eval-edn`+`nrepl-dict` wiring against real `parseedn` (mocked transport, real parse), `cider-symbol-at-point` keyword `::`/`:kw` in `clojure-mode`, `syntax-ppss` reader-macros/comments |
 
 Approach A now hides far fewer integration touch points than before: the real `clojure-mode` syntax table (not just `emacs-lisp-mode` + `{[}`), the real `parseedn` 20231203 hash-table contract, and the real `cider-symbol-at-point` keyword semantics are all exercised in Tier A2 without needing a JVM.
@@ -69,7 +69,7 @@ Test the full end-to-end flow using a headless Emacs instance connected to a rea
 
 **Phase 1 — DONE (local unit, tiers A1+A2):**
 1. ✅ Eldev handles `cider`/`parseedn`/`clojure-mode` resolution (`editor/emacs/Eldev`).
-2. ✅ `editor/emacs/Makefile` prefers `eldev test` and falls back to `emacs -Q --batch` with stubbed deps; `server/bin/ci/check-elisp.sh` byte-compiles against stubs.
+2. ✅ `editor/emacs/Makefile` prefers `eldev test` and falls back to `emacs -Q --batch` with stubbed deps; `editor/emacs/bin/ci/check-elisp.sh` byte-compiles against stubs.
 3. ✅ `test/test-helper.el` provides tier-aware stubs (`provide` + `fboundp`/`autoloadp` guards + `nrepl-dict-get` stub + `test-helper--real-deps-p` / `test-helper--parseedn-real-p` helpers) and `test/clara-explorer-test.el` uses real `clojure-mode` in `with-clara-buffer` plus `skip-unless` Tier-2 tests for EDN round-trip, `eval-edn` wiring, and `cider-symbol-at-point`.
 
 **Phase 2 — DEFERRED (live-server integration):**

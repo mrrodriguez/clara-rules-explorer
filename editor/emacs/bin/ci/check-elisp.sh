@@ -5,9 +5,9 @@ set -euo pipefail
 # APIs so syntax errors, unknown variables, and bad arities are caught without
 # a live Emacs + CIDER session.  Fails on any compiler diagnostic.
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 EL="$ROOT/editor/emacs/clara-explorer.el"
-OUT="$ROOT/server/target/elisp-check"
+OUT="$ROOT/editor/emacs/target/elisp-check"
 
 mkdir -p "$OUT"
 
@@ -19,8 +19,8 @@ fi
 LOG="$OUT/compile.log"
 : > "$LOG"
 
-# The compiled .elc is written into server/target/elisp-check/ (not next to
-# the source) so `make clean` (`rm -rf target`) removes it.
+# The compiled .elc is written into editor/emacs/target/elisp-check/ (not
+# next to the source) so the editor `make clean` removes it.
 emacs -Q --batch \
   --eval "(progn (require 'cl-lib) (provide 'cider) (provide 'parseedn) (provide 'clojure-mode))" \
   --eval "(progn

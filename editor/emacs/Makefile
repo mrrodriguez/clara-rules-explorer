@@ -4,7 +4,7 @@ SHELL := /bin/bash
 ROOT := $(shell cd ../.. && pwd)
 EL := $(ROOT)/editor/emacs/clara-explorer.el
 TEST_DIR := $(ROOT)/editor/emacs/test
-OUT := $(ROOT)/server/target/elisp-check
+OUT := $(ROOT)/editor/emacs/target
 ELDEV_CACHE := $(ROOT)/editor/emacs/.eldev
 DIST := $(ROOT)/editor/emacs/dist
 
@@ -63,7 +63,7 @@ package: eldev-prepare
 
 # Byte-compile against stubbed APIs — catches syntax/arity errors without cider installed.
 check-elisp:
-	@$(ROOT)/server/bin/ci/check-elisp.sh
+	@$(ROOT)/editor/emacs/bin/ci/check-elisp.sh
 
 lint: check-elisp
 

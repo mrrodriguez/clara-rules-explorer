@@ -191,7 +191,7 @@ cd editor/emacs && make test-unit   # Tier 1 (stubbed) or Tier 2 if eldev presen
 cd editor/emacs && eldev test         # Tier 2 explicitly
 ```
 
-`test-helper.el` provides `(provide 'cider)` etc. and autoloads `cider-*`/`parseedn-read-str` plus a tiny `nrepl-dict-get`/`parseedn-read-str` stub so `M-x eval-buffer` and `make check-elisp` byte-compile pass without a live REPL. Under Eldev the real packages win (guards are `unless (featurep ...)` / `unless (fboundp ...)` and `autoloadp` checks), and `test-helper--parseedn-real-p` / `test-helper--real-deps-p` gate the Tier-2 tests via `skip-unless`. `with-clara-buffer` prefers real `clojure-mode` when `fboundp`, falling back to `emacs-lisp-mode` + manual `{[}` syntax for Tier 1.
+`test-helper.el` provides `(provide 'cider)` etc. and autoloads `cider-*`/`parseedn-read-str` plus a tiny `nrepl-dict-get`/`parseedn-read-str` stub so `M-x eval-buffer` and `make -C editor/emacs check-elisp` byte-compile pass without a live REPL. Under Eldev the real packages win (guards are `unless (featurep ...)` / `unless (fboundp ...)` and `autoloadp` checks), and `test-helper--parseedn-real-p` / `test-helper--real-deps-p` gate the Tier-2 tests via `skip-unless`. `with-clara-buffer` prefers real `clojure-mode` when `fboundp`, falling back to `emacs-lisp-mode` + manual `{[}` syntax for Tier 1.
 
 ## Refresh workflow
 
