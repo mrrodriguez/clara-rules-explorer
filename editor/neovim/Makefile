@@ -6,8 +6,10 @@ SELENE ?= selene
 
 # Tier 1 (pure Lua) + Tier 2 (mocked transport), headless, no user config.
 # Tree-sitter structural cases skip cleanly when the clojure parser is absent.
+# NVIM_LOG_FILE=/dev/null keeps nvim from writing a stray nvim.log into the
+# repo when the default log dir (~/.local/state/nvim) is not writable.
 test:
-	@$(NVIM) --headless --noplugin -i NONE -u test/minimal_init.lua \
+	@NVIM_LOG_FILE=/dev/null $(NVIM) --headless --noplugin -i NONE -u test/minimal_init.lua \
 	  -c "lua require('plenary.test_harness').test_directory('test', { minimal_init = 'test/minimal_init.lua' })"
 
 format:

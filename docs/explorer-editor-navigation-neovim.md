@@ -6,9 +6,7 @@ REPL bootstrap, fact-type resolution, jump semantics, and refresh/swap
 workflow — those are identical across editors. This page is the
 Neovim-specific surface: install, requirements, and testing.
 
-The client is `editor/neovim/` (a clean Lua plugin). Plan and roadmap:
-`docs/planning/explorer-server-neovim-plan.md`,
-`docs/planning/explorer-server-neovim-roadmap.md`.
+The client is `editor/neovim/` (a clean Lua plugin).
 
 ## Commands
 
@@ -109,8 +107,8 @@ as Emacs:
 
 ```bash
 cd editor/neovim
-make test    # Tiers 1 + 2, headless
-make format  # stylua
+make check   # format-check + lint + test (one-command gate)
+make format  # stylua (apply)
 make lint    # selene (std = "neovim")
 make clean
 ```

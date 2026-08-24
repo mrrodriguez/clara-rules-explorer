@@ -1,5 +1,5 @@
 --- Conjure transport: eval-str wrapper, error surfacing, async plumbing.
--- Verified against Conjure's `conjure.eval` API (see plan §5):
+-- The Conjure `conjure.eval` API contract:
 --   * eval via the `eval["eval-str"]` accessor (bracket form, not dotted)
 --   * the value callback key is `["on-result"]` (fires only when there is a
 --     `value`; never on a Clojure exception)
