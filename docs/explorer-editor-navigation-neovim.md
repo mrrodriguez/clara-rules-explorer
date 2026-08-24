@@ -50,19 +50,38 @@ just invokes `stylua`/`selene`. The selene `neovim` std is vendored as
 
 ## Install (lazy.nvim / AstroNvim)
 
+The plugin is loaded from a local checkout located via the
+`CLARA_HOME_EXPLORER` environment variable (the repo root). The spec derives
+the plugin directory as `$CLARA_HOME_EXPLORER/editor/neovim`. If the variable
+is unset, the plugin is skipped and a warning is emitted — no hard failure.
+The variable is read once at Neovim startup; change it and restart.
+
+```sh
+# per machine — the repo root of your clara-rules-explorer checkout
+export CLARA_HOME_EXPLORER="$HOME/Projects/clara-rules-explorer"
+```
+
 ```lua
 -- ~/.config/nvim/lua/plugins/clara-explorer.lua
-return {
+local plugins = {
   "Olical/conjure",
   { "nvim-treesitter/nvim-treesitter", opts = { ensure_installed = { "clojure" } } },
-  -- local checkout, unpublished — replace with your checkout location
-  { dir = "~/src/clara-rules-explorer/editor/neovim" },
 }
+
+local clara_root = vim.env.CLARA_HOME_EXPLORER
+if clara_root then
+  plugins[#plugins + 1] = { dir = clara_root .. "/editor/neovim" }
+else
+  vim.notify("CLARA_HOME_EXPLORER is not set — clara-explorer not loaded", vim.log.levels.WARN)
+end
+
+return plugins
 ```
 
 AstroNvim users add the same spec to their `lua/plugins/` directory; the
 plugin loads automatically and registers the four user commands. The plugin
-does not hard-code any machine-specific paths, home directories, or ports.
+does not hard-code any machine-specific paths, home directories, or ports —
+the checkout location comes from `CLARA_HOME_EXPLORER`.
 
 ## Architecture
 
