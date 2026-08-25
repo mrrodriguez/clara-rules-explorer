@@ -2,8 +2,8 @@
 # selene standard library for the `std = "neovim"` config.  selene bundles the
 # Lua base stds (lua51/52/53, luau, roblox) but not the Neovim std, so we
 # vendor a minimal one in the working directory (same shape as the astrovim
-# dotfiles).  `global_usage = "allow"` in selene.toml means deep `vim.*` field
-# checking is not needed here — only the `vim` global name needs to be known.
+# dotfiles).  Declaring the `vim` global as `any: true` suppresses deep
+# `vim.*` field checking, so only the global name needs to be known.
 base: lua51
 
 globals:
