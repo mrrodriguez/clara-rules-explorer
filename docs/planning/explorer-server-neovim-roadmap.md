@@ -10,12 +10,12 @@ is **done and unchanged** — every box here is Lua + tests.
 
 Standing gates (every phase):
 
-| Surface | Gate |
-| ------- | ---- |
-| Lua change | `make -C editor/neovim check` (format-check + lint + test) |
-| Lua change | all suites pass (edn, token, structural, transport, jump), via stylua 2.5.2 + selene 0.31.0 |
-| Portability | `grep -R "~/Projects\|/Users/" editor/` empty; `grep -R "eval\.eval_str\|on_result" editor/neovim/` empty |
-| API contract | none — no `client/navigate` or HTTP changes allowed in this work |
+| Surface      | Gate                                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------------- |
+| Lua change   | `make -C editor/neovim check` (format-check + lint + test)                                                |
+| Lua change   | all suites pass (edn, token, structural, transport, jump), via stylua 2.5.2 + selene 0.31.0               |
+| Portability  | `grep -R "~/Projects\|/Users/" editor/` empty; `grep -R "eval\.eval_str\|on_result" editor/neovim/` empty |
+| API contract | none — no `client/navigate` or HTTP changes allowed in this work                                          |
 
 ---
 
@@ -55,7 +55,7 @@ in the plan: `explorer-server-neovim-plan.md` §9 "GitHub Actions recipe".
 - [ ] CI workflow `editor-neovim.yml` — install pinned Neovim (0.10+),
       `stylua`, `selene`, and plenary **directly** (no mise — mise is
       local-dev only); run `make check`; gate on Tiers 1–2.
-- [ ] (Optional) install the clojure tree-sitter parser in CI so
+- [x] (Optional) install the clojure tree-sitter parser in CI so
       `structural_spec.lua` runs instead of skipping.
 
 ## Phase 3 — Optional extensions (only on evidence)
@@ -81,7 +81,7 @@ in the plan: `explorer-server-neovim-plan.md` §9 "GitHub Actions recipe".
 - **Tree-sitter node shapes verified** against the installed grammar: head and
   name are `sym_lit` (unqualified via the trailing `sym_name` child), metadata
   on the name is a `meta_lit` child of that same `sym_lit`, so the production
-  name is the *second* `sym_lit` child after the head.
+  name is the _second_ `sym_lit` child after the head.
 - **Neovim version floor is 0.10** (`vim.treesitter.has_parser` API); the
   0.12 `vim.treesitter.language.get_lang` API is the fallback so both work.
   `vim.ui.select` needs 0.9+. Developed/tested on 0.12.4.

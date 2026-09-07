@@ -70,7 +70,21 @@ local plugins = {
 
 local clara_root = vim.env.CLARA_HOME_EXPLORER
 if clara_root then
-  plugins[#plugins + 1] = { dir = clara_root .. "/editor/neovim" }
+  plugins[#plugins + 1] = {
+    dir = clara_root .. "/editor/neovim",
+    init = function()
+      -- Map keys strictly in Clojure buffers so they don't clash elsewhere
+      vim.api.nvim_create_autocmd("FileType", {
+        pattern = "clojure",
+        callback = function(args)
+          -- Note: gp and gc are standard Vim bindings (paste/comment). 
+          -- If you use those, consider changing these to <localleader> mappings like ",gp".
+          vim.keymap.set("n", "gp", "<Cmd>ClaraExplorerNavigateProducer<CR>", { buffer = args.buf, desc = "Navigate to Producer (Clara)" })
+          vim.keymap.set("n", "gc", "<Cmd>ClaraExplorerNavigateConsumer<CR>", { buffer = args.buf, desc = "Navigate to Consumer (Clara)" })
+        end,
+      })
+    end
+  }
 else
   vim.notify("CLARA_HOME_EXPLORER is not set — clara-explorer not loaded", vim.log.levels.WARN)
 end
