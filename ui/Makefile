@@ -5,7 +5,7 @@
 # bare `pnpm test:e2e` does not: the serialized demo session
 # (server/demo-data/session.bin, gitignored), the e2e production SPA build,
 # and installed deps.
-.PHONY: test test-unit test-e2e deps demo-setup demo-scrape demo-preview e2e-build check lint format format-check clean e2e-stop
+.PHONY: test test-unit test-e2e deps demo-setup demo-scrape demo-preview demo-build e2e-build check lint format format-check clean e2e-stop
 
 SHELL := /bin/bash
 
@@ -44,8 +44,18 @@ demo-setup:
 demo-scrape: deps
 	pnpm run scrape:demo
 
-demo-preview:
+# Preview the static demo SPA locally.  `pnpm preview` runs `vite preview`,
+# which serves the production output in .svelte-kit/output/server — so the
+# demo build must exist first.  Build it here rather than asking the caller
+# to remember the separate `pnpm run build:demo` step.
+demo-preview: demo-build
 	pnpm preview
+
+# Build the static demo SPA (adapter-static, VITE_DEMO_MODE=true, base path
+# /clara-rules-explorer).  Regenerated unconditionally because demo-scrape
+# refreshes the JSON that gets baked into the build.
+demo-build:
+	pnpm run build:demo
 
 # Build the e2e SPA only when missing.  Use `make e2e-build` to regenerate
 # unconditionally (e.g. after source changes).

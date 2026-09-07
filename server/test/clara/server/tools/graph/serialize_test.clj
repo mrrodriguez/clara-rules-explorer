@@ -102,14 +102,14 @@
 
   (testing "Keywords keep their colon"
     (is (= ":my.ns/child" (s/resolve-type nil :my.ns/child)))
-    (is (= ":extract-doc-meta" (s/resolve-type nil :extract-doc-meta))))
+    (is (= ":extracted-doc-meta" (s/resolve-type nil :extracted-doc-meta))))
 
   (testing "Strings are quoted (pr-str)"
     (is (= "\"foo\"" (s/resolve-type nil "foo"))))
 
   (testing "Unresolved symbols are wrapped in symbol[...]"
     (is (= "symbol[my.ns/foo]" (s/resolve-type nil 'my.ns/foo)))
-    (is (= "symbol[extract-doc-meta]" (s/resolve-type nil 'extract-doc-meta))))
+    (is (= "symbol[extracted-doc-meta]" (s/resolve-type nil 'extracted-doc-meta))))
 
   (testing "Symbols resolving to a class via the ns-name serialize as the class name"
     (is (= "clara.server.tools.graph.rules.loan_app_facts.Application"

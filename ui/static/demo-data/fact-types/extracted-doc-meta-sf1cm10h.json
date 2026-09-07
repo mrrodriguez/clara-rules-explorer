@@ -1,7 +1,7 @@
 {
 	"retracted-by-rules": [],
 	"ns": null,
-	"name": ":extract-doc-meta",
+	"name": ":extracted-doc-meta",
 	"used-by-queries": [],
 	"used-by-rules": [
 		{
@@ -13,7 +13,7 @@
 	],
 	"descendants": [],
 	"ancestors": [],
-	"id": "extract-doc-meta-is5qkiib",
+	"id": "extracted-doc-meta-sf1cm10h",
 	"inserted-by-rules": [
 		{
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule",
