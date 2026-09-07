@@ -33,7 +33,7 @@
 ;; Using custom macros that emit rules with var referenced functions as facts.
 ;; ---------------------------------------------------------------------------
 
-(h/def-fact-fn extract-doc-meta :extract-doc-meta
+(h/def-fact-fn extract-doc-meta :extracted-doc-meta
   [doc-fact]
   (let [doc-meta (-> doc-fact
                      meta
