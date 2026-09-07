@@ -25,6 +25,12 @@
 			"count": 1
 		},
 		{
+			"name": ":extracted-doc-meta",
+			"id": "extracted-doc-meta-sf1cm10h",
+			"ns": null,
+			"count": 1
+		},
+		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
 			"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
 			"ns": "clara.server.tools.graph.rules.loan_app_facts",
@@ -76,12 +82,6 @@
 			"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
 			"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
 			"ns": "clara.server.tools.graph.rules.loan_app_facts",
-			"count": 1
-		},
-		{
-			"name": ":extract-doc-meta",
-			"id": "extract-doc-meta-is5qkiib",
-			"ns": null,
 			"count": 1
 		},
 		{
