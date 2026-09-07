@@ -61,7 +61,9 @@
           ;; (single-threaded, before the server accepts connections) closes the
           ;; race; both paths then just resolve an already-loaded var.
           :main-opts ["-e" "(require 'cider.nrepl.pprint)"
-                      "-m" "nrepl.cmdline" "--middleware" "[cider.nrepl/cider-middleware]"]}
+                      "-m" "nrepl.cmdline" 
+                      "--middleware" "[cider.nrepl/cider-middleware]"
+                      "--interactive"]}
 
   :run-tests {:extra-paths ["dev" "test" "test-resources"]
               :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
