@@ -438,7 +438,7 @@
    java.lang.Object) appear after these, sorted alphabetically."
   ["clara.server.tools.graph.rules.loan_app_facts.Application"
    "clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
-   ":extract-doc-meta"
+   ":extracted-doc-meta"
    "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta"
    "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"
    "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"

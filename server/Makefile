@@ -1,9 +1,13 @@
-.PHONY: test lint clean reflection-check format format-check regen-fixture demo-setup demo-run hierarchy-run
+.PHONY: test lint clean reflection-check format format-check regen-fixture demo-setup demo-run hierarchy-run repl
 
 SHELL := /bin/bash
 
 test:
 	clojure -M:test:run-tests
+
+# Start a headless nREPL server with dev and test dependencies loaded (for Conjure, CIDER, etc.)
+repl:
+	clojure -M:dev:test:nrepl
 
 # Serialize the demo session (loan-app rules) to demo-data/session.bin.
 demo-setup:

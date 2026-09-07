@@ -492,7 +492,7 @@
                          "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"
                          "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"
                          "loan-doc-rules/document-check-input"
-                         "extract-doc-meta"}
+                         "extracted-doc-meta"}
               present (set/intersection expected type-names)]
           (is (seq present)
               (str "No expected fact types found in memory-analysis. "

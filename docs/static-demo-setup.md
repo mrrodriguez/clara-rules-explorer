@@ -45,33 +45,24 @@ Keep this server running in your terminal while you perform the next steps.
 
 ### Step 3: Scrape Demo Data
 
-Open a new terminal window. Run the scraper script in the `ui` directory to fetch the current API responses and save them as static JSON files:
+Open a new terminal window. Run the scraper in the `ui` directory to fetch the current API responses and save them as static JSON files:
 
 ```bash
 cd ui
-make deps
-pnpm run scrape:demo
+make demo-scrape
 ```
 
-### Step 4: Build the Demo Files
+`demo-scrape` installs dependencies first (`make deps`), then runs the scraper against the backend on port `9001`.
 
-Compile the static build files:
+### Step 4: Build and Preview Locally
+
+Compile the static build and serve it locally in one step:
 
 ```bash
-pnpm run build:demo
+make demo-preview
 ```
 
-This script (configured in `ui/package.json`) runs the build with `VITE_DEMO_MODE=true` and sets the repository subdirectory base path (`BASE_PATH="/clara-rules-explorer"`).
-
-### Step 5: Preview Locally
-
-You can preview the compiled static build locally before deploying:
-
-```bash
-pnpm preview
-```
-
-Open the local URL in your browser to inspect the visualizer running 100% statically.
+`demo-preview` first runs `demo-build` (which invokes `pnpm run build:demo` under the hood, setting `VITE_DEMO_MODE=true` and `BASE_PATH="/clara-rules-explorer"`), then starts `vite preview`. Open the local URL it prints to inspect the visualizer running 100% statically.
 
 ---
 
@@ -83,7 +74,7 @@ Once deployed, the explorer demo is served at:
 👉 **[https://www.metasimple.org/clara-rules-explorer/](https://www.metasimple.org/clara-rules-explorer/)**
 
 - **DNS Configuration**: None required.
-- **Build Path**: Compiled using `BASE_PATH="/clara-rules-explorer"` (handled automatically by `pnpm build:demo`).
+- **Build Path**: Compiled using `BASE_PATH="/clara-rules-explorer"` (handled automatically by `make demo-build`, which `make demo-preview` runs before previewing).
 
 > [!IMPORTANT] > **If you see a 404 page at the URL above:**
 >

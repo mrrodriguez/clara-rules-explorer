@@ -123,7 +123,7 @@ Goal: tested, refreshable, durably installable.
       `test-session-swap-reflected-in-navigation` + existing `server_test`
       reload coverage; the full manual Emacs flow remains part of 0.5 acceptance
 - [x] Elisp tiered tests — `editor/emacs/test/clara-explorer-test.el` (43 ERT, see
-      `docs/planning/explorer-server-emacs-testing.md` + `docs/explorer-editor-navigation.md#Testing`):
+      `docs/planning/explorer-server-emacs-testing.md` + `docs/explorer-editor-navigation-emacs.md#Testing`):
   - [x] **Tier 1 — stubbed unit** (`make -C editor/emacs test-tier1` / fallback `make test-unit`): 38 passed + 5 skipped, <1s, no network/JVM, `test/test-helper.el` `provide` stubs + minimal `clojure-mode` syntax table + tiny `nrepl-dict-get`/`parseedn-read-str` stubs, `with-clara-buffer` prefers real `clojure-mode` when `fboundp` else `emacs-lisp-mode`
   - [x] **Tier 2 — real-deps unit** (`make eldev-prepare && make eldev-test` / `eldev test`): same 38 + 5 now 0 skipped, `editor/emacs/Eldev` `:main-file`/`:package` + `(eldev-use-package-archive 'melpa) (eldev-use-package-archive 'gnu)` + `Version: 0.1.0` header (required for `package-buffer-info`), `.eldev/` gitignored (`make clean` wipes `editor/emacs/target/elisp-check` + `.eldev/`), `test-helper--real-deps-p`/`--parseedn-real-p` + `test-helper--report-tier` banner (`Tier 1 — 5 skipped — hint: run eldev test`), `clara-explorer.el` guards now `or (featurep ...) (require ...)` and `test-helper` `unless (or (featurep ...) (require ...))` so Eldev’s real `cider`/`parseedn`/`clojure-mode` win, order `(require 'test-helper) (require 'clara-explorer)` + load-path shim for `test-helper` under Eldev. Covers `--edn-map→parseedn-read-str` hash-table/`vector` contract, `--eval-edn`+`nrepl-dict` wiring, `cider-symbol-at-point` `::`/`:kw`, real `syntax-ppss` for comments/reader macros
   - [x] **Tier 3 — live nREPL integration (deferred)** — full `client/navigate` e2e via `cider-nrepl-sync-request:eval` against live `server` (ctor, `:via :retract`, global `{:production nil}`), reserved for future `make eldev-prepare && eldev test --integration` / `test-integration` target; not required for CI (see testing doc)
@@ -165,7 +165,7 @@ integration test remains deferred; this phase does not need it.)
       (`eldev package` → `dist/clara-explorer-<version>.tar`), independent
       of the Spacemacs layer (which lives outside the Eldev project),
       `package-install-file` + `use-package :load-path` recipes documented in
-      `docs/explorer-editor-navigation.md#Install`; `dist/` gitignored +
+      `docs/explorer-editor-navigation-emacs.md#Install`; `dist/` gitignored +
       removed by `make clean`
 - [x] Local-layer recipes documented — `dotspacemacs-configuration-layer-path`
       via `add-to-list` (not `setq`, which would replace other layer paths),

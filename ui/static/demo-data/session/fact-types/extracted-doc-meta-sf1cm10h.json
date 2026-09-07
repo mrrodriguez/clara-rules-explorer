@@ -1,6 +1,6 @@
 {
-	"name": ":extract-doc-meta",
-	"id": "extract-doc-meta-is5qkiib",
+	"name": ":extracted-doc-meta",
+	"id": "extracted-doc-meta-sf1cm10h",
 	"ns": null,
 	"count": 1,
 	"inserted-from": [
@@ -12,8 +12,8 @@
 				{
 					"id": 5,
 					"type": {
-						"name": ":extract-doc-meta",
-						"id": "extract-doc-meta-is5qkiib",
+						"name": ":extracted-doc-meta",
+						"id": "extracted-doc-meta-sf1cm10h",
 						"known": true
 					},
 					"ns": null,
@@ -49,8 +49,8 @@
 				{
 					"id": 5,
 					"type": {
-						"name": ":extract-doc-meta",
-						"id": "extract-doc-meta-is5qkiib",
+						"name": ":extracted-doc-meta",
+						"id": "extracted-doc-meta-sf1cm10h",
 						"known": true
 					},
 					"ns": null,

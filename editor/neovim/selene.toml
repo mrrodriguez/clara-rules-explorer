@@ -1,0 +1,25 @@
+# selene linter config for the Neovim client.
+#
+# `std = "neovim"` lints against the Neovim API + Lua 5.1 base.  selene does
+# not bundle the Neovim std, so it is vendored as `neovim.yml` next to this
+# file (base: lua51 + the `vim`/busted globals we use).
+#
+# The three `allow` overrides are the minimum for this codebase.  Each is
+# justified by a real finding from a run with no overrides:
+#
+#   - incorrect_standard_library_use: 133 sites — the plenary.busted test
+#     suites use `assert`/`assert.are.same`, which selene flags because
+#     LuaJIT can compile `assert` out under -O2.  In tests it is the canonical
+#     assertion primitive, not a runtime check we rely on.
+#   - mixed_table: 1 site — `vim.cmd.normal({ "gg", bang = true })` is the
+#     Neovim API's own array+key shape (command list + `bang` option).
+#   - multiple_statements: 21 sites — stylua's
+#     `collapse_simple_statement = "Always"` collapses single-line function
+#     bodies onto one line, which selene counts as multiple statements.
+
+std = "neovim"
+
+[rules]
+incorrect_standard_library_use = "allow"
+mixed_table = "allow"
+multiple_statements = "allow"

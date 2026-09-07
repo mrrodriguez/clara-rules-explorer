@@ -33,7 +33,7 @@
 ;; Using custom macros that emit rules with var referenced functions as facts.
 ;; ---------------------------------------------------------------------------
 
-(h/def-fact-fn extract-doc-meta :extract-doc-meta
+(h/def-fact-fn extract-doc-meta :extracted-doc-meta
   [doc-fact]
   (let [doc-meta (-> doc-fact
                      meta
@@ -49,7 +49,7 @@
 (r/defrule collect-doc-meta
   [Application (= ?app-id app-id)]
   [?docs <- (acc/all) :from [GivenDocument (= ?app-id app-id)]]
-  [?extract-doc-meta <- :extract-doc-meta]
+  [?extract-doc-meta <- :extracted-doc-meta]
   =>
   (let [doc-metas (mapv ?extract-doc-meta ?docs)]
     (r/insert! (laf/map->AllGivenDocumentsMeta {:app-id ?app-id :doc-metas doc-metas}))))

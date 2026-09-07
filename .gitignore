@@ -25,6 +25,7 @@ ui/playwright-report
 *.swp
 *.swo
 *~
+nvim.log
 
 # OS metadata
 .DS_Store

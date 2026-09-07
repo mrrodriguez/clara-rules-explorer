@@ -446,11 +446,11 @@
           a (ann/get-annotation ann `ldr/extract-doc-meta-rule)
           dyn (:clara-rules/dynamic-insert-types-detected a)]
       (is (= :full (:resolution dyn)))
-      (is (= [:extract-doc-meta] (:clara-rules/insert-types a))
+      (is (= [:extracted-doc-meta] (:clara-rules/insert-types a))
           "resolver-provided fact type is promoted (arbitrary token shapes pass through)")
       (let [{:keys [source-str status resolved-types]} (first (:callsites dyn))]
         (is (= :full status))
-        (is (= [:extract-doc-meta] resolved-types))
+        (is (= [:extracted-doc-meta] resolved-types))
         (is (re-matches #"resolved__\d+__auto__" source-str)
             "the callsite still shows the literal boundary arg (the gensym local)"))
 

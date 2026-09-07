@@ -49,6 +49,22 @@
                   :extra-deps {ch.qos.logback/logback-classic {:mvn/version "1.6.2"}}
                   :main-opts ["-m" "clara.server.graph.hierarchy-run"]}
 
+  :nrepl {:extra-deps {nrepl/nrepl {:mvn/version "1.7.0"}
+                       cider/cider-nrepl {:mvn/version "0.62.2"}}
+          ;; cider-nrepl 0.62.x defers middleware loading. nREPL's print
+          ;; middleware resolves Conjure's default print fn
+          ;; (cider.nrepl.pprint/pprint) via a raw `require`, while the deferred
+          ;; inspect middleware requires the same namespace under the serialized
+          ;; require lock. When Conjure's first evals race these two loads, the
+          ;; namespace is left half-registered and every later require fails with
+          ;; "namespace 'cider.nrepl.pprint' not found". Requiring it up front
+          ;; (single-threaded, before the server accepts connections) closes the
+          ;; race; both paths then just resolve an already-loaded var.
+          :main-opts ["-e" "(require 'cider.nrepl.pprint)"
+                      "-m" "nrepl.cmdline" 
+                      "--middleware" "[cider.nrepl/cider-middleware]"
+                      "--interactive"]}
+
   :run-tests {:extra-paths ["dev" "test" "test-resources"]
               :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
               :main-opts ["-m" "cognitect.test-runner" "-d" "test"]}}}
