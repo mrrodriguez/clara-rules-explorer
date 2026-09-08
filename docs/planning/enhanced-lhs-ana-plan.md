@@ -255,6 +255,91 @@ recoverable:
 
 This is the natural next increment after the mapping layer exists.
 
+### 3.6 Accumulator node types & binding semantics
+
+Both accumulator record types matter, not just `AccumulateNode`:
+
+- `AccumulateNode` — equality-only `:from` constraints.
+- `AccumulateWithJoinFilterNode` — created when the `:from` has non-equality
+  unifications; adds a `join-filter-fn` field, otherwise the same shape.
+
+Both carry the fields we care about: `:accum-condition`, `:accumulator`
+(evaluated), `:result-binding`, `:binding-keys`, and `:new-bindings`. A
+condition→node mapper must match both records.
+
+`:binding-keys` and `:new-bindings` are **disjoint**. For DSL accumulators
+they partition the `:from` constraint variables:
+
+- `:binding-keys` = `(set/intersection cond-bindings parent-bindings)` —
+  variables already bound upstream that this condition joins on.
+- `:new-bindings` = `(set/difference constraint-vars parent-bindings)` —
+  variables the `:from` constraints introduce for the first time.
+
+Verified live with an accumulator whose `:from` constraints were
+`(= ?p id) (= ?other val)` and `?p` was bound upstream:
+`{:binding-keys #{:?p} :new-bindings #{:?other}}`, intersection empty.
+
+Only the two accumulator node records retain `:new-bindings` in the compiled
+network. `condition-to-node` computes `:new-bindings` for every condition
+descriptor, but `compile-node` copies it only into `AccumulateNode` /
+`AccumulateWithJoinFilterNode`; join and negation records keep
+`:binding-keys` and drop `:new-bindings`, and `TestNode` keeps neither.
+
+The reason `:new-bindings` is persisted only for accumulators is the
+initial-value propagation rule: on left-activate (and after full retraction),
+the engine emits the accumulator's converted `:initial-value` with no matching
+facts **only when `(empty? new-bindings)`**. If the `:from` constraints
+introduce new variables, an initial value cannot satisfy them, so nothing is
+propagated. So `:new-bindings` is a first-class static property for
+accumulator analysis — exactly the detail under focus.
+
+### 3.7 A lightweight per-LHS binding analyzer is feasible
+
+The per-condition picture the user wants — "which `:binding-keys` does it
+use" and "which keys are new vs joined" — can be computed directly from a
+production's raw `:lhs` by reusing the compiler's own transformation
+functions. No beta graph, node ids, or compiled network required.
+
+Public in `clara.rules.compiler`:
+
+- `condition-type`
+- `to-dnf`
+- `analyze-condition` (per-condition `:bound` / `:unbound` / `:is-accumulator`)
+- `sort-conditions`
+- `condition-to-node` — returns `:used-bindings`, `:new-bindings`,
+  `:join-bindings` (= the compiled `:binding-keys`), and
+  `:join-filter-join-bindings`.
+
+Private but small/stable (call via `#'clara.rules.compiler/...` or reimplement
+their few lines locally):
+
+- `extract-exists`
+- `classify-variables`
+- `variables-as-keywords`
+
+The walk mirrors `build-rule-node` / `add-conjunctions` /
+`get-condition-bindings`:
+
+1. flatten top-level `:and` groups;
+2. `sort-conditions`;
+3. walk the sorted conditions carrying `ancestor-bindings` (init `#{}`);
+4. per condition: `to-dnf`, split disjunctions, `extract-exists`, then for
+   each conjunction call `condition-to-node` with `(:env production)` and the
+   current ancestor bindings;
+5. accumulate the next ancestor bindings exactly as the compiler does:
+   `union(ancestor, (:used-bindings node), result-binding, fact-binding)`.
+
+`condition-to-node` already yields the exact `new` vs `join` split for every
+condition type — including join/test/negation nodes where the compiled session
+drops `:new-bindings`. For binding metadata this lightweight analyzer is
+strictly more informative than reading the compiled network, and it works on a
+bare rulebase (no session required).
+
+Caveats: `sc/defn` performs runtime schema validation (fine at analysis time,
+optimizable later); depending on private vars is a deliberate coupling to
+handle (copy or guard); `:or` / `:exists` / complex `:not` need the same
+expansion the compiler does — which the functions above already encapsulate.
+
 ---
 
 ## 4. Options
@@ -287,53 +372,80 @@ Eval failures / non-map results degrade to `:some-initial-value? false`.
 - Accumulator forms that reference macro-local symbols (unresolvable after
   compilation) will fail to eval → false, with no way to know "unknown" vs
   "actually nil initial value".
-- Does not unlock `:bindings`/node-level enrichment — that still needs the
-  mapper.
+- Does not unlock `:bindings`/node-level enrichment — that still needs another
+  pass.
 
-### Option B — Map raw conditions to compiled nodes, read the evaluated accumulator (richer)
+### Option B — Lightweight per-LHS binding analyzer (preferred for bindings)
 
-Add a dedicated analysis pass (new namespace, e.g.
-`clara.server.tools.graph.lhs-nodes`) that:
+Add a small namespace (e.g. `clara.server.tools.graph.lhs-bindings`) that
+analyzes a single production's raw `:lhs` using the compiler's own
+transformation functions (Section 3.7). It emits, per raw condition / expanded
+conjunction:
 
-1. builds reverse adjacency from `:children`,
-2. resolves each production to its reachable node set via reverse-BFS from its
-   terminal node(s),
-3. structurally matches raw LHS conditions to nodes (Section 3.4),
-4. serializes accumulator details from the node's evaluated `:accumulator`
-   (no `eval`), and can later emit `:bindings` / node ids per condition.
+- `:used-bindings` — every variable the condition references,
+- `:join-bindings` — variables already bound upstream that this condition
+  joins on (the compiled `:binding-keys`),
+- `:new-bindings` — variables this condition introduces for the first time,
+- `:result-binding` / `:fact-binding` where present.
+
+This is **not** a compiler reimplementation: it reuses `to-dnf`,
+`sort-conditions`, `condition-to-node` (and either calls or reimplements the
+small private `extract-exists` / `classify-variables`) to reconstruct exactly
+the binding sets the compiler uses — without building a beta graph or
+assigning node ids.
 
 **Pros**
 
-- Uses the engine's own evaluated accumulator — no re-evaluation, no purity
-  concern, exact.
-- Unlocks the richer per-layer data (`:binding-keys`, `:new-bindings`,
-  node ids, compiled expressions) that the user is already interested in.
-- The mapping layer is reusable for other condition metadata.
+- Works from a bare rulebase (no live session / compiled network required).
+- Gives the complete new-vs-join picture for **every** condition type; the
+  compiled session only persists `:new-bindings` for accumulator nodes.
+- Small, focused, testable against `condition-to-node` output.
+- Reuses the compiler's own semantics, so it stays correct as clara evolves.
 
 **Cons**
 
-- Substantially more code and test surface.
-- Must correctly handle compiler transformations: topological reorder,
-  `:exists` expansion, `:or`/DNF, `:not`, non-equality unifications, shared
-  nodes, multiple terminal nodes.
-- Structural matching is heuristic; edge cases need a lot of fixtures.
-- Requires a live compiled session (not a bare hand-built rulebase).
+- Depends on some `clara.rules.compiler` internals (public fns + a couple of
+  private ones to copy or call via var).
+- `sc/defn` schema validation is runtime overhead (fine for analysis-time;
+  optimize later if needed).
+- `:or` / `:exists` / complex `:not` require the same expansion the compiler
+  does — already encapsulated by the reused fns, but needs fixtures.
 
-### Option C — Hybrid (recommended)
+### Option C — Compiled-node mapper (only for evaluated-accumulator access)
 
-1. **Now:** implement **Option A** to ship the concrete accumulator fields
-   (`:form`, `:some-initial-value?`) and fix the broken representation.
-2. **Next:** implement **Option B** as a separate pass, initially to source
-   `:some-initial-value?` (and future accumulator fields) from the node, and to
-   attach optional per-condition node/binding metadata.
+Keep the node-mapping idea from Section 3.4, but narrowly scoped: map
+accumulator conditions to `AccumulateNode` / `AccumulateWithJoinFilterNode` to
+read the engine's already-evaluated `:accumulator` (and persisted
+`:binding-keys` / `:new-bindings`). This complements Option B — it is not a
+replacement, because the compiled session drops `:new-bindings` for
+non-accumulator nodes.
 
-This keeps the API additive: the accumulator object gains keys over time
-(`:some-initial-value?` now, later `:node-id`, `:bindings`, …) without a
-breaking change.
+**Pros**
 
-**Recommendation: Option C.** Option A is cheap and satisfies the immediate
-goal; Option B is the right home for the binding-layer work but is too big to
-bundle with it blindly.
+- No `eval` at serialization time; exact evaluated accumulator.
+- Reuses the same reverse-BFS + structural matcher for future node-id exposure.
+
+**Cons**
+
+- Only strictly needed if Option A's `eval` is unacceptable.
+- Most mapping complexity (`:or`, `:exists`, shared nodes, non-equality
+  unifications) remains, for a narrower payoff once Option B exists.
+
+### Recommended sequencing
+
+1. **Now:** Option A — ship `:form` + `:some-initial-value?` and fix the broken
+   `:accumulator` representation.
+2. **Next:** Option B — add the per-condition binding analyzer; expose
+   `:used-bindings` / `:join-bindings` / `:new-bindings` on serialized LHS
+   conditions (additive).
+3. **Later / only if needed:** Option C — node mapping for evaluated
+   accumulators, replacing Option A's eval if purity becomes a blocker, and
+   exposing node ids.
+
+**Recommendation: A now, B next.** B is the right home for the binding-layer
+work, and it removes the pressure to make the fragile node mapper carry
+binding semantics. C is optional and only for the evaluated-accumulator
+question.
 
 ---
 
