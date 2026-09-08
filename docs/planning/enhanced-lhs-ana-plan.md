@@ -1,12 +1,15 @@
 # Enhanced LHS Analysis — Accumulator Details & Node Mapping — Plan
 
-Status: **Planning / not yet implemented.**
+Status: **Implemented (accumulator info) + binding analyzer prototyped.** See
+the companion [`roadmap-enhanced-lhs-ana.md`](./roadmap-enhanced-lhs-ana.md)
+for the work log and next steps.
 
 Scope: extend the serialized rulebase LHS analysis so accumulator conditions
 carry real information about the accumulator (form + `:initial-value`
 presence), fix the currently-broken `:accumulator` representation, and lay the
-groundwork for richer per-layer data (bindings) sourced from the compiled Rete
-network.
+groundwork for richer per-layer data (bindings). Accumulator evaluation now
+happens in a dedicated conditions-analysis pass
+(`clara.server.tools.graph.conditions`), not during serialization.
 
 ---
 
@@ -344,41 +347,46 @@ expansion the compiler does — which the functions above already encapsulate.
 
 ## 4. Options
 
-### Option A — Eval the raw accumulator form in serialization (minimal)
+### Option A — Evaluate accumulator forms in the conditions-analysis pass (implemented)
 
-Add `serialize/serialize-accumulator` (or extend `serialize-condition`) that,
-for a condition with `:accumulator`:
+Add `clara.server.tools.graph.conditions/accumulator-info`, which:
 
-1. pretty-prints the raw form via the existing dynamic `*form-printer*`
-   (trimmed of the trailing newline), and
-2. evaluates the form in the production's namespace
-   (`(binding [*ns* (or (some-> prod-ns find-ns) *ns*)] (eval form))`),
-   then reports `:some-initial-value?` as `(some? (:initial-value result))`.
+1. evaluates the raw accumulator form in the production's namespace
+   (`(binding [*ns* acc-ns] (eval form))`), and
+2. returns
+   `{:form <raw-form> :some-initial-value? (some? (:initial-value result))}`.
 
-Eval failures / non-map results degrade to `:some-initial-value? false`.
+`enrich-lhs` then prewalks a production's raw LHS and replaces each
+accumulator condition's `:accumulator` with that map. `core/production-summary`
+runs the enrichment before `serialize-lhs`; `serialize-condition` only
+stringifies the already-computed `:form` via `*form-printer*` +
+`str/trim-newline`.
+
+Eval failures throw (`ex-info`) — analysis assumes the rulebase namespaces are
+already loaded, so a failure is a real analysis error, not a silent `false`.
 
 **Pros**
 
-- Small, localized change in `serialize.clj` + tests + UI types/render.
-- Directly matches the original proposal; no network traversal.
-- Handles both inline constructor calls and var accumulator references.
-- No dependency on the compiled network shape (works even on a bare rulebase
-  as long as the namespaces are loaded).
+- Analysis and serialization stay separated: direct consumers of
+  `->rulebase-analysis` get `:some-initial-value?` without any HTTP/serialize
+  step.
+- No network traversal; works from the raw rulebase as long as namespaces are
+  loaded (the same assumption the rest of the analysis already makes).
+- Handles inline constructor calls and var accumulator references.
 
 **Cons**
 
-- `eval` at serialization time is a (small) purity/side-effect concern for
-  `->rulebase-analysis`, which is currently documented as pure.
-- Accumulator forms that reference macro-local symbols (unresolvable after
-  compilation) will fail to eval → false, with no way to know "unknown" vs
-  "actually nil initial value".
-- Does not unlock `:bindings`/node-level enrichment — that still needs another
-  pass.
+- `eval` at analysis time is a (small) side effect for `->rulebase-analysis`.
+- Accumulator forms referencing macro-locals that were not retained after
+  compilation will throw rather than degrade — accepted for now (see Open
+  Questions).
+- Does not unlock per-condition `:bindings` — that is Option B.
 
-### Option B — Lightweight per-LHS binding analyzer (preferred for bindings)
+### Option B — Lightweight per-LHS binding analyzer (prototyped)
 
-Add a small namespace (e.g. `clara.server.tools.graph.lhs-bindings`) that
-analyzes a single production's raw `:lhs` using the compiler's own
+Implemented as `conditions/analyze-lhs-bindings`; not yet wired into the
+serialized `:lhs`. The analyzer lives in `clara.server.tools.graph.conditions`
+and analyzes a single production's raw `:lhs` using the compiler's own
 transformation functions (Section 3.7). It emits, per raw condition / expanded
 conjunction:
 
@@ -431,38 +439,40 @@ non-accumulator nodes.
 - Most mapping complexity (`:or`, `:exists`, shared nodes, non-equality
   unifications) remains, for a narrower payoff once Option B exists.
 
-### Recommended sequencing
+### Sequencing & current state
 
-1. **Now:** Option A — ship `:form` + `:some-initial-value?` and fix the broken
-   `:accumulator` representation.
-2. **Next:** Option B — add the per-condition binding analyzer; expose
-   `:used-bindings` / `:join-bindings` / `:new-bindings` on serialized LHS
-   conditions (additive).
-3. **Later / only if needed:** Option C — node mapping for evaluated
-   accumulators, replacing Option A's eval if purity becomes a blocker, and
-   exposing node ids.
+1. **Done:** Option A — accumulator `:form` + `:some-initial-value?` shipped;
+   the broken `:accumulator` representation is fixed.
+2. **Done (prototype):** Option B's analyzer (`conditions/analyze-lhs-bindings`)
+   is implemented and tested, but not yet exposed on the serialized `:lhs`.
+3. **Next:** wire Option B's per-condition binding metadata
+   (`:used-bindings` / `:join-bindings` / `:new-bindings`) into the analysis
+   output additively.
+4. **Later / only if needed:** Option C — node mapping for evaluated
+   accumulators, if eval purity becomes a blocker, and for node-id exposure.
 
-**Recommendation: A now, B next.** B is the right home for the binding-layer
-work, and it removes the pressure to make the fragile node mapper carry
-binding semantics. C is optional and only for the evaluated-accumulator
-question.
+**Recommendation unchanged:** A is complete; B is the next increment. C remains
+optional and only for the evaluated-accumulator question.
 
 ---
 
-## 5. Proposed API shape (incremental)
+## 5. Implemented API shape
 
 ### 5.1 Server (`graph/api.clj`)
 
-Add:
+Implemented:
 
 ```clojure
 (s/defschema AccumulatorInfo
-  "Details of an accumulator condition's accumulator form."
+  "Details of an accumulator condition's `:accumulator` form, computed by the
+   conditions analysis pass.  `:form` is the rendered form string;
+   `:some-initial-value?` is true when the evaluated accumulator has a non-nil
+   `:initial-value`."
   {:form s/Str
    :some-initial-value? s/Bool})
 ```
 
-Change `LhsCondition`:
+`LhsCondition` now declares:
 
 ```clojure
 (s/optional-key :accumulator) AccumulatorInfo
@@ -470,70 +480,84 @@ Change `LhsCondition`:
 
 (was `s/Any`).
 
-### 5.2 Server (`serialize.clj`)
+### 5.2 Server (`conditions.clj` / `serialize.clj` / `core.clj`)
+
+Analysis (`conditions.clj`) evaluates and attaches:
 
 ```clojure
-(defn- eval-accumulator-form [form prod-ns] ...)
-(defn- serialize-accumulator [form prod-ns]
-  {:form (str/trim-newline (*form-printer* form))
-   :some-initial-value? (boolean (some? (:initial-value (eval-accumulator-form form prod-ns))))})
+(defn accumulator-info [form prod-ns] ...) ; eval → {:form form :some-initial-value? bool}
+(defn enrich-lhs [lhs prod-ns] ...)        ; prewalk, attach accumulator-info
+```
+
+Serialization (`serialize.clj`) only renders the already-computed form:
+
+```clojure
+(serialize-accumulator [acc-info]
+  (update acc-info :form #(str/trim-newline (*form-printer* %))))
 ```
 
 `serialize-condition`'s `serialize-node` adds:
 
 ```clojure
-(contains? node :accumulator) (update :accumulator #(serialize-accumulator % prod-ns))
+(contains? node :accumulator) (update :accumulator serialize-accumulator)
 ```
+
+`core/production-summary` runs `conditions/enrich-lhs` before
+`serialize-lhs`.
 
 ### 5.3 UI (`ui/src/lib/types/api.ts`, `LhsCondition.svelte`)
 
-- Replace `accumulator?: string[]` with `accumulator?: AccumulatorInfo`.
-- Add `AccumulatorInfo { form: string; 'some-initial-value?': boolean }`.
-- Render `leaf.accumulator.form` as the accumulator text and surface the
-  initial-value flag (e.g. a small `initial-value` badge).
+Implemented:
+
+- `accumulator?: AccumulatorInfo` replaces `string[]`.
+- `AccumulatorInfo { form: string; 'some-initial-value?': boolean }` added.
+- `LhsCondition.svelte` renders `leaf.accumulator.form` and an
+  `Initial Value` badge when `some-initial-value?` is true.
 
 ---
 
-## 6. Tests to update / add
+## 6. Tests added / updated
 
 Server:
 
-- `serialize_test.clj` `test-serialize-condition` accumulator case — update to
-  expect the new map; use a fully-qualified form so eval succeeds.
-- New cases:
-  - `(clara.rules.accumulators/all)` → `:some-initial-value? true`.
-  - `(clara.rules.accumulators/min :field)` (or `max`) →
-    `:some-initial-value? false` (nil initial value).
-  - var accumulator (`def my-all (acc/all)`) → `true`.
-  - unevaluable form → `false` + form still string.
-- Any `graph/api.clj` schema validation fixtures that touch `:accumulator`.
+- New `conditions_test.clj` covers:
+  - `accumulator-info` for `(all)` → `:some-initial-value? true`,
+    `(min :temperature)` → `false`, a var accumulator, and unevaluable forms
+    throwing `ex-info`.
+  - `enrich-lhs` attaches accumulator info and leaves other conditions intact.
+  - `analyze-lhs-bindings` binding records (used/join/new + result-binding).
+- `serialize_test.clj` `test-serialize-condition` accumulator case updated to
+  the accumulator-info map input and rendered `:form` string.
+- `make test` → 249 tests / 1635 assertions, 0 failures/errors.
 
 UI:
 
-- `make check` / type-check after the type change.
-- Existing LHS condition rendering tests (if any) should be updated to the new
-  shape.
+- `api.ts` type changed; `LhsCondition.svelte` renders `form` + an
+  `Initial Value` badge. `make format check lint` pass.
 
 ---
 
 ## 7. Open questions
 
-1. **"unknown" vs "false".** Do we need a third state for unevaluable
-   accumulators, or is `false` acceptable for now? The proposed shape only has
-   `:some-initial-value?` boolean. A future `:resolution`-style marker could be
-   added if needed.
-2. **Purity of `->rulebase-analysis`.** If `eval` in serialization is a
-   concern, we could move Option B (node-sourced) earlier, or precompute an
-   accumulator-eval cache at session load time. Where should the eval cache
-   live?
-3. **`*form-printer*` trailing newline.** `default-form-printer` emits a
-   trailing newline for a single form; plan is to `str/trim-newline`. Confirm
-   that's acceptable (it also matters for `lhs-form` joins — not touched here).
-4. **Bare rulebase without loaded namespaces.** Should analysis attempt to
-   `require` the production ns / accumulator nses before eval, or accept false?
-5. **Scope of the node mapper.** Should the future mapper be restricted to
-   straight-line + accumulator + simple `:not`, explicitly excluding `:or` /
-   `:exists` in v1, and degrade gracefully for the rest?
+Resolved during implementation:
+
+- Unevaluable accumulator forms **throw** (`ex-info`) — no silent `false`.
+- Accumulator `:form` string uses `str/trim-newline` around `*form-printer*`.
+- Analysis requires production/accumulator namespaces to be loaded; missing
+  namespaces throw rather than degrade.
+
+Still open:
+
+1. **Eval caching / purity.** Accumulator eval now runs in the analysis pass
+   (not serialize). If `->rulebase-analysis` purity or repeated-eval cost
+   matters, precompute/cache accumulator info at session-load time. Where
+   should that cache live?
+2. **Binding metadata shape.** How to attach `conditions/analyze-lhs-bindings`
+   records back to raw LHS conditions and expose them on the serialized
+   `:lhs` (additive key vs a parallel analysis map)?
+3. **Node-mapper scope.** If Option C is ever needed, restrict v1 to
+   straight-line + accumulator + simple `:not`, excluding `:or` / `:exists` in
+   v1, and degrade gracefully for the rest.
 
 ---
 
