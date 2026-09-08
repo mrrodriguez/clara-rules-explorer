@@ -66,6 +66,14 @@
    :type s/Str
    (s/optional-key :match) [TypeBridgeMatch]})
 
+(s/defschema AccumulatorInfo
+  "Details of an accumulator condition's `:accumulator` form, computed by the
+   conditions analysis pass.  `:form` is the rendered form string;
+   `:some-initial-value?` is true when the evaluated accumulator has a non-nil
+   `:initial-value`."
+  {:form s/Str
+   :some-initial-value? s/Bool})
+
 (s/defschema LhsCondition
   "A serialized LHS condition from the Clara Rete network.
    Known keys: :type (a `TypeReference`), :constraints, :args, :accumulator,
@@ -73,7 +81,7 @@
   {(s/optional-key :type) TypeReference
    (s/optional-key :constraints) s/Str
    (s/optional-key :args) s/Str
-   (s/optional-key :accumulator) s/Any
+   (s/optional-key :accumulator) AccumulatorInfo
    (s/optional-key :from) (s/recursive #'LhsCondition)
    (s/optional-key :result-binding) s/Any
    (s/optional-key :fact-binding) s/Any

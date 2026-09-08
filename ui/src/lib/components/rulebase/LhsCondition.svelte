@@ -104,7 +104,10 @@
 				{/if}
 
 				{#if leaf.accumulator}
-					{@render textProperty('Accumulator', leaf.accumulator[0], 'text-info')}
+					{@render textProperty('Accumulator', leaf.accumulator.form, 'text-info')}
+					{#if leaf.accumulator['some-initial-value?']}
+						{@render textProperty('Initial Value', 'present', 'text-warning')}
+					{/if}
 				{/if}
 
 				{#if leaf.from}

@@ -222,10 +222,13 @@
       (is (string? (:constraints (nth serialized 2))))))
 
   (testing "Accumulator condition serialization"
-    (let [condition {:accumulator '(acc/all)
+    (let [condition {:accumulator {:form '(clara.rules.accumulators/all)
+                                   :some-initial-value? true}
                      :from {:type :some-type :constraints '[(= ?a 1)]}}
           serialized (s/serialize-condition condition nil #{})]
-      (is (= '(acc/all) (:accumulator serialized)))
+      (is (= {:form "(clara.rules.accumulators/all)"
+              :some-initial-value? true}
+             (:accumulator serialized)))
       (is (= ":some-type" (get-in serialized [:from :type :name])))
       (is (string? (get-in serialized [:from :constraints]))))))
 

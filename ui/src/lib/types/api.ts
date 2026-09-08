@@ -38,6 +38,17 @@ export interface ProductionReference {
 }
 
 /**
+ * Details of an accumulator condition's `:accumulator` form, computed by the
+ * conditions analysis pass. `form` is the rendered form string;
+ * `some-initial-value?` is true when the evaluated accumulator has a non-nil
+ * `:initial-value`.
+ */
+export interface AccumulatorInfo {
+	form: string;
+	'some-initial-value?': boolean;
+}
+
+/**
  * Represents a condition or constraint in the left-hand side (LHS) of a rule or query.
  * The shape of LHS elements can vary (e.g., standard type constraints, accumulators, etc.).
  * For now, we represent it as a flexible record.
@@ -45,7 +56,7 @@ export interface ProductionReference {
 export interface LhsElement {
 	type?: TypeReference;
 	constraints?: string;
-	accumulator?: string[];
+	accumulator?: AccumulatorInfo;
 	from?: LhsElement;
 	'result-binding'?: string;
 	'fact-binding'?: string;

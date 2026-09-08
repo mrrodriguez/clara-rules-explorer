@@ -236,12 +236,15 @@
                     (->> forms
                          (map *form-printer*)
                          (str/join \newline))))
+          (serialize-accumulator [acc-info]
+            (update acc-info :form #(str/trim-newline (*form-printer* %))))
           (serialize-node [node]
             (if (map? node)
               (cond-> node
                 (some? (:type node)) (update :type #(serialize-type-ref known-set prod-ns %))
                 (contains? node :constraints) (update :constraints serialize-forms)
-                (contains? node :args) (update :args serialize-forms))
+                (contains? node :args) (update :args serialize-forms)
+                (contains? node :accumulator) (update :accumulator serialize-accumulator))
               node))]
     (w/prewalk serialize-node condition)))
 

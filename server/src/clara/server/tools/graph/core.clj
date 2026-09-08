@@ -7,6 +7,7 @@
             [clara.rules.schema :as schema]
             [clara.server.tools.graph.annotations :as ann]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
+            [clara.server.tools.graph.conditions :as conditions]
             [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.nodes :as nodes]
             [clara.server.tools.graph.serialize :as serialize]
@@ -169,6 +170,7 @@
   (let [ann (ann/production-annotation annotations production)
         ;; Queries in clara.rules.schema/Query have no :ns-name — derive it.
         p-ns-name (get-production-ns-name-sym production)
+        lhs-analysis (conditions/enrich-lhs (:lhs production) p-ns-name)
         serialize-type-ref (partial serialize/serialize-type-ref known-set p-ns-name)
 
         {:keys [upstream downstream]} (get-production-deps-summary p-name ctx)
@@ -194,7 +196,7 @@
                  :props     (-> (or (:props production) {})
                                 serialize/prune-fns
                                 serialize/stringify-map-keys)
-                 :lhs       (-> production :lhs
+                 :lhs       (-> lhs-analysis
                                 (serialize/serialize-lhs p-ns-name known-set)
                                 serialize/prune-fns)
                  :lhs-form   (-> production :lhs
