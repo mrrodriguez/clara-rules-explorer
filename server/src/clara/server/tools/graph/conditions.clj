@@ -20,16 +20,15 @@
             [clojure.walk :as walk]))
 
 (defn accumulator-info
-  "Evaluates an accumulator form in the production's namespace and returns
-   `{:form form :some-initial-value? bool}`.  The `:form` is returned unchanged
-   (the raw Clojure form); serialization renders it to a string.
+  "Evaluates an accumulator form in the `prod-n` and returns:
 
-   `:some-initial-value?` is `(some? (:initial-value <evaluated-accumulator>))`.
+  * `:form` - `form` returned unchanged.
 
-   Throws when the production namespace is not loaded or the form does not
-   evaluate to a map.  Analysis assumes the rulebase's namespaces are already
-   loaded in the runtime — the same assumption the rest of the analysis makes
-   for symbol resolution."
+  * `:some-initial-value?` - true when the accumulator has `some?` `:initial-value` defined,
+  otherwise false.
+
+   Throws when the production namespace is not loaded or the form does not evaluate to a map.
+  Analysis assumes the rulebase's namespaces are already loaded in the runtime."
   [form prod-ns]
   (let [acc-ns (or (some-> prod-ns find-ns)
                    (throw (ex-info "Cannot evaluate accumulator: production namespace not loaded"
@@ -135,11 +134,11 @@
 
 (defn analyze-lhs-bindings
   "Analyzes the compiler's binding bookkeeping for `lhs` (a production's raw
-   LHS conditions) using clara-rules' own `sort-conditions` and
-   `condition-to-node`.
+   LHS conditions) using clara.rules.compiler internal functions, eg. own `com/sort-conditions` and
+   `com/condition-to-node`.
 
-   Returns a flat vector of per-conjunction records, in compiler processing
-   order.  Each record:
+   Returns a flat vector of per-conjunction maps, in compiler processing
+   order.  Each map:
 
    * `:condition` — the expanded conjunction form (after `:exists` expansion);
    * `:used-bindings` — variables the condition references;

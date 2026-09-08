@@ -499,5 +499,3 @@
    that should not depend on those details."
   [analysis]
   (dissoc analysis :fact-type-id-index :production-id-index :merged-annotations))
-
-
