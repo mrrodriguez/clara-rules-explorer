@@ -4,6 +4,7 @@
             [clara.server.tools.graph.annotation-fixtures :as fixtures]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.core :as core]
+            [clara.server.tools.graph.conditions :as conditions]
             [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
@@ -204,14 +205,16 @@
 (deftest test-lhs-type-extraction
   (testing "Extraction from various internal condition types"
     (is (= [Application GivenDocument]
-           (core/extract-lhs-fact-types [{:type Application :constraints []}
-                                         {:accumulator 'some-acc
-                                          :from {:type GivenDocument :constraints []}}])))
+           (conditions/extract-lhs-fact-types
+            [{:type Application :constraints []}
+             {:accumulator 'some-acc
+              :from {:type GivenDocument :constraints []}}])))
 
     (is (= [Application AllGivenDocuments AllRequiredDocuments]
-           (core/extract-lhs-fact-types [{:type Application :constraints []}
-                                         {:type AllGivenDocuments :constraints []}
-                                         {:type AllRequiredDocuments :constraints []}])))))
+           (conditions/extract-lhs-fact-types
+            [{:type Application :constraints []}
+             {:type AllGivenDocuments :constraints []}
+             {:type AllRequiredDocuments :constraints []}])))))
 
 (deftest test-rulebase-analysis-loan-app
   (let [session (->test-session)

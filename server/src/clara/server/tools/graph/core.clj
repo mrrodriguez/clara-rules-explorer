@@ -4,7 +4,6 @@
    lives here; fact-type hierarchy bookkeeping and read-side accessors live
    in `clara.server.tools.graph.fact-types`."
   (:require [clara.rules.engine :as eng]
-            [clara.rules.schema :as schema]
             [clara.server.tools.graph.annotations :as ann]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.conditions :as conditions]
@@ -33,22 +32,6 @@
   [session-or-rulebase]
   (or (-> session-or-rulebase get-rulebase :get-alphas-fn meta :ancestors-fn)
       clojure.core/ancestors))
-
-(defn extract-lhs-fact-types
-  "Recursively walks the LHS of a rule and extracts all fact types."
-  [lhs]
-  (let [extract (fn extract [condition]
-                  (case (schema/condition-type condition)
-                    :fact        [(:type condition)]
-                    :accumulator (extract (:from condition))
-                    (:and :or :not :exists) (mapcat extract (rest condition))
-                    :test        []
-                    []))]
-    (into []
-          (comp (mapcat extract)
-                (remove nil?)
-                (distinct))
-          lhs)))
 
 (defn- ->memoized-ancestors
   "Returns a memoized fn mapping a raw fact type to its set of ancestor raw
@@ -194,7 +177,7 @@
                  :id        (serialize/route-id (str p-name))
                  :ns        (str p-ns-name)
                  :doc       (:doc production)
-                 :lhs-types (mapv serialize-type-ref (extract-lhs-fact-types (:lhs production)))
+                 :lhs-types (mapv serialize-type-ref (conditions/extract-lhs-fact-types lhs-analysis))
                  :props     (-> (or (:props production) {})
                                 serialize/prune-fns
                                 serialize/stringify-map-keys)
@@ -202,6 +185,7 @@
                                 (serialize/serialize-lhs p-ns-name known-set)
                                 serialize/prune-fns)
                  :lhs-form   (-> production :lhs
+                                 conditions/get-raw-lhs
                                  serialize/serialize-lhs-form)
                  :notes     (:notes ann)}
 
@@ -268,7 +252,7 @@
   (into {}
         (map (fn [{p-name :name :keys [lhs] :as production}]
                (let [{:keys [insert-types retract-types]} (get production-annotation-map p-name)
-                     upstream-types (extract-lhs-fact-types lhs)
+                     upstream-types (conditions/extract-lhs-fact-types lhs)
                      retract-set (into #{}
                                        (remove nil?)
                                        retract-types)
@@ -390,6 +374,10 @@
    dynamic binding."
   [session-or-rulebase annotations]
   (let [{:keys [productions id-to-node] :as rulebase} (get-rulebase session-or-rulebase)
+        ;; Normalize the LHS once, up front, so every downstream pass
+        ;; (fact-type extraction, binding augmentation, serialization) works
+        ;; on the homogeneous shape.
+        productions (mapv #(update % :lhs conditions/normalize-lhs) productions)
 
         annotations (:annotations (coerce-annotations-arg annotations))
         annotations (if (every? (comp string? key) annotations)

@@ -14,6 +14,25 @@
 (def prod-ns 'clara.server.tools.graph.rules.loan-doc-rules)
 (def my-all (acc/all))
 
+(deftest test-normalize-lhs
+  (let [raw [[:and {:type Application :constraints []}
+              [:or {:type GivenDocument :constraints []}
+               {:type GivenDocument :constraints []}]]]
+        normalized (conditions/normalize-lhs raw)]
+    (testing "groups become homogeneous maps"
+      (is (= :and (get-in normalized [0 :condition-type])))
+      (is (= :or (get-in normalized [0 :children 1 :condition-type]))))
+    (testing "raw forms are retained for the binding walk"
+      (is (= raw (conditions/get-raw-lhs normalized)))))
+
+  (testing "accumulator :from subtrees are normalized and raw is retained"
+    (let [raw [{:accumulator '(clara.rules.accumulators/all)
+                :from [:not {:type GivenDocument :constraints []}]
+                :result-binding :?docs}]
+          normalized (conditions/normalize-lhs raw)]
+      (is (= :not (get-in normalized [0 :from :condition-type])))
+      (is (= raw (conditions/get-raw-lhs normalized))))))
+
 (deftest test-accumulator-info
   (testing "inline accumulator with a non-nil initial-value"
     (is (= {:form '(clara.rules.accumulators/all)
@@ -86,7 +105,7 @@
              {:type :extracted-doc-meta
               :constraints []
               :fact-binding :?extract-doc-meta}]
-        augmented (conditions/augment-lhs lhs {:prod-ns prod-ns :env nil})]
+        augmented (conditions/augment-lhs (conditions/normalize-lhs lhs) {:prod-ns prod-ns :env nil})]
 
     (testing "leaf conditions are augmented with a nested bindings summary"
       (is (= {:binding-keys []
@@ -129,9 +148,13 @@
                             :constraints '[(= ?app-id app-id)]}
                       {:type GivenDocument
                        :constraints '[(= ?app-id app-id)]}]]]
-          augmented (conditions/augment-lhs lhs {:prod-ns prod-ns :env nil})]
-      (is (= (second lhs) (second augmented))
-          "the compound negation group must not be augmented"))))
+          augmented (conditions/augment-lhs (conditions/normalize-lhs lhs) {:prod-ns prod-ns :env nil})
+          not-entry (second augmented)
+          and-entry (first (:children not-entry))]
+      (is (= :not (:condition-type not-entry)))
+      (is (= :and (:condition-type and-entry)))
+      (is (every? #(not (contains? % :bindings)) (:children and-entry))
+          "compound-negation leaves must not be augmented"))))
 
 (deftest test-analyze-lhs-bindings--exists-deterministic
   (testing "repeated analyses of the same :exists LHS are stable"
@@ -151,11 +174,11 @@
               :constraints '[(= ?app-id app-id)]}
              [:not {:type Application
                     :constraints '[(= ?app-id app-id)]}]]
-        augmented (conditions/augment-lhs lhs {:prod-ns prod-ns :env nil})
+        augmented (conditions/augment-lhs (conditions/normalize-lhs lhs) {:prod-ns prod-ns :env nil})
         not-entry (second augmented)
-        not-leaf (second not-entry)]
-    (testing "group vectors stay vectors"
-      (is (= :not (first not-entry)))
+        not-leaf (first (:children not-entry))]
+    (testing "group entries are normalized maps"
+      (is (= :not (:condition-type not-entry)))
       (is (map? not-leaf)))
 
     (testing "the nested leaf inside :not is augmented"

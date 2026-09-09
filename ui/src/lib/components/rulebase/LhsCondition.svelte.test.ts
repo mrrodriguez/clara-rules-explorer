@@ -39,4 +39,16 @@ describe('LhsCondition bindings summary', () => {
 
 		expect(screen.container.querySelectorAll('button[aria-expanded]')).toHaveLength(0);
 	});
+
+	it('renders group entries (condition-type + children) as nested conditions', async () => {
+		const group: LhsElement = {
+			'condition-type': 'not',
+			children: [{ type }]
+		};
+
+		const screen = await render(LhsCondition, { props: { condition: group } });
+
+		expect(screen.container.querySelector('.nested-badge')?.textContent?.trim()).toBe('not');
+		expect(screen.container.querySelectorAll('.lhs-condition')).toHaveLength(2);
+	});
 });

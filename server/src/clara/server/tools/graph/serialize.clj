@@ -5,7 +5,6 @@
    [clojure.set :as set]
    [clojure.string :as str]
    [clojure.tools.logging :as log]
-   [clojure.walk :as w]
    [clara.rules.schema :as schema]
    [clara.server.tools.graph.utils :as utils])
   (:import [java.math BigInteger]))
@@ -220,9 +219,11 @@
       (nil? rhs) (assoc :type "query"))))
 
 (defn serialize-condition
-  "Serializes a single condition, including pretty-printing its constraints and
-   args and converting its `:type` (raw fact type) into a
-   `clara.server.graph.api/TypeReference`.
+  "Serializes a single normalized LHS condition, including pretty-printing its
+   constraints and args and converting its `:type` (raw fact type) into a
+   `clara.server.graph.api/TypeReference`.  Group entries keep their
+   `:condition-type` and have their `:children` recursed; accumulator entries
+   recurse into `:from`.
    `prod-ns` is the production's namespace, used to resolve symbol types;
    `known-set` is the analysis's serialized fact-type names.
 
@@ -239,14 +240,16 @@
           (serialize-accumulator [acc-info]
             (update acc-info :form #(str/trim-newline (*form-printer* %))))
           (serialize-node [node]
-            (if (map? node)
-              (cond-> node
-                (some? (:type node)) (update :type #(serialize-type-ref known-set prod-ns %))
-                (contains? node :constraints) (update :constraints serialize-forms)
-                (contains? node :args) (update :args serialize-forms)
-                (contains? node :accumulator) (update :accumulator serialize-accumulator))
-              node))]
-    (w/prewalk serialize-node condition)))
+            (cond-> node
+              (some? (:type node)) (update :type #(serialize-type-ref known-set prod-ns %))
+              (contains? node :constraints) (update :constraints serialize-forms)
+              (contains? node :args) (update :args serialize-forms)
+              (contains? node :accumulator) (update :accumulator serialize-accumulator)))]
+    (if (map? condition)
+      (cond-> (serialize-node condition)
+        (contains? condition :from) (update :from #(serialize-condition % prod-ns known-set))
+        (contains? condition :children) (update :children #(mapv (fn [c] (serialize-condition c prod-ns known-set)) %)))
+      condition)))
 
 (defn serialize-lhs
   "Serializes the LHS of a rule.  Condition `:type` values are raw fact types

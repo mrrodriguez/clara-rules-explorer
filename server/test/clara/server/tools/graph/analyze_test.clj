@@ -6,7 +6,7 @@
             [clara.server.tools.graph.annotations :as ann]
             [clara.server.tools.graph.annotations.callsite :as ann.callsite]
             [clara.server.tools.graph.analyze :as analyze]
-            [clara.server.tools.graph.analyze.alias :as alias]
+            [clara.server.tools.graph.conditions :as conditions]
             [clara.server.tools.graph.analyze.synth :as synth]
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
@@ -486,18 +486,24 @@
 (deftest test-lhs-var-bindings
   (testing "fact conditions: :fact-binding pairs with the condition's type"
     (is (= [{:binding '?t :fact-type :widget-transform}]
-           (alias/lhs-var-bindings [{:type :widget-transform :constraints [] :fact-binding :?t}]))))
+           (conditions/extract-var-bindings
+            [{:type :widget-transform :constraints [] :fact-binding :?t}]))))
   (testing "accumulator conditions: :result-binding pairs with the :from subtree's types"
     (is (= [{:binding '?ts :fact-type :widget-transform}]
-           (alias/lhs-var-bindings [{:accumulator 'some-acc
-                                     :from {:type :widget-transform}
-                                     :result-binding :?ts}]))))
+           (conditions/extract-var-bindings
+            [{:accumulator 'some-acc
+              :from {:type :widget-transform}
+              :result-binding :?ts}]))))
   (testing "nested and/or compounds are walked"
     (is (= [{:binding '?x :fact-type :a} {:binding '?y :fact-type :c}]
-           (alias/lhs-var-bindings ['(:and {:type :a :fact-binding :?x}
-                                           (:or {:type :b} {:type :c :fact-binding :?y}))]))))
+           (conditions/extract-var-bindings
+            [{:condition-type :and
+              :children [{:type :a :fact-binding :?x}
+                         {:condition-type :or
+                          :children [{:type :b}
+                                     {:type :c :fact-binding :?y}]}]}]))))
   (testing "unbound and test conditions contribute nothing"
-    (is (= [] (alias/lhs-var-bindings [{:type :a} {:constraints []}])))))
+    (is (= [] (conditions/extract-var-bindings [{:type :a} {:constraints []}])))))
 
 (deftest test-fact-type-spec-fn
   (let [spec-fn (fn [t]

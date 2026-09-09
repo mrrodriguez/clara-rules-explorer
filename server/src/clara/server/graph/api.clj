@@ -83,9 +83,9 @@
    (s/optional-key :join-filter-join-bindings) [s/Keyword]})
 
 (s/defschema LhsCondition
-  "A serialized LHS condition from the Clara Rete network.
-   Known keys: :type (a `TypeReference`), :constraints, :args, :accumulator,
-   :from, :result-binding, :fact-binding, :bindings."
+  "A serialized LHS condition.  Leaf conditions carry :type / :constraints /
+   :args / :accumulator / :from / :result-binding / :fact-binding / :bindings
+   as applicable; group conditions carry :condition-type and :children."
   {(s/optional-key :type) TypeReference
    (s/optional-key :constraints) s/Str
    (s/optional-key :args) s/Str
@@ -94,7 +94,8 @@
    (s/optional-key :result-binding) s/Any
    (s/optional-key :fact-binding) s/Any
    (s/optional-key :bindings) LhsBindingInfo
-   s/Keyword s/Any})
+   (s/optional-key :condition-type) (s/enum :and :or :not :exists)
+   (s/optional-key :children) [(s/recursive #'LhsCondition)]})
 
 (s/defschema ViaEntry
   "A single entry in a `:rule-to-boundary-path` / `:boundary-to-constructor-path` chain."

@@ -1,6 +1,6 @@
 (ns clara.server.tools.graph.serialize-test
   (:require [clara.server.tools.graph.serialize :as s]
-            [clara.server.tools.graph.core :as core]
+            [clara.server.tools.graph.conditions :as conditions]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
@@ -211,15 +211,15 @@
       (is (str/includes? (:constraints serialized) "(= ?a 1)"))))
 
   (testing "Nested condition serialization (OR/AND)"
-    (let [condition [:or
-                     {:type :type-a :constraints '[(= ?a 1)]}
-                     {:type :type-b :constraints '[(= ?b 2)]}]
+    (let [condition {:condition-type :or
+                     :children [{:type :type-a :constraints '[(= ?a 1)]}
+                                {:type :type-b :constraints '[(= ?b 2)]}]}
           serialized (s/serialize-condition condition nil #{})]
-      (is (= :or (first serialized)))
-      (is (= ":type-a" (get-in (second serialized) [:type :name])))
-      (is (string? (:constraints (second serialized))))
-      (is (= ":type-b" (get-in (nth serialized 2) [:type :name])))
-      (is (string? (:constraints (nth serialized 2))))))
+      (is (= :or (:condition-type serialized)))
+      (is (= ":type-a" (get-in serialized [:children 0 :type :name])))
+      (is (string? (get-in serialized [:children 0 :constraints])))
+      (is (= ":type-b" (get-in serialized [:children 1 :type :name])))
+      (is (string? (get-in serialized [:children 1 :constraints])))))
 
   (testing "Accumulator condition serialization"
     (let [condition {:accumulator {:form '(clara.rules.accumulators/all)
@@ -359,7 +359,7 @@
                 :result-binding '?m
                 :from {:type 'my.ns/Z :fact-binding '?z}}]
           lhs-form-str (s/serialize-lhs-form lhs)
-          fact-types (core/extract-lhs-fact-types lhs)]
+          fact-types (conditions/extract-lhs-fact-types (conditions/normalize-lhs lhs))]
       (is (seq fact-types) "LHS must yield at least one fact type")
       (doseq [ft fact-types]
         (is (str/includes? lhs-form-str (str ft))

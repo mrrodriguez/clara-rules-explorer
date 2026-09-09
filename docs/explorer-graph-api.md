@@ -360,7 +360,7 @@ Includes everything from the list view plus:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `lhs` | object[] | Serialized LHS conditions, each with `:type` (a TypeReference) and pretty-printed `:constraints` / `:args` |
+| `lhs` | object[] | Serialized LHS conditions — every entry is an object. Leaf entries carry `:type` (a TypeReference), pretty-printed `:constraints` / `:args`, `:accumulator` / `:from` / `:result-binding` / `:fact-binding` / `:bindings` as applicable; group entries carry `:condition-type` (`and` \| `or` \| `not` \| `exists`) and `:children` |
 | `rhs-form` | string | Pretty-printed RHS s-expression (fns redacted) |
 | `props` | object | Full `:props` map from the `defrule` body (fns redacted, keys stringified) |
 | `notes` | string\|null | Human-readable notes from annotations |

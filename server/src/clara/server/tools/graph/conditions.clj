@@ -8,6 +8,14 @@
 
   Passes:
 
+  * `normalize-lhs` — convert a production's raw Clara LHS into the
+    homogeneous shape used throughout the analysis: every entry is a map;
+    boolean groups carry `:condition-type` + `:children`; leaves keep their
+    raw fields.
+
+  * `extract-lhs-fact-types` / `extract-var-bindings` — structural walkers
+    over the normalized LHS (fact types and bound fact variables).
+
   * `accumulator-info` — evaluate an accumulator condition's `:accumulator`
     form in the production namespace and return its `:form` and
     `:some-initial-value?` details.
@@ -17,8 +25,8 @@
     `com/sort-conditions` and `com/condition-to-node`, tagged with each
     record's origin path in the raw LHS.
 
-  * `augment-lhs` — evaluate accumulators and attach per-leaf binding info to
-    the original LHS shape."
+  * `augment-lhs` — normalize the LHS, evaluate accumulators, and attach
+    per-leaf binding info."
   (:require [clara.rules.compiler :as com]
             [clojure.set :as set]
             [clojure.walk :as walk]
@@ -48,6 +56,103 @@
    (s/optional-key :result-binding) s/Keyword
    (s/optional-key :fact-binding) s/Keyword
    (s/optional-key :join-filter-join-bindings) #{s/Keyword}})
+
+(defn- get-condition-type
+  "Returns the condition type of a normalized LHS node: the `:condition-type`
+   of a group, else `:accumulator` / `:fact` / `:test` by the leaf's keys."
+  [node]
+  (or (:condition-type node)
+      (cond
+        (:accumulator node) :accumulator
+        (:type node) :fact
+        :else :test)))
+
+(defn- normalize-condition
+  "Converts one raw Clara condition into the normalized homogeneous shape:
+   boolean group vectors become `{:condition-type … :children […]}`; accumulator
+   maps have their `:from` subtree normalized; leaf maps are unchanged.  Group
+   and accumulator nodes retain their raw form under `:raw-condition` so the
+   compiler-coupled binding walk can read it without a reverse conversion."
+  [condition]
+  (cond
+    (map? condition)
+    (if (contains? condition :accumulator)
+      (assoc (update condition :from normalize-condition)
+             :raw-condition condition)
+      condition)
+
+    (and (sequential? condition) (seq condition))
+    (let [op (first condition)]
+      {:condition-type (if (keyword? op) op (keyword (name op)))
+       :children (mapv normalize-condition (rest condition))
+       :raw-condition condition})
+
+    :else condition))
+
+(defn normalize-lhs
+  "Normalizes a production's raw LHS conditions into the homogeneous shape
+   used by the rest of the analysis: every entry is a map; group entries carry
+   `:condition-type` + `:children`; leaf entries keep their raw fields.  Group
+   and accumulator entries retain their raw form under `:raw-condition` for the
+   compiler-coupled binding walk; `augment-lhs` strips it once consumed."
+  [lhs]
+  (mapv normalize-condition lhs))
+
+(defn- get-raw-condition
+  "Returns the raw Clara form retained on a normalized condition (or the
+   condition itself when it is already a raw leaf map)."
+  [node]
+  (or (:raw-condition node) node))
+
+(defn get-raw-lhs
+  "Returns the raw Clara LHS retained on a normalized LHS (see
+   `normalize-lhs`)."
+  [lhs]
+  (mapv get-raw-condition lhs))
+
+(defn- extract-condition-fact-types
+  "Returns the fact types referenced by a single normalized LHS condition
+   subtree (fact leaves and accumulator `:from` subtrees; groups are walked;
+   test leaves contribute none).  Duplicates are preserved; callers that need
+   a deduplicated view use `extract-lhs-fact-types`."
+  [condition]
+  (case (get-condition-type condition)
+    :fact [(:type condition)]
+    :accumulator (extract-condition-fact-types (:from condition))
+    (:and :or :not :exists) (mapcat extract-condition-fact-types (:children condition))
+    :test []
+    []))
+
+(defn extract-lhs-fact-types
+  "Returns the distinct fact types referenced by a normalized production LHS,
+   in traversal order."
+  [lhs]
+  (into []
+        (comp (mapcat extract-condition-fact-types)
+              (remove nil?)
+              (distinct))
+        lhs))
+
+(defn extract-var-bindings
+  "Scans a normalized production LHS for bound fact variables:
+   `:fact-binding` on fact leaves and `:result-binding` on accumulator leaves
+   (whose `:from` subtree supplies the fact types).  Returns
+   `[{:binding ?sym :fact-type t} …]` with `:binding` as a symbol."
+  [lhs]
+  (letfn [(walk [condition]
+            (case (get-condition-type condition)
+              :fact (if-let [b (:fact-binding condition)]
+                      [{:binding (symbol (name b)) :fact-type (:type condition)}]
+                      [])
+              :accumulator (if-let [b (:result-binding condition)]
+                             (into []
+                                   (map (fn [t] {:binding (symbol (name b)) :fact-type t}))
+                                   (distinct (extract-condition-fact-types (:from condition))))
+                             [])
+              (:and :or :not :exists) (mapcat walk (:children condition))
+              :test []
+              []))]
+    (into [] (mapcat walk) lhs)))
 
 (s/defn accumulator-info :- AccumulatorInfo
   "Evaluates an accumulator form in the production's namespace and returns a
@@ -272,16 +377,17 @@
       records)))
 
 (defn analyze-lhs-bindings
-  "Analyzes the compiler's binding bookkeeping for `lhs` (a production's raw
-   LHS conditions) using clara-rules' own `com/sort-conditions` and
-   `com/condition-to-node`.
+  "Analyzes the compiler's binding bookkeeping for a normalized `lhs` using
+   clara-rules' own `com/sort-conditions` and `com/condition-to-node`.  The
+   normalized LHS is read via `get-raw-lhs` only for this compiler-coupled
+   walk.
 
    Returns a flat vector of origin-tagged records, in compiler processing
    order.  Each record:
 
-   * `:origin` — path into the raw LHS tree the record came from;
+   * `:origin` — path into the LHS tree the record came from;
    * `:attach-path` — path where this record's info should be attached when
-     augmenting the original LHS (nil for `:or` / `:exists` groups);
+     augmenting the LHS (nil for `:or` / `:exists` groups);
    * `:condition` — the expanded conjunction form (after `:exists` expansion);
    * `:used-bindings` — variables the condition references;
    * `:binding-keys` — variables already bound upstream that this condition
@@ -295,7 +401,7 @@
 
    `env` is the production's `:env` (usually nil)."
   [lhs env]
-  (analyze-tagged (sort-tagged (flatten-tagged lhs)) env))
+  (analyze-tagged (sort-tagged (flatten-tagged (get-raw-lhs lhs))) env))
 
 (defn- sort-bindings
   "Returns a deterministic, sorted vector of binding keywords."
@@ -332,33 +438,42 @@
           records))
 
 (defn- walk-augment
-  "Walks the (already accumulator-enriched) LHS tree, merging binding info into
-   leaf maps by path.  Group vectors are kept as vectors and only their nested
-   leaf maps are augmented."
+  "Walks the (normalized, accumulator-enriched) LHS tree, merging binding info
+   into leaf maps by path.  Group maps keep their `:condition-type` and have
+   their `:children` recursed.  The internal `:raw-condition` key is stripped
+   here — it is only needed by the binding walk."
   [x path binding-index]
   (cond
-    (map? x) (if-let [binding-info (get binding-index path)]
-               (merge x binding-info)
-               x)
+    (and (map? x) (contains? x :children))
+    (-> x
+        (update :children
+                (fn [children]
+                  (mapv (fn [j child]
+                          (walk-augment child (conj path j) binding-index))
+                        (range)
+                        children)))
+        (dissoc :raw-condition))
 
-    (vector? x) (into [(first x)]
-                      (map (fn [[child-path child]]
-                             (walk-augment child child-path binding-index))
-                           (group-child-paths path x)))
+    (map? x) (-> (if-let [binding-info (get binding-index path)]
+                   (merge x binding-info)
+                   x)
+                 (dissoc :raw-condition))
 
     :else x))
 
 (defn augment-lhs
-  "Returns `lhs` enriched for analysis: accumulator conditions carry
-   `accumulator-info`, and leaf conditions carry a nested `:bindings` map
+  "Enriches a normalized LHS for analysis.  Every entry is a map: group entries
+   are `{:condition-type … :children […]}`; leaf entries carry
+   `accumulator-info` (accumulator conditions) and a nested `:bindings` map
    (`:binding-keys` / `:new-bindings`, plus `:join-filter-join-bindings` when
    the condition has non-equality joins).
 
-   Group vectors (`:and`, `:or`, `:not`, `:exists`) are kept as vectors; only
-   their nested leaf maps are augmented.  `:or` / `:exists` groups and compound
-   negations (`[:not [:and/:or/:not ...]]`) are still analyzed for
-   ancestor-bindings propagation, but their nested leaves are not augmented in
-   this pass.
+   The caller is responsible for normalizing the raw LHS first (see
+   `normalize-lhs`); this function only enriches an already-normalized LHS.
+
+   `:or` / `:exists` groups and compound negations
+   (`[:not [:and/:or/:not ...]]`) are still analyzed for ancestor-bindings
+   propagation, but their nested leaves are not augmented in this pass.
 
    `opts`:
    * `:prod-ns` — production namespace (required for accumulator evaluation);

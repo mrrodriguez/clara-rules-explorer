@@ -1,11 +1,12 @@
 # Enhanced LHS Analysis — Accumulator Details & Node Mapping — Plan
 
-Status: **Implemented (accumulator info + leaf binding augmentation, with a
-consolidated `:bindings` wire shape).** Group-level (`:or` / `:exists`) and
-compound-negation binding info is deferred (explicitly). Review 1 feedback
-incorporated — see the companion
-[`roadmap-enhanced-lhs-ana.md`](./roadmap-enhanced-lhs-ana.md) for the work
-log and next steps.
+Status: **Implemented (accumulator info + leaf binding augmentation + LHS
+homogenization, with a consolidated `:bindings` wire shape).** The LHS is
+normalized once into homogeneous maps at the top of the analysis and consumed
+as such downstream; group-level (`:or` / `:exists`) and compound-negation
+binding info remain deferred (explicitly). Review 1 feedback incorporated —
+see the companion [`roadmap-enhanced-lhs-ana.md`](./roadmap-enhanced-lhs-ana.md)
+for the work log and next steps.
 
 Scope: extend the serialized rulebase LHS analysis so accumulator conditions
 carry real information about the accumulator (form + `:initial-value`
@@ -458,9 +459,16 @@ non-accumulator nodes.
    deferral, deterministic `:exists` placeholders, shared path-construction
    helper, `:join-bindings` → `:binding-keys` squash, internal schemas, and the
    collapsible bindings UI.
-4. **Next:** decide how/whether to expose binding info for `:or` / `:exists` /
-   compound-negation leaves, and whether to homogenize LHS entries into maps.
-5. **Later / only if needed:** Option C — node mapping for evaluated
+4. **Done (homogenization):** `conditions/normalize-lhs` produces one
+   homogeneous LHS shape (`:condition-type` + `:children` for groups) early in
+   `->rulebase-analysis` and the analyze flow; structural walkers
+   (`extract-lhs-fact-types`, `extract-var-bindings`) and serialization consume
+   that shape. Raw forms are retained as `:raw-condition` only for the
+   compiler-coupled binding walk and `:lhs-form`.
+5. **Next:** decide how/whether to expose binding info for `:or` / `:exists` /
+   compound-negation leaves; regenerate demo data when the static demo next
+   ships.
+6. **Later / only if needed:** Option C — node mapping for evaluated
    accumulators, if eval purity becomes a blocker, and for node-id exposure.
 
 **Recommendation unchanged:** A and leaf-level B are complete. C remains
@@ -491,24 +499,34 @@ Implemented:
    (s/optional-key :join-filter-join-bindings) [s/Keyword]})
 ```
 
-`LhsCondition` now declares:
+`LhsCondition` is a strict recursive schema:
 
 ```clojure
-(s/optional-key :accumulator) AccumulatorInfo
-(s/optional-key :bindings) LhsBindingInfo
+{(s/optional-key :type) TypeReference
+ (s/optional-key :constraints) s/Str
+ (s/optional-key :args) s/Str
+ (s/optional-key :accumulator) AccumulatorInfo
+ (s/optional-key :from) (s/recursive #'LhsCondition)
+ (s/optional-key :result-binding) s/Any
+ (s/optional-key :fact-binding) s/Any
+ (s/optional-key :bindings) LhsBindingInfo
+ (s/optional-key :condition-type) (s/enum :and :or :not :exists)
+ (s/optional-key :children) [(s/recursive #'LhsCondition)]}
 ```
 
-(`:accumulator` was `s/Any`; `:bindings` replaces the flat catch-all binding
-keys.)
+(`:accumulator` was `s/Any`; the old `s/Keyword s/Any` catch-all is gone, so
+group entries now actually validate.)
 
 ### 5.2 Server (`conditions.clj` / `serialize.clj` / `core.clj`)
 
-Analysis (`conditions.clj`) evaluates and attaches:
+Analysis (`conditions.clj`) normalizes, evaluates, and attaches:
 
 ```clojure
+(defn normalize-lhs [lhs] ...)             ; raw → homogeneous maps (+ :raw-condition)
+(defn get-raw-lhs [lhs] ...)               ; recover raw forms for the compiler walk / :lhs-form
 (defn accumulator-info [form prod-ns] ...) ; eval → {:form form :some-initial-value? bool}
-(defn analyze-lhs-bindings [lhs env] ...)  ; origin-tagged compiler-order records
-(defn augment-lhs [lhs opts] ...)          ; eval accumulators + merge nested :bindings
+(defn analyze-lhs-bindings [lhs env] ...)  ; normalized → origin-tagged compiler-order records
+(defn augment-lhs [lhs opts] ...)          ; enrich normalized lhs (accumulators + :bindings)
 ```
 
 Internal (`s/defschema`) shapes `AccumulatorInfo` (raw form) and
@@ -533,8 +551,11 @@ Serialization (`serialize.clj`) only renders the already-computed form:
 (contains? node :accumulator) (update :accumulator serialize-accumulator)
 ```
 
-`core/production-summary` runs `conditions/augment-lhs` before
-`serialize-lhs`.
+`core/->rulebase-analysis` normalizes every production's `:lhs` once, up front;
+`production-summary` then runs `conditions/augment-lhs` (on the normalized LHS)
+before `serialize-lhs`, and reconstructs `:lhs-form` via
+`conditions/get-raw-lhs`.  `serialize/serialize-condition` consumes the
+normalized shape (groups recurse `:children`; accumulators recurse `:from`).
 
 ### 5.3 UI (`ui/src/lib/types/api.ts`, `LhsCondition.svelte`)
 
@@ -544,9 +565,12 @@ Implemented:
 - `AccumulatorInfo { form: string; 'some-initial-value?': boolean }` added.
 - `LhsBindingInfo { 'binding-keys': string[]; 'new-bindings': string[];
   'join-filter-join-bindings'?: string[] }` added; `bindings?` on `LhsElement`.
-- `LhsCondition.svelte` renders `leaf.accumulator.form` + `Initial Value`
-  badge, and a collapsible "Show bindings" element for `leaf.bindings` (fixed
-  group order: new → joins → join filter).
+- `LhsElement` is a closed map type: `condition-type?` / `children?` (groups)
+  plus the leaf keys; the `[key: string]: unknown` catch-all is removed.
+- `LhsCondition.svelte` detects groups by `children` presence (no
+  `Array.isArray` / `condition[0]`), renders `leaf.accumulator.form` +
+  `Initial Value` badge, and renders `leaf.bindings` in a collapsible
+  "Show bindings" element (fixed group order: new → joins → join filter).
 
 ---
 
@@ -561,17 +585,21 @@ Server:
   - `analyze-lhs-bindings` binding records (used / binding-keys / new +
     result-binding), the unsatisfiable-input throw, and deterministic
     `:exists` expansion.
-  - `augment-lhs` nested `:bindings` output for fact / accumulator / `:not`
+  - `normalize-lhs` (structure + raw retention via `get-raw-lhs`), and
+    `augment-lhs` nested `:bindings` output for fact / accumulator / `:not`
     leaves, plus compound-negation deferral.
-- `serialize_test.clj` `test-serialize-condition` accumulator case updated to
-  the accumulator-info map input and rendered `:form` string.
-- `make test` → 253 tests / 1648 assertions, 0 failures/errors.
+- `serialize_test.clj` `test-serialize-condition` accumulator + group cases
+  updated to the normalized input and rendered output.
+- `core_test.clj` / `analyze_test.clj` updated to the shared `conditions`
+  walkers and the normalized group shape.
+- `make test` → 254 tests / 1655 assertions, 0 failures/errors.
 
 UI:
 
-- `api.ts` adds `AccumulatorInfo` + `LhsBindingInfo`; `LhsCondition.svelte`
-  renders `form` + `Initial Value` badge and the collapsible bindings element.
-  `make format check lint`, `make test-unit` (31), and `make test-e2e` (65)
+- `api.ts` adds `AccumulatorInfo` + `LhsBindingInfo` and closes `LhsElement`;
+  `LhsCondition.svelte` renders group entries, `form` + `Initial Value` badge,
+  and the collapsible bindings element.
+  `make format check lint`, `make test-unit` (32), and `make test-e2e` (65)
   pass.
 
 ---

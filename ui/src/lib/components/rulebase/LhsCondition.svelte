@@ -8,45 +8,28 @@
 	import ConditionFactType from '$lib/components/rulebase/ConditionFactType.svelte';
 
 	interface Props {
-		condition: LhsElement | unknown[];
+		condition: LhsElement;
 		depth?: number;
 	}
 
 	let { condition, depth = 0 }: Props = $props();
 
-	function isNested(c: LhsElement | unknown[]): c is unknown[] {
-		return Array.isArray(c);
+	function isNested(c: LhsElement): boolean {
+		return c.children !== undefined;
 	}
 
 	const nested = $derived.by(() => {
 		if (!isNested(condition)) return null;
 		return {
-			type: condition[0] as string,
-			conditions: condition.slice(1)
+			type: condition['condition-type'] as string,
+			conditions: condition.children ?? []
 		};
 	});
 
-	function formatValue(val: unknown): string {
-		if (val === null || val === undefined) return '';
-		if (typeof val === 'string') return val;
-		return JSON.stringify(val);
-	}
-
 	let bindingsExpanded = $state(false);
 
-	const ignoredKeys = new Set([
-		'type',
-		'constraints',
-		'args',
-		'accumulator',
-		'from',
-		'result-binding',
-		'fact-binding',
-		'bindings'
-	]);
-
-	// Type cast for convenience in template
-	const leaf = $derived(condition as LhsElement);
+	// Convenience alias for the leaf branch (condition is always a map now).
+	const leaf = $derived(condition);
 
 	const bindingGroups = $derived.by(() => {
 		const bindings = leaf.bindings;
@@ -105,7 +88,7 @@
 			<span class="badge bg-secondary text-uppercase nested-badge">{nested.type}</span>
 		</div>
 		{#each nested.conditions as subCondition, i (i)}
-			<LhsCondition condition={subCondition as LhsElement | unknown[]} depth={depth + 1} />
+			<LhsCondition condition={subCondition} depth={depth + 1} />
 		{/each}
 	{:else}
 		<div class="card border bg-light-subtle mb-2">
@@ -171,12 +154,6 @@
 						</div>
 					{/if}
 				{/if}
-
-				{#each Object.entries(condition) as [key, value] (key)}
-					{#if !ignoredKeys.has(key)}
-						{@render textProperty(key, formatValue(value))}
-					{/if}
-				{/each}
 
 				{#if leaf.args}
 					<div class="row g-0">

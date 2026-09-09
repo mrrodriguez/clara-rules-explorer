@@ -65,14 +65,16 @@ export interface LhsBindingInfo {
  * For now, we represent it as a flexible record.
  */
 export interface LhsElement {
+	'condition-type'?: 'and' | 'or' | 'not' | 'exists';
+	children?: LhsElement[];
 	type?: TypeReference;
 	constraints?: string;
+	args?: string;
 	accumulator?: AccumulatorInfo;
 	from?: LhsElement;
 	'result-binding'?: string;
 	'fact-binding'?: string;
 	bindings?: LhsBindingInfo;
-	[key: string]: unknown;
 }
 
 /**
