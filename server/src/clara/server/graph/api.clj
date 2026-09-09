@@ -74,10 +74,18 @@
   {:form s/Str
    :some-initial-value? s/Bool})
 
+(s/defschema LhsBindingInfo
+  "Per-condition binding summary attached under `:bindings` on serialized LHS
+   leaves.  Values are keywords pre-JSON (the API validates the in-memory
+   shape); the UI receives strings after JSON encoding."
+  {:binding-keys [s/Keyword]
+   :new-bindings [s/Keyword]
+   (s/optional-key :join-filter-join-bindings) [s/Keyword]})
+
 (s/defschema LhsCondition
   "A serialized LHS condition from the Clara Rete network.
    Known keys: :type (a `TypeReference`), :constraints, :args, :accumulator,
-   :from, :result-binding, :fact-binding."
+   :from, :result-binding, :fact-binding, :bindings."
   {(s/optional-key :type) TypeReference
    (s/optional-key :constraints) s/Str
    (s/optional-key :args) s/Str
@@ -85,6 +93,7 @@
    (s/optional-key :from) (s/recursive #'LhsCondition)
    (s/optional-key :result-binding) s/Any
    (s/optional-key :fact-binding) s/Any
+   (s/optional-key :bindings) LhsBindingInfo
    s/Keyword s/Any})
 
 (s/defschema ViaEntry

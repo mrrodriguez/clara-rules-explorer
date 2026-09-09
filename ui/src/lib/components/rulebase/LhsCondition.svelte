@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { LhsElement } from '$lib/types/api';
+	import Badge from '$lib/components/ui/Badge.svelte';
 	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
+	import CollapseToggleButton from '$lib/components/ui/CollapseToggleButton.svelte';
 	import LhsCondition from '$lib/components/rulebase/LhsCondition.svelte';
 	import ConditionFactType from '$lib/components/rulebase/ConditionFactType.svelte';
 
@@ -30,6 +32,8 @@
 		return JSON.stringify(val);
 	}
 
+	let bindingsExpanded = $state(false);
+
 	const ignoredKeys = new Set([
 		'type',
 		'constraints',
@@ -37,11 +41,26 @@
 		'accumulator',
 		'from',
 		'result-binding',
-		'fact-binding'
+		'fact-binding',
+		'bindings'
 	]);
 
 	// Type cast for convenience in template
 	const leaf = $derived(condition as LhsElement);
+
+	const bindingGroups = $derived.by(() => {
+		const bindings = leaf.bindings;
+		if (!bindings) return [];
+		return [
+			{ key: 'new-bindings', label: 'New', values: bindings['new-bindings'] ?? [] },
+			{ key: 'binding-keys', label: 'Joins', values: bindings['binding-keys'] ?? [] },
+			{
+				key: 'join-filter-join-bindings',
+				label: 'Join filter',
+				values: bindings['join-filter-join-bindings'] ?? []
+			}
+		].filter((group) => group.values.length > 0);
+	});
 </script>
 
 {#snippet property(label: string, valueClass: string = '', content: Snippet)}
@@ -112,6 +131,45 @@
 
 				{#if leaf.from}
 					{@render property('From', 'p-0', fromCondition)}
+				{/if}
+
+				{#if bindingGroups.length > 0}
+					<div class="row g-0 py-0 align-items-center">
+						<div
+							class="col-auto text-muted fw-bold text-uppercase ps-2"
+							style="width: 100px; font-size: 0.65rem;"
+						>
+							Bindings
+						</div>
+						<div class="col pe-2">
+							<CollapseToggleButton
+								expanded={bindingsExpanded}
+								label="bindings"
+								onclick={() => (bindingsExpanded = !bindingsExpanded)}
+							/>
+						</div>
+					</div>
+					{#if bindingsExpanded}
+						<div class="row g-0 pt-1 pb-2">
+							<div class="col-12 ps-2 d-flex flex-column gap-2">
+								{#each bindingGroups as group (group.key)}
+									<div class="d-flex align-items-baseline gap-2">
+										<span
+											class="text-muted fw-bold text-uppercase flex-shrink-0"
+											style="font-size: 0.6rem; width: 80px;"
+										>
+											{group.label}
+										</span>
+										<span class="d-flex flex-wrap gap-1">
+											{#each group.values as binding (binding)}
+												<Badge variant="secondary" size="sm">{binding}</Badge>
+											{/each}
+										</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
 				{/if}
 
 				{#each Object.entries(condition) as [key, value] (key)}

@@ -1,7 +1,9 @@
 # Enhanced LHS Analysis — Accumulator Details & Node Mapping — Plan
 
-Status: **Implemented (accumulator info + leaf binding augmentation).**
-Group-level (`:or` / `:exists`) binding info is deferred. See the companion
+Status: **Implemented (accumulator info + leaf binding augmentation, with a
+consolidated `:bindings` wire shape).** Group-level (`:or` / `:exists`) and
+compound-negation binding info is deferred (explicitly). Review 1 feedback
+incorporated — see the companion
 [`roadmap-enhanced-lhs-ana.md`](./roadmap-enhanced-lhs-ana.md) for the work
 log and next steps.
 
@@ -395,8 +397,8 @@ leaves are deferred. The analyzer lives in
 emits, per raw condition / expanded conjunction:
 
 - `:used-bindings` — every variable the condition references,
-- `:join-bindings` — variables already bound upstream that this condition
-  joins on (the compiled `:binding-keys`),
+- `:binding-keys` — variables already bound upstream that this condition
+  joins on (the compiled node's `:binding-keys`),
 - `:new-bindings` — variables this condition introduces for the first time,
 - `:result-binding` / `:fact-binding` where present.
 
@@ -449,10 +451,16 @@ non-accumulator nodes.
    the broken `:accumulator` representation is fixed.
 2. **Done:** Option B — `conditions/analyze-lhs-bindings` (origin-tagged) +
    `conditions/augment-lhs` implemented and tested; leaf binding info is wired
-   into the serialized `:lhs`.
-3. **Next:** decide how/whether to expose binding info for `:or` / `:exists`
-   group leaves, and whether to homogenize LHS entries into maps.
-4. **Later / only if needed:** Option C — node mapping for evaluated
+   into the serialized `:lhs` as a nested `:bindings` map
+   (`:binding-keys` / `:new-bindings`, plus `:join-filter-join-bindings` when
+   present).
+3. **Done (review 1):** unsatisfiable-input guard, explicit compound-negation
+   deferral, deterministic `:exists` placeholders, shared path-construction
+   helper, `:join-bindings` → `:binding-keys` squash, internal schemas, and the
+   collapsible bindings UI.
+4. **Next:** decide how/whether to expose binding info for `:or` / `:exists` /
+   compound-negation leaves, and whether to homogenize LHS entries into maps.
+5. **Later / only if needed:** Option C — node mapping for evaluated
    accumulators, if eval purity becomes a blocker, and for node-id exposure.
 
 **Recommendation unchanged:** A and leaf-level B are complete. C remains
@@ -474,15 +482,24 @@ Implemented:
    `:initial-value`."
   {:form s/Str
    :some-initial-value? s/Bool})
+
+(s/defschema LhsBindingInfo
+  "Per-condition binding summary attached under `:bindings` on serialized LHS
+   leaves.  Values are keywords pre-JSON; the UI receives strings."
+  {:binding-keys [s/Keyword]
+   :new-bindings [s/Keyword]
+   (s/optional-key :join-filter-join-bindings) [s/Keyword]})
 ```
 
 `LhsCondition` now declares:
 
 ```clojure
 (s/optional-key :accumulator) AccumulatorInfo
+(s/optional-key :bindings) LhsBindingInfo
 ```
 
-(was `s/Any`).
+(`:accumulator` was `s/Any`; `:bindings` replaces the flat catch-all binding
+keys.)
 
 ### 5.2 Server (`conditions.clj` / `serialize.clj` / `core.clj`)
 
@@ -491,8 +508,17 @@ Analysis (`conditions.clj`) evaluates and attaches:
 ```clojure
 (defn accumulator-info [form prod-ns] ...) ; eval → {:form form :some-initial-value? bool}
 (defn analyze-lhs-bindings [lhs env] ...)  ; origin-tagged compiler-order records
-(defn augment-lhs [lhs opts] ...)          ; eval accumulators + merge leaf binding info
+(defn augment-lhs [lhs opts] ...)          ; eval accumulators + merge nested :bindings
 ```
+
+Internal (`s/defschema`) shapes `AccumulatorInfo` (raw form) and
+`LhsBindingRecord` are co-located in `conditions.clj` and declared as
+`s/defn` output schemas, so they are validated only when
+`schema.test/validate-schemas` is active in tests — no runtime validation
+overhead in production.  The cumulative `:used-bindings` /
+`:ancestor-bindings` / `:all-bindings` sets stay internal; only
+`:binding-keys` / `:new-bindings` (plus `:join-filter-join-bindings` when
+present) are surfaced, nested under `:bindings`.
 
 Serialization (`serialize.clj`) only renders the already-computed form:
 
@@ -516,8 +542,11 @@ Implemented:
 
 - `accumulator?: AccumulatorInfo` replaces `string[]`.
 - `AccumulatorInfo { form: string; 'some-initial-value?': boolean }` added.
-- `LhsCondition.svelte` renders `leaf.accumulator.form` and an
-  `Initial Value` badge when `some-initial-value?` is true.
+- `LhsBindingInfo { 'binding-keys': string[]; 'new-bindings': string[];
+  'join-filter-join-bindings'?: string[] }` added; `bindings?` on `LhsElement`.
+- `LhsCondition.svelte` renders `leaf.accumulator.form` + `Initial Value`
+  badge, and a collapsible "Show bindings" element for `leaf.bindings` (fixed
+  group order: new → joins → join filter).
 
 ---
 
@@ -529,27 +558,42 @@ Server:
   - `accumulator-info` for `(all)` → `:some-initial-value? true`,
     `(min :temperature)` → `false`, a var accumulator, and unevaluable forms
     throwing `ex-info`.
-  - `enrich-lhs` attaches accumulator info and leaves other conditions intact.
-  - `analyze-lhs-bindings` binding records (used/join/new + result-binding).
+  - `analyze-lhs-bindings` binding records (used / binding-keys / new +
+    result-binding), the unsatisfiable-input throw, and deterministic
+    `:exists` expansion.
+  - `augment-lhs` nested `:bindings` output for fact / accumulator / `:not`
+    leaves, plus compound-negation deferral.
 - `serialize_test.clj` `test-serialize-condition` accumulator case updated to
   the accumulator-info map input and rendered `:form` string.
-- `make test` → 249 tests / 1635 assertions, 0 failures/errors.
+- `make test` → 253 tests / 1648 assertions, 0 failures/errors.
 
 UI:
 
-- `api.ts` type changed; `LhsCondition.svelte` renders `form` + an
-  `Initial Value` badge. `make format check lint` pass.
+- `api.ts` adds `AccumulatorInfo` + `LhsBindingInfo`; `LhsCondition.svelte`
+  renders `form` + `Initial Value` badge and the collapsible bindings element.
+  `make format check lint`, `make test-unit` (31), and `make test-e2e` (65)
+  pass.
 
 ---
 
 ## 7. Open questions
 
-Resolved during implementation:
+Resolved during implementation / review 1:
 
 - Unevaluable accumulator forms **throw** (`ex-info`) — no silent `false`.
 - Accumulator `:form` string uses `str/trim-newline` around `*form-printer*`.
 - Analysis requires production/accumulator namespaces to be loaded; missing
-  namespaces throw rather than degrade.
+  namespaces throw rather than degrade (and a nil namespace is distinguished
+  from a non-loaded one).
+- Unsatisfiable LHS input throws instead of looping (compiler guard restored).
+- Compound negations defer explicitly rather than silently dropping binding
+  info.
+- Binding metadata is exposed as one nested `:bindings` map per leaf
+  (`:binding-keys` / `:new-bindings`, plus `:join-filter-join-bindings` when
+  present); cumulative/superset groups stay internal.
+- Internal (pre-serialization) schemas are co-located in `conditions.clj` as
+  `s/defn` output schemas, validated only under
+  `schema.test/validate-schemas` in tests.
 
 Still open:
 
@@ -557,9 +601,9 @@ Still open:
    (not serialize). If `->rulebase-analysis` purity or repeated-eval cost
    matters, precompute/cache accumulator info at session-load time. Where
    should that cache live?
-2. **Binding metadata shape.** How to attach `conditions/analyze-lhs-bindings`
-   records back to raw LHS conditions and expose them on the serialized
-   `:lhs` (additive key vs a parallel analysis map)?
+2. **Group-level binding exposure.** Whether/when to attach binding info to
+   `:or` / `:exists` / compound-negation leaves (requires more of the
+   compiler's extraction/DNF bookkeeping).
 3. **Node-mapper scope.** If Option C is ever needed, restrict v1 to
    straight-line + accumulator + simple `:not`, excluding `:or` / `:exists` in
    v1, and degrade gracefully for the rest.

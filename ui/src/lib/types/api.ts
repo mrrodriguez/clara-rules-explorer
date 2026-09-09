@@ -49,6 +49,17 @@ export interface AccumulatorInfo {
 }
 
 /**
+ * Per-condition binding summary attached under `bindings` on serialized LHS
+ * leaves. Each group is a sorted vector of binding names (strings after JSON
+ * encoding; keywords pre-JSON on the server).
+ */
+export interface LhsBindingInfo {
+	'binding-keys': string[];
+	'new-bindings': string[];
+	'join-filter-join-bindings'?: string[];
+}
+
+/**
  * Represents a condition or constraint in the left-hand side (LHS) of a rule or query.
  * The shape of LHS elements can vary (e.g., standard type constraints, accumulators, etc.).
  * For now, we represent it as a flexible record.
@@ -60,6 +71,7 @@ export interface LhsElement {
 	from?: LhsElement;
 	'result-binding'?: string;
 	'fact-binding'?: string;
+	bindings?: LhsBindingInfo;
 	[key: string]: unknown;
 }
 

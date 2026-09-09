@@ -21,9 +21,35 @@
     the original LHS shape."
   (:require [clara.rules.compiler :as com]
             [clojure.set :as set]
-            [clojure.walk :as walk]))
+            [clojure.walk :as walk]
+            [schema.core :as s]))
 
-(defn accumulator-info
+(s/defschema AccumulatorInfo
+  "In-memory (pre-serialization) accumulator analysis shape.  `:form` is the
+   raw accumulator form (list/symbol); `serialize.clj` renders it to a string
+   at the API boundary."
+  {:form s/Any
+   :some-initial-value? s/Bool})
+
+(s/defschema LhsBindingRecord
+  "In-memory shape of one origin-tagged binding record produced by
+   `analyze-lhs-bindings`.  The cumulative `:used-bindings` /
+   `:ancestor-bindings` / `:all-bindings` sets are kept here because the walk
+   needs them for propagation; only `:binding-keys` / `:new-bindings` (plus
+   `:join-filter-join-bindings` when present) are surfaced on the wire."
+  {:condition s/Any
+   :origin [s/Int]
+   :attach-path (s/maybe [s/Int])
+   :used-bindings #{s/Keyword}
+   :binding-keys #{s/Keyword}
+   :new-bindings #{s/Keyword}
+   :ancestor-bindings #{s/Keyword}
+   :all-bindings #{s/Keyword}
+   (s/optional-key :result-binding) s/Keyword
+   (s/optional-key :fact-binding) s/Keyword
+   (s/optional-key :join-filter-join-bindings) #{s/Keyword}})
+
+(s/defn accumulator-info :- AccumulatorInfo
   "Evaluates an accumulator form in the production's namespace and returns a
    map with:
 
@@ -37,7 +63,11 @@
    loaded in the runtime — the same assumption the rest of the analysis makes
    for symbol resolution."
   [form prod-ns]
-  (let [acc-ns (or (some-> prod-ns find-ns)
+  (when (nil? prod-ns)
+    (throw (ex-info "Cannot evaluate accumulator: production namespace not derivable"
+                    {:prod-ns prod-ns
+                     :accumulator form})))
+  (let [acc-ns (or (find-ns prod-ns)
                    (throw (ex-info "Cannot evaluate accumulator: production namespace not loaded"
                                    {:prod-ns prod-ns
                                     :accumulator form})))
@@ -68,6 +98,15 @@
        x))
    lhs))
 
+(defn- group-child-paths
+  "Returns a seq of `[child-path child]` pairs for the child conditions of a
+   group vector (the entries after the leading operator).  This is the single
+   place that encodes how a child's path is derived from its parent's path;
+   `flatten-tagged`, `attach-path`, and `walk-augment` all rely on it."
+  [path group]
+  (map-indexed (fn [j child] [(conj path j) child])
+               (rest group)))
+
 (defn- flatten-tagged
   "Flattens top-level `:and` groups, tagging each flattened condition with its
    origin path into the original LHS tree.  A top-level map entry gets origin
@@ -76,10 +115,10 @@
   (vec
    (mapcat (fn [i condition]
              (if (#{'and :and} (first condition))
-               (map-indexed (fn [j child]
-                              {:origin [i j]
-                               :condition child})
-                            (rest condition))
+               (map (fn [[path child]]
+                      {:origin path
+                       :condition child})
+                    (group-child-paths [i] condition))
                [{:origin [i]
                  :condition condition}]))
            (range) lhs)))
@@ -111,6 +150,12 @@
                       (remove satisfied? remaining))
               updated (apply set/union bound
                              (map (comp :bound :classified) newly))]
+          (when (empty? newly)
+            (let [unsatisfiable (set/difference
+                                 (apply set/union (map (comp :unbound :classified) still))
+                                 bound)]
+              (throw (ex-info "Using variable that is not previously bound"
+                              {:unbound-variables unsatisfiable}))))
           (recur (into sorted newly) updated still))))))
 
 (defn- disjunction-branches
@@ -127,28 +172,45 @@
 
 (defn- expand-exists
   "Expands `:exists` conditions into accumulator conditions, mirroring
-   `clara.rules.compiler/extract-exists`."
-  [conjunctions]
-  (mapcat (fn [condition]
+   `clara.rules.compiler/extract-exists`.  The generated `:result-binding` is
+   deterministic — derived from the origin path and the condition's position in
+   its conjunction — rather than a gensym, so repeated analyses of the same LHS
+   are stable."
+  [origin conjunctions]
+  (mapcat (fn [i condition]
             (if (= :exists (com/condition-type condition))
               [{:accumulator '(clara.rules.accumulators/exists)
                 :from (second condition)
-                :result-binding (keyword (gensym "?__gen__"))}]
+                :result-binding (keyword (str "?__exists__"
+                                              (apply str (interpose "_" origin))
+                                              "__" i))}]
               [condition]))
+          (range)
           conjunctions))
+
+(defn- compound-negation?
+  "True when `condition` is a `[:not [:and/:or/:not ...]]` group.  The compiler
+   does not keep these in place — it extracts them into a helper production and
+   a `NegationResult` condition — so this analyzer cannot map them back to the
+   raw LHS tree and must defer them explicitly."
+  [condition]
+  (and (#{:not 'not} (first condition))
+       (sequential? (second condition))
+       (#{:and :or :not 'and 'or 'not} (first (second condition)))))
 
 (defn- attach-path
   "Returns the path into the original LHS tree where `condition`'s binding info
-   should be attached, or nil when the condition is a `:or` / `:exists` group
-   (those are still analyzed for ancestor-bindings propagation, but their
-   nested leaves are not augmented in this pass)."
+   should be attached, or nil when the condition is a `:or` / `:exists` group or
+   a compound negation (those are still analyzed for ancestor-bindings
+   propagation, but their nested leaves are not augmented in this pass)."
   [origin condition]
   (cond
     (map? condition) origin
-    (#{:not 'not} (first condition)) (conj origin 0)
+    (compound-negation? condition) nil
+    (#{:not 'not} (first condition)) (ffirst (group-child-paths origin condition))
     :else nil))
 
-(defn- conjunction-binding
+(s/defn ^:private conjunction-binding :- LhsBindingRecord
   "Computes one binding record for an expanded conjunction."
   [conjunction env ancestor-bindings origin attach-path]
   (let [node (com/condition-to-node conjunction env ancestor-bindings)
@@ -160,7 +222,7 @@
              :origin origin
              :attach-path attach-path
              :used-bindings (:used-bindings node)
-             :join-bindings (:join-bindings node)
+             :binding-keys (or (:join-bindings node) #{})
              :new-bindings (:new-bindings node)
              :ancestor-bindings ancestor-bindings
              :all-bindings all-bindings}
@@ -197,7 +259,7 @@
     (if-let [{:keys [origin condition]} (first remaining)]
       (let [ap (attach-path origin condition)
             branch-results (map (fn [branch]
-                                  (analyze-branch (expand-exists branch)
+                                  (analyze-branch (expand-exists origin branch)
                                                   env
                                                   ancestor-bindings
                                                   origin
@@ -222,7 +284,7 @@
      augmenting the original LHS (nil for `:or` / `:exists` groups);
    * `:condition` — the expanded conjunction form (after `:exists` expansion);
    * `:used-bindings` — variables the condition references;
-   * `:join-bindings` — variables already bound upstream that this condition
+   * `:binding-keys` — variables already bound upstream that this condition
      joins on (the compiled node's `:binding-keys`);
    * `:new-bindings` — variables introduced by this condition's constraints;
    * `:join-filter-join-bindings` — present only when the condition has
@@ -240,20 +302,34 @@
   [bindings]
   (vec (sort-by name bindings)))
 
+(defn- binding-summary
+  "Reduces an origin-tagged record to the small, deterministic wire shape
+   attached under `:bindings`: `:binding-keys` and `:new-bindings`, plus
+   `:join-filter-join-bindings` when the condition has non-equality joins.
+   The cumulative / superset groups stay internal to the walk."
+  [{:keys [binding-keys new-bindings] :as record}]
+  (cond-> {:binding-keys (sort-bindings binding-keys)
+           :new-bindings (sort-bindings new-bindings)}
+    (contains? record :join-filter-join-bindings)
+    (assoc :join-filter-join-bindings
+           (sort-bindings (:join-filter-join-bindings record)))))
+
 (defn- path-index
-  "Builds `{attach-path binding-summary}` from origin-tagged records, with
-   binding sets sorted into vectors for deterministic consumers."
+  "Builds `{attach-path :bindings binding-summary}` from origin-tagged records,
+   with binding sets sorted into vectors for deterministic consumers.  A
+   duplicate attach-path is an analysis invariant violation, so it throws
+   rather than silently overwriting."
   [records]
-  (into {}
-        (keep (fn [{:keys [attach-path used-bindings join-bindings new-bindings
-                           ancestor-bindings all-bindings]}]
-                (when attach-path
-                  [attach-path {:used-bindings (sort-bindings used-bindings)
-                                :binding-keys (sort-bindings join-bindings)
-                                :new-bindings (sort-bindings new-bindings)
-                                :ancestor-bindings (sort-bindings ancestor-bindings)
-                                :all-bindings (sort-bindings all-bindings)}])))
-        records))
+  (reduce (fn [acc {:keys [attach-path] :as record}]
+            (if attach-path
+              (do
+                (when (contains? acc attach-path)
+                  (throw (ex-info "Duplicate attach-path in LHS binding analysis"
+                                  {:attach-path attach-path})))
+                (assoc acc attach-path {:bindings (binding-summary record)}))
+              acc))
+          {}
+          records))
 
 (defn- walk-augment
   "Walks the (already accumulator-enriched) LHS tree, merging binding info into
@@ -266,24 +342,23 @@
                x)
 
     (vector? x) (into [(first x)]
-                      (map-indexed (fn [j child]
-                                     (walk-augment child
-                                                   (conj path j)
-                                                   binding-index)))
-                      (rest x))
+                      (map (fn [[child-path child]]
+                             (walk-augment child child-path binding-index))
+                           (group-child-paths path x)))
 
     :else x))
 
 (defn augment-lhs
   "Returns `lhs` enriched for analysis: accumulator conditions carry
-   `accumulator-info`, and leaf conditions carry per-leaf binding info
-   (`:used-bindings`, `:binding-keys`, `:new-bindings`,
-   `:ancestor-bindings`, `:all-bindings`).
+   `accumulator-info`, and leaf conditions carry a nested `:bindings` map
+   (`:binding-keys` / `:new-bindings`, plus `:join-filter-join-bindings` when
+   the condition has non-equality joins).
 
    Group vectors (`:and`, `:or`, `:not`, `:exists`) are kept as vectors; only
-   their nested leaf maps are augmented.  `:or` / `:exists` groups are still
-   analyzed for ancestor-bindings propagation, but their nested leaves are not
-   augmented in this pass.
+   their nested leaf maps are augmented.  `:or` / `:exists` groups and compound
+   negations (`[:not [:and/:or/:not ...]]`) are still analyzed for
+   ancestor-bindings propagation, but their nested leaves are not augmented in
+   this pass.
 
    `opts`:
    * `:prod-ns` — production namespace (required for accumulator evaluation);
