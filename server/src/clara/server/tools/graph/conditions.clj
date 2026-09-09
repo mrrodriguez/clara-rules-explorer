@@ -96,12 +96,12 @@
       condition)
 
     (and (sequential? condition) (seq condition))
-    (let [op (first condition)]
-      (when-not (or (keyword? op) (symbol? op))
+    (let [group-head (first condition)]
+      (when-not (or (keyword? group-head) (symbol? group-head))
         (throw (ex-info "Unsupported LHS condition shape: group vector head must be a keyword or symbol"
                         {:condition condition
-                         :head op})))
-      {:condition-type (if (keyword? op) op (keyword (name op)))
+                         :head group-head})))
+      {:condition-type (if (keyword? group-head) group-head (keyword (name group-head)))
        :children (mapv normalize-condition (rest condition))
        :raw-condition condition
        ::normalized true})
@@ -163,14 +163,15 @@
   [lhs]
   (letfn [(walk [condition]
             (case (get-condition-type condition)
-              :fact (if-let [b (:fact-binding condition)]
-                      [{:binding (-> b name symbol) :fact-type (:type condition)}]
+              :fact (if-let [bound-var (:fact-binding condition)]
+                      [{:binding (-> bound-var name symbol) :fact-type (:type condition)}]
                       [])
-              :accumulator (if-let [b (:result-binding condition)]
+              :accumulator (if-let [bound-var (:result-binding condition)]
                              (->> (extract-condition-fact-types (:from condition))
                                   distinct
-                                  (into [] (map (fn [t] {:binding (-> b name symbol)
-                                                         :fact-type t}))))
+                                  (into [] (map (fn [fact-type]
+                                                  {:binding (-> bound-var name symbol)
+                                                   :fact-type fact-type}))))
                              [])
               (:and :or :not :exists) (mapcat walk (:children condition))
               :test []
@@ -195,25 +196,25 @@
     (throw (ex-info "Cannot evaluate accumulator: production namespace not derivable"
                     {:prod-ns prod-ns
                      :accumulator form})))
-  (let [acc-ns (or (find-ns prod-ns)
-                   (throw (ex-info "Cannot evaluate accumulator: production namespace not loaded"
-                                   {:prod-ns prod-ns
-                                    :accumulator form})))
-        acc (try
-              (binding [*ns* acc-ns]
-                (eval form))
-              (catch Throwable t
-                (throw (ex-info "Failed to evaluate accumulator form"
-                                {:prod-ns prod-ns
-                                 :accumulator form}
-                                t))))]
-    (when-not (map? acc)
+  (let [eval-ns (or (find-ns prod-ns)
+                    (throw (ex-info "Cannot evaluate accumulator: production namespace not loaded"
+                                    {:prod-ns prod-ns
+                                     :accumulator form})))
+        evaluated (try
+                    (binding [*ns* eval-ns]
+                      (eval form))
+                    (catch Throwable t
+                      (throw (ex-info "Failed to evaluate accumulator form"
+                                      {:prod-ns prod-ns
+                                       :accumulator form}
+                                      t))))]
+    (when-not (map? evaluated)
       (throw (ex-info "Accumulator form did not evaluate to a map"
                       {:prod-ns prod-ns
                        :accumulator form
-                       :result acc})))
+                       :result evaluated})))
     {:form form
-     :some-initial-value? (some? (:initial-value acc))}))
+     :some-initial-value? (some? (:initial-value evaluated))}))
 
 (defn- strip-internal-keys
   "Removes the internal normalization keys (`:raw-condition` and `::normalized`)
@@ -239,15 +240,17 @@
   "Returns a seq of `[child-path child]` pairs for the child conditions of a
    group vector (the entries after the leading operator).  This is the single
    place that encodes how a child's path is derived from its parent's path;
-   `flatten-tagged`, `attach-path`, and `walk-augment` all rely on it."
+   `flatten-and-tag-conditions`, `resolve-attach-path`, and
+   `merge-bindings-into-tree` all rely on it."
   [path group]
   (map-indexed (fn [j child] [(conj path j) child])
                (rest group)))
 
-(defn- flatten-tagged
-  "Flattens top-level `:and` groups, tagging each flattened condition with its
-   origin path into the original LHS tree.  A top-level map entry gets origin
-   `[i]`; the `j`th child of a top-level `:and` at index `i` gets `[i j]`."
+(defn- flatten-and-tag-conditions
+  "Flattens a raw LHS into origin-tagged conditions (`{:origin [i] :condition
+   c}` maps), flattening top-level `:and` groups so their children each carry
+   their own origin path.  A top-level map entry gets origin `[i]`; the `j`th
+   child of a top-level `:and` at index `i` gets `[i j]`."
   [lhs]
   (vec
    (mapcat (fn [i condition]
@@ -260,14 +263,15 @@
                  :condition condition}]))
            (range) lhs)))
 
-(defn- sort-tagged
-  "Reimplements `clara.rules.compiler/sort-conditions` while preserving each
-   condition's origin.  Uses the compiler's own `com/analyze-condition` for
-   the per-condition classification, so the ordering is identical."
-  [tagged]
+(defn- sort-tagged-conditions
+  "Reimplements `clara.rules.compiler/sort-conditions` over origin-tagged
+   conditions while preserving each condition's origin.  Uses the compiler's
+   own `com/analyze-condition` for the per-condition classification, so the
+   ordering is identical."
+  [tagged-conditions]
   (let [classified (mapv (fn [{:keys [condition] :as item}]
                            (assoc item :classified (com/analyze-condition condition)))
-                         tagged)]
+                         tagged-conditions)]
     (loop [sorted []
            bound #{}
            remaining classified]
@@ -279,23 +283,23 @@
                                      (and (not (get-in item [:classified :is-accumulator]))
                                           (set/subset? (get-in item [:classified :unbound]) bound)))
               has-non-accum (some satisfied-non-accum? remaining)
-              newly (if has-non-accum
-                      (filter satisfied-non-accum? remaining)
-                      (filter satisfied? remaining))
-              still (if has-non-accum
-                      (remove satisfied-non-accum? remaining)
-                      (remove satisfied? remaining))
-              updated (->> newly
-                           (map (comp :bound :classified))
-                           (apply set/union bound))]
-          (when (empty? newly)
-            (let [unbound-union (->> still
+              newly-satisfied (if has-non-accum
+                                (filter satisfied-non-accum? remaining)
+                                (filter satisfied? remaining))
+              still-unsatisfied (if has-non-accum
+                                  (remove satisfied-non-accum? remaining)
+                                  (remove satisfied? remaining))
+              updated-bound (->> newly-satisfied
+                                 (map (comp :bound :classified))
+                                 (apply set/union bound))]
+          (when (empty? newly-satisfied)
+            (let [unbound-union (->> still-unsatisfied
                                      (map (comp :unbound :classified))
                                      (apply set/union))
                   unsatisfiable (set/difference unbound-union bound)]
               (throw (ex-info "Using variable that is not previously bound"
                               {:unbound-variables unsatisfiable}))))
-          (recur (into sorted newly) updated still))))))
+          (recur (into sorted newly-satisfied) updated-bound still-unsatisfied))))))
 
 (defn- disjunction-branches
   "Returns the conjunction branches of `condition` after `com/to-dnf`, each
@@ -341,7 +345,7 @@
        (sequential? (second condition))
        (#{:and :or :not 'and 'or 'not} (first (second condition)))))
 
-(defn- attach-path
+(defn- resolve-attach-path
   "Returns the path into the original LHS tree where `condition`'s binding info
    should be attached, or nil when the condition is a `:or` / `:exists` group or
    a compound negation (those are still analyzed for ancestor-bindings
@@ -353,24 +357,24 @@
     (#{:not 'not} (first condition)) (ffirst (group-child-paths origin condition))
     :else nil))
 
-(s/defn ^:private conjunction-binding :- LhsBindingRecord
-  "Computes one binding record for an expanded conjunction."
+(s/defn ^:private conjunction-binding-record :- LhsBindingRecord
+  "Computes one `LhsBindingRecord` for an expanded conjunction."
   [conjunction env ancestor-bindings origin attach-path]
-  (let [node (com/condition-to-node conjunction env ancestor-bindings)
+  (let [compiled-node (com/condition-to-node conjunction env ancestor-bindings)
         {:keys [result-binding fact-binding]} conjunction
-        all-bindings (cond-> (set/union ancestor-bindings (:used-bindings node))
+        all-bindings (cond-> (set/union ancestor-bindings (:used-bindings compiled-node))
                        result-binding (conj result-binding)
                        fact-binding (conj fact-binding))]
     (cond-> {:condition conjunction
              :origin origin
              :attach-path attach-path
-             :used-bindings (:used-bindings node)
-             :binding-keys (or (:join-bindings node) #{})
-             :new-bindings (:new-bindings node)
+             :used-bindings (:used-bindings compiled-node)
+             :binding-keys (or (:join-bindings compiled-node) #{})
+             :new-bindings (:new-bindings compiled-node)
              :ancestor-bindings ancestor-bindings
              :all-bindings all-bindings}
-      (:join-filter-join-bindings node)
-      (assoc :join-filter-join-bindings (:join-filter-join-bindings node))
+      (:join-filter-join-bindings compiled-node)
+      (assoc :join-filter-join-bindings (:join-filter-join-bindings compiled-node))
 
       result-binding
       (assoc :result-binding result-binding)
@@ -378,35 +382,35 @@
       fact-binding
       (assoc :fact-binding fact-binding))))
 
-(defn- analyze-branch
-  "Runs the binding walk over one conjunction branch, returning its records and
-   final bindings."
+(defn- analyze-conjunction-branch
+  "Runs the binding walk over one conjunction branch, returning its binding
+   records and final bindings."
   [conjunctions env ancestor-bindings origin attach-path]
   (loop [remaining conjunctions
          ancestor ancestor-bindings
          records []]
     (if-let [conjunction (first remaining)]
-      (let [record (conjunction-binding conjunction env ancestor origin attach-path)]
+      (let [record (conjunction-binding-record conjunction env ancestor origin attach-path)]
         (recur (rest remaining)
                (:all-bindings record)
                (conj records record)))
       {:records records
        :final-bindings ancestor})))
 
-(defn- analyze-tagged
+(defn- analyze-tagged-conditions
   "Runs the compiler-order binding walk over sorted, origin-tagged conditions."
-  [tagged env]
-  (loop [remaining tagged
+  [tagged-conditions env]
+  (loop [remaining tagged-conditions
          ancestor-bindings #{}
          records []]
     (if-let [{:keys [origin condition]} (first remaining)]
-      (let [ap (attach-path origin condition)
+      (let [attach-path (resolve-attach-path origin condition)
             branch-results (map (fn [branch]
-                                  (analyze-branch (expand-exists origin branch)
-                                                  env
-                                                  ancestor-bindings
-                                                  origin
-                                                  ap))
+                                  (analyze-conjunction-branch (expand-exists origin branch)
+                                                              env
+                                                              ancestor-bindings
+                                                              origin
+                                                              attach-path))
                                 (disjunction-branches condition))
             next-bindings (->> branch-results
                                (map :final-bindings)
@@ -442,9 +446,9 @@
    `env` is the production's `:env` (usually nil)."
   [lhs env]
   (-> (get-raw-lhs lhs)
-      flatten-tagged
-      sort-tagged
-      (analyze-tagged env)))
+      flatten-and-tag-conditions
+      sort-tagged-conditions
+      (analyze-tagged-conditions env)))
 
 (defn- sort-bindings
   "Returns a deterministic, sorted vector of binding keywords."
@@ -464,7 +468,7 @@
     (assoc :join-filter-join-bindings
            (sort-bindings (:join-filter-join-bindings record)))))
 
-(defn- path-index
+(defn- build-binding-index
   "Builds `{attach-path :bindings binding-summary}` from origin-tagged records,
    with binding sets sorted into vectors for deterministic consumers.  A
    duplicate attach-path is an analysis invariant violation, so it throws
@@ -481,26 +485,26 @@
           {}
           records))
 
-(defn- walk-augment
+(defn- merge-bindings-into-tree
   "Walks the (normalized, accumulator-enriched) LHS tree, merging binding info
    into leaf maps by path.  Group maps keep their `:condition-type` and have
    their `:children` recursed.  The internal `:raw-condition` and `::normalized`
    keys are already stripped before enrichment (see `strip-internal-keys`)."
-  [x path binding-index]
+  [node path binding-index]
   (cond
-    (and (map? x) (contains? x :children))
-    (update x :children
+    (and (map? node) (contains? node :children))
+    (update node :children
             (fn [children]
               (mapv (fn [j child]
-                      (walk-augment child (conj path j) binding-index))
+                      (merge-bindings-into-tree child (conj path j) binding-index))
                     (range)
                     children)))
 
-    (map? x) (if-let [binding-info (get binding-index path)]
-               (merge x binding-info)
-               x)
+    (map? node) (if-let [binding-info (get binding-index path)]
+                  (merge node binding-info)
+                  node)
 
-    :else x))
+    :else node))
 
 (defn augment-lhs
   "Enriches a normalized LHS for analysis.  Every entry is a map: group entries
@@ -522,8 +526,8 @@
    * `:prod-ns` — production namespace (required for accumulator evaluation);
    * `:env` — the production's `:env` (usually nil)."
   [lhs {:keys [prod-ns env]}]
-  (let [binding-index (path-index (analyze-lhs-bindings lhs env))
+  (let [binding-index (build-binding-index (analyze-lhs-bindings lhs env))
         enriched (enrich-accumulators (strip-internal-keys lhs) prod-ns)]
     (map-indexed (fn [i entry]
-                   (walk-augment entry [i] binding-index))
+                   (merge-bindings-into-tree entry [i] binding-index))
                  enriched)))
