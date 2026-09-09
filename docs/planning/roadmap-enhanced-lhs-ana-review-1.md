@@ -271,43 +271,53 @@ Agreed direction: bindings are worth showing, but only a small, cheap,
 per-condition subset, in a dedicated collapsible element — not the JSON-blob
 fallback.
 
-**Which groups to keep.** All are sets in-memory, sorted vectors on the wire:
+**Which groups to surface.** All are sets in-memory, sorted vectors on the
+wire:
 
-| Group | Meaning | Keep? |
+| Group | Meaning | Surface? |
 | --- | --- | --- |
-| `used-bindings` | every variable the condition references (constraints + `fact-binding` + join-filter vars) | **yes** |
-| `binding-keys` | variables already bound *upstream* that this condition joins on (its input join keys) | **yes** |
+| `binding-keys` | variables already bound *upstream* that this condition joins on (its equality join keys) | **yes** |
 | `new-bindings` | variables this condition's constraints introduce for the first time (excludes `fact-binding`/`result-binding`) | **yes** |
+| `join-filter-join-bindings` | variables referenced through *non-equality* join filters that are already bound upstream | **yes** — optional, present only for non-equality joins |
+| `used-bindings` | every variable the condition references (constraints + `fact-binding` + join-filter vars) | **no** — superset of the above; its only unique content (`fact-binding`, non-equality vars) is now explicit |
 | `ancestor-bindings` | cumulative bindings available *before* the condition | **no** — O(n²), low reading value |
 | `all-bindings` | cumulative bindings available *after* the condition | **no** — redundant |
+
+Decision: drop `used-bindings` and instead surface
+`join-filter-join-bindings`, so each wire group has a single, explicit meaning.
+`fact-binding` / `result-binding` remain first-class fields on the leaf (already
+rendered as their own rows), which is what `used-bindings` used to be the only
+other home for.
 
 On `binding-keys`: it is the condition's *input* join key — which upstream
 bindings it matches against — not something the condition produces. That is why
 it is non-empty on a join/accumulator leaf even when `new-bindings` is `[]`. It
 is the other half of the "new vs joined" split that motivated this analysis
-(plan §3.6–3.7), so keep it next to `new-bindings` rather than dropping it.
+(plan §3.6–3.7), so keep it next to `new-bindings`.
 
-**Wire shape.** Nest the three kept groups under a single `:bindings` key so
-the generic renderer can ignore it wholesale and the UI can show/hide one
-object:
+**Wire shape.** Nest the kept groups under a single `:bindings` key so the
+generic renderer can ignore it wholesale and the UI can show/hide one object:
 
 ```json
 "bindings": {
-  "used-bindings": ["?app-id"],
-  "binding-keys":  ["?app-id"],
-  "new-bindings":  []
+  "binding-keys": ["?app-id"],
+  "new-bindings": []
 }
 ```
 
+with `"join-filter-join-bindings": ["?a"]` added only when the condition has
+non-equality joins.
+
 `augment-lhs`/`path-index` then stop emitting the five flat keys and emit the
-single `:bindings` map (keeping only the three groups). Dropping
-`ancestor-bindings` / `all-bindings` also fixes the O(n²) payload concern.
+single `:bindings` map. Dropping `used-bindings` / `ancestor-bindings` /
+`all-bindings` also fixes the O(n²) payload concern.
 
 **Determinism.** Each group's vector is already sorted server-side
 (`sort-bindings` → `sort-by name`), so per-group order is stable. The *group*
-order must be fixed by the UI element (hard-coded: used → new → binding-keys,
-or whatever display order you prefer), not derived from `Object.entries` /
-`Object.keys` — Clojure map key order is not a logical order.
+order must be fixed by the UI element (hard-coded: new-bindings → binding-keys
+→ join-filter-join-bindings, or whatever display order you prefer), not derived
+from `Object.entries` / `Object.keys` — Clojure map key order is not a logical
+order.
 
 **UI.** In `LhsCondition.svelte`, add `:bindings` to `ignoredKeys` (kills the
 JSON-blob fallback) and render a collapsible "Show bindings" affordance — the
@@ -321,17 +331,17 @@ catch-all (roadmap item #3):
 ```clojure
 ;; api.clj — serialized layer
 (s/optional-key :bindings)
-{:used-bindings [s/Keyword]
- :binding-keys  [s/Keyword]
- :new-bindings  [s/Keyword]}
+{:binding-keys  [s/Keyword]
+ :new-bindings  [s/Keyword]
+ (s/optional-key :join-filter-join-bindings) [s/Keyword]}
 ```
 
 ```ts
 // api.ts
 bindings?: {
-  'used-bindings': string[];
   'binding-keys': string[];
   'new-bindings': string[];
+  'join-filter-join-bindings'?: string[];
 };
 ```
 
@@ -384,9 +394,9 @@ named to signal the layer:
    (s/optional-key :join-filter-join-bindings) #{s/Keyword}})
 ```
 
-`ancestor-bindings` / `all-bindings` stay in the internal record (the walk
-needs them for propagation) but are dropped at the serialization boundary —
-see U1 for the wire subset.
+`used-bindings` / `ancestor-bindings` / `all-bindings` stay in the internal
+record (the walk needs them for propagation) but are dropped at the
+serialization boundary — see U1 for the wire subset.
 
 Two caveats:
 
@@ -419,9 +429,9 @@ Two caveats:
 2. **(MEDIUM)** Make compound negation defer explicitly in `attach-path`
    (C2), and assert/warn on duplicate `attach-path`s in `path-index`.
 3. **(MEDIUM)** Consolidate binding info: emit one nested `:bindings` map
-   (`used-bindings` / `binding-keys` / `new-bindings`), drop
-   `ancestor-bindings` / `all-bindings`, and add the collapsible
-   "Show bindings" UI element (U1).
+   (`binding-keys` / `new-bindings`, plus `join-filter-join-bindings` when
+   non-empty), drop `used-bindings` / `ancestor-bindings` / `all-bindings`,
+   and add the collapsible "Show bindings" UI element (U1).
 4. **(LOW)** Deterministic `:exists` placeholder (C3).
 5. **(LOW)** Add the internal (pre-serialization) schemas (U2).
 6. **(LOW)** Extract shared path-construction helper (S1) and squash
