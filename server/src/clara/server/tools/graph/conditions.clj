@@ -9,26 +9,28 @@
   Passes:
 
   * `accumulator-info` — evaluate an accumulator condition's `:accumulator`
-    form in the production namespace and return
-    `{:form form :some-initial-value? bool}`.
+    form in the production namespace and return its `:form` and
+    `:some-initial-value?` details.
 
   * `analyze-lhs-bindings` — reproduce the compiler's binding bookkeeping
     (used / join / new bindings per condition) using clara-rules' own
-    `sort-conditions` and `condition-to-node`, tagged with each record's
-    origin path in the raw LHS.
+    `com/sort-conditions` and `com/condition-to-node`, tagged with each
+    record's origin path in the raw LHS.
 
-  * `augment-lhs` — the pass `core` actually calls: evaluate accumulators and
-    attach per-leaf binding info to the original LHS shape."
+  * `augment-lhs` — evaluate accumulators and attach per-leaf binding info to
+    the original LHS shape."
   (:require [clara.rules.compiler :as com]
             [clojure.set :as set]
             [clojure.walk :as walk]))
 
 (defn accumulator-info
-  "Evaluates an accumulator form in the production's namespace and returns
-   `{:form form :some-initial-value? bool}`.  The `:form` is returned unchanged
-   (the raw Clojure form); serialization renders it to a string.
+  "Evaluates an accumulator form in the production's namespace and returns a
+   map with:
 
-   `:some-initial-value?` is `(some? (:initial-value <evaluated-accumulator>))`.
+   * `:form` — the raw accumulator form, unchanged (serialization renders it
+     to a string);
+   * `:some-initial-value?` — true when the evaluated accumulator's
+     `:initial-value` is non-nil.
 
    Throws when the production namespace is not loaded or the form does not
    evaluate to a map.  Analysis assumes the rulebase's namespaces are already
@@ -69,14 +71,13 @@
 (defn- flatten-tagged
   "Flattens top-level `:and` groups, tagging each flattened condition with its
    origin path into the original LHS tree.  A top-level map entry gets origin
-   `[i]`; the `j`th child of a top-level `:and` at index `i` gets
-   `[i (inc j)]`."
+   `[i]`; the `j`th child of a top-level `:and` at index `i` gets `[i j]`."
   [lhs]
   (vec
    (mapcat (fn [i condition]
              (if (#{'and :and} (first condition))
                (map-indexed (fn [j child]
-                              {:origin [i (inc j)]
+                              {:origin [i j]
                                :condition child})
                             (rest condition))
                [{:origin [i]
@@ -85,8 +86,8 @@
 
 (defn- sort-tagged
   "Reimplements `clara.rules.compiler/sort-conditions` while preserving each
-   condition's origin.  Uses the compiler's own `analyze-condition` for the
-   per-condition classification, so the ordering is identical."
+   condition's origin.  Uses the compiler's own `com/analyze-condition` for
+   the per-condition classification, so the ordering is identical."
   [tagged]
   (let [classified (mapv (fn [{:keys [condition] :as item}]
                            (assoc item :classified (com/analyze-condition condition)))
@@ -113,8 +114,8 @@
           (recur (into sorted newly) updated still))))))
 
 (defn- disjunction-branches
-  "Returns the conjunction branches of `condition` after `to-dnf`, each branch
-   a seq of conditions.  Mirrors the compiler's disjunction handling."
+  "Returns the conjunction branches of `condition` after `com/to-dnf`, each
+   branch a seq of conditions.  Mirrors the compiler's disjunction handling."
   [condition]
   (let [dnf (com/to-dnf condition)]
     (for [expression (if (= :or (first dnf))
@@ -138,12 +139,13 @@
 
 (defn- attach-path
   "Returns the path into the original LHS tree where `condition`'s binding info
-   should be attached, or nil when the condition is a grouped form we do not
-   augment yet (`:or` / `:exists`)."
+   should be attached, or nil when the condition is a `:or` / `:exists` group
+   (those are still analyzed for ancestor-bindings propagation, but their
+   nested leaves are not augmented in this pass)."
   [origin condition]
   (cond
     (map? condition) origin
-    (#{:not 'not} (first condition)) (conj origin 1)
+    (#{:not 'not} (first condition)) (conj origin 0)
     :else nil))
 
 (defn- conjunction-binding
@@ -209,8 +211,8 @@
 
 (defn analyze-lhs-bindings
   "Analyzes the compiler's binding bookkeeping for `lhs` (a production's raw
-   LHS conditions) using clara-rules' own `sort-conditions` and
-   `condition-to-node`.
+   LHS conditions) using clara-rules' own `com/sort-conditions` and
+   `com/condition-to-node`.
 
    Returns a flat vector of origin-tagged records, in compiler processing
    order.  Each record:
@@ -266,7 +268,7 @@
     (vector? x) (into [(first x)]
                       (map-indexed (fn [j child]
                                      (walk-augment child
-                                                   (conj path (inc j))
+                                                   (conj path j)
                                                    binding-index)))
                       (rest x))
 
@@ -279,8 +281,9 @@
    `:ancestor-bindings`, `:all-bindings`).
 
    Group vectors (`:and`, `:or`, `:not`, `:exists`) are kept as vectors; only
-   their nested leaf maps are augmented.  `:or` / `:exists` group leaves are
-   not augmented in this pass.
+   their nested leaf maps are augmented.  `:or` / `:exists` groups are still
+   analyzed for ancestor-bindings propagation, but their nested leaves are not
+   augmented in this pass.
 
    `opts`:
    * `:prod-ns` — production namespace (required for accumulator evaluation);
