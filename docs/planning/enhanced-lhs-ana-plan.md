@@ -1,8 +1,9 @@
 # Enhanced LHS Analysis — Accumulator Details & Node Mapping — Plan
 
-Status: **Implemented (accumulator info) + binding analyzer prototyped.** See
-the companion [`roadmap-enhanced-lhs-ana.md`](./roadmap-enhanced-lhs-ana.md)
-for the work log and next steps.
+Status: **Implemented (accumulator info + leaf binding augmentation).**
+Group-level (`:or` / `:exists`) binding info is deferred. See the companion
+[`roadmap-enhanced-lhs-ana.md`](./roadmap-enhanced-lhs-ana.md) for the work
+log and next steps.
 
 Scope: extend the serialized rulebase LHS analysis so accumulator conditions
 carry real information about the accumulator (form + `:initial-value`
@@ -382,13 +383,16 @@ already loaded, so a failure is a real analysis error, not a silent `false`.
   Questions).
 - Does not unlock per-condition `:bindings` — that is Option B.
 
-### Option B — Lightweight per-LHS binding analyzer (prototyped)
+### Option B — Lightweight per-LHS binding analyzer (implemented for leaves)
 
-Implemented as `conditions/analyze-lhs-bindings`; not yet wired into the
-serialized `:lhs`. The analyzer lives in `clara.server.tools.graph.conditions`
-and analyzes a single production's raw `:lhs` using the compiler's own
-transformation functions (Section 3.7). It emits, per raw condition / expanded
-conjunction:
+Implemented as `conditions/analyze-lhs-bindings` (origin-tagged compiler-order
+records) plus `conditions/augment-lhs` (merges binding info back into the
+original LHS tree). Leaf binding info is wired into the serialized `:lhs` for
+fact/test/accumulator leaves and `:not` nested leaves; `:or` / `:exists` group
+leaves are deferred. The analyzer lives in
+`clara.server.tools.graph.conditions` and analyzes a single production's raw
+`:lhs` using the compiler's own transformation functions (Section 3.7). It
+emits, per raw condition / expanded conjunction:
 
 - `:used-bindings` — every variable the condition references,
 - `:join-bindings` — variables already bound upstream that this condition
@@ -443,15 +447,15 @@ non-accumulator nodes.
 
 1. **Done:** Option A — accumulator `:form` + `:some-initial-value?` shipped;
    the broken `:accumulator` representation is fixed.
-2. **Done (prototype):** Option B's analyzer (`conditions/analyze-lhs-bindings`)
-   is implemented and tested, but not yet exposed on the serialized `:lhs`.
-3. **Next:** wire Option B's per-condition binding metadata
-   (`:used-bindings` / `:join-bindings` / `:new-bindings`) into the analysis
-   output additively.
+2. **Done:** Option B — `conditions/analyze-lhs-bindings` (origin-tagged) +
+   `conditions/augment-lhs` implemented and tested; leaf binding info is wired
+   into the serialized `:lhs`.
+3. **Next:** decide how/whether to expose binding info for `:or` / `:exists`
+   group leaves, and whether to homogenize LHS entries into maps.
 4. **Later / only if needed:** Option C — node mapping for evaluated
    accumulators, if eval purity becomes a blocker, and for node-id exposure.
 
-**Recommendation unchanged:** A is complete; B is the next increment. C remains
+**Recommendation unchanged:** A and leaf-level B are complete. C remains
 optional and only for the evaluated-accumulator question.
 
 ---
@@ -486,7 +490,8 @@ Analysis (`conditions.clj`) evaluates and attaches:
 
 ```clojure
 (defn accumulator-info [form prod-ns] ...) ; eval → {:form form :some-initial-value? bool}
-(defn enrich-lhs [lhs prod-ns] ...)        ; prewalk, attach accumulator-info
+(defn analyze-lhs-bindings [lhs env] ...)  ; origin-tagged compiler-order records
+(defn augment-lhs [lhs opts] ...)          ; eval accumulators + merge leaf binding info
 ```
 
 Serialization (`serialize.clj`) only renders the already-computed form:
@@ -502,7 +507,7 @@ Serialization (`serialize.clj`) only renders the already-computed form:
 (contains? node :accumulator) (update :accumulator serialize-accumulator)
 ```
 
-`core/production-summary` runs `conditions/enrich-lhs` before
+`core/production-summary` runs `conditions/augment-lhs` before
 `serialize-lhs`.
 
 ### 5.3 UI (`ui/src/lib/types/api.ts`, `LhsCondition.svelte`)

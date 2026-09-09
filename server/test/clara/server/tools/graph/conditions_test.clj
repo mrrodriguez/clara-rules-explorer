@@ -32,20 +32,6 @@
                           #"Failed to evaluate accumulator form"
                           (conditions/accumulator-info '(this-does-not-exist) prod-ns)))))
 
-(deftest test-enrich-lhs
-  (let [lhs [{:type Application
-              :constraints '[(= ?app-id app-id)]}
-             {:accumulator '(clara.rules.accumulators/all)
-              :from {:type GivenDocument
-                     :constraints '[(= ?app-id app-id)]}
-              :result-binding :?docs}]
-        enriched (conditions/enrich-lhs lhs prod-ns)]
-    (is (= {:form '(clara.rules.accumulators/all)
-            :some-initial-value? true}
-           (:accumulator (second enriched))))
-    ;; Non-accumulator conditions are untouched.
-    (is (= (first lhs) (first enriched)))))
-
 (deftest test-analyze-lhs-bindings
   (let [lhs [{:type Application
               :constraints '[(= ?app-id app-id)]}
@@ -86,3 +72,57 @@
         (is (= #{:?app-id} (:join-bindings r)))
         (is (= #{} (:new-bindings r)))
         (is (= :?docs (:result-binding r)))))))
+
+(deftest test-augment-lhs
+  (let [lhs [{:type Application
+              :constraints '[(= ?app-id app-id)]}
+             {:accumulator '(clara.rules.accumulators/all)
+              :from {:type GivenDocument
+                     :constraints '[(= ?app-id app-id)]}
+              :result-binding :?docs}
+             {:type :extracted-doc-meta
+              :constraints []
+              :fact-binding :?extract-doc-meta}]
+        augmented (conditions/augment-lhs lhs {:prod-ns prod-ns :env nil})]
+
+    (testing "leaf conditions are augmented with sorted binding vectors"
+      (is (= [:?app-id] (:new-bindings (first augmented))))
+      (is (= [] (:binding-keys (first augmented))))
+      (is (= [:?app-id] (:used-bindings (first augmented))))
+      (is (= [] (:ancestor-bindings (first augmented))))
+      (is (= [:?app-id] (:all-bindings (first augmented)))))
+
+    (testing "non-accumulator leaf contents are preserved"
+      (is (= Application (:type (first augmented))))
+      (is (= '[(= ?app-id app-id)] (:constraints (first augmented)))))
+
+    (testing "accumulator conditions carry accumulator info and binding info"
+      (let [acc-entry (second augmented)]
+        (is (= {:form '(clara.rules.accumulators/all)
+                :some-initial-value? true}
+               (:accumulator acc-entry)))
+        (is (= [:?app-id] (:binding-keys acc-entry)))
+        (is (= [] (:new-bindings acc-entry)))
+        (is (= :?docs (:result-binding acc-entry)))))
+
+    (testing "fact-binding leaf is augmented too"
+      (let [fact-entry (nth augmented 2)]
+        (is (= [:?extract-doc-meta] (:used-bindings fact-entry)))
+        (is (= [] (:binding-keys fact-entry)))
+        (is (= [] (:new-bindings fact-entry)))))))
+
+(deftest test-augment-lhs--not-group
+  (let [lhs [{:type Application
+              :constraints '[(= ?app-id app-id)]}
+             [:not {:type Application
+                    :constraints '[(= ?app-id app-id)]}]]
+        augmented (conditions/augment-lhs lhs {:prod-ns prod-ns :env nil})
+        not-entry (second augmented)
+        not-leaf (second not-entry)]
+    (testing "group vectors stay vectors"
+      (is (= :not (first not-entry)))
+      (is (map? not-leaf)))
+
+    (testing "the nested leaf inside :not is augmented"
+      (is (= [:?app-id] (:binding-keys not-leaf)))
+      (is (= [] (:new-bindings not-leaf))))))

@@ -3,7 +3,8 @@
 Companion to [`enhanced-lhs-ana-plan.md`](./enhanced-lhs-ana-plan.md). Tracks
 concrete work done and the next increments.
 
-Status: **accumulator info shipped; binding analyzer prototyped.**
+Status: **accumulator info + leaf binding augmentation shipped; group-level
+(`:or` / `:exists`) binding info deferred.**
 
 ---
 
@@ -16,22 +17,26 @@ Added `server/src/clara/server/tools/graph/conditions.clj`:
 - `accumulator-info` — evaluates an accumulator form in the production's
   namespace (throws on failure) and returns
   `{:form <raw-form> :some-initial-value? bool}`.
-- `enrich-lhs` — prewalks a raw LHS and replaces each accumulator condition's
-  `:accumulator` with its `accumulator-info` map.
 - `analyze-lhs-bindings` — the compiler-equivalent binding walk
   (`sort-conditions` + `condition-to-node` + `:exists` expansion +
-  disjunction handling). Returns per-conjunction
+  disjunction handling), reimplementing the topological sort with origin
+  tags so records map back to raw LHS positions. Returns per-conjunction
   `:used-bindings` / `:join-bindings` / `:new-bindings` /
   `:join-filter-join-bindings` / `:ancestor-bindings` / `:all-bindings`
   (plus `:result-binding` / `:fact-binding` where present).
+- `augment-lhs` — enriches accumulator conditions and merges per-leaf binding
+  info back into the original LHS tree. Group vectors stay vectors; only their
+  nested leaf maps are augmented.
 
-### 2. Accumulator info wired into core analysis
+### 2. Conditions analysis wired into core analysis
 
-- `core/production-summary` enriches each production's LHS via
-  `conditions/enrich-lhs` before `serialize/serialize-lhs`.
-- The `->rulebase-analysis` output therefore carries `:some-initial-value?`
-  pre-serialization — direct consumers of the analysis get it without any
-  HTTP/serialize step.
+- `core/production-summary` runs `conditions/augment-lhs` on each production's
+  LHS before `serialize/serialize-lhs`.
+- The `->rulebase-analysis` output therefore carries accumulator info
+  (`:form` / `:some-initial-value?`) and per-leaf binding info
+  (`:used-bindings` / `:binding-keys` / `:new-bindings` /
+  `:ancestor-bindings` / `:all-bindings`) pre-serialization — direct
+  consumers of the analysis get it without any HTTP/serialize step.
 
 ### 3. Serialization is pure
 
@@ -50,7 +55,9 @@ Added `server/src/clara/server/tools/graph/conditions.clj`:
 
 ### 5. Tests
 
-- Added `server/test/clara/server/tools/graph/conditions_test.clj`.
+- Added `server/test/clara/server/tools/graph/conditions_test.clj` (accumulator
+  info, enrich, origin-tagged bindings, `augment-lhs`, `:not` leaf
+  augmentation).
 - Updated `server/test/clara/server/tools/graph/serialize_test.clj`
   accumulator case to the accumulator-info map input.
 
@@ -60,7 +67,7 @@ Added `server/src/clara/server/tools/graph/conditions.clj`:
 
 Server (`cd server`):
 
-- `make test` → 249 tests / 1635 assertions, 0 failures / 0 errors.
+- `make test` → 251 tests / 1651 assertions, 0 failures / 0 errors.
 - `make format-check lint reflection-check` → all pass.
 
 UI (`cd ui`):
@@ -73,11 +80,14 @@ UI (`cd ui`):
 
 ## Current state / next increments
 
-1. **Wire `conditions/analyze-lhs-bindings` into the analysis output.**
-   Decide the additive shape for per-condition
-   `:used-bindings` / `:join-bindings` / `:new-bindings` (and how to map the
-   sorted/expanded records back to raw LHS conditions).
-2. **Optionally precompute/cache accumulator eval** if `->rulebase-analysis`
+1. **Leaf binding augmentation is wired** for fact/test/accumulator leaves and
+   `:not` nested leaves. `:or` / `:exists` group leaves are left
+   unaugmented this pass.
+2. **Decide whether/when to homogenize LHS entries into maps** — group vectors
+   are the remaining awkward consumer-API shape, left as-is for now.
+3. **Optionally expose the binding keys in the API schema + UI** — they are
+   currently carried through the catch-all keys, not explicitly typed/rendered.
+4. **Optionally precompute/cache accumulator eval** if `->rulebase-analysis`
    purity or repeated-eval cost becomes a concern.
-3. **Optionally build the compiled-node mapper (Option C)** only if eval purity
+5. **Optionally build the compiled-node mapper (Option C)** only if eval purity
    becomes a blocker or node-id exposure is wanted.

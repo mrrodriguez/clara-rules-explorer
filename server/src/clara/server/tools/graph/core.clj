@@ -170,7 +170,9 @@
   (let [ann (ann/production-annotation annotations production)
         ;; Queries in clara.rules.schema/Query have no :ns-name — derive it.
         p-ns-name (get-production-ns-name-sym production)
-        lhs-analysis (conditions/enrich-lhs (:lhs production) p-ns-name)
+        lhs-analysis (conditions/augment-lhs (:lhs production)
+                                             {:prod-ns p-ns-name
+                                              :env (:env production)})
         serialize-type-ref (partial serialize/serialize-type-ref known-set p-ns-name)
 
         {:keys [upstream downstream]} (get-production-deps-summary p-name ctx)
