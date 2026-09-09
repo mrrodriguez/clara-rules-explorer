@@ -89,9 +89,10 @@
 
     (map? condition)
     (if (contains? condition :accumulator)
-      (assoc (update condition :from normalize-condition)
-             :raw-condition condition
-             ::normalized true)
+      (-> condition
+          (update :from normalize-condition)
+          (assoc :raw-condition condition
+                 ::normalized true))
       condition)
 
     (and (sequential? condition) (seq condition))
@@ -163,12 +164,13 @@
   (letfn [(walk [condition]
             (case (get-condition-type condition)
               :fact (if-let [b (:fact-binding condition)]
-                      [{:binding (symbol (name b)) :fact-type (:type condition)}]
+                      [{:binding (-> b name symbol) :fact-type (:type condition)}]
                       [])
               :accumulator (if-let [b (:result-binding condition)]
-                             (into []
-                                   (map (fn [t] {:binding (symbol (name b)) :fact-type t}))
-                                   (distinct (extract-condition-fact-types (:from condition))))
+                             (->> (extract-condition-fact-types (:from condition))
+                                  distinct
+                                  (into [] (map (fn [t] {:binding (-> b name symbol)
+                                                         :fact-type t}))))
                              [])
               (:and :or :not :exists) (mapcat walk (:children condition))
               :test []
@@ -283,12 +285,14 @@
               still (if has-non-accum
                       (remove satisfied-non-accum? remaining)
                       (remove satisfied? remaining))
-              updated (apply set/union bound
-                             (map (comp :bound :classified) newly))]
+              updated (->> newly
+                           (map (comp :bound :classified))
+                           (apply set/union bound))]
           (when (empty? newly)
-            (let [unsatisfiable (set/difference
-                                 (apply set/union (map (comp :unbound :classified) still))
-                                 bound)]
+            (let [unbound-union (->> still
+                                     (map (comp :unbound :classified))
+                                     (apply set/union))
+                  unsatisfiable (set/difference unbound-union bound)]
               (throw (ex-info "Using variable that is not previously bound"
                               {:unbound-variables unsatisfiable}))))
           (recur (into sorted newly) updated still))))))
@@ -305,20 +309,24 @@
         (rest expression)
         [expression]))))
 
+(defn- exists-result-binding
+  "Builds the deterministic `:result-binding` keyword for an expanded `:exists`
+   condition from its origin path and position, so repeated analyses of the
+   same LHS are stable (unlike the compiler's gensym)."
+  [origin i]
+  (keyword (format "?__exists__%s__%s"
+                   (->> origin (interpose "_") (apply str))
+                   i)))
+
 (defn- expand-exists
   "Expands `:exists` conditions into accumulator conditions, mirroring
-   `clara.rules.compiler/extract-exists`.  The generated `:result-binding` is
-   deterministic — derived from the origin path and the condition's position in
-   its conjunction — rather than a gensym, so repeated analyses of the same LHS
-   are stable."
+   `clara.rules.compiler/extract-exists`."
   [origin conjunctions]
   (mapcat (fn [i condition]
             (if (= :exists (com/condition-type condition))
               [{:accumulator '(clara.rules.accumulators/exists)
                 :from (second condition)
-                :result-binding (keyword (str "?__exists__"
-                                              (apply str (interpose "_" origin))
-                                              "__" i))}]
+                :result-binding (exists-result-binding origin i)}]
               [condition]))
           (range)
           conjunctions))
@@ -400,8 +408,9 @@
                                                   origin
                                                   ap))
                                 (disjunction-branches condition))
-            next-bindings (reduce set/union ancestor-bindings
-                                  (map :final-bindings branch-results))
+            next-bindings (->> branch-results
+                               (map :final-bindings)
+                               (reduce set/union ancestor-bindings))
             next-records (into records (mapcat :records) branch-results)]
         (recur (rest remaining) next-bindings next-records))
       records)))
@@ -432,7 +441,10 @@
 
    `env` is the production's `:env` (usually nil)."
   [lhs env]
-  (analyze-tagged (sort-tagged (flatten-tagged (get-raw-lhs lhs))) env))
+  (-> (get-raw-lhs lhs)
+      flatten-tagged
+      sort-tagged
+      (analyze-tagged env)))
 
 (defn- sort-bindings
   "Returns a deterministic, sorted vector of binding keywords."
