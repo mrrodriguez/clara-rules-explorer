@@ -124,14 +124,15 @@ malformed-shape error, docstring alignment) is incorporated.
 
 Server (`cd server`):
 
-- `make test` → **261 tests / 1672 assertions**, 0 failures / 0 errors.
+- `make test` → all pass (accumulator eval, binding augmentation, LHS
+  normalization, serialization, and analyze-flow cases are covered).
 - `make format-check lint reflection-check` → all pass.
 
 UI (`cd ui`):
 
 - `TMPDIR="$PWD/target/tmp" make format check lint` → all pass.
-- `make test-unit` → **32 passed**.
-- `make test-e2e` → **65 passed**.
+- `make test-unit` / `make test-e2e` → all pass (bindings summary and group
+  rendering covered in the unit suite).
 
 (Demo-data regeneration is intentionally deferred.)
 

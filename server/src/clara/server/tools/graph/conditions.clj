@@ -74,13 +74,23 @@
   [condition]
   (boolean (::normalized condition)))
 
+(defn- assert-normalized-condition
+  "Throws when `node` does not carry the `::normalized` marker added by
+   `normalize-condition`.  Every normalized condition — group, accumulator,
+   and leaf — is tagged, so a missing marker means raw (or malformed) input
+   and fails loudly here instead of being silently mis-classified."
+  [node]
+  (when-not (::normalized node)
+    (throw (ex-info "Expected a normalized LHS condition (call conditions/normalize-lhs first)"
+                    {:condition node}))))
+
 (defn- normalize-condition
   "Converts one raw Clara condition into the normalized homogeneous shape:
    boolean group vectors become `{:condition-type … :children […]}`; accumulator
-   maps have their `:from` subtree normalized; leaf maps are unchanged.  Group
-   and accumulator nodes retain their raw form under `:raw-condition` (so the
-   compiler-coupled binding walk can read it without a reverse conversion) and
-   are tagged with `::normalized` so re-normalization is a no-op.
+   maps have their `:from` subtree normalized; leaf maps keep their raw fields.
+   Every normalized node is tagged with `::normalized`; group and accumulator
+   nodes additionally retain their raw form under `:raw-condition` (so the
+   compiler-coupled binding walk can read it without a reverse conversion).
 
    Idempotent: an already-normalized node is returned unchanged."
   [condition]
@@ -93,7 +103,7 @@
           (update :from normalize-condition)
           (assoc :raw-condition condition
                  ::normalized true))
-      condition)
+      (assoc condition ::normalized true))
 
     (and (sequential? condition) (seq condition))
     (let [group-head (first condition)]
@@ -111,21 +121,26 @@
 (defn normalize-lhs
   "Normalizes a production's raw LHS conditions into the homogeneous shape
    used by the rest of the analysis: every entry is a map; group entries carry
-   `:condition-type` + `:children`; leaf entries keep their raw fields.  Group
-   and accumulator entries retain their raw form under `:raw-condition` (for
-   the compiler-coupled binding walk) and are tagged with `::normalized`; the
-   internal keys are kept through analysis and stripped at the serialization
-   boundary (see `strip-internal-keys`).
+   `:condition-type` + `:children`; leaf entries keep their raw fields.  Every
+   entry is tagged with `::normalized`; group and accumulator entries
+   additionally retain their raw form under `:raw-condition` (for the
+   compiler-coupled binding walk).  The internal keys are kept through
+   analysis and stripped at the serialization boundary (see
+   `strip-internal-keys`).
 
    Idempotent: an already-normalized LHS is returned unchanged."
   [lhs]
   (mapv normalize-condition lhs))
 
 (defn- get-raw-condition
-  "Returns the raw Clara form retained on a normalized condition (or the
-   condition itself when it is already a raw leaf map)."
+  "Returns the raw Clara form retained on a normalized condition.  Group and
+   accumulator nodes keep their original form under `:raw-condition`; leaf maps
+   are unchanged apart from the `::normalized` marker, which is stripped here
+   so the returned LHS is the pure raw form.  Raw (non-normalized) conditions
+   pass through unchanged."
   [node]
-  (or (:raw-condition node) node))
+  (or (:raw-condition node)
+      (cond-> node (map? node) (dissoc ::normalized))))
 
 (defn get-raw-lhs
   "Returns the raw Clara LHS retained on a normalized LHS (see
@@ -137,8 +152,12 @@
   "Returns the fact types referenced by a single normalized LHS condition
    subtree (fact leaves and accumulator `:from` subtrees; groups are walked;
    test leaves contribute none).  Duplicates are preserved; callers that need
-   a deduplicated view use `extract-lhs-fact-types`."
+   a deduplicated view use `extract-lhs-fact-types`.
+
+   Throws when `condition` is not a normalized condition (see
+   `assert-normalized-condition`)."
   [condition]
+  (assert-normalized-condition condition)
   (case (get-condition-type condition)
     :fact [(:type condition)]
     :accumulator (extract-condition-fact-types (:from condition))
@@ -148,7 +167,8 @@
 
 (defn extract-lhs-fact-types
   "Returns the distinct fact types referenced by a normalized production LHS,
-   in traversal order."
+   in traversal order.  Throws when any entry is not normalized (missing the
+   `::normalized` marker)."
   [lhs]
   (into []
         (comp (mapcat extract-condition-fact-types)
@@ -160,9 +180,13 @@
   "Scans a normalized production LHS for bound fact variables:
    `:fact-binding` on fact leaves and `:result-binding` on accumulator leaves
    (whose `:from` subtree supplies the fact types).  Returns
-   `[{:binding ?sym :fact-type t} …]` with `:binding` as a symbol."
+   `[{:binding ?sym :fact-type t} …]` with `:binding` as a symbol.
+
+   Throws when any condition is not normalized (missing the `::normalized`
+   marker)."
   [lhs]
   (letfn [(walk [condition]
+            (assert-normalized-condition condition)
             (case (get-condition-type condition)
               :fact (if-let [bound-var (:fact-binding condition)]
                       [{:binding (-> bound-var name symbol) :fact-type (:type condition)}]

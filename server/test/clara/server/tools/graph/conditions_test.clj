@@ -49,6 +49,31 @@
                           (conditions/normalize-lhs
                            [[{:type Application :constraints []}]])))))
 
+(deftest test-extract-walkers--non-normalized-throws
+  (testing "extract-lhs-fact-types throws on raw group vectors"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Expected a normalized LHS condition"
+                          (conditions/extract-lhs-fact-types
+                           [[:or {:type Application :constraints []}]]))))
+  (testing "extract-lhs-fact-types throws on raw accumulator maps"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Expected a normalized LHS condition"
+                          (conditions/extract-lhs-fact-types
+                           [{:accumulator '(clara.rules.accumulators/all)
+                             :from {:type GivenDocument :constraints []}}]))))
+  (testing "extract-lhs-fact-types throws on raw leaf maps"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Expected a normalized LHS condition"
+                          (conditions/extract-lhs-fact-types
+                           [{:type Application :constraints []}]))))
+  (testing "extract-var-bindings throws on raw group vectors"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Expected a normalized LHS condition"
+                          (conditions/extract-var-bindings
+                           [[:or {:type Application
+                                  :constraints []
+                                  :fact-binding :?a}]])))))
+
 (deftest test-accumulator-info
   (testing "inline accumulator with a non-nil initial-value"
     (is (= {:form '(clara.rules.accumulators/all)

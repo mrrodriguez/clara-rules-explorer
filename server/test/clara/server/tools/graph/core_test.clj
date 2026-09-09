@@ -206,15 +206,17 @@
   (testing "Extraction from various internal condition types"
     (is (= [Application GivenDocument]
            (conditions/extract-lhs-fact-types
-            [{:type Application :constraints []}
-             {:accumulator 'some-acc
-              :from {:type GivenDocument :constraints []}}])))
+            (conditions/normalize-lhs
+             [{:type Application :constraints []}
+              {:accumulator 'some-acc
+               :from {:type GivenDocument :constraints []}}]))))
 
     (is (= [Application AllGivenDocuments AllRequiredDocuments]
            (conditions/extract-lhs-fact-types
-            [{:type Application :constraints []}
-             {:type AllGivenDocuments :constraints []}
-             {:type AllRequiredDocuments :constraints []}])))))
+            (conditions/normalize-lhs
+             [{:type Application :constraints []}
+              {:type AllGivenDocuments :constraints []}
+              {:type AllRequiredDocuments :constraints []}]))))))
 
 (deftest test-rulebase-analysis-loan-app
   (let [session (->test-session)

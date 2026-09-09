@@ -487,23 +487,24 @@
   (testing "fact conditions: :fact-binding pairs with the condition's type"
     (is (= [{:binding '?t :fact-type :widget-transform}]
            (conditions/extract-var-bindings
-            [{:type :widget-transform :constraints [] :fact-binding :?t}]))))
+            (conditions/normalize-lhs
+             [{:type :widget-transform :constraints [] :fact-binding :?t}])))))
   (testing "accumulator conditions: :result-binding pairs with the :from subtree's types"
     (is (= [{:binding '?ts :fact-type :widget-transform}]
            (conditions/extract-var-bindings
-            [{:accumulator 'some-acc
-              :from {:type :widget-transform}
-              :result-binding :?ts}]))))
+            (conditions/normalize-lhs
+             [{:accumulator 'some-acc
+               :from {:type :widget-transform}
+               :result-binding :?ts}])))))
   (testing "nested and/or compounds are walked"
     (is (= [{:binding '?x :fact-type :a} {:binding '?y :fact-type :c}]
            (conditions/extract-var-bindings
-            [{:condition-type :and
-              :children [{:type :a :fact-binding :?x}
-                         {:condition-type :or
-                          :children [{:type :b}
-                                     {:type :c :fact-binding :?y}]}]}]))))
+            (conditions/normalize-lhs
+             [[:and {:type :a :fact-binding :?x}
+               [:or {:type :b} {:type :c :fact-binding :?y}]]])))))
   (testing "unbound and test conditions contribute nothing"
-    (is (= [] (conditions/extract-var-bindings [{:type :a} {:constraints []}])))))
+    (is (= [] (conditions/extract-var-bindings
+               (conditions/normalize-lhs [{:type :a} {:constraints []}]))))))
 
 (deftest test-fact-type-spec-fn
   (let [spec-fn (fn [t]

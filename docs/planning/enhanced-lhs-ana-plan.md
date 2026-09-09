@@ -597,15 +597,16 @@ Server:
   updated to the normalized input and rendered output.
 - `core_test.clj` / `analyze_test.clj` updated to the shared `conditions`
   walkers and the normalized group shape.
-- `make test` → 261 tests / 1672 assertions, 0 failures/errors.
+- `make test` → all pass (the `conditions` suite covers normalization,
+  accumulator eval, binding augmentation, the join-filter path, and the
+  non-normalized-input guard).
 
 UI:
 
 - `api.ts` adds `AccumulatorInfo` + `LhsBindingInfo` and closes `LhsElement`;
   `LhsCondition.svelte` renders group entries, `form` + `Initial Value` badge,
   and the collapsible bindings element.
-  `make format check lint`, `make test-unit` (32), and `make test-e2e` (65)
-  pass.
+  `make format check lint`, `make test-unit`, and `make test-e2e` pass.
 
 ---
 

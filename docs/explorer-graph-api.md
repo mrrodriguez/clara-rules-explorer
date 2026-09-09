@@ -366,6 +366,43 @@ Includes everything from the list view plus:
 | `notes` | string\|null | Human-readable notes from annotations |
 | `upstream` / `downstream` | ProductionDep[] | Dependency edges; `:match` present when the pair links via at least one type pair |
 
+Each `lhs` entry is an object in one of two shapes.
+
+**Leaf condition** (fact / test / accumulator):
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `type` | TypeReference | Fact type (fact leaves and accumulator `from` subtrees) |
+| `constraints` | string | Pretty-printed constraint forms |
+| `args` | string | Pretty-printed argument forms |
+| `accumulator` | AccumulatorInfo | Accumulator details (accumulator leaves only) |
+| `from` | LhsElement | The accumulator's source condition subtree |
+| `result-binding` | string | Accumulator result binding (e.g. `"?docs"`) |
+| `fact-binding` | string | Fact binding (e.g. `"?app-id"`) |
+| `bindings` | LhsBindingInfo | Per-leaf binding summary (see below) |
+
+**Group condition** (`and` / `or` / `not` / `exists`):
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `condition-type` | string | `and` \| `or` \| `not` \| `exists` |
+| `children` | LhsElement[] | Nested conditions |
+
+**`AccumulatorInfo`**:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `form` | string | Rendered accumulator form, e.g. `"(clara.rules.accumulators/all)"` |
+| `some-initial-value?` | boolean | `true` when the evaluated accumulator has a non-nil `:initial-value` |
+
+**`LhsBindingInfo`** (attached under `bindings` on leaf entries):
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `binding-keys` | string[] | Variables already bound upstream that this condition joins on |
+| `new-bindings` | string[] | Variables this condition's constraints introduce for the first time |
+| `join-filter-join-bindings` | string[] | Present only for non-equality unifications that reference an upstream binding |
+
 **Response** `404`:
 ```json
 { "error": "Rule not found" }
