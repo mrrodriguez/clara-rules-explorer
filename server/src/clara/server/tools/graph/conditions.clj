@@ -113,8 +113,9 @@
    used by the rest of the analysis: every entry is a map; group entries carry
    `:condition-type` + `:children`; leaf entries keep their raw fields.  Group
    and accumulator entries retain their raw form under `:raw-condition` (for
-   the compiler-coupled binding walk) and are tagged with `::normalized`;
-   `augment-lhs` strips the internal keys once consumed.
+   the compiler-coupled binding walk) and are tagged with `::normalized`; the
+   internal keys are kept through analysis and stripped at the serialization
+   boundary (see `strip-internal-keys`).
 
    Idempotent: an already-normalized LHS is returned unchanged."
   [lhs]
@@ -216,25 +217,32 @@
     {:form form
      :some-initial-value? (some? (:initial-value evaluated))}))
 
-(defn- strip-internal-keys
-  "Removes the internal normalization keys (`:raw-condition` and `::normalized`)
-   from a normalized LHS tree.  The binding walk consumes `:raw-condition` (via
-   `get-raw-lhs`) before accumulator enrichment runs, so dropping them here
-   avoids re-evaluating the retained raw accumulator copies during
-   `enrich-accumulators` and keeps the internal markers off the wire."
+(defn strip-internal-keys
+  "Removes the internal analysis keys (`:raw-condition` and `::normalized`)
+   from a serialized (or normalized/augmented) LHS tree.  The keys are
+   serialized into the in-memory `:lhs` and removed here at the external-view
+   boundary so they are not externalized via the API."
   [lhs]
   (walk/prewalk (fn [x] (if (map? x) (dissoc x :raw-condition ::normalized) x)) lhs))
 
 (defn- enrich-accumulators
   "Returns `lhs` with every accumulator condition's `:accumulator` replaced by
-   its `accumulator-info` map.  Non-accumulator conditions are unchanged."
+   its `accumulator-info` map.  Only the normalized condition structure is
+   traversed (`:from` / `:children`); the retained `:raw-condition` subtrees are
+   skipped, so each accumulator form is evaluated exactly once."
   [lhs prod-ns]
-  (walk/prewalk
-   (fn [x]
-     (if (and (map? x) (contains? x :accumulator))
-       (update x :accumulator #(accumulator-info % prod-ns))
-       x))
-   lhs))
+  (letfn [(enrich-node [node]
+            (cond
+              (and (map? node) (contains? node :accumulator))
+              (-> node
+                  (update :accumulator #(accumulator-info % prod-ns))
+                  (update :from enrich-node))
+
+              (and (map? node) (contains? node :children))
+              (update node :children (fn [children] (mapv enrich-node children)))
+
+              :else node))]
+    (mapv enrich-node lhs)))
 
 (defn- group-child-paths
   "Returns a seq of `[child-path child]` pairs for the child conditions of a
@@ -489,7 +497,7 @@
   "Walks the (normalized, accumulator-enriched) LHS tree, merging binding info
    into leaf maps by path.  Group maps keep their `:condition-type` and have
    their `:children` recursed.  The internal `:raw-condition` and `::normalized`
-   keys are already stripped before enrichment (see `strip-internal-keys`)."
+   keys are left intact for in-memory consumers."
   [node path binding-index]
   (cond
     (and (map? node) (contains? node :children))
@@ -516,7 +524,9 @@
 
    The caller is responsible for normalizing the raw LHS first (see
    `normalize-lhs`, which is idempotent); this function only enriches an
-   already-normalized LHS.
+   already-normalized LHS.  The enriched LHS retains the internal
+   `:raw-condition` and `::normalized` keys for in-memory consumers;
+   `strip-internal-keys` removes them at the serialization boundary.
 
    `:or` / `:exists` groups and compound negations
    (`[:not [:and/:or/:not ...]]`) are still analyzed for ancestor-bindings
@@ -527,7 +537,7 @@
    * `:env` — the production's `:env` (usually nil)."
   [lhs {:keys [prod-ns env]}]
   (let [binding-index (build-binding-index (analyze-lhs-bindings lhs env))
-        enriched (enrich-accumulators (strip-internal-keys lhs) prod-ns)]
+        enriched (enrich-accumulators lhs prod-ns)]
     (map-indexed (fn [i entry]
                    (merge-bindings-into-tree entry [i] binding-index))
                  enriched)))

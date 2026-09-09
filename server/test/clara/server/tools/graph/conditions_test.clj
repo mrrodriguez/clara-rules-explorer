@@ -229,3 +229,36 @@
       (is (= {:binding-keys [:?app-id]
               :new-bindings []}
              (:bindings not-leaf))))))
+
+(deftest test-augment-lhs--retains-internal-keys
+  (testing "augment-lhs keeps :raw-condition and ::normalized for in-memory consumers"
+    (let [lhs [{:accumulator '(clara.rules.accumulators/all)
+                :from {:type GivenDocument
+                       :constraints '[(= ?app-id app-id)]}
+                :result-binding :?docs}]
+          augmented (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                            {:prod-ns prod-ns :env nil})
+          acc-entry (first augmented)]
+      (is (contains? acc-entry :raw-condition))
+      (is (true? (::conditions/normalized acc-entry)))
+      (is (= '(clara.rules.accumulators/all)
+             (get-in acc-entry [:raw-condition :accumulator]))))))
+
+(deftest test-augment-lhs--accumulator-evaluated-once
+  (testing "each accumulator is evaluated once, not once per retained raw copy"
+    (let [calls (atom 0)
+          original conditions/accumulator-info
+          counting (fn [form pns] (swap! calls inc) (original form pns))
+          lhs [[:or
+                {:accumulator '(clara.rules.accumulators/all)
+                 :from {:type GivenDocument
+                        :constraints '[(= ?app-id app-id)]}
+                 :result-binding :?docs}
+                {:accumulator '(clara.rules.accumulators/all)
+                 :from {:type GivenDocument
+                        :constraints '[(= ?app-id app-id)]}
+                 :result-binding :?docs}]]]
+      (with-redefs [conditions/accumulator-info counting]
+        (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                {:prod-ns prod-ns :env nil}))
+      (is (= 2 @calls)))))

@@ -47,7 +47,10 @@ malformed-shape error, docstring alignment) is incorporated.
   `get-raw-lhs` only for the compiler-coupled walk (`sort-conditions` +
   `condition-to-node` + `:exists` expansion).
 - `augment-lhs` enriches an already-normalized LHS (accumulator info + per-leaf
-  `:bindings`) and strips the internal `:raw-condition` key in `walk-augment`.
+  `:bindings`) and retains the internal `:raw-condition` / `::normalized` keys
+  for in-memory consumers; `enrich-accumulators` skips `:raw-condition`
+  subtrees (no re-evaluation), and `strip-internal-keys` removes the internal
+  keys at the serialization boundary.
 - Review-1 hardening retained: unsatisfiable-input guard, explicit
   compound-negation deferral, deterministic `:exists` placeholders, shared path
   helper, `:join-bindings` → `:binding-keys`, test-time-only `s/defn` schemas.
@@ -91,9 +94,9 @@ malformed-shape error, docstring alignment) is incorporated.
 
 ### 8. Review-2 hardening (`R2-1`–`R2-7`)
 
-- Accumulators are evaluated once per condition: `strip-raw-conditions` runs
-  before `enrich-accumulators`, so the retained `:raw-condition` copies are
-  not re-evaluated (R2-5).
+- Accumulators are evaluated once per condition: `enrich-accumulators` walks
+  only `:from` / `:children` and never descends into the retained
+  `:raw-condition` subtrees (R2-5).
 - `:join-filter-join-bindings` is gated on `not-empty` and only emitted for
   non-equality unifications that reference an upstream binding; empty variants
   are omitted (R2-1), with a new `augment-lhs` test covering the non-empty and
@@ -106,13 +109,22 @@ malformed-shape error, docstring alignment) is incorporated.
 - `analyze-lhs-bindings` `:attach-path` docstring now lists compound negations
   alongside `:or` / `:exists` (R2-3).
 
----
+### 9. Internal LHS keys serialized, stripped at the external-view boundary
 
-## Verified
+- `serialize/serialize-condition` serializes each retained `:raw-condition`
+  recursively as a condition (raw group vectors stay vectors; a raw
+  accumulator form becomes a string) and passes the `::normalized` marker
+  through, so the serialized `:lhs` stays fully serialized while retaining the
+  internal keys for in-memory consumers of `->rulebase-analysis`.
+- `core/get-production-external-view` (and
+  `core/get-rulebase-analysis-external-view`) strip `:raw-condition` /
+  `::normalized` from the serialized `:lhs` at the API boundary, so they are
+  never externalized.
+
 
 Server (`cd server`):
 
-- `make test` → **257 tests / 1661 assertions**, 0 failures / 0 errors.
+- `make test` → **261 tests / 1672 assertions**, 0 failures / 0 errors.
 - `make format-check lint reflection-check` → all pass.
 
 UI (`cd ui`):
@@ -132,9 +144,9 @@ UI (`cd ui`):
 2. **Group-level binding info is deferred** for `:or` / `:exists` group leaves
    and compound negations — analyzed for ancestor propagation but left
    unaugmented, explicitly.
-3. **LHS entries are homogeneous maps** end-to-end (raw retained only as
-   `:raw-condition` for the binding walk and `:lhs-form`); normalization is
-   idempotent and `:raw-condition` is stripped before accumulator enrichment.
+3. **LHS entries are homogeneous maps** end-to-end; normalization is
+   idempotent, and the serialized `:lhs` retains the internal `:raw-condition`
+   / `::normalized` keys, stripped only at the external-view boundary.
 4. **Regenerate demo data** when the static demo next needs to reflect the new
    wire shape (deferred; it is already stale for accumulator/bindings).
 5. **Optionally precompute/cache accumulator eval** if `->rulebase-analysis`
@@ -151,6 +163,6 @@ UI (`cd ui`):
    compiler's extraction/DNF bookkeeping).
 2. **Accumulator eval caching.** Where it should live if introduced.
 3. **`raw-condition` lifecycle.** It is an internal key on normalized nodes,
-   stripped before accumulator enrichment (after the binding walk consumes it)
-   by `strip-raw-conditions`; normalization is idempotent, so re-normalizing
-   an already-normalized LHS is safe.
+   serialized recursively into the in-memory `:lhs` and stripped at the
+   external-view boundary (`core/get-production-external-view`); normalization
+   is idempotent.

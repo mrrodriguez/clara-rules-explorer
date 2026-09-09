@@ -556,7 +556,11 @@ Serialization (`serialize.clj`) only renders the already-computed form:
 `production-summary` then runs `conditions/augment-lhs` (on the normalized LHS)
 before `serialize-lhs`, and reconstructs `:lhs-form` via
 `conditions/get-raw-lhs`.  `serialize/serialize-condition` consumes the
-normalized shape (groups recurse `:children`; accumulators recurse `:from`).
+normalized shape (groups recurse `:children`; accumulators recurse `:from`)
+and serializes each retained `:raw-condition` recursively as a condition (raw
+group vectors stay vectors), keeping the `:lhs` fully serialized;
+`core/get-production-external-view` removes the internal `:raw-condition` /
+`::normalized` keys at the API boundary.
 
 ### 5.3 UI (`ui/src/lib/types/api.ts`, `LhsCondition.svelte`)
 
@@ -593,7 +597,7 @@ Server:
   updated to the normalized input and rendered output.
 - `core_test.clj` / `analyze_test.clj` updated to the shared `conditions`
   walkers and the normalized group shape.
-- `make test` → 257 tests / 1661 assertions, 0 failures/errors.
+- `make test` → 261 tests / 1672 assertions, 0 failures/errors.
 
 UI:
 

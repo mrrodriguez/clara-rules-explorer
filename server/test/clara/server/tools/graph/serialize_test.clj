@@ -243,6 +243,36 @@
       (is (= ":type-b" (get-in (second serialized) [:type :name])))
       (is (string? (:constraints (second serialized)))))))
 
+(deftest test-serialize-lhs--serializes-internal-keys
+  (testing "serialize-lhs serializes :raw-condition recursively and keeps ::normalized"
+    (let [lhs [{:condition-type :not
+                :children [{:type :type-a :constraints '[(= ?a 1)]}]
+                :raw-condition [:not {:type :type-a :constraints '[(= ?a 1)]}]
+                ::conditions/normalized true}]
+          serialized (s/serialize-lhs lhs nil #{})
+          raw (get-in serialized [0 :raw-condition])]
+      (is (= :not (get-in serialized [0 :condition-type])))
+      (is (vector? raw))
+      (is (= :not (first raw)))
+      (is (string? (get-in raw [1 :constraints])))
+      (is (string? (get-in raw [1 :type :name])))
+      (is (true? (get-in serialized [0 ::conditions/normalized]))))))
+
+(deftest test-serialize-condition--raw-accumulator
+  (testing "a raw accumulator :raw-condition serializes its raw accumulator form to a string"
+    (let [condition {:accumulator {:form '(clara.rules.accumulators/all)
+                                   :some-initial-value? true}
+                     :from {:type :type-a :constraints '[(= ?a 1)]}
+                     :result-binding :?docs
+                     :raw-condition {:accumulator '(clara.rules.accumulators/all)
+                                     :from {:type :type-a :constraints '[(= ?a 1)]}
+                                     :result-binding :?docs}}
+          serialized (s/serialize-condition condition nil #{})
+          raw (:raw-condition serialized)]
+      (is (string? (:accumulator raw)))
+      (is (str/includes? (:accumulator raw) "clara.rules.accumulators/all"))
+      (is (string? (get-in raw [:from :constraints]))))))
+
 ;; ---------------------------------------------------------------------------
 ;; serialize-lhs-form — condition-type dispatch
 ;; ---------------------------------------------------------------------------

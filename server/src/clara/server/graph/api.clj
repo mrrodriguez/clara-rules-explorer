@@ -374,7 +374,7 @@
         name (get (:production-id-index analysis) id)
         rule (get-in analysis [:rules name])]
     (if rule
-      {:status 200 :body rule}
+      {:status 200 :body (core/get-production-external-view rule)}
       {:status 404 :body {:error "Rule not found"}})))
 
 (s/defn handle-get-queries :- {:status (s/eq 200) :body {:queries [QueryListItem]}}
@@ -393,7 +393,7 @@
         name (get (:production-id-index analysis) id)
         query (get-in analysis [:queries name])]
     (if query
-      {:status 200 :body query}
+      {:status 200 :body (core/get-production-external-view query)}
       {:status 404 :body {:error "Query not found"}})))
 
 (s/defn handle-get-fact-types :- {:status (s/eq 200) :body {:fact-types [FactTypeListItem]}}

@@ -1134,3 +1134,15 @@
              (match-pairs down)))
       (is (= [nil :retract] (mapv :via (:match down)))
           "insert match unflagged, retract match flagged"))))
+
+(deftest test-get-production-external-view-strips-internal-lhs-keys
+  (testing "external view removes :raw-condition and ::normalized from the serialized :lhs"
+    (let [summary {:lhs [{:condition-type :not
+                          :children [{:type :type-a :constraints "[(= ?a 1)]"}]
+                          :raw-condition "[:not {:type type-a :constraints [(= ?a 1)]}]"
+                          ::conditions/normalized true}]}
+          ext (core/get-production-external-view summary)
+          lhs (first (:lhs ext))]
+      (is (= :not (:condition-type lhs)))
+      (is (not (contains? lhs :raw-condition)))
+      (is (not (contains? lhs ::conditions/normalized))))))

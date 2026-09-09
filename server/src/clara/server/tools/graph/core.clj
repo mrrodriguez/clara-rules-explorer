@@ -482,10 +482,22 @@
   (mapv #(select-keys % [:name :id :ns :doc :lhs-types :params])
         (vals (:queries analysis))))
 
+(defn get-production-external-view
+  "Returns a rule/query summary stripped of the internal LHS analysis keys
+   (`:raw-condition` / `::normalized`) so they are not externalized via the
+   API.  The in-memory summary's serialized `:lhs` retains them; this function
+   removes them (recursively) from every LHS condition."
+  [summary]
+  (update summary :lhs conditions/strip-internal-keys))
+
 (defn get-rulebase-analysis-external-view
   "Returns the analysis map stripped of internal implementation details
-   (`:fact-type-id-index`, `:production-id-index`, `:merged-annotations`).
-   Suitable for serialization to external consumers (e.g. the HTTP API)
-   that should not depend on those details."
+   (`:fact-type-id-index`, `:production-id-index`, `:merged-annotations`, and
+   each production's internal LHS keys via `get-production-external-view`).
+   Suitable for serialization to external consumers (e.g. the HTTP API) that
+   should not depend on those details."
   [analysis]
-  (dissoc analysis :fact-type-id-index :production-id-index :merged-annotations))
+  (-> analysis
+      (dissoc :fact-type-id-index :production-id-index :merged-annotations)
+      (update :rules #(update-vals % get-production-external-view))
+      (update :queries #(update-vals % get-production-external-view))))
