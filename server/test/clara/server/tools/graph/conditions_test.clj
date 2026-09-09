@@ -33,6 +33,22 @@
       (is (= :not (get-in normalized [0 :from :condition-type])))
       (is (= raw (conditions/get-raw-lhs normalized))))))
 
+(deftest test-normalize-lhs--idempotent
+  (testing "re-normalizing an already-normalized LHS does not double-wrap :raw-condition"
+    (let [raw [{:accumulator '(clara.rules.accumulators/all)
+                :from {:type GivenDocument :constraints []}
+                :result-binding :?docs}]
+          once (conditions/normalize-lhs raw)]
+      (is (= once (conditions/normalize-lhs once)))
+      (is (= raw (conditions/get-raw-lhs (conditions/normalize-lhs once)))))))
+
+(deftest test-normalize-lhs--malformed-group-head
+  (testing "a group vector whose head is not a keyword/symbol throws a clear ex-info"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Unsupported LHS condition shape"
+                          (conditions/normalize-lhs
+                           [[{:type Application :constraints []}]])))))
+
 (deftest test-accumulator-info
   (testing "inline accumulator with a non-nil initial-value"
     (is (= {:form '(clara.rules.accumulators/all)
@@ -131,6 +147,34 @@
         (is (= {:binding-keys []
                 :new-bindings []}
                (:bindings fact-entry)))))))
+
+(deftest test-augment-lhs--join-filter-join-bindings
+  (testing "non-equality unifications referencing an upstream binding are surfaced"
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               {:type Application
+                :constraints '[(> ?app-id 1000)]}]
+          augmented (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                            {:prod-ns prod-ns :env nil})
+          entry (second augmented)]
+      (is (= {:binding-keys []
+              :new-bindings []
+              :join-filter-join-bindings [:?app-id]}
+             (:bindings entry)))))
+
+  (testing "non-equality unifications that do not reference an upstream binding are omitted"
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               {:type Application
+                :constraints '[(> ?d 1000)]
+                :fact-binding :?d}]
+          augmented (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                            {:prod-ns prod-ns :env nil})
+          entry (second augmented)]
+      (is (= {:binding-keys []
+              :new-bindings []}
+             (:bindings entry)))
+      (is (not (contains? (:bindings entry) :join-filter-join-bindings))))))
 
 (deftest test-analyze-lhs-bindings--unsatisfiable
   (testing "an unsatisfiable LHS throws rather than looping"

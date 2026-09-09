@@ -77,7 +77,9 @@
 (s/defschema LhsBindingInfo
   "Per-condition binding summary attached under `:bindings` on serialized LHS
    leaves.  Values are keywords pre-JSON (the API validates the in-memory
-   shape); the UI receives strings after JSON encoding."
+   shape); the UI receives strings after JSON encoding.
+   `:join-filter-join-bindings` is present only when the condition has
+   non-equality unifications that reference an upstream binding."
   {:binding-keys [s/Keyword]
    :new-bindings [s/Keyword]
    (s/optional-key :join-filter-join-bindings) [s/Keyword]})

@@ -7,7 +7,9 @@ Tracks concrete work done and the next increments.
 Status: **accumulator info + leaf binding augmentation shipped; LHS entries
 homogenized into maps and normalized once at the top of the analysis.**
 Group-level (`:or` / `:exists`) and compound-negation binding info remain
-deferred (explicitly, not silently).
+deferred (explicitly, not silently). Review-2 feedback (single accumulator
+eval, `:join-filter-join-bindings` gating, idempotent normalization, clearer
+malformed-shape error, docstring alignment) is incorporated.
 
 ---
 
@@ -87,13 +89,30 @@ deferred (explicitly, not silently).
   shared `conditions` walkers and the normalized group shape.
 - `ui/.../LhsCondition.svelte.test.ts`: bindings summary + group rendering.
 
+### 8. Review-2 hardening (`R2-1`–`R2-7`)
+
+- Accumulators are evaluated once per condition: `strip-raw-conditions` runs
+  before `enrich-accumulators`, so the retained `:raw-condition` copies are
+  not re-evaluated (R2-5).
+- `:join-filter-join-bindings` is gated on `not-empty` and only emitted for
+  non-equality unifications that reference an upstream binding; empty variants
+  are omitted (R2-1), with a new `augment-lhs` test covering the non-empty and
+  omitted cases (R2-2).
+- `normalize-lhs` is idempotent — `normalize-condition` tags group/accumulator
+  nodes with a namespaced `::normalized` marker and short-circuits on it
+  (R2-6).
+- `normalize-condition` throws a clear `ex-info` for a malformed group vector
+  whose head is not a keyword/symbol (R2-7).
+- `analyze-lhs-bindings` `:attach-path` docstring now lists compound negations
+  alongside `:or` / `:exists` (R2-3).
+
 ---
 
 ## Verified
 
 Server (`cd server`):
 
-- `make test` → **254 tests / 1655 assertions**, 0 failures / 0 errors.
+- `make test` → **257 tests / 1661 assertions**, 0 failures / 0 errors.
 - `make format-check lint reflection-check` → all pass.
 
 UI (`cd ui`):
@@ -114,7 +133,8 @@ UI (`cd ui`):
    and compound negations — analyzed for ancestor propagation but left
    unaugmented, explicitly.
 3. **LHS entries are homogeneous maps** end-to-end (raw retained only as
-   `:raw-condition` for the binding walk and `:lhs-form`).
+   `:raw-condition` for the binding walk and `:lhs-form`); normalization is
+   idempotent and `:raw-condition` is stripped before accumulator enrichment.
 4. **Regenerate demo data** when the static demo next needs to reflect the new
    wire shape (deferred; it is already stale for accumulator/bindings).
 5. **Optionally precompute/cache accumulator eval** if `->rulebase-analysis`
@@ -131,6 +151,6 @@ UI (`cd ui`):
    compiler's extraction/DNF bookkeeping).
 2. **Accumulator eval caching.** Where it should live if introduced.
 3. **`raw-condition` lifecycle.** It is an internal key on normalized nodes,
-   stripped by `augment-lhs`; any future consumer that walks a normalized-but-
-   not-yet-augmented LHS must be aware it is present (it is harmless to the
-   structural walkers).
+   stripped before accumulator enrichment (after the binding walk consumes it)
+   by `strip-raw-conditions`; normalization is idempotent, so re-normalizing
+   an already-normalized LHS is safe.

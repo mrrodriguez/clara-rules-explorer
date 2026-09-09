@@ -67,25 +67,43 @@
         (:type node) :fact
         :else :test)))
 
+(defn- normalized-node?
+  "True when `condition` was already normalized by `normalize-condition` — it
+   carries the `::normalized` marker.  The marker is namespaced to this
+   namespace, so it cannot collide with raw Clara condition keys."
+  [condition]
+  (boolean (::normalized condition)))
+
 (defn- normalize-condition
   "Converts one raw Clara condition into the normalized homogeneous shape:
    boolean group vectors become `{:condition-type … :children […]}`; accumulator
    maps have their `:from` subtree normalized; leaf maps are unchanged.  Group
-   and accumulator nodes retain their raw form under `:raw-condition` so the
-   compiler-coupled binding walk can read it without a reverse conversion."
+   and accumulator nodes retain their raw form under `:raw-condition` (so the
+   compiler-coupled binding walk can read it without a reverse conversion) and
+   are tagged with `::normalized` so re-normalization is a no-op.
+
+   Idempotent: an already-normalized node is returned unchanged."
   [condition]
   (cond
+    (normalized-node? condition) condition
+
     (map? condition)
     (if (contains? condition :accumulator)
       (assoc (update condition :from normalize-condition)
-             :raw-condition condition)
+             :raw-condition condition
+             ::normalized true)
       condition)
 
     (and (sequential? condition) (seq condition))
     (let [op (first condition)]
+      (when-not (or (keyword? op) (symbol? op))
+        (throw (ex-info "Unsupported LHS condition shape: group vector head must be a keyword or symbol"
+                        {:condition condition
+                         :head op})))
       {:condition-type (if (keyword? op) op (keyword (name op)))
        :children (mapv normalize-condition (rest condition))
-       :raw-condition condition})
+       :raw-condition condition
+       ::normalized true})
 
     :else condition))
 
@@ -93,8 +111,11 @@
   "Normalizes a production's raw LHS conditions into the homogeneous shape
    used by the rest of the analysis: every entry is a map; group entries carry
    `:condition-type` + `:children`; leaf entries keep their raw fields.  Group
-   and accumulator entries retain their raw form under `:raw-condition` for the
-   compiler-coupled binding walk; `augment-lhs` strips it once consumed."
+   and accumulator entries retain their raw form under `:raw-condition` (for
+   the compiler-coupled binding walk) and are tagged with `::normalized`;
+   `augment-lhs` strips the internal keys once consumed.
+
+   Idempotent: an already-normalized LHS is returned unchanged."
   [lhs]
   (mapv normalize-condition lhs))
 
@@ -191,6 +212,15 @@
                        :result acc})))
     {:form form
      :some-initial-value? (some? (:initial-value acc))}))
+
+(defn- strip-internal-keys
+  "Removes the internal normalization keys (`:raw-condition` and `::normalized`)
+   from a normalized LHS tree.  The binding walk consumes `:raw-condition` (via
+   `get-raw-lhs`) before accumulator enrichment runs, so dropping them here
+   avoids re-evaluating the retained raw accumulator copies during
+   `enrich-accumulators` and keeps the internal markers off the wire."
+  [lhs]
+  (walk/prewalk (fn [x] (if (map? x) (dissoc x :raw-condition ::normalized) x)) lhs))
 
 (defn- enrich-accumulators
   "Returns `lhs` with every accumulator condition's `:accumulator` replaced by
@@ -387,14 +417,15 @@
 
    * `:origin` — path into the LHS tree the record came from;
    * `:attach-path` — path where this record's info should be attached when
-     augmenting the LHS (nil for `:or` / `:exists` groups);
+     augmenting the LHS (nil for `:or` / `:exists` groups and compound
+     negations);
    * `:condition` — the expanded conjunction form (after `:exists` expansion);
    * `:used-bindings` — variables the condition references;
    * `:binding-keys` — variables already bound upstream that this condition
      joins on (the compiled node's `:binding-keys`);
    * `:new-bindings` — variables introduced by this condition's constraints;
    * `:join-filter-join-bindings` — present only when the condition has
-     non-equality unifications;
+     non-equality unifications that reference an upstream binding;
    * `:result-binding` / `:fact-binding` — present when the condition binds one;
    * `:ancestor-bindings` — bindings available before the condition;
    * `:all-bindings` — bindings available after it.
@@ -411,12 +442,13 @@
 (defn- binding-summary
   "Reduces an origin-tagged record to the small, deterministic wire shape
    attached under `:bindings`: `:binding-keys` and `:new-bindings`, plus
-   `:join-filter-join-bindings` when the condition has non-equality joins.
+   `:join-filter-join-bindings` when the condition has non-equality
+   unifications that reference an upstream binding (empty sets are omitted).
    The cumulative / superset groups stay internal to the walk."
   [{:keys [binding-keys new-bindings] :as record}]
   (cond-> {:binding-keys (sort-bindings binding-keys)
            :new-bindings (sort-bindings new-bindings)}
-    (contains? record :join-filter-join-bindings)
+    (seq (:join-filter-join-bindings record))
     (assoc :join-filter-join-bindings
            (sort-bindings (:join-filter-join-bindings record)))))
 
@@ -440,24 +472,21 @@
 (defn- walk-augment
   "Walks the (normalized, accumulator-enriched) LHS tree, merging binding info
    into leaf maps by path.  Group maps keep their `:condition-type` and have
-   their `:children` recursed.  The internal `:raw-condition` key is stripped
-   here — it is only needed by the binding walk."
+   their `:children` recursed.  The internal `:raw-condition` and `::normalized`
+   keys are already stripped before enrichment (see `strip-internal-keys`)."
   [x path binding-index]
   (cond
     (and (map? x) (contains? x :children))
-    (-> x
-        (update :children
-                (fn [children]
-                  (mapv (fn [j child]
-                          (walk-augment child (conj path j) binding-index))
-                        (range)
-                        children)))
-        (dissoc :raw-condition))
+    (update x :children
+            (fn [children]
+              (mapv (fn [j child]
+                      (walk-augment child (conj path j) binding-index))
+                    (range)
+                    children)))
 
-    (map? x) (-> (if-let [binding-info (get binding-index path)]
-                   (merge x binding-info)
-                   x)
-                 (dissoc :raw-condition))
+    (map? x) (if-let [binding-info (get binding-index path)]
+               (merge x binding-info)
+               x)
 
     :else x))
 
@@ -466,10 +495,12 @@
    are `{:condition-type … :children […]}`; leaf entries carry
    `accumulator-info` (accumulator conditions) and a nested `:bindings` map
    (`:binding-keys` / `:new-bindings`, plus `:join-filter-join-bindings` when
-   the condition has non-equality joins).
+   the condition has non-equality unifications that reference an upstream
+   binding).
 
    The caller is responsible for normalizing the raw LHS first (see
-   `normalize-lhs`); this function only enriches an already-normalized LHS.
+   `normalize-lhs`, which is idempotent); this function only enriches an
+   already-normalized LHS.
 
    `:or` / `:exists` groups and compound negations
    (`[:not [:and/:or/:not ...]]`) are still analyzed for ancestor-bindings
@@ -480,7 +511,7 @@
    * `:env` — the production's `:env` (usually nil)."
   [lhs {:keys [prod-ns env]}]
   (let [binding-index (path-index (analyze-lhs-bindings lhs env))
-        enriched (enrich-accumulators lhs prod-ns)]
+        enriched (enrich-accumulators (strip-internal-keys lhs) prod-ns)]
     (map-indexed (fn [i entry]
                    (walk-augment entry [i] binding-index))
                  enriched)))

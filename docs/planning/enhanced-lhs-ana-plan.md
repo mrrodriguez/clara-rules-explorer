@@ -4,9 +4,10 @@ Status: **Implemented (accumulator info + leaf binding augmentation + LHS
 homogenization, with a consolidated `:bindings` wire shape).** The LHS is
 normalized once into homogeneous maps at the top of the analysis and consumed
 as such downstream; group-level (`:or` / `:exists`) and compound-negation
-binding info remain deferred (explicitly). Review 1 feedback incorporated —
-see the companion [`roadmap-enhanced-lhs-ana.md`](./roadmap-enhanced-lhs-ana.md)
-for the work log and next steps.
+binding info remain deferred (explicitly). Review 1 and review 2 feedback
+incorporated — see the companion
+[`roadmap-enhanced-lhs-ana.md`](./roadmap-enhanced-lhs-ana.md) for the work log
+and next steps.
 
 Scope: extend the serialized rulebase LHS analysis so accumulator conditions
 carry real information about the accumulator (form + `:initial-value`
@@ -592,7 +593,7 @@ Server:
   updated to the normalized input and rendered output.
 - `core_test.clj` / `analyze_test.clj` updated to the shared `conditions`
   walkers and the normalized group shape.
-- `make test` → 254 tests / 1655 assertions, 0 failures/errors.
+- `make test` → 257 tests / 1661 assertions, 0 failures/errors.
 
 UI:
 
@@ -606,7 +607,7 @@ UI:
 
 ## 7. Open questions
 
-Resolved during implementation / review 1:
+Resolved during implementation / review 1 / review 2:
 
 - Unevaluable accumulator forms **throw** (`ex-info`) — no silent `false`.
 - Accumulator `:form` string uses `str/trim-newline` around `*form-printer*`.
@@ -622,6 +623,14 @@ Resolved during implementation / review 1:
 - Internal (pre-serialization) schemas are co-located in `conditions.clj` as
   `s/defn` output schemas, validated only under
   `schema.test/validate-schemas` in tests.
+- Accumulators are evaluated once per condition — `:raw-condition` is stripped
+  before accumulator enrichment (R2-5).
+- `:join-filter-join-bindings` is emitted only when non-empty (i.e. for
+  non-equality unifications that reference an upstream binding) (R2-1), with a
+  test for the non-empty and omitted cases (R2-2).
+- `normalize-lhs` is idempotent (R2-6); malformed group vectors throw a clear
+  `ex-info` (R2-7); the `analyze-lhs-bindings` `:attach-path` docstring now
+  lists compound negations (R2-3).
 
 Still open:
 
