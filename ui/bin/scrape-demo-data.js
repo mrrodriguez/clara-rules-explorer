@@ -13,99 +13,138 @@ async function fetchJson(url) {
 	return res.json();
 }
 
+/**
+ * Recursively sort object keys so the serialized JSON is byte-stable across
+ * runs. Array order is preserved — the analysis endpoints already emit their
+ * semantically-ordered collections (upstream/downstream, matches, ancestors,
+ * etc.) deterministically.
+ */
+function canonicalize(value) {
+	if (Array.isArray(value)) {
+		return value.map(canonicalize);
+	}
+	if (value && typeof value === 'object') {
+		return Object.fromEntries(
+			Object.keys(value)
+				.sort()
+				.map((key) => [key, canonicalize(value[key])])
+		);
+	}
+	return value;
+}
+
 function writeJson(relativePath, data) {
 	const fullPath = path.join(OUTPUT_DIR, relativePath);
-	const dir = path.dirname(fullPath);
-	fs.mkdirSync(dir, { recursive: true });
-	fs.writeFileSync(fullPath, JSON.stringify(data, null, 2), 'utf-8');
+	fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+	fs.writeFileSync(fullPath, `${JSON.stringify(canonicalize(data), null, 2)}\n`, 'utf-8');
 	console.log(`Wrote: ${relativePath}`);
+}
+
+/** Fetch each `<collection>/<id>` detail endpoint into an id-keyed map. */
+async function fetchDetailMap(collection, ids) {
+	const entries = await Promise.all(
+		ids.map(async (id) => [id, await fetchJson(`${API_BASE}/${collection}/${id}`)])
+	);
+	return Object.fromEntries(entries);
+}
+
+/**
+ * Rulebase side of the demo: summary counts plus full detail for every rule,
+ * query, and fact type. The list endpoints are only used to enumerate ids —
+ * each detail response is a superset of its list entry, so the merged file is
+ * lossless.
+ */
+async function scrapeRulebase() {
+	const summary = await fetchJson(`${API_BASE}/rulebase-summary`);
+	const [rulesData, queriesData, factTypesData] = await Promise.all([
+		fetchJson(`${API_BASE}/rules`),
+		fetchJson(`${API_BASE}/queries`),
+		fetchJson(`${API_BASE}/fact-types`)
+	]);
+	const rulesList = rulesData.rules ?? [];
+	const queriesList = queriesData.queries ?? [];
+	const factTypesList = factTypesData['fact-types'] ?? [];
+
+	const [rules, queries, factTypes] = await Promise.all([
+		fetchDetailMap(
+			'rules',
+			rulesList.map((rule) => rule.id)
+		),
+		fetchDetailMap(
+			'queries',
+			queriesList.map((query) => query.id)
+		),
+		fetchDetailMap(
+			'fact-types',
+			factTypesList.map((factType) => factType.id)
+		)
+	]);
+
+	return { summary, rules, queries, 'fact-types': factTypes };
+}
+
+/**
+ * Session side of the demo: the fact-type summary nav feed, per-fact-type
+ * instance groupings, per-rule/query activity, and every individual fact
+ * detail reachable from those groupings.
+ */
+async function scrapeSession(ruleIds, queryIds) {
+	const factTypeSummary = await fetchJson(`${API_BASE}/session/fact-types`);
+	const typeIds = (factTypeSummary.types ?? []).map((type) => type.id);
+
+	const factTypeDetails = await fetchDetailMap('session/fact-types', typeIds);
+
+	const factIds = new Set();
+	const collectFactIds = (groups) => {
+		for (const group of groups ?? []) {
+			for (const fact of group.facts ?? []) {
+				if (fact.id !== undefined && fact.id !== null) {
+					factIds.add(fact.id);
+				}
+			}
+		}
+	};
+	for (const detail of Object.values(factTypeDetails)) {
+		collectFactIds(detail['inserted-from']);
+		collectFactIds(detail['used-by']);
+	}
+
+	const [rules, queries, facts] = await Promise.all([
+		fetchDetailMap('session/rules', ruleIds),
+		fetchDetailMap('session/queries', queryIds),
+		fetchDetailMap('session/facts', [...factIds])
+	]);
+
+	// The nav sorts this list client-side, but pin the serialized order so the
+	// merged file is stable regardless of upstream map iteration order.
+	const sortedTypes = [...(factTypeSummary.types ?? [])].sort((a, b) =>
+		a.id.localeCompare(b.id)
+	);
+
+	return {
+		'fact-types': { ...factTypeSummary, types: sortedTypes },
+		'fact-type-details': factTypeDetails,
+		rules,
+		queries,
+		facts
+	};
 }
 
 async function scrape() {
 	try {
 		console.log(`Starting scrape from backend at ${API_HOST}...`);
 
-		// Clean out stale files from prior scrapes
+		// Clean out stale files (and any prior split-file layout) from scrapes.
 		if (fs.existsSync(OUTPUT_DIR)) {
 			fs.rmSync(OUTPUT_DIR, { recursive: true });
 		}
 		fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
-		// 1. Save rulebase summary
-		const rulebaseSummary = await fetchJson(`${API_BASE}/rulebase-summary`);
-		writeJson('rulebase-summary.json', rulebaseSummary);
+		const rulebase = await scrapeRulebase();
+		writeJson('rulebase.json', rulebase);
 
-		// 2. Save rule list and dynamic details/activity
-		const rulesData = await fetchJson(`${API_BASE}/rules`);
-		writeJson('rules.json', rulesData);
-		const rules = rulesData.rules || [];
-		for (const rule of rules) {
-			const ruleId = rule.id;
-			// Static detail
-			const ruleDetail = await fetchJson(`${API_BASE}/rules/${ruleId}`);
-			writeJson(`rules/${ruleId}.json`, ruleDetail);
-			// Session activity
-			const ruleActivity = await fetchJson(`${API_BASE}/session/rules/${ruleId}`);
-			writeJson(`session/rules/${ruleId}.json`, ruleActivity);
-		}
-
-		// 3. Save query list and dynamic details/activity
-		const queriesData = await fetchJson(`${API_BASE}/queries`);
-		writeJson('queries.json', queriesData);
-		const queries = queriesData.queries || [];
-		for (const query of queries) {
-			const queryId = query.id;
-			// Static detail
-			const queryDetail = await fetchJson(`${API_BASE}/queries/${queryId}`);
-			writeJson(`queries/${queryId}.json`, queryDetail);
-			// Session activity
-			const queryActivity = await fetchJson(`${API_BASE}/session/queries/${queryId}`);
-			writeJson(`session/queries/${queryId}.json`, queryActivity);
-		}
-
-		// 4. Save static fact types
-		const factTypesData = await fetchJson(`${API_BASE}/fact-types`);
-		writeJson('fact-types.json', factTypesData);
-		const factTypes = factTypesData['fact-types'] || [];
-		for (const factType of factTypes) {
-			const factTypeId = factType.id;
-			// Static detail
-			const factTypeDetail = await fetchJson(`${API_BASE}/fact-types/${factTypeId}`);
-			writeJson(`fact-types/${factTypeId}.json`, factTypeDetail);
-		}
-
-		// 5. Save session fact types list
-		const sessionFactTypes = await fetchJson(`${API_BASE}/session/fact-types`);
-		writeJson('session/fact-types.json', sessionFactTypes);
-
-		// 6. Save session fact type instances and collect individual fact IDs
-		const factIds = new Set();
-		const sessionTypes = sessionFactTypes.types || [];
-		for (const typeInfo of sessionTypes) {
-			const typeId = typeInfo.id;
-			const instances = await fetchJson(`${API_BASE}/session/fact-types/${typeId}`);
-			writeJson(`session/fact-types/${typeId}.json`, instances);
-
-			// Extract individual fact IDs to scrape detail views
-			const extractFacts = (groups) => {
-				for (const group of (groups || [])) {
-					for (const factObj of (group.facts || [])) {
-						if (factObj.id !== undefined && factObj.id !== null) {
-							factIds.add(factObj.id);
-						}
-					}
-				}
-			};
-			extractFacts(instances['inserted-from']);
-			extractFacts(instances['used-by']);
-		}
-
-		// 7. Save detail views for all collected facts
-		console.log(`Discovered ${factIds.size} unique facts in session. Scraping detail views...`);
-		for (const id of factIds) {
-			const factDetail = await fetchJson(`${API_BASE}/session/facts/${id}`);
-			writeJson(`session/facts/${id}.json`, factDetail);
-		}
+		const session = await scrapeSession(Object.keys(rulebase.rules), Object.keys(rulebase.queries));
+		writeJson('session.json', session);
 
 		console.log('Scrape completed successfully!');
 	} catch (e) {

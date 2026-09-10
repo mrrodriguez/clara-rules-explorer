@@ -103,7 +103,8 @@ Ports `9101`/`9201` deliberately avoid the `9001` default used by local
 REPL/integration-test helpers.
 
 The static demo build (`pnpm build:demo`, hosted on GitHub Pages) is a
-separate concern: it serves scraped `static/demo-data` from the loan-app-rules
+separate concern: it projects the merged `static/demo-data/rulebase.json` and
+`static/demo-data/session.json` bundles scraped from the loan-app-rules
 session only, and is not used by the e2e suite.  See
 [`docs/static-demo-setup.md`](../docs/static-demo-setup.md).
 

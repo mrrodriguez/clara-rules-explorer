@@ -3,12 +3,12 @@ import path from 'path';
 import type { EntryGenerator } from './$types';
 
 export const entries: EntryGenerator = () => {
-	const filePath = path.resolve('static/demo-data/queries.json');
+	const filePath = path.resolve('static/demo-data/rulebase.json');
 	if (fs.existsSync(filePath)) {
-		const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-		return (data.queries || []).map((query: { id: string }) => ({
-			id: query.id
-		}));
+		const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as {
+			queries?: Record<string, unknown>;
+		};
+		return Object.keys(data.queries ?? {}).map((id) => ({ id }));
 	}
 	return [];
 };

@@ -72,12 +72,17 @@
   (with-meta {:app-id app-id :status :pass :reviewer "metadata-review"}
     {:type :compliance-review-result}))
 
+(def ^:private demo-audit-timestamp-ms
+  "Fixed epoch millis for the dummy AuditTrail demo fact (2026-01-01T00:00:00Z).
+   Pinning this keeps regenerated demo sessions byte-stable across scrapes."
+  (.toEpochMilli (java.time.Instant/parse "2026-01-01T00:00:00Z")))
+
 (defn build-audit-trail-entry
   "Builds an AuditTrail via an opaque builder function.
    The analyzer knows an insert happened but cannot determine the fact type
    because the constructor is a custom fn with no recognisable pattern."
   [app-id action]
-  (AuditTrail. app-id action (System/currentTimeMillis)))
+  (AuditTrail. app-id action demo-audit-timestamp-ms))
 
 (r/defrule collect-app-id-card-given-docs
   [Application (= ?app-id app-id)]
