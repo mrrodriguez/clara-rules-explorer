@@ -59,7 +59,9 @@
                 (laf/map->GivenDocument {:app-id "app-1" :doc-type :paycheck})
                 (laf/map->GivenDocument {:app-id "app-1" :doc-type :bank-statement})
                 (laf/map->IdentityCheck {:app-id "app-1" :status :pass})
-                (laf/map->FraudCheck {:app-id "app-1" :status :pass}))
+                (laf/map->FraudCheck {:app-id "app-1" :status :pass})
+                (with-meta {:value 1}
+                  {:type :doc-check-count-min}))
       (r/fire-rules)))
 
 (defn run-loan-app-rules
@@ -492,7 +494,7 @@
                          "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview"
                          "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail"
                          "loan-doc-rules/document-check-input"
-                         "extracted-doc-meta"}
+                         "extract-doc-meta"}
               present (set/intersection expected type-names)]
           (is (seq present)
               (str "No expected fact types found in memory-analysis. "

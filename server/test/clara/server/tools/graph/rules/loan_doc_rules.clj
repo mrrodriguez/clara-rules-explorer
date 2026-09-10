@@ -33,7 +33,7 @@
 ;; Using custom macros that emit rules with var referenced functions as facts.
 ;; ---------------------------------------------------------------------------
 
-(h/def-fact-fn extract-doc-meta :extracted-doc-meta
+(h/def-fact-fn extract-doc-meta :extract-doc-meta
   [doc-fact]
   (let [doc-meta (-> doc-fact
                      meta
@@ -49,7 +49,7 @@
 (r/defrule collect-doc-meta
   [Application (= ?app-id app-id)]
   [?docs <- (acc/all) :from [GivenDocument (= ?app-id app-id)]]
-  [?extract-doc-meta <- :extracted-doc-meta]
+  [?extract-doc-meta <- :extract-doc-meta]
   =>
   (let [doc-metas (mapv ?extract-doc-meta ?docs)]
     (r/insert! (laf/map->AllGivenDocumentsMeta {:app-id ?app-id :doc-metas doc-metas}))))
@@ -189,3 +189,17 @@
   [DocumentCheck (= ?app-id app-id) (= status :pass)]
   =>
   (r/insert! (build-audit-trail-entry ?app-id :doc-check-passed)))
+
+(r/defrule doc-check-count
+  {:clara-rules/insert-types [:doc-check-count]}
+  [?count <- (acc/count) :from [DocumentCheck (= ?app-id app-id)]]
+  =>
+  (r/insert! (with-meta {:count ?count} {:type :doc-check-count})))
+
+(r/defrule doc-check-count-satisfies-min
+  {:clara-rules/insert-types [:doc-check-count-satisfies-min]}
+  [:doc-check-count (= ?count (:count this))]
+  [:doc-check-count-min (<= (:value this) ?count)]
+  =>
+  (r/insert! (with-meta {:count ?count}
+               {:type :doc-check-count-satisfies-min})))

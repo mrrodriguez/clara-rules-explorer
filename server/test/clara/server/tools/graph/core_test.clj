@@ -366,6 +366,7 @@
                  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
                  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
                  "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"
+                 "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
               "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
@@ -397,7 +398,15 @@
                #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
               "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
               {:upstream
-               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}}}
+               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+              "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"},
+               :downstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/doc-check-count-satisfies-min"}},
+              "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count-satisfies-min"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/doc-check-count"}}}
              graph)))))
 
 ;;;;
@@ -443,7 +452,7 @@
    java.lang.Object) appear after these, sorted alphabetically."
   ["clara.server.tools.graph.rules.loan_app_facts.Application"
    "clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
-   ":extracted-doc-meta"
+   ":extract-doc-meta"
    "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta"
    "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"
    "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"
@@ -452,6 +461,9 @@
    ":loan-doc-rules/document-check-input"
    "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"
    "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"
+   ":doc-check-count"
+   ":doc-check-count-min"
+   ":doc-check-count-satisfies-min"
    "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"
    "clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
    "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"])
