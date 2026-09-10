@@ -18,7 +18,11 @@
 				"known": true
 			},
 			"constraints": "[\n(= ?app-id app-id)\n]",
-			"fact-binding": "?outcome"
+			"fact-binding": "?outcome",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": ["?app-id"]
+			}
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-app-rules-find-app-outco-9qb1iqvl",

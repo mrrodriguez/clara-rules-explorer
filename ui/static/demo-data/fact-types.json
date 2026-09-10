@@ -1,8 +1,8 @@
 {
 	"fact-types": [
 		{
-			"name": ":extracted-doc-meta",
-			"id": "extracted-doc-meta-sf1cm10h",
+			"name": ":extract-doc-meta",
+			"id": "extract-doc-meta-is5qkiib",
 			"ns": null,
 			"used-by-rules": [
 				{
@@ -268,6 +268,12 @@
 					"type": "rule"
 				},
 				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-nolex62p",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
 					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 					"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
 					"ns": "clara.server.tools.graph.rules.loan-app-rules",
@@ -362,6 +368,61 @@
 				{
 					"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
 					"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-3snojfsz",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"retracted-by-rules": []
+		},
+		{
+			"name": ":doc-check-count",
+			"id": "doc-check-count-766j6udp",
+			"ns": null,
+			"used-by-rules": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count-satisfies-min",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-b7b02kft",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"used-by-queries": [],
+			"inserted-by-rules": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-nolex62p",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"retracted-by-rules": []
+		},
+		{
+			"name": ":doc-check-count-min",
+			"id": "doc-check-count-min-1yxaapb2",
+			"ns": null,
+			"used-by-rules": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count-satisfies-min",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-b7b02kft",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"used-by-queries": [],
+			"inserted-by-rules": [],
+			"retracted-by-rules": []
+		},
+		{
+			"name": ":doc-check-count-satisfies-min",
+			"id": "doc-check-count-satisfies-min-31sipq7b",
+			"ns": null,
+			"used-by-rules": [],
+			"used-by-queries": [],
+			"inserted-by-rules": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count-satisfies-min",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-b7b02kft",
 					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 					"type": "rule"
 				}

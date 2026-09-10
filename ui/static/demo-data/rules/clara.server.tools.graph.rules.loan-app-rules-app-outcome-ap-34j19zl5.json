@@ -146,7 +146,11 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n]",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": ["?app-id"]
+			}
 		},
 		{
 			"type": {
@@ -154,7 +158,11 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": []
+			}
 		},
 		{
 			"type": {
@@ -162,7 +170,11 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": []
+			}
 		},
 		{
 			"type": {
@@ -170,7 +182,11 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-9sjv10vl",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": []
+			}
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",

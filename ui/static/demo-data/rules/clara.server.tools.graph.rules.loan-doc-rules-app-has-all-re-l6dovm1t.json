@@ -62,6 +62,26 @@
 		},
 		{
 			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-nolex62p",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+						"known": true
+					}
+				}
+			]
+		},
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 			"name": "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail",
 			"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-3snojfsz",
 			"type": "rule",
@@ -216,7 +236,11 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n]",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": ["?app-id"]
+			}
 		},
 		{
 			"type": {
@@ -225,7 +249,11 @@
 				"known": true
 			},
 			"constraints": "[\n(= ?app-id app-id)\n\n(= ?required-docs required-docs)\n\n(= ?given-docs given-docs)\n\n(= ?missing-required-docs missing-required-docs)\n]",
-			"args": "[\n{:keys [app-id required-docs given-docs missing-required-docs]}\n]"
+			"args": "[\n{:keys [app-id required-docs given-docs missing-required-docs]}\n]",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": ["?given-docs", "?missing-required-docs", "?required-docs"]
+			}
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",

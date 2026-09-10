@@ -32,7 +32,7 @@
 		"resolution": "full"
 	},
 	"source-rule": false,
-	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[:?docs\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.GivenDocument\n  (= ?app-id app-id)]]\n[:?extract-doc-meta <- :extracted-doc-meta]\n",
+	"lhs-form": "[clara.server.tools.graph.rules.loan_app_facts.Application\n (= ?app-id app-id)]\n[:?docs\n <-\n (clara.rules.accumulators/all)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.GivenDocument\n  (= ?app-id app-id)]]\n[:?extract-doc-meta <- :extract-doc-meta]\n",
 	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
 	"name": "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta",
 	"lhs-types": [
@@ -47,8 +47,8 @@
 			"known": true
 		},
 		{
-			"name": ":extracted-doc-meta",
-			"id": "extracted-doc-meta-sf1cm10h",
+			"name": ":extract-doc-meta",
+			"id": "extract-doc-meta-is5qkiib",
 			"known": true
 		}
 	],
@@ -59,10 +59,17 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n]",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": ["?app-id"]
+			}
 		},
 		{
-			"accumulator": ["clara.rules.accumulators/all"],
+			"accumulator": {
+				"form": "(clara.rules.accumulators/all)",
+				"some-initial-value?": true
+			},
 			"from": {
 				"type": {
 					"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
@@ -71,16 +78,24 @@
 				},
 				"constraints": "[\n(= ?app-id app-id)\n]"
 			},
-			"result-binding": "?docs"
+			"result-binding": "?docs",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": []
+			}
 		},
 		{
 			"type": {
-				"name": ":extracted-doc-meta",
-				"id": "extracted-doc-meta-sf1cm10h",
+				"name": ":extract-doc-meta",
+				"id": "extract-doc-meta-is5qkiib",
 				"known": true
 			},
 			"constraints": "[\n]",
-			"fact-binding": "?extract-doc-meta"
+			"fact-binding": "?extract-doc-meta",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": []
+			}
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-doc-me-t9iiky95",
@@ -103,13 +118,13 @@
 			"match": [
 				{
 					"producer-type": {
-						"name": ":extracted-doc-meta",
-						"id": "extracted-doc-meta-sf1cm10h",
+						"name": ":extract-doc-meta",
+						"id": "extract-doc-meta-is5qkiib",
 						"known": true
 					},
 					"consumer-type": {
-						"name": ":extracted-doc-meta",
-						"id": "extracted-doc-meta-sf1cm10h",
+						"name": ":extract-doc-meta",
+						"id": "extract-doc-meta-is5qkiib",
 						"known": true
 					}
 				}

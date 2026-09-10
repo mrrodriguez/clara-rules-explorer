@@ -214,6 +214,12 @@
 					"type": "rule"
 				},
 				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-nolex62p",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				},
+				{
 					"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 					"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
 					"ns": "clara.server.tools.graph.rules.loan-app-rules",

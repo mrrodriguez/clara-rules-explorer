@@ -133,7 +133,11 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n]",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": ["?app-id"]
+			}
 		},
 		{
 			"type": {
@@ -141,7 +145,11 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n\n(= ?given-docs docs)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n\n(= ?given-docs docs)\n]",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": ["?given-docs"]
+			}
 		},
 		{
 			"type": {
@@ -149,7 +157,11 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n\n(= ?required-docs docs)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n\n(= ?required-docs docs)\n]",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": ["?required-docs"]
+			}
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-do-ma7qvf9k",

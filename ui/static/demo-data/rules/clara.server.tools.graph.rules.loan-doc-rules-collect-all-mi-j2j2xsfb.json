@@ -18,7 +18,11 @@
 				"known": true
 			},
 			"constraints": "[\n(= ?app-id app-id)\n\n(= ?missing-required-docs missing-required-docs)\n\n(seq ?missing-required-docs)\n]",
-			"args": "[\n{:keys [app-id missing-required-docs]}\n]"
+			"args": "[\n{:keys [app-id missing-required-docs]}\n]",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": ["?app-id", "?missing-required-docs"]
+			}
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-all-mi-j2j2xsfb",
