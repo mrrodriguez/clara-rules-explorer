@@ -8,7 +8,7 @@ This guide explains how to build, test, and host a fully interactive static demo
 
 Since the explorer is a visualization tool, visitors don't need to compile new rulebases or facts in real-time. They just need to browse and inspect a representative sample dataset.
 
-1. **Scraped Data**: We run a script to scrape the Clojure backend into a small, deterministic set of merged bundles under `ui/static/demo-data/`: `rulebase.json` (summary counts plus every rule, query, and fact type keyed by route id) and `session.json` (fact-type summary, per-type instances, per-rule/query activity, and individual facts). Keeping it to two files keeps demo-data refreshes easy to review and stable in git.
+1. **Scraped Data**: We run a script to scrape the Clojure backend into a small, deterministic set of merged bundles under `ui/static/demo-data/`: `rulebase.json` (summary counts plus every rule, query, and fact type, each list kept in the analysis's own order) and `session.json` (fact-type summary, per-type instances, per-rule/query activity, and individual facts). Keeping it to two files keeps demo-data refreshes easy to review and stable in git.
 2. **Runtime Projection**: When built in demo mode, the SvelteKit API client loads `rulebase.json` / `session.json` once and projects the same per-endpoint shapes the live `/v1/...` API returns.
 3. **Single Page Application (SPA)**: SvelteKit is built using `@sveltejs/adapter-static` with a fallback page (`404.html`), allowing client-side dynamic routing to resolve `/rules/[id]` and `/session/facts/[id]` in the browser.
 

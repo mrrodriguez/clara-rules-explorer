@@ -6,9 +6,9 @@ export const entries: EntryGenerator = () => {
 	const filePath = path.resolve('static/demo-data/rulebase.json');
 	if (fs.existsSync(filePath)) {
 		const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as {
-			'fact-types'?: Record<string, unknown>;
+			'fact-types'?: { id: string }[];
 		};
-		return Object.keys(data['fact-types'] ?? {}).map((id) => ({ id }));
+		return (data['fact-types'] ?? []).map((factType) => ({ id: factType.id }));
 	}
 	return [];
 };

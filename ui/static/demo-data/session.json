@@ -2418,14 +2418,14 @@
 		"types": [
 			{
 				"count": 1,
-				"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-9kes1f1s",
-				"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
-				"ns": "clara.server.tools.graph.rules.loan_app_facts"
+				"id": "clara.server.tools.graph.rules.loan-doc-rules.ComplianceRevi-nx3kfyoz",
+				"name": "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview",
+				"ns": "clara.server.tools.graph.rules.loan_doc_rules"
 			},
 			{
 				"count": 1,
-				"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
-				"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-9sjv10vl",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
 				"ns": "clara.server.tools.graph.rules.loan_app_facts"
 			},
 			{
@@ -2433,6 +2433,12 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.AllRequiredDoc-2tbfl47t",
 				"name": "clara.server.tools.graph.rules.loan_app_facts.AllRequiredDocuments",
 				"ns": "clara.server.tools.graph.rules.loan_app_facts"
+			},
+			{
+				"count": 1,
+				"id": "compliance-review-result-84o5ao5k",
+				"name": ":compliance-review-result",
+				"ns": null
 			},
 			{
 				"count": 1,
@@ -2448,9 +2454,9 @@
 			},
 			{
 				"count": 1,
-				"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-9sjv10vl",
-				"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
-				"ns": "clara.server.tools.graph.rules.loan_app_facts"
+				"id": "clara.server.tools.graph.rules.loan-doc-rules.AuditTrail-ihl0yjcd",
+				"name": "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail",
+				"ns": "clara.server.tools.graph.rules.loan_doc_rules"
 			},
 			{
 				"count": 3,
@@ -2460,9 +2466,21 @@
 			},
 			{
 				"count": 1,
-				"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
-				"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+				"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-9kes1f1s",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta",
 				"ns": "clara.server.tools.graph.rules.loan_app_facts"
+			},
+			{
+				"count": 1,
+				"id": "loan-doc-rules-document-check-input-bsfqrt8a",
+				"name": ":loan-doc-rules/document-check-input",
+				"ns": "loan-doc-rules"
+			},
+			{
+				"count": 1,
+				"id": "doc-check-count-766j6udp",
+				"name": ":doc-check-count",
+				"ns": null
 			},
 			{
 				"count": 1,
@@ -2478,33 +2496,9 @@
 			},
 			{
 				"count": 1,
-				"id": "clara.server.tools.graph.rules.loan-doc-rules.AllIdCardGiven-4xiyfnsl",
-				"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
-				"ns": "clara.server.tools.graph.rules.loan_doc_rules"
-			},
-			{
-				"count": 1,
-				"id": "clara.server.tools.graph.rules.loan-doc-rules.AuditTrail-ihl0yjcd",
-				"name": "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail",
-				"ns": "clara.server.tools.graph.rules.loan_doc_rules"
-			},
-			{
-				"count": 1,
-				"id": "clara.server.tools.graph.rules.loan-doc-rules.ComplianceRevi-nx3kfyoz",
-				"name": "clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview",
-				"ns": "clara.server.tools.graph.rules.loan_doc_rules"
-			},
-			{
-				"count": 1,
-				"id": "compliance-review-result-84o5ao5k",
-				"name": ":compliance-review-result",
-				"ns": null
-			},
-			{
-				"count": 1,
-				"id": "doc-check-count-766j6udp",
-				"name": ":doc-check-count",
-				"ns": null
+				"id": "clara.server.tools.graph.rules.loan-app-facts.AllGivenDocume-qwj7hnke",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments",
+				"ns": "clara.server.tools.graph.rules.loan_app_facts"
 			},
 			{
 				"count": 1,
@@ -2514,9 +2508,15 @@
 			},
 			{
 				"count": 1,
-				"id": "loan-doc-rules-document-check-input-bsfqrt8a",
-				"name": ":loan-doc-rules/document-check-input",
-				"ns": "loan-doc-rules"
+				"id": "clara.server.tools.graph.rules.loan-doc-rules.AllIdCardGiven-4xiyfnsl",
+				"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
+				"ns": "clara.server.tools.graph.rules.loan_doc_rules"
+			},
+			{
+				"count": 1,
+				"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
+				"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+				"ns": "clara.server.tools.graph.rules.loan_app_facts"
 			}
 		]
 	},

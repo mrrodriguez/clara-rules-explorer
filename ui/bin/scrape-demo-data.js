@@ -15,9 +15,10 @@ async function fetchJson(url) {
 
 /**
  * Recursively sort object keys so the serialized JSON is byte-stable across
- * runs. Array order is preserved — the analysis endpoints already emit their
- * semantically-ordered collections (upstream/downstream, matches, ancestors,
- * etc.) deterministically.
+ * runs. Array order is preserved — the analysis endpoints return collections
+ * in a meaningful order (rules/queries in rulebase load order, fact types in
+ * first-reference then alphabetical order), and re-sorting or re-keying them
+ * would lose that.
  */
 function canonicalize(value) {
 	if (Array.isArray(value)) {
@@ -40,6 +41,11 @@ function writeJson(relativePath, data) {
 	console.log(`Wrote: ${relativePath}`);
 }
 
+/** Fetch each `<collection>/<id>` detail endpoint, preserving the given id order. */
+async function fetchDetailList(collection, ids) {
+	return Promise.all(ids.map((id) => fetchJson(`${API_BASE}/${collection}/${id}`)));
+}
+
 /** Fetch each `<collection>/<id>` detail endpoint into an id-keyed map. */
 async function fetchDetailMap(collection, ids) {
 	const entries = await Promise.all(
@@ -50,9 +56,9 @@ async function fetchDetailMap(collection, ids) {
 
 /**
  * Rulebase side of the demo: summary counts plus full detail for every rule,
- * query, and fact type. The list endpoints are only used to enumerate ids —
- * each detail response is a superset of its list entry, so the merged file is
- * lossless.
+ * query, and fact type, kept as arrays in the analysis's own order. The list
+ * endpoints are only used to enumerate ids — each detail response is a
+ * superset of its list entry, so the merged file is lossless.
  */
 async function scrapeRulebase() {
 	const summary = await fetchJson(`${API_BASE}/rulebase-summary`);
@@ -66,15 +72,15 @@ async function scrapeRulebase() {
 	const factTypesList = factTypesData['fact-types'] ?? [];
 
 	const [rules, queries, factTypes] = await Promise.all([
-		fetchDetailMap(
+		fetchDetailList(
 			'rules',
 			rulesList.map((rule) => rule.id)
 		),
-		fetchDetailMap(
+		fetchDetailList(
 			'queries',
 			queriesList.map((query) => query.id)
 		),
-		fetchDetailMap(
+		fetchDetailList(
 			'fact-types',
 			factTypesList.map((factType) => factType.id)
 		)
@@ -84,9 +90,9 @@ async function scrapeRulebase() {
 }
 
 /**
- * Session side of the demo: the fact-type summary nav feed, per-fact-type
- * instance groupings, per-rule/query activity, and every individual fact
- * detail reachable from those groupings.
+ * Session side of the demo: the fact-type summary nav feed (kept in its
+ * endpoint order), per-fact-type instance groupings, per-rule/query activity,
+ * and every individual fact detail reachable from those groupings.
  */
 async function scrapeSession(ruleIds, queryIds) {
 	const factTypeSummary = await fetchJson(`${API_BASE}/session/fact-types`);
@@ -115,14 +121,8 @@ async function scrapeSession(ruleIds, queryIds) {
 		fetchDetailMap('session/facts', [...factIds])
 	]);
 
-	// The nav sorts this list client-side, but pin the serialized order so the
-	// merged file is stable regardless of upstream map iteration order.
-	const sortedTypes = [...(factTypeSummary.types ?? [])].sort((a, b) =>
-		a.id.localeCompare(b.id)
-	);
-
 	return {
-		'fact-types': { ...factTypeSummary, types: sortedTypes },
+		'fact-types': factTypeSummary,
 		'fact-type-details': factTypeDetails,
 		rules,
 		queries,
@@ -143,7 +143,10 @@ async function scrape() {
 		const rulebase = await scrapeRulebase();
 		writeJson('rulebase.json', rulebase);
 
-		const session = await scrapeSession(Object.keys(rulebase.rules), Object.keys(rulebase.queries));
+		const session = await scrapeSession(
+			rulebase.rules.map((rule) => rule.id),
+			rulebase.queries.map((query) => query.id)
+		);
 		writeJson('session.json', session);
 
 		console.log('Scrape completed successfully!');

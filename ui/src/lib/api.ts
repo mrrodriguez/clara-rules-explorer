@@ -51,7 +51,7 @@ export async function fetchRulebaseAnalysis(
  */
 export async function fetchRulesList(customFetch: typeof fetch = fetch): Promise<RuleListItem[]> {
 	if (isDemoMode()) {
-		return Object.values((await loadDemoRulebase(customFetch)).rules);
+		return (await loadDemoRulebase(customFetch)).rules;
 	}
 	const response = await customFetch(`${API_BASE}/rules`);
 	if (!response.ok) {
@@ -68,7 +68,7 @@ export async function fetchQueriesList(
 	customFetch: typeof fetch = fetch
 ): Promise<QueryListItem[]> {
 	if (isDemoMode()) {
-		return Object.values((await loadDemoRulebase(customFetch)).queries);
+		return (await loadDemoRulebase(customFetch)).queries;
 	}
 	const response = await customFetch(`${API_BASE}/queries`);
 	if (!response.ok) {
@@ -85,7 +85,7 @@ export async function fetchFactTypesList(
 	customFetch: typeof fetch = fetch
 ): Promise<FactTypeSummary[]> {
 	if (isDemoMode()) {
-		return Object.values((await loadDemoRulebase(customFetch))['fact-types']);
+		return (await loadDemoRulebase(customFetch))['fact-types'];
 	}
 	const response = await customFetch(`${API_BASE}/fact-types`);
 	if (!response.ok) {
@@ -103,7 +103,7 @@ export async function fetchRule(
 	customFetch: typeof fetch = fetch
 ): Promise<RuleSummary> {
 	if (isDemoMode()) {
-		const rule = (await loadDemoRulebase(customFetch)).rules[id];
+		const rule = (await loadDemoRulebase(customFetch)).rules.find((entry) => entry.id === id);
 		if (!rule) {
 			throw new Error(`Rule ${id} not found in demo data`);
 		}
@@ -124,7 +124,7 @@ export async function fetchQuery(
 	customFetch: typeof fetch = fetch
 ): Promise<QuerySummary> {
 	if (isDemoMode()) {
-		const query = (await loadDemoRulebase(customFetch)).queries[id];
+		const query = (await loadDemoRulebase(customFetch)).queries.find((entry) => entry.id === id);
 		if (!query) {
 			throw new Error(`Query ${id} not found in demo data`);
 		}
@@ -145,7 +145,9 @@ export async function fetchFactType(
 	customFetch: typeof fetch = fetch
 ): Promise<FactTypeSummary> {
 	if (isDemoMode()) {
-		const factType = (await loadDemoRulebase(customFetch))['fact-types'][id];
+		const factType = (await loadDemoRulebase(customFetch))['fact-types'].find(
+			(entry) => entry.id === id
+		);
 		if (!factType) {
 			throw new Error(`Fact type ${id} not found in demo data`);
 		}

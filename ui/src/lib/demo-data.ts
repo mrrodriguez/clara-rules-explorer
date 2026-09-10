@@ -13,15 +13,17 @@ import type {
 const DEMO_BASE = `${base}/demo-data`;
 
 /**
- * The merged rulebase bundle written by `bin/scrape-demo-data.js`:
- * summary counts plus full detail keyed by route id for every rule, query,
- * and fact type. Each detail entry is a superset of its list entry.
+ * The merged rulebase bundle written by `bin/scrape-demo-data.js`: summary
+ * counts plus full detail for every rule, query, and fact type. Collections
+ * are arrays in the analysis's own order (rules/queries in rulebase load
+ * order, fact types in first-reference then alphabetical order), and each
+ * detail entry is a superset of its list entry.
  */
 export interface DemoRulebase {
 	summary: RulebaseSummary;
-	rules: Record<string, RuleSummary>;
-	queries: Record<string, QuerySummary>;
-	'fact-types': Record<string, FactTypeSummary>;
+	rules: RuleSummary[];
+	queries: QuerySummary[];
+	'fact-types': FactTypeSummary[];
 }
 
 /**
