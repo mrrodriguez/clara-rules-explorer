@@ -643,9 +643,9 @@ Still open:
    (not serialize). If `->rulebase-analysis` purity or repeated-eval cost
    matters, precompute/cache accumulator info at session-load time. Where
    should that cache live?
-2. **Group-level binding exposure.** Whether/when to attach binding info to
-   `:or` / `:exists` / compound-negation leaves (requires more of the
-   compiler's extraction/DNF bookkeeping).
+2. **Group-level binding exposure.** Resolved — binding info is attached to
+   `:or` / `:exists` / compound-negation groups (each the union of its
+   children's) and every nested leaf, per the group-bindings companion doc.
 3. **Node-mapper scope.** If Option C is ever needed, restrict v1 to
    straight-line + accumulator + simple `:not`, excluding `:or` / `:exists` in
    v1, and degrade gracefully for the rest.

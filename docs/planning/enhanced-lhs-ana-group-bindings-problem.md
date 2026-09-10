@@ -5,8 +5,9 @@ Companion to [`enhanced-lhs-ana-plan.md`](./enhanced-lhs-ana-plan.md) and
 
 Status: **resolved.** `:or` groups, `:exists` groups, compound negations, and every
 leaf nested inside one now carry `:bindings` on the augmented LHS (implemented
-per §5.1–§5.4, §5.6; `:bindings-deferred` shipped as a transitional safety net
-but emitted nowhere — the no-node-without-`:bindings` invariant holds).
+per §5.1–§5.4, §5.6 — the no-node-without-`:bindings` invariant holds). The
+transitional `:bindings-deferred` net proposed in §5.5 was removed after
+landing: it was never emitted, so it was pure baggage.
 
 The cause is mostly **representational, not semantic.** Group bindings are well
 defined, clara computes the compound-negation one itself and materializes it in the

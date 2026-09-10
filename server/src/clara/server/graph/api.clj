@@ -91,9 +91,7 @@
   "A serialized LHS condition.  Leaf conditions carry :type / :constraints /
    :args / :accumulator / :from / :result-binding / :fact-binding / :bindings
    as applicable; group conditions carry :condition-type, :children, and their
-   own :bindings union.  `:bindings-deferred` marks a node the analysis
-   explicitly did not cover (with the reason); it is a transitional safety net
-   — no node carries neither `:bindings` nor `:bindings-deferred`."
+   own :bindings union.  Every node carries `:bindings`."
   {(s/optional-key :type) TypeReference
    (s/optional-key :constraints) s/Str
    (s/optional-key :args) s/Str
@@ -102,7 +100,6 @@
    (s/optional-key :result-binding) s/Any
    (s/optional-key :fact-binding) s/Any
    (s/optional-key :bindings) LhsBindingInfo
-   (s/optional-key :bindings-deferred) s/Keyword
    (s/optional-key :condition-type) (s/enum :and :or :not :exists)
    (s/optional-key :children) [(s/recursive #'LhsCondition)]})
 

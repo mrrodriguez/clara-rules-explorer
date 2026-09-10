@@ -75,18 +75,15 @@ describe('LhsCondition bindings summary', () => {
 		expect(collapseWhitespace(screen.container.textContent)).toContain('Joins ?app-id');
 	});
 
-	it('surfaces bindings-deferred instead of an empty bindings block', async () => {
+	it('renders no bindings card for a group without bindings', async () => {
 		const group: LhsElement = {
 			'condition-type': 'not',
-			'bindings-deferred': 'compound-negation',
 			children: [{ type }]
 		};
 
 		const screen = await render(LhsCondition, { props: { condition: group } });
 
 		expect(screen.container.querySelectorAll('button[aria-expanded]')).toHaveLength(0);
-		expect(collapseWhitespace(screen.container.textContent)).toContain(
-			'Bindings deferred: compound-negation'
-		);
+		expect(screen.container.textContent).not.toContain('Bindings');
 	});
 });

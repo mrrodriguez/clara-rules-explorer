@@ -83,9 +83,7 @@
 {/snippet}
 
 {#snippet bindingsBlock()}
-	{#if condition['bindings-deferred']}
-		{@render textProperty('Bindings', `deferred: ${condition['bindings-deferred']}`, 'text-muted')}
-	{:else if bindingGroups.length > 0}
+	{#if bindingGroups.length > 0}
 		<div class="row g-0 py-0 align-items-center">
 			<div
 				class="col-auto text-muted fw-bold text-uppercase ps-2"
@@ -130,11 +128,13 @@
 		<div class="mb-1">
 			<span class="badge bg-secondary text-uppercase nested-badge">{nested.type}</span>
 		</div>
-		<div class="card border bg-light-subtle mb-2">
-			<div class="card-body p-0 container-fluid property-container">
-				{@render bindingsBlock()}
+		{#if leaf.bindings}
+			<div class="card border bg-light-subtle mb-2">
+				<div class="card-body p-0 container-fluid property-container">
+					{@render bindingsBlock()}
+				</div>
 			</div>
-		</div>
+		{/if}
 		{#each nested.conditions as subCondition, i (i)}
 			<LhsCondition condition={subCondition} depth={depth + 1} />
 		{/each}

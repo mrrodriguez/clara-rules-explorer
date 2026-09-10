@@ -28,8 +28,8 @@
     leaves attach at their real tree paths and every group carries the
     componentwise union of its children's summaries.
 
-  * `augment-lhs` — normalize the LHS, evaluate accumulators, and attach
-    per-node binding info (leaves and groups alike)."
+  * `augment-lhs` — evaluate accumulators and attach per-node binding info
+    (leaves and groups alike) on an already-normalized LHS."
   (:require [clara.rules.compiler :as com]
             [clojure.set :as set]
             [clojure.walk :as walk]

@@ -78,8 +78,6 @@ export interface LhsElement {
 	'result-binding'?: string;
 	'fact-binding'?: string;
 	bindings?: LhsBindingInfo;
-	/** Present when the analysis explicitly deferred a node, with the reason. */
-	'bindings-deferred'?: string;
 }
 
 /**

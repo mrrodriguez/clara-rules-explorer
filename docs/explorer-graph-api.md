@@ -360,7 +360,7 @@ Includes everything from the list view plus:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `lhs` | object[] | Serialized LHS conditions — every entry is an object. Leaf entries carry `:type` (a TypeReference), pretty-printed `:constraints` / `:args`, `:accumulator` / `:from` / `:result-binding` / `:fact-binding` / `:bindings` as applicable; group entries carry `:condition-type` (`and` \| `or` \| `not` \| `exists`) and `:children` |
+| `lhs` | object[] | Serialized LHS conditions — every entry is an object. Leaf entries carry `:type` (a TypeReference), pretty-printed `:constraints` / `:args`, `:accumulator` / `:from` / `:result-binding` / `:fact-binding` / `:bindings` as applicable; group entries carry `:condition-type` (`and` \| `or` \| `not` \| `exists`), `:children`, and `:bindings` |
 | `rhs-form` | string | Pretty-printed RHS s-expression (fns redacted) |
 | `props` | object | Full `:props` map from the `defrule` body (fns redacted, keys stringified) |
 | `notes` | string\|null | Human-readable notes from annotations |
@@ -379,7 +379,7 @@ Each `lhs` entry is an object in one of two shapes.
 | `from` | LhsElement | The accumulator's source condition subtree |
 | `result-binding` | string | Accumulator result binding (e.g. `"?docs"`) |
 | `fact-binding` | string | Fact binding (e.g. `"?app-id"`) |
-| `bindings` | LhsBindingInfo | Per-leaf binding summary (see below) |
+| `bindings` | LhsBindingInfo | Per-condition binding summary (see below) |
 
 **Group condition** (`and` / `or` / `not` / `exists`):
 
@@ -387,6 +387,7 @@ Each `lhs` entry is an object in one of two shapes.
 |-----|------|-------------|
 | `condition-type` | string | `and` \| `or` \| `not` \| `exists` |
 | `children` | LhsElement[] | Nested conditions |
+| `bindings` | LhsBindingInfo | Group binding summary (union of children's) |
 
 **`AccumulatorInfo`**:
 
@@ -395,7 +396,7 @@ Each `lhs` entry is an object in one of two shapes.
 | `form` | string | Rendered accumulator form, e.g. `"(clara.rules.accumulators/all)"` |
 | `some-initial-value?` | boolean | `true` when the evaluated accumulator has a non-nil `:initial-value` |
 
-**`LhsBindingInfo`** (attached under `bindings` on leaf entries):
+**`LhsBindingInfo`** (attached under `bindings` on leaves and groups):
 
 | Key | Type | Description |
 |-----|------|-------------|

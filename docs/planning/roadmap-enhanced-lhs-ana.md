@@ -122,11 +122,10 @@ malformed-shape error, docstring alignment) is incorporated.
 - Compound negations walk the inner `negation-expr` (what the compiler's helper
   production actually builds — never the De Morgan expansion); the group's
   `:binding-keys` equal `variables-as-keywords ∩ ancestor-bindings`.
-- `api/LhsCondition` gains optional `:bindings-deferred` (transitional safety
-  net; emitted nowhere — every node carries `:bindings`); `LhsBindingInfo`
-  docstring records the derived-union contract.
-- `LhsCondition.svelte` renders group `bindings` and surfaces
-  `bindings-deferred`; `api.ts` closes the shape with the optional key.
+- `api/LhsCondition` carries `:bindings` on every node (the transitional
+  `:bindings-deferred` net was removed — it was never emitted);
+  `LhsBindingInfo` docstring records the derived-union contract.
+- `LhsCondition.svelte` renders group `bindings`; `api.ts` closes the shape.
 - `conditions_test.clj`: flat/nested/identical/asymmetric `:or`, two-group
   isolation, `:exists` group==child with no synthetic binding, compound-negation
   sub-scope + `vars ∩ ancestor` check, no-leak outward, group-union structural
@@ -143,6 +142,16 @@ malformed-shape error, docstring alignment) is incorporated.
   `core/get-rulebase-analysis-external-view`) strip `:raw-condition` /
   `::normalized` from the serialized `:lhs` at the API boundary, so they are
   never externalized.
+
+
+### 11. Removed the transitional `:bindings-deferred` net (`api`, UI)
+
+- `api/LhsCondition` no longer carries optional `:bindings-deferred` — the net
+  was never emitted (every node carries `:bindings` per the
+  no-node-without-`:bindings` invariant), so it was pure baggage.
+- `api.ts` drops the optional key; `LhsCondition.svelte` drops the deferred
+  branch and only renders a group bindings card when the group has
+  `:bindings`.
 
 
 Server (`cd server`):
