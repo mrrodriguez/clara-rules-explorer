@@ -18,7 +18,11 @@
 				"known": true
 			},
 			"constraints": "[\n(= ?app-id app-id)\n]",
-			"fact-binding": "?document-check"
+			"fact-binding": "?document-check",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": ["?app-id"]
+			}
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-doc-rules-find-document--czo18bjs",

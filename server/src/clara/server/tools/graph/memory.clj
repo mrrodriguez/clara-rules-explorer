@@ -4,7 +4,7 @@
             [clara.rules.engine :as eng]
             [clara.rules.memory :as mem]
             [clara.rules.platform :as platform]
-            [clara.server.tools.graph.core :as core]
+            [clara.server.tools.graph.conditions :as conditions]
             [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.serialize :as serialize]
             [clara.server.tools.graph.utils :as utils]
@@ -50,8 +50,8 @@
 (defn- get-fact-type-order
   [{:keys [productions] :as _rulebase}]
   (into {}
-        (comp (map :lhs)
-              (mapcat core/extract-lhs-fact-types)
+        (comp (map #(conditions/normalize-lhs (:lhs %)))
+              (mapcat conditions/extract-lhs-fact-types)
               (distinct)
               (map-indexed (comp vec reverse vector)))
         productions))

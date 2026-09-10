@@ -1,47 +1,49 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { LhsElement } from '$lib/types/api';
+	import Badge from '$lib/components/ui/Badge.svelte';
 	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
+	import CollapseToggleButton from '$lib/components/ui/CollapseToggleButton.svelte';
 	import LhsCondition from '$lib/components/rulebase/LhsCondition.svelte';
 	import ConditionFactType from '$lib/components/rulebase/ConditionFactType.svelte';
 
 	interface Props {
-		condition: LhsElement | unknown[];
+		condition: LhsElement;
 		depth?: number;
 	}
 
 	let { condition, depth = 0 }: Props = $props();
 
-	function isNested(c: LhsElement | unknown[]): c is unknown[] {
-		return Array.isArray(c);
+	function isNested(c: LhsElement): boolean {
+		return c.children !== undefined;
 	}
 
 	const nested = $derived.by(() => {
 		if (!isNested(condition)) return null;
 		return {
-			type: condition[0] as string,
-			conditions: condition.slice(1)
+			type: condition['condition-type'] as string,
+			conditions: condition.children ?? []
 		};
 	});
 
-	function formatValue(val: unknown): string {
-		if (val === null || val === undefined) return '';
-		if (typeof val === 'string') return val;
-		return JSON.stringify(val);
-	}
+	let bindingsExpanded = $state(false);
 
-	const ignoredKeys = new Set([
-		'type',
-		'constraints',
-		'args',
-		'accumulator',
-		'from',
-		'result-binding',
-		'fact-binding'
-	]);
+	// Convenience alias for the leaf branch (condition is always a map now).
+	const leaf = $derived(condition);
 
-	// Type cast for convenience in template
-	const leaf = $derived(condition as LhsElement);
+	const bindingGroups = $derived.by(() => {
+		const bindings = leaf.bindings;
+		if (!bindings) return [];
+		return [
+			{ key: 'new-bindings', label: 'New', values: bindings['new-bindings'] ?? [] },
+			{ key: 'binding-keys', label: 'Joins', values: bindings['binding-keys'] ?? [] },
+			{
+				key: 'join-filter-join-bindings',
+				label: 'Join filter',
+				values: bindings['join-filter-join-bindings'] ?? []
+			}
+		].filter((group) => group.values.length > 0);
+	});
 </script>
 
 {#snippet property(label: string, valueClass: string = '', content: Snippet)}
@@ -80,13 +82,61 @@
 	<LhsCondition condition={leaf.from!} depth={depth + 1} />
 {/snippet}
 
+{#snippet bindingsBlock()}
+	{#if bindingGroups.length > 0}
+		<div class="row g-0 py-0 align-items-center">
+			<div
+				class="col-auto text-muted fw-bold text-uppercase ps-2"
+				style="width: 100px; font-size: 0.65rem;"
+			>
+				Bindings
+			</div>
+			<div class="col pe-2">
+				<CollapseToggleButton
+					expanded={bindingsExpanded}
+					label="bindings"
+					onclick={() => (bindingsExpanded = !bindingsExpanded)}
+				/>
+			</div>
+		</div>
+		{#if bindingsExpanded}
+			<div class="row g-0 pt-1 pb-2">
+				<div class="col-12 ps-2 d-flex flex-column gap-2">
+					{#each bindingGroups as group (group.key)}
+						<div class="d-flex align-items-baseline gap-2">
+							<span
+								class="text-muted fw-bold text-uppercase flex-shrink-0"
+								style="font-size: 0.6rem; width: 80px;"
+							>
+								{group.label}
+							</span>
+							<span class="d-flex flex-wrap gap-1">
+								{#each group.values as binding (binding)}
+									<Badge variant="secondary" size="sm">{binding}</Badge>
+								{/each}
+							</span>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
+	{/if}
+{/snippet}
+
 <div class="lhs-condition {depth > 0 ? 'ms-3 mt-1 border-start ps-2' : ''}">
 	{#if nested}
 		<div class="mb-1">
 			<span class="badge bg-secondary text-uppercase nested-badge">{nested.type}</span>
 		</div>
+		{#if leaf.bindings}
+			<div class="card border bg-light-subtle mb-2">
+				<div class="card-body p-0 container-fluid property-container">
+					{@render bindingsBlock()}
+				</div>
+			</div>
+		{/if}
 		{#each nested.conditions as subCondition, i (i)}
-			<LhsCondition condition={subCondition as LhsElement | unknown[]} depth={depth + 1} />
+			<LhsCondition condition={subCondition} depth={depth + 1} />
 		{/each}
 	{:else}
 		<div class="card border bg-light-subtle mb-2">
@@ -104,18 +154,17 @@
 				{/if}
 
 				{#if leaf.accumulator}
-					{@render textProperty('Accumulator', leaf.accumulator[0], 'text-info')}
+					{@render textProperty('Accumulator', leaf.accumulator.form, 'text-info')}
+					{#if leaf.accumulator['some-initial-value?']}
+						{@render textProperty('Initial Value', 'present', 'text-warning')}
+					{/if}
 				{/if}
 
 				{#if leaf.from}
 					{@render property('From', 'p-0', fromCondition)}
 				{/if}
 
-				{#each Object.entries(condition) as [key, value] (key)}
-					{#if !ignoredKeys.has(key)}
-						{@render textProperty(key, formatValue(value))}
-					{/if}
-				{/each}
+				{@render bindingsBlock()}
 
 				{#if leaf.args}
 					<div class="row g-0">

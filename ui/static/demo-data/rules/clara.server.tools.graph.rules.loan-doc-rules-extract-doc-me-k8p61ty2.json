@@ -8,13 +8,13 @@
 			"match": [
 				{
 					"producer-type": {
-						"name": ":extracted-doc-meta",
-						"id": "extracted-doc-meta-sf1cm10h",
+						"name": ":extract-doc-meta",
+						"id": "extract-doc-meta-is5qkiib",
 						"known": true
 					},
 					"consumer-type": {
-						"name": ":extracted-doc-meta",
-						"id": "extracted-doc-meta-sf1cm10h",
+						"name": ":extract-doc-meta",
+						"id": "extract-doc-meta-is5qkiib",
 						"known": true
 					}
 				}
@@ -44,7 +44,7 @@
 				]
 			}
 		],
-		"fact-instance-derived-types": [":extracted-doc-meta"],
+		"fact-instance-derived-types": [":extract-doc-meta"],
 		"resolution": "none"
 	},
 	"source-rule": true,
@@ -58,8 +58,8 @@
 	"notes": null,
 	"insert-types": [
 		{
-			"name": ":extracted-doc-meta",
-			"id": "extracted-doc-meta-sf1cm10h",
+			"name": ":extract-doc-meta",
+			"id": "extract-doc-meta-is5qkiib",
 			"known": true
 		}
 	],

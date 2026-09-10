@@ -4,6 +4,7 @@
             [clara.server.tools.graph.annotation-fixtures :as fixtures]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
             [clara.server.tools.graph.core :as core]
+            [clara.server.tools.graph.conditions :as conditions]
             [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
@@ -204,14 +205,18 @@
 (deftest test-lhs-type-extraction
   (testing "Extraction from various internal condition types"
     (is (= [Application GivenDocument]
-           (core/extract-lhs-fact-types [{:type Application :constraints []}
-                                         {:accumulator 'some-acc
-                                          :from {:type GivenDocument :constraints []}}])))
+           (conditions/extract-lhs-fact-types
+            (conditions/normalize-lhs
+             [{:type Application :constraints []}
+              {:accumulator 'some-acc
+               :from {:type GivenDocument :constraints []}}]))))
 
     (is (= [Application AllGivenDocuments AllRequiredDocuments]
-           (core/extract-lhs-fact-types [{:type Application :constraints []}
-                                         {:type AllGivenDocuments :constraints []}
-                                         {:type AllRequiredDocuments :constraints []}])))))
+           (conditions/extract-lhs-fact-types
+            (conditions/normalize-lhs
+             [{:type Application :constraints []}
+              {:type AllGivenDocuments :constraints []}
+              {:type AllRequiredDocuments :constraints []}]))))))
 
 (deftest test-rulebase-analysis-loan-app
   (let [session (->test-session)
@@ -361,6 +366,7 @@
                  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice"
                  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
                  "clara.server.tools.graph.rules.loan-doc-rules/find-document-check"
+                 "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
                  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
               "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
@@ -392,7 +398,15 @@
                #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
               "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"
               {:upstream
-               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}}}
+               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+              "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"},
+               :downstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/doc-check-count-satisfies-min"}},
+              "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count-satisfies-min"
+              {:upstream
+               #{"clara.server.tools.graph.rules.loan-doc-rules/doc-check-count"}}}
              graph)))))
 
 ;;;;
@@ -438,7 +452,7 @@
    java.lang.Object) appear after these, sorted alphabetically."
   ["clara.server.tools.graph.rules.loan_app_facts.Application"
    "clara.server.tools.graph.rules.loan_app_facts.GivenDocument"
-   ":extracted-doc-meta"
+   ":extract-doc-meta"
    "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocumentsMeta"
    "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments"
    "clara.server.tools.graph.rules.loan_app_facts.AllGivenDocuments"
@@ -447,6 +461,9 @@
    ":loan-doc-rules/document-check-input"
    "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"
    "clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice"
+   ":doc-check-count"
+   ":doc-check-count-min"
+   ":doc-check-count-satisfies-min"
    "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck"
    "clara.server.tools.graph.rules.loan_app_facts.FraudCheck"
    "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"])
@@ -1131,3 +1148,15 @@
              (match-pairs down)))
       (is (= [nil :retract] (mapv :via (:match down)))
           "insert match unflagged, retract match flagged"))))
+
+(deftest test-get-production-external-view-strips-internal-lhs-keys
+  (testing "external view removes :raw-condition and ::normalized from the serialized :lhs"
+    (let [summary {:lhs [{:condition-type :not
+                          :children [{:type :type-a :constraints "[(= ?a 1)]"}]
+                          :raw-condition "[:not {:type type-a :constraints [(= ?a 1)]}]"
+                          ::conditions/normalized true}]}
+          ext (core/get-production-external-view summary)
+          lhs (first (:lhs ext))]
+      (is (= :not (:condition-type lhs)))
+      (is (not (contains? lhs :raw-condition)))
+      (is (not (contains? lhs ::conditions/normalized))))))

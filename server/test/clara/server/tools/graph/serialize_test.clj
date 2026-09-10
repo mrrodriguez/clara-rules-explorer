@@ -1,6 +1,6 @@
 (ns clara.server.tools.graph.serialize-test
   (:require [clara.server.tools.graph.serialize :as s]
-            [clara.server.tools.graph.core :as core]
+            [clara.server.tools.graph.conditions :as conditions]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
@@ -211,21 +211,24 @@
       (is (str/includes? (:constraints serialized) "(= ?a 1)"))))
 
   (testing "Nested condition serialization (OR/AND)"
-    (let [condition [:or
-                     {:type :type-a :constraints '[(= ?a 1)]}
-                     {:type :type-b :constraints '[(= ?b 2)]}]
+    (let [condition {:condition-type :or
+                     :children [{:type :type-a :constraints '[(= ?a 1)]}
+                                {:type :type-b :constraints '[(= ?b 2)]}]}
           serialized (s/serialize-condition condition nil #{})]
-      (is (= :or (first serialized)))
-      (is (= ":type-a" (get-in (second serialized) [:type :name])))
-      (is (string? (:constraints (second serialized))))
-      (is (= ":type-b" (get-in (nth serialized 2) [:type :name])))
-      (is (string? (:constraints (nth serialized 2))))))
+      (is (= :or (:condition-type serialized)))
+      (is (= ":type-a" (get-in serialized [:children 0 :type :name])))
+      (is (string? (get-in serialized [:children 0 :constraints])))
+      (is (= ":type-b" (get-in serialized [:children 1 :type :name])))
+      (is (string? (get-in serialized [:children 1 :constraints])))))
 
   (testing "Accumulator condition serialization"
-    (let [condition {:accumulator '(acc/all)
+    (let [condition {:accumulator {:form '(clara.rules.accumulators/all)
+                                   :some-initial-value? true}
                      :from {:type :some-type :constraints '[(= ?a 1)]}}
           serialized (s/serialize-condition condition nil #{})]
-      (is (= '(acc/all) (:accumulator serialized)))
+      (is (= {:form "(clara.rules.accumulators/all)"
+              :some-initial-value? true}
+             (:accumulator serialized)))
       (is (= ":some-type" (get-in serialized [:from :type :name])))
       (is (string? (get-in serialized [:from :constraints]))))))
 
@@ -239,6 +242,36 @@
       (is (string? (:constraints (first serialized))))
       (is (= ":type-b" (get-in (second serialized) [:type :name])))
       (is (string? (:constraints (second serialized)))))))
+
+(deftest test-serialize-lhs--serializes-internal-keys
+  (testing "serialize-lhs serializes :raw-condition recursively and keeps ::normalized"
+    (let [lhs [{:condition-type :not
+                :children [{:type :type-a :constraints '[(= ?a 1)]}]
+                :raw-condition [:not {:type :type-a :constraints '[(= ?a 1)]}]
+                ::conditions/normalized true}]
+          serialized (s/serialize-lhs lhs nil #{})
+          raw (get-in serialized [0 :raw-condition])]
+      (is (= :not (get-in serialized [0 :condition-type])))
+      (is (vector? raw))
+      (is (= :not (first raw)))
+      (is (string? (get-in raw [1 :constraints])))
+      (is (string? (get-in raw [1 :type :name])))
+      (is (true? (get-in serialized [0 ::conditions/normalized]))))))
+
+(deftest test-serialize-condition--raw-accumulator
+  (testing "a raw accumulator :raw-condition serializes its raw accumulator form to a string"
+    (let [condition {:accumulator {:form '(clara.rules.accumulators/all)
+                                   :some-initial-value? true}
+                     :from {:type :type-a :constraints '[(= ?a 1)]}
+                     :result-binding :?docs
+                     :raw-condition {:accumulator '(clara.rules.accumulators/all)
+                                     :from {:type :type-a :constraints '[(= ?a 1)]}
+                                     :result-binding :?docs}}
+          serialized (s/serialize-condition condition nil #{})
+          raw (:raw-condition serialized)]
+      (is (string? (:accumulator raw)))
+      (is (str/includes? (:accumulator raw) "clara.rules.accumulators/all"))
+      (is (string? (get-in raw [:from :constraints]))))))
 
 ;; ---------------------------------------------------------------------------
 ;; serialize-lhs-form — condition-type dispatch
@@ -356,7 +389,7 @@
                 :result-binding '?m
                 :from {:type 'my.ns/Z :fact-binding '?z}}]
           lhs-form-str (s/serialize-lhs-form lhs)
-          fact-types (core/extract-lhs-fact-types lhs)]
+          fact-types (conditions/extract-lhs-fact-types (conditions/normalize-lhs lhs))]
       (is (seq fact-types) "LHS must yield at least one fact type")
       (doseq [ft fact-types]
         (is (str/includes? lhs-form-str (str ft))

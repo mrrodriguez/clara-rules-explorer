@@ -38,18 +38,46 @@ export interface ProductionReference {
 }
 
 /**
+ * Details of an accumulator condition's `:accumulator` form, computed by the
+ * conditions analysis pass. `form` is the rendered form string;
+ * `some-initial-value?` is true when the evaluated accumulator has a non-nil
+ * `:initial-value`.
+ */
+export interface AccumulatorInfo {
+	form: string;
+	'some-initial-value?': boolean;
+}
+
+/**
+ * Per-condition binding summary attached under `bindings` on serialized LHS
+ * leaves and groups alike (one vocabulary everywhere). A group's `bindings`
+ * is the componentwise union of its children's — derived, not additional:
+ * aggregate over leaves *or* read group summaries, never both. Each group is
+ * a sorted vector of binding names (strings after JSON encoding; keywords
+ * pre-JSON on the server).
+ */
+export interface LhsBindingInfo {
+	'binding-keys': string[];
+	'new-bindings': string[];
+	'join-filter-join-bindings'?: string[];
+}
+
+/**
  * Represents a condition or constraint in the left-hand side (LHS) of a rule or query.
  * The shape of LHS elements can vary (e.g., standard type constraints, accumulators, etc.).
  * For now, we represent it as a flexible record.
  */
 export interface LhsElement {
+	'condition-type'?: 'and' | 'or' | 'not' | 'exists';
+	children?: LhsElement[];
 	type?: TypeReference;
 	constraints?: string;
-	accumulator?: string[];
+	args?: string;
+	accumulator?: AccumulatorInfo;
 	from?: LhsElement;
 	'result-binding'?: string;
 	'fact-binding'?: string;
-	[key: string]: unknown;
+	bindings?: LhsBindingInfo;
 }
 
 /**

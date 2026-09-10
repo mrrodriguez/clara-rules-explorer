@@ -64,14 +64,34 @@
 			},
 			"bindings": [
 				{
-					"?document-check": {
-						"app-id": "app-1",
-						"status": "pass",
-						"message": "All required documents found"
-					},
-					"?app-id": "app-1"
+					"?app-id": "app-1",
+					"?count": 1
 				}
 			]
+		}
+	],
+	"inserted-facts": [
+		{
+			"id": 11,
+			"type": {
+				"name": ":doc-check-count",
+				"id": "doc-check-count-766j6udp",
+				"known": true
+			},
+			"ns": null,
+			"data": {
+				"count": 1
+			},
+			"is-root": false,
+			"inserted-from": [
+				{
+					"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count",
+					"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-nolex62p",
+					"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"used-by": []
 		}
 	]
 }

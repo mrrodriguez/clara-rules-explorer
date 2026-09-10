@@ -1,0 +1,94 @@
+{
+	"downstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count-satisfies-min",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-b7b02kft",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": ":doc-check-count",
+						"id": "doc-check-count-766j6udp",
+						"known": true
+					},
+					"consumer-type": {
+						"name": ":doc-check-count",
+						"id": "doc-check-count-766j6udp",
+						"known": true
+					}
+				}
+			]
+		}
+	],
+	"source-rule": false,
+	"lhs-form": "[:?count\n <-\n (clara.rules.accumulators/count)\n :from\n [clara.server.tools.graph.rules.loan_app_facts.DocumentCheck\n  (= ?app-id app-id)]]\n",
+	"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+	"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count",
+	"lhs-types": [
+		{
+			"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+			"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+			"known": true
+		}
+	],
+	"lhs": [
+		{
+			"accumulator": {
+				"form": "(clara.rules.accumulators/count)",
+				"some-initial-value?": true
+			},
+			"from": {
+				"type": {
+					"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+					"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+					"known": true
+				},
+				"constraints": "[\n(= ?app-id app-id)\n]"
+			},
+			"result-binding": "?count",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": ["?app-id"]
+			}
+		}
+	],
+	"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-nolex62p",
+	"retract-types": [],
+	"notes": null,
+	"insert-types": [
+		{
+			"name": ":doc-check-count",
+			"id": "doc-check-count-766j6udp",
+			"known": true
+		}
+	],
+	"rhs-form": "(do (r/insert! (with-meta {:count ?count} {:type :doc-check-count})))\n",
+	"upstream": [
+		{
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-app-has-all-re-l6dovm1t",
+			"type": "rule",
+			"match": [
+				{
+					"producer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+						"known": true
+					},
+					"consumer-type": {
+						"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+						"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+						"known": true
+					}
+				}
+			]
+		}
+	],
+	"doc": null,
+	"sink-rule": false,
+	"props": {
+		"insert-types": ["doc-check-count"]
+	}
+}

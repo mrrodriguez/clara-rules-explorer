@@ -1,0 +1,25 @@
+{
+	"retracted-by-rules": [],
+	"ns": null,
+	"name": ":doc-check-count",
+	"used-by-queries": [],
+	"used-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count-satisfies-min",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-b7b02kft",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	],
+	"descendants": [],
+	"ancestors": [],
+	"id": "doc-check-count-766j6udp",
+	"inserted-by-rules": [
+		{
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count",
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-nolex62p",
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"type": "rule"
+		}
+	]
+}

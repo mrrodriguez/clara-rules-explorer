@@ -54,10 +54,17 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n]",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": ["?app-id"]
+			}
 		},
 		{
-			"accumulator": ["clara.rules.accumulators/all"],
+			"accumulator": {
+				"form": "(clara.rules.accumulators/all)",
+				"some-initial-value?": true
+			},
 			"from": {
 				"type": {
 					"name": "clara.server.tools.graph.rules.loan_app_facts.GivenDocument",
@@ -66,7 +73,11 @@
 				},
 				"constraints": "[\n(= ?app-id app-id)\n\n(= doc-type :id-card)\n]"
 			},
-			"result-binding": "?docs"
+			"result-binding": "?docs",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": []
+			}
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-doc-rules-collect-app-id-fhyj46dq",

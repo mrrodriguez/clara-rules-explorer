@@ -10,7 +10,7 @@
 			"type": "rule",
 			"facts": [
 				{
-					"id": 16,
+					"id": 17,
 					"type": {
 						"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
 						"id": "clara.server.tools.graph.rules.loan-doc-rules.AllIdCardGiven-4xiyfnsl",
@@ -42,5 +42,5 @@
 		}
 	],
 	"used-by": [],
-	"ids": [16]
+	"ids": [17]
 }

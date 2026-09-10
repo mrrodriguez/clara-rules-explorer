@@ -5,7 +5,6 @@
    [clojure.set :as set]
    [clojure.string :as str]
    [clojure.tools.logging :as log]
-   [clojure.walk :as w]
    [clara.rules.schema :as schema]
    [clara.server.tools.graph.utils :as utils])
   (:import [java.math BigInteger]))
@@ -220,9 +219,13 @@
       (nil? rhs) (assoc :type "query"))))
 
 (defn serialize-condition
-  "Serializes a single condition, including pretty-printing its constraints and
-   args and converting its `:type` (raw fact type) into a
-   `clara.server.graph.api/TypeReference`.
+  "Serializes a single LHS condition (normalized or raw), pretty-printing its
+   constraints and args and converting its `:type` (raw fact type) into a
+   `clara.server.graph.api/TypeReference`.  Group entries keep their
+   `:condition-type` and have their `:children` recursed; accumulator entries
+   recurse into `:from`; raw group vectors are serialized as vectors with
+   serialized children.  A retained `:raw-condition` is serialized recursively
+   the same way (the internal keys are removed at the external-view boundary).
    `prod-ns` is the production's namespace, used to resolve symbol types;
    `known-set` is the analysis's serialized fact-type names.
 
@@ -236,20 +239,38 @@
                     (->> forms
                          (map *form-printer*)
                          (str/join \newline))))
+          (serialize-accumulator [acc]
+            (if (map? acc)
+              (update acc :form #(str/trim-newline (*form-printer* %)))
+              (str/trim-newline (*form-printer* acc))))
           (serialize-node [node]
-            (if (map? node)
-              (cond-> node
-                (some? (:type node)) (update :type #(serialize-type-ref known-set prod-ns %))
-                (contains? node :constraints) (update :constraints serialize-forms)
-                (contains? node :args) (update :args serialize-forms))
-              node))]
-    (w/prewalk serialize-node condition)))
+            (cond-> node
+              (some? (:type node)) (update :type #(serialize-type-ref known-set prod-ns %))
+              (contains? node :constraints) (update :constraints serialize-forms)
+              (contains? node :args) (update :args serialize-forms)
+              (contains? node :accumulator) (update :accumulator serialize-accumulator)
+              (contains? node :raw-condition) (update :raw-condition #(serialize-condition % prod-ns known-set))))]
+    (cond
+      (map? condition)
+      (cond-> (serialize-node condition)
+        (contains? condition :from) (update :from #(serialize-condition % prod-ns known-set))
+        (contains? condition :children) (update :children #(mapv (fn [c] (serialize-condition c prod-ns known-set)) %)))
+
+      (and (sequential? condition) (seq condition))
+      (into [(first condition)]
+            (map #(serialize-condition % prod-ns known-set))
+            (rest condition))
+
+      :else condition)))
 
 (defn serialize-lhs
   "Serializes the LHS of a rule.  Condition `:type` values are raw fact types
    here — callers must apply `prune-fns` to the RESULT (not beforehand) so the
    types are still Classes/keywords when `serialize-condition` converts them
    to `clara.server.graph.api/TypeReference` maps.
+
+   Internal analysis keys (`:raw-condition` / `::normalized`) are serialized
+   along with the rest of the LHS and removed at the external-view boundary.
 
    Form printing is controlled by the dynamic var `*form-printer*`."
   [lhs prod-ns known-set]

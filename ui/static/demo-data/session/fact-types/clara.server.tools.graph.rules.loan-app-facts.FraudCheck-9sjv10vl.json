@@ -10,7 +10,7 @@
 			"type": "root",
 			"facts": [
 				{
-					"id": 12,
+					"id": 13,
 					"type": {
 						"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
 						"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-9sjv10vl",
@@ -43,7 +43,7 @@
 			"type": "rule",
 			"facts": [
 				{
-					"id": 12,
+					"id": 13,
 					"type": {
 						"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
 						"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-9sjv10vl",
@@ -70,5 +70,5 @@
 			"ns": "clara.server.tools.graph.rules.loan-app-rules"
 		}
 	],
-	"ids": [12]
+	"ids": [13]
 }

@@ -44,15 +44,15 @@ Start the server in your REPL and register it:
 ## Fact types and LHS structure (shared)
 
 `navigate` resolves the token under point to a kind-explicit type string
-(`core/extract-lhs-fact-types` contract) — class name, keyword, `pr-str`'d
-string/tuple/map. Both editors mirror that contract:
+(`conditions/extract-lhs-fact-types` contract) — class name, keyword,
+`pr-str`'d string/tuple/map. Both editors mirror that contract:
 
 - **Plain / record / class** — `[Application ...]` or `[?v <- Application]` → `Application`
 - **Keyword** — `[?d <- ::supporting-document]` → `::supporting-document` (fully-qualified via `*ns*`)
 - **String** — `[?x <- "my-string"]` or `(r/insert! "my-string")` → `"my-string"` (quoted)
 - **Vector tuple** — `[:loan/status "verified"]`, `[:my-thing]`, `[:my-thing :qual]` → `pr-str`'d vector
 - **Props `{:clara-rules/insert-types [T] :clara-rules/retract-types [T]}`** — the optional rule map (second form after the name) is parsed; point inside its `[T]` vector is treated as an **RHS** producer fact type (the same `insert-types`/`retract-types` the server advertises), so consumer navigation finds its consumers.
-- **Accumulator `:from`** — the LHS extractor is `case :fact → :type / :accumulator → :from / :and/:or/:not/:exists → rest` (`core.clj`). The editor walks the condition vector:
+- **Accumulator `:from`** — the LHS extractor is `case :fact → :type / :accumulator → :from / :and/:or/:not/:exists → :children` (`conditions.clj`). The editor walks the condition vector:
   - `[?acc <- (acc/all) :from [:my-thing ...]]` → `:my-thing`
   - `[?acc <- (acc/all) :from [[:my-thing]]]` → `[:my-thing]`
   - `[?acc <- (acc/all) :from [[:my-thing] [this] (= ?x ...)]]` → `[:my-thing]`

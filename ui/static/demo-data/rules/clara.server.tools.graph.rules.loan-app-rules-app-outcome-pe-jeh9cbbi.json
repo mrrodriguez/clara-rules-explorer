@@ -131,32 +131,59 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n]",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": ["?app-id"]
+			}
 		},
-		[
-			"not",
-			{
-				"type": {
-					"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-					"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
-					"known": true
-				},
-				"constraints": "[\n(= ?app-id app-id)\n\n(= status :approved)\n]"
-			}
-		],
-		[
-			"not",
-			{
-				"type": {
-					"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-					"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
-					"known": true
-				},
-				"constraints": "[\n(= ?app-id app-id)\n\n(= status :denied)\n]"
-			}
-		],
 		{
-			"accumulator": ["clara.rules.accumulators/all"],
+			"condition-type": "not",
+			"children": [
+				{
+					"type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					},
+					"constraints": "[\n(= ?app-id app-id)\n\n(= status :approved)\n]",
+					"bindings": {
+						"binding-keys": ["?app-id"],
+						"new-bindings": []
+					}
+				}
+			],
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": []
+			}
+		},
+		{
+			"condition-type": "not",
+			"children": [
+				{
+					"type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					},
+					"constraints": "[\n(= ?app-id app-id)\n\n(= status :denied)\n]",
+					"bindings": {
+						"binding-keys": ["?app-id"],
+						"new-bindings": []
+					}
+				}
+			],
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": []
+			}
+		},
+		{
+			"accumulator": {
+				"form": "(clara.rules.accumulators/all)",
+				"some-initial-value?": true
+			},
 			"from": {
 				"type": {
 					"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
@@ -165,10 +192,17 @@
 				},
 				"constraints": "[\n(= ?app-id app-id)\n]"
 			},
-			"result-binding": "?doc-checks"
+			"result-binding": "?doc-checks",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": []
+			}
 		},
 		{
-			"accumulator": ["clara.rules.accumulators/all"],
+			"accumulator": {
+				"form": "(clara.rules.accumulators/all)",
+				"some-initial-value?": true
+			},
 			"from": {
 				"type": {
 					"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
@@ -177,10 +211,17 @@
 				},
 				"constraints": "[\n(= ?app-id app-id)\n]"
 			},
-			"result-binding": "?id-checks"
+			"result-binding": "?id-checks",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": []
+			}
 		},
 		{
-			"accumulator": ["clara.rules.accumulators/all"],
+			"accumulator": {
+				"form": "(clara.rules.accumulators/all)",
+				"some-initial-value?": true
+			},
 			"from": {
 				"type": {
 					"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
@@ -189,7 +230,11 @@
 				},
 				"constraints": "[\n(= ?app-id app-id)\n]"
 			},
-			"result-binding": "?fraud-checks"
+			"result-binding": "?fraud-checks",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": []
+			}
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-pe-jeh9cbbi",

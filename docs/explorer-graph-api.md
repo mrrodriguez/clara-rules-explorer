@@ -360,11 +360,49 @@ Includes everything from the list view plus:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `lhs` | object[] | Serialized LHS conditions, each with `:type` (a TypeReference) and pretty-printed `:constraints` / `:args` |
+| `lhs` | object[] | Serialized LHS conditions — every entry is an object. Leaf entries carry `:type` (a TypeReference), pretty-printed `:constraints` / `:args`, `:accumulator` / `:from` / `:result-binding` / `:fact-binding` / `:bindings` as applicable; group entries carry `:condition-type` (`and` \| `or` \| `not` \| `exists`), `:children`, and `:bindings` |
 | `rhs-form` | string | Pretty-printed RHS s-expression (fns redacted) |
 | `props` | object | Full `:props` map from the `defrule` body (fns redacted, keys stringified) |
 | `notes` | string\|null | Human-readable notes from annotations |
 | `upstream` / `downstream` | ProductionDep[] | Dependency edges; `:match` present when the pair links via at least one type pair |
+
+Each `lhs` entry is an object in one of two shapes.
+
+**Leaf condition** (fact / test / accumulator):
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `type` | TypeReference | Fact type (fact leaves and accumulator `from` subtrees) |
+| `constraints` | string | Pretty-printed constraint forms |
+| `args` | string | Pretty-printed argument forms |
+| `accumulator` | AccumulatorInfo | Accumulator details (accumulator leaves only) |
+| `from` | LhsElement | The accumulator's source condition subtree |
+| `result-binding` | string | Accumulator result binding (e.g. `"?docs"`) |
+| `fact-binding` | string | Fact binding (e.g. `"?app-id"`) |
+| `bindings` | LhsBindingInfo | Per-condition binding summary (see below) |
+
+**Group condition** (`and` / `or` / `not` / `exists`):
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `condition-type` | string | `and` \| `or` \| `not` \| `exists` |
+| `children` | LhsElement[] | Nested conditions |
+| `bindings` | LhsBindingInfo | Group binding summary (union of children's) |
+
+**`AccumulatorInfo`**:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `form` | string | Rendered accumulator form, e.g. `"(clara.rules.accumulators/all)"` |
+| `some-initial-value?` | boolean | `true` when the evaluated accumulator has a non-nil `:initial-value` |
+
+**`LhsBindingInfo`** (attached under `bindings` on leaves and groups):
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `binding-keys` | string[] | Variables already bound upstream that this condition joins on |
+| `new-bindings` | string[] | Variables this condition's constraints introduce for the first time |
+| `join-filter-join-bindings` | string[] | Present only for non-equality unifications that reference an upstream binding |
 
 **Response** `404`:
 ```json

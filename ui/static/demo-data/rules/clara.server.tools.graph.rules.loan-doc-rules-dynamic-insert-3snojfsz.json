@@ -43,7 +43,11 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n\n(= status :pass)\n]",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": ["?app-id"]
+			}
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-doc-rules-dynamic-insert-3snojfsz",

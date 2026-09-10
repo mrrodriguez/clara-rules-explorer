@@ -66,18 +66,42 @@
    :type s/Str
    (s/optional-key :match) [TypeBridgeMatch]})
 
+(s/defschema AccumulatorInfo
+  "Details of an accumulator condition's `:accumulator` form, computed by the
+   conditions analysis pass.  `:form` is the rendered form string;
+   `:some-initial-value?` is true when the evaluated accumulator has a non-nil
+   `:initial-value`."
+  {:form s/Str
+   :some-initial-value? s/Bool})
+
+(s/defschema LhsBindingInfo
+  "Per-condition binding summary attached under `:bindings` on serialized LHS
+   leaves and groups alike (one vocabulary everywhere).  A group's `:bindings`
+   is the componentwise union of its children's — derived, not additional:
+   consumers aggregate over leaves *or* read group summaries, never both.
+   Values are keywords pre-JSON (the API validates the in-memory shape); the
+   UI receives strings after JSON encoding.
+   `:join-filter-join-bindings` is present only when the condition has
+   non-equality unifications that reference an upstream binding."
+  {:binding-keys [s/Keyword]
+   :new-bindings [s/Keyword]
+   (s/optional-key :join-filter-join-bindings) [s/Keyword]})
+
 (s/defschema LhsCondition
-  "A serialized LHS condition from the Clara Rete network.
-   Known keys: :type (a `TypeReference`), :constraints, :args, :accumulator,
-   :from, :result-binding, :fact-binding."
+  "A serialized LHS condition.  Leaf conditions carry :type / :constraints /
+   :args / :accumulator / :from / :result-binding / :fact-binding / :bindings
+   as applicable; group conditions carry :condition-type, :children, and their
+   own :bindings union.  Every node carries `:bindings`."
   {(s/optional-key :type) TypeReference
    (s/optional-key :constraints) s/Str
    (s/optional-key :args) s/Str
-   (s/optional-key :accumulator) s/Any
+   (s/optional-key :accumulator) AccumulatorInfo
    (s/optional-key :from) (s/recursive #'LhsCondition)
    (s/optional-key :result-binding) s/Any
    (s/optional-key :fact-binding) s/Any
-   s/Keyword s/Any})
+   (s/optional-key :bindings) LhsBindingInfo
+   (s/optional-key :condition-type) (s/enum :and :or :not :exists)
+   (s/optional-key :children) [(s/recursive #'LhsCondition)]})
 
 (s/defschema ViaEntry
   "A single entry in a `:rule-to-boundary-path` / `:boundary-to-constructor-path` chain."
@@ -354,7 +378,7 @@
         name (get (:production-id-index analysis) id)
         rule (get-in analysis [:rules name])]
     (if rule
-      {:status 200 :body rule}
+      {:status 200 :body (core/get-production-external-view rule)}
       {:status 404 :body {:error "Rule not found"}})))
 
 (s/defn handle-get-queries :- {:status (s/eq 200) :body {:queries [QueryListItem]}}
@@ -373,7 +397,7 @@
         name (get (:production-id-index analysis) id)
         query (get-in analysis [:queries name])]
     (if query
-      {:status 200 :body query}
+      {:status 200 :body (core/get-production-external-view query)}
       {:status 404 :body {:error "Query not found"}})))
 
 (s/defn handle-get-fact-types :- {:status (s/eq 200) :body {:fact-types [FactTypeListItem]}}

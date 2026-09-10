@@ -24,7 +24,7 @@
 						]
 					}
 				],
-				"fact-instance-derived-types": [":extracted-doc-meta"],
+				"fact-instance-derived-types": [":extract-doc-meta"],
 				"resolution": "none"
 			},
 			"source-rule": true,
@@ -35,8 +35,8 @@
 			"retract-types": [],
 			"insert-types": [
 				{
-					"name": ":extracted-doc-meta",
-					"id": "extracted-doc-meta-sf1cm10h",
+					"name": ":extract-doc-meta",
+					"id": "extract-doc-meta-is5qkiib",
 					"known": true
 				}
 			],
@@ -91,8 +91,8 @@
 					"known": true
 				},
 				{
-					"name": ":extracted-doc-meta",
-					"id": "extracted-doc-meta-sf1cm10h",
+					"name": ":extract-doc-meta",
+					"id": "extract-doc-meta-is5qkiib",
 					"known": true
 				}
 			],
@@ -665,6 +665,57 @@
 				}
 			],
 			"doc": "After document checks pass, write an audit trail entry via opaque builder.\n   The analyzer detects an insert but cannot resolve the fact type — the\n   builder is a custom non-record function. This stays unresolved.",
+			"sink-rule": true
+		},
+		{
+			"source-rule": false,
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count",
+			"lhs-types": [
+				{
+					"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
+					"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
+					"known": true
+				}
+			],
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-nolex62p",
+			"retract-types": [],
+			"insert-types": [
+				{
+					"name": ":doc-check-count",
+					"id": "doc-check-count-766j6udp",
+					"known": true
+				}
+			],
+			"doc": null,
+			"sink-rule": false
+		},
+		{
+			"source-rule": false,
+			"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+			"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count-satisfies-min",
+			"lhs-types": [
+				{
+					"name": ":doc-check-count",
+					"id": "doc-check-count-766j6udp",
+					"known": true
+				},
+				{
+					"name": ":doc-check-count-min",
+					"id": "doc-check-count-min-1yxaapb2",
+					"known": true
+				}
+			],
+			"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-b7b02kft",
+			"retract-types": [],
+			"insert-types": [
+				{
+					"name": ":doc-check-count-satisfies-min",
+					"id": "doc-check-count-satisfies-min-31sipq7b",
+					"known": true
+				}
+			],
+			"doc": null,
 			"sink-rule": true
 		},
 		{

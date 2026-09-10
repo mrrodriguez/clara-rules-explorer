@@ -37,6 +37,7 @@
             [clara.server.tools.graph.analyze.index :as index]
             [clara.server.tools.graph.analyze.synth :as synth]
             [clara.server.tools.graph.serialize :as serialize]
+            [clara.server.tools.graph.conditions :as conditions]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.annotations :as ann]
@@ -634,10 +635,13 @@
    wrapped fn runtime insertion uses); falls back to `clojure.core/ancestors`
    when absent (e.g. a hand-built rulebase).  Called on the loaded Class,
    since scan tokens are fq class-name symbols."
-  [rulebase]
+  [rulebase productions query-lhs]
   (let [lhs-type-names (into #{}
                              (map type-name-str)
-                             (alias/rulebase-fact-types rulebase))
+                             (concat (mapcat #(conditions/extract-lhs-fact-types (:lhs %))
+                                             productions)
+                                     (mapcat conditions/extract-lhs-fact-types
+                                             query-lhs)))
         ancestors-fn (core/extract-ancestors-fn rulebase)
         allowed? (memoize
                   (fn [type-sym]
@@ -737,12 +741,16 @@
 
   (let [get-source (build-source-loader (::combined-sources rule-source-analysis))
         rulebase (get-rulebase session-or-rulebase)
+        productions (mapv #(update % :lhs conditions/normalize-lhs)
+                          (:productions rulebase))
+        query-lhs (mapv #(conditions/normalize-lhs (get-in % [:query :lhs]))
+                        (vals (:query-nodes rulebase)))
         fallback-mode (or dynamic-type-fallback-resolution :rulebase-fact-types-only)
         fallback-type-filter (when (= :rulebase-fact-types-only fallback-mode)
-                               (build-fallback-type-filter rulebase))
+                               (build-fallback-type-filter rulebase productions query-lhs))
         productions-by-name (into {}
                                   (map (fn [p] [(normalize-fq-name-key (:name p)) p]))
-                                  (:productions rulebase))
+                                  productions)
         effective-filter (if (seq rules-filter)
                            (mapv normalize-fq-name-key rules-filter)
                            (all-rule-fq-names session-or-rulebase))
