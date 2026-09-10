@@ -468,7 +468,9 @@ non-accumulator nodes.
    (`extract-lhs-fact-types`, `extract-var-bindings`) and serialization consume
    that shape. Raw forms are retained as `:raw-condition` only for the
    compiler-coupled binding walk and `:lhs-form`.
-5. **Next:** regenerate demo data when the static demo next ships.
+5. **Done:** demo data regenerated to reflect the new wire shape (accumulator
+   `:form` / `:some-initial-value?`, per-node `:bindings`, group
+   `:condition-type`).
 6. **Later / only if needed:** Option C — node mapping for evaluated
    accumulators, if eval purity becomes a blocker, and for node-id exposure.
 

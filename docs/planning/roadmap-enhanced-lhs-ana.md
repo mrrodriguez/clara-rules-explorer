@@ -166,7 +166,9 @@ UI (`cd ui`):
 - `make test-unit` / `make test-e2e` → all pass (bindings summary and group
   rendering covered in the unit suite).
 
-(Demo-data regeneration is intentionally deferred.)
+Demo data regenerated (`db0a0b4`) to reflect the new wire shape —
+accumulator `:form` / `:some-initial-value?`, per-node `:bindings`, and group
+`:condition-type`.
 
 ---
 
@@ -178,11 +180,9 @@ UI (`cd ui`):
 2. **LHS entries are homogeneous maps** end-to-end; normalization is
    idempotent, and the serialized `:lhs` retains the internal `:raw-condition`
    / `::normalized` keys, stripped only at the external-view boundary.
-3. **Regenerate demo data** when the static demo next needs to reflect the new
-   wire shape (deferred; it is already stale for accumulator/bindings).
-4. **Optionally precompute/cache accumulator eval** if `->rulebase-analysis`
+3. **Optionally precompute/cache accumulator eval** if `->rulebase-analysis`
    purity or repeated-eval cost becomes a concern.
-5. **Optionally build the compiled-node mapper (Option C)** only if eval purity
+4. **Optionally build the compiled-node mapper (Option C)** only if eval purity
    becomes a blocker or node-id exposure is wanted.
 
 ---
