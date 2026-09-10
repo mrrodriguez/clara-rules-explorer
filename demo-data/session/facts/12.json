@@ -1,8 +1,8 @@
 {
 	"id": 12,
 	"type": {
-		"name": "clara.server.tools.graph.rules.loan_app_facts.FraudCheck",
-		"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-9sjv10vl",
+		"name": "clara.server.tools.graph.rules.loan_app_facts.IdentityCheck",
+		"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
 		"known": true
 	},
 	"ns": "clara.server.tools.graph.rules.loan_app_facts",

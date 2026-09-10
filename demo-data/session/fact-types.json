@@ -25,12 +25,6 @@
 			"count": 1
 		},
 		{
-			"name": ":extracted-doc-meta",
-			"id": "extracted-doc-meta-sf1cm10h",
-			"ns": null,
-			"count": 1
-		},
-		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.Application",
 			"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
 			"ns": "clara.server.tools.graph.rules.loan_app_facts",
@@ -67,6 +61,12 @@
 			"count": 1
 		},
 		{
+			"name": ":doc-check-count",
+			"id": "doc-check-count-766j6udp",
+			"ns": null,
+			"count": 1
+		},
+		{
 			"name": "clara.server.tools.graph.rules.loan_app_facts.RequiredDocument",
 			"id": "clara.server.tools.graph.rules.loan-app-facts.RequiredDocume-7rfb9pky",
 			"ns": "clara.server.tools.graph.rules.loan_app_facts",
@@ -85,6 +85,12 @@
 			"count": 1
 		},
 		{
+			"name": ":extract-doc-meta",
+			"id": "extract-doc-meta-is5qkiib",
+			"ns": null,
+			"count": 1
+		},
+		{
 			"name": "clara.server.tools.graph.rules.loan_doc_rules.AllIdCardGivenDocuments",
 			"id": "clara.server.tools.graph.rules.loan-doc-rules.AllIdCardGiven-4xiyfnsl",
 			"ns": "clara.server.tools.graph.rules.loan_doc_rules",
@@ -97,5 +103,5 @@
 			"count": 1
 		}
 	],
-	"total-count": 18
+	"total-count": 19
 }

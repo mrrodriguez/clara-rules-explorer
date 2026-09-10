@@ -49,6 +49,12 @@
 						"type": "rule"
 					},
 					{
+						"name": "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count",
+						"id": "clara.server.tools.graph.rules.loan-doc-rules-doc-check-coun-nolex62p",
+						"ns": "clara.server.tools.graph.rules.loan-doc-rules",
+						"type": "rule"
+					},
+					{
 						"name": "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?",
 						"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-ap-34j19zl5",
 						"ns": "clara.server.tools.graph.rules.loan-app-rules",
@@ -65,7 +71,7 @@
 	],
 	"inserted-facts": [
 		{
-			"id": 17,
+			"id": 18,
 			"type": {
 				"name": "clara.server.tools.graph.rules.loan_doc_rules.AuditTrail",
 				"id": "clara.server.tools.graph.rules.loan-doc-rules.AuditTrail-ihl0yjcd",
@@ -75,7 +81,7 @@
 			"data": {
 				"app-id": "app-1",
 				"action": "doc-check-passed",
-				"timestamp": 1788808414396
+				"timestamp": 1789052134169
 			},
 			"is-root": false,
 			"inserted-from": [

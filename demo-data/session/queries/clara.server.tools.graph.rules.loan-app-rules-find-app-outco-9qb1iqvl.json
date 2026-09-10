@@ -2,7 +2,7 @@
 	"matches": [
 		{
 			"fact": {
-				"id": 13,
+				"id": 14,
 				"type": {
 					"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
 					"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",

@@ -131,26 +131,44 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.Application-heibfo1i",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n]"
-		},
-		[
-			"not",
-			{
-				"type": {
-					"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-					"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
-					"known": true
-				},
-				"constraints": "[\n(= ?app-id app-id)\n\n(= status :approved)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n]",
+			"bindings": {
+				"binding-keys": [],
+				"new-bindings": ["?app-id"]
 			}
-		],
+		},
+		{
+			"condition-type": "not",
+			"children": [
+				{
+					"type": {
+						"name": "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
+						"id": "clara.server.tools.graph.rules.loan-app-rules.ApplicationOut-ominnzf4",
+						"known": true
+					},
+					"constraints": "[\n(= ?app-id app-id)\n\n(= status :approved)\n]",
+					"bindings": {
+						"binding-keys": ["?app-id"],
+						"new-bindings": []
+					}
+				}
+			],
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": []
+			}
+		},
 		{
 			"type": {
 				"name": "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck",
 				"id": "clara.server.tools.graph.rules.loan-app-facts.DocumentCheck-187g0z2y",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n\n(= ?doc-check-status status)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n\n(= ?doc-check-status status)\n]",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": ["?doc-check-status"]
+			}
 		},
 		{
 			"type": {
@@ -158,7 +176,11 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.IdentityCheck-hz0jmefx",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n\n(= ?identity-check-status status)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n\n(= ?identity-check-status status)\n]",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": ["?identity-check-status"]
+			}
 		},
 		{
 			"type": {
@@ -166,7 +188,11 @@
 				"id": "clara.server.tools.graph.rules.loan-app-facts.FraudCheck-9sjv10vl",
 				"known": true
 			},
-			"constraints": "[\n(= ?app-id app-id)\n\n(= ?fraud-check-status status)\n]"
+			"constraints": "[\n(= ?app-id app-id)\n\n(= ?fraud-check-status status)\n]",
+			"bindings": {
+				"binding-keys": ["?app-id"],
+				"new-bindings": ["?fraud-check-status"]
+			}
 		}
 	],
 	"id": "clara.server.tools.graph.rules.loan-app-rules-app-outcome-de-5lgk14oz",
