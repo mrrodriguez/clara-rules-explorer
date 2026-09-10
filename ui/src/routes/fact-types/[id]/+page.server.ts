@@ -3,13 +3,12 @@ import path from 'path';
 import type { EntryGenerator } from './$types';
 
 export const entries: EntryGenerator = () => {
-	const filePath = path.resolve('static/demo-data/fact-types.json');
+	const filePath = path.resolve('static/demo-data/rulebase.json');
 	if (fs.existsSync(filePath)) {
-		const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-		const types = data['fact-types'] || [];
-		return types.map((type: { id: string }) => ({
-			id: type.id
-		}));
+		const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as {
+			'fact-types'?: { id: string }[];
+		};
+		return (data['fact-types'] ?? []).map((factType) => ({ id: factType.id }));
 	}
 	return [];
 };
