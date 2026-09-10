@@ -82,10 +82,58 @@
 	<LhsCondition condition={leaf.from!} depth={depth + 1} />
 {/snippet}
 
+{#snippet bindingsBlock()}
+	{#if condition['bindings-deferred']}
+		{@render textProperty('Bindings', `deferred: ${condition['bindings-deferred']}`, 'text-muted')}
+	{:else if bindingGroups.length > 0}
+		<div class="row g-0 py-0 align-items-center">
+			<div
+				class="col-auto text-muted fw-bold text-uppercase ps-2"
+				style="width: 100px; font-size: 0.65rem;"
+			>
+				Bindings
+			</div>
+			<div class="col pe-2">
+				<CollapseToggleButton
+					expanded={bindingsExpanded}
+					label="bindings"
+					onclick={() => (bindingsExpanded = !bindingsExpanded)}
+				/>
+			</div>
+		</div>
+		{#if bindingsExpanded}
+			<div class="row g-0 pt-1 pb-2">
+				<div class="col-12 ps-2 d-flex flex-column gap-2">
+					{#each bindingGroups as group (group.key)}
+						<div class="d-flex align-items-baseline gap-2">
+							<span
+								class="text-muted fw-bold text-uppercase flex-shrink-0"
+								style="font-size: 0.6rem; width: 80px;"
+							>
+								{group.label}
+							</span>
+							<span class="d-flex flex-wrap gap-1">
+								{#each group.values as binding (binding)}
+									<Badge variant="secondary" size="sm">{binding}</Badge>
+								{/each}
+							</span>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
+	{/if}
+{/snippet}
+
 <div class="lhs-condition {depth > 0 ? 'ms-3 mt-1 border-start ps-2' : ''}">
 	{#if nested}
 		<div class="mb-1">
 			<span class="badge bg-secondary text-uppercase nested-badge">{nested.type}</span>
+		</div>
+		<div class="card border bg-light-subtle mb-2">
+			<div class="card-body p-0 container-fluid property-container">
+				{@render bindingsBlock()}
+			</div>
 		</div>
 		{#each nested.conditions as subCondition, i (i)}
 			<LhsCondition condition={subCondition} depth={depth + 1} />
@@ -116,44 +164,7 @@
 					{@render property('From', 'p-0', fromCondition)}
 				{/if}
 
-				{#if bindingGroups.length > 0}
-					<div class="row g-0 py-0 align-items-center">
-						<div
-							class="col-auto text-muted fw-bold text-uppercase ps-2"
-							style="width: 100px; font-size: 0.65rem;"
-						>
-							Bindings
-						</div>
-						<div class="col pe-2">
-							<CollapseToggleButton
-								expanded={bindingsExpanded}
-								label="bindings"
-								onclick={() => (bindingsExpanded = !bindingsExpanded)}
-							/>
-						</div>
-					</div>
-					{#if bindingsExpanded}
-						<div class="row g-0 pt-1 pb-2">
-							<div class="col-12 ps-2 d-flex flex-column gap-2">
-								{#each bindingGroups as group (group.key)}
-									<div class="d-flex align-items-baseline gap-2">
-										<span
-											class="text-muted fw-bold text-uppercase flex-shrink-0"
-											style="font-size: 0.6rem; width: 80px;"
-										>
-											{group.label}
-										</span>
-										<span class="d-flex flex-wrap gap-1">
-											{#each group.values as binding (binding)}
-												<Badge variant="secondary" size="sm">{binding}</Badge>
-											{/each}
-										</span>
-									</div>
-								{/each}
-							</div>
-						</div>
-					{/if}
-				{/if}
+				{@render bindingsBlock()}
 
 				{#if leaf.args}
 					<div class="row g-0">

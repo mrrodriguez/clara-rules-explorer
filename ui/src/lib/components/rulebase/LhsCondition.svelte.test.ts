@@ -51,4 +51,42 @@ describe('LhsCondition bindings summary', () => {
 		expect(screen.container.querySelector('.nested-badge')?.textContent?.trim()).toBe('not');
 		expect(screen.container.querySelectorAll('.lhs-condition')).toHaveLength(2);
 	});
+
+	it('renders group-level bindings as the union of the children', async () => {
+		const group: LhsElement = {
+			'condition-type': 'or',
+			bindings: {
+				'binding-keys': ['?app-id'],
+				'new-bindings': ['?k']
+			},
+			children: [
+				{ type, bindings: { 'binding-keys': ['?app-id'], 'new-bindings': ['?k'] } },
+				{ type, bindings: { 'binding-keys': ['?app-id'], 'new-bindings': [] } }
+			]
+		};
+
+		const screen = await render(LhsCondition, { props: { condition: group } });
+
+		const toggles = screen.container.querySelectorAll<HTMLElement>('button[aria-expanded]');
+		// one toggle for the group plus one per bound child
+		expect(toggles.length).toBe(3);
+
+		await toggles[0].click();
+		expect(collapseWhitespace(screen.container.textContent)).toContain('Joins ?app-id');
+	});
+
+	it('surfaces bindings-deferred instead of an empty bindings block', async () => {
+		const group: LhsElement = {
+			'condition-type': 'not',
+			'bindings-deferred': 'compound-negation',
+			children: [{ type }]
+		};
+
+		const screen = await render(LhsCondition, { props: { condition: group } });
+
+		expect(screen.container.querySelectorAll('button[aria-expanded]')).toHaveLength(0);
+		expect(collapseWhitespace(screen.container.textContent)).toContain(
+			'Bindings deferred: compound-negation'
+		);
+	});
 });

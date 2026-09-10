@@ -1,11 +1,13 @@
 # Enhanced LHS Analysis — Accumulator Details & Node Mapping — Plan
 
-Status: **Implemented (accumulator info + leaf binding augmentation + LHS
+Status: **Implemented (accumulator info + full binding augmentation + LHS
 homogenization, with a consolidated `:bindings` wire shape).** The LHS is
 normalized once into homogeneous maps at the top of the analysis and consumed
-as such downstream; group-level (`:or` / `:exists`) and compound-negation
-binding info remain deferred (explicitly). Review 1 and review 2 feedback
-incorporated — see the companion
+as such downstream; group-level (`:or` / `:exists` / negation) binding info is
+attached per
+[`enhanced-lhs-ana-group-bindings-problem.md`](./enhanced-lhs-ana-group-bindings-problem.md)
+(children in their own scope, group as the union). Review 1 and review 2
+feedback incorporated — see the companion
 [`roadmap-enhanced-lhs-ana.md`](./roadmap-enhanced-lhs-ana.md) for the work log
 and next steps.
 
@@ -387,13 +389,13 @@ already loaded, so a failure is a real analysis error, not a silent `false`.
   Questions).
 - Does not unlock per-condition `:bindings` — that is Option B.
 
-### Option B — Lightweight per-LHS binding analyzer (implemented for leaves)
+### Option B — Lightweight per-LHS binding analyzer (implemented for leaves and groups)
 
 Implemented as `conditions/analyze-lhs-bindings` (origin-tagged compiler-order
 records) plus `conditions/augment-lhs` (merges binding info back into the
-original LHS tree). Leaf binding info is wired into the serialized `:lhs` for
-fact/test/accumulator leaves and `:not` nested leaves; `:or` / `:exists` group
-leaves are deferred. The analyzer lives in
+original LHS tree). Binding info is wired into the serialized `:lhs` for
+fact/test/accumulator leaves, nested leaves, and `:or` / `:exists` / negation
+groups (each group the union of its children's). The analyzer lives in
 `clara.server.tools.graph.conditions` and analyzes a single production's raw
 `:lhs` using the compiler's own transformation functions (Section 3.7). It
 emits, per raw condition / expanded conjunction:
@@ -466,9 +468,7 @@ non-accumulator nodes.
    (`extract-lhs-fact-types`, `extract-var-bindings`) and serialization consume
    that shape. Raw forms are retained as `:raw-condition` only for the
    compiler-coupled binding walk and `:lhs-form`.
-5. **Next:** decide how/whether to expose binding info for `:or` / `:exists` /
-   compound-negation leaves; regenerate demo data when the static demo next
-   ships.
+5. **Next:** regenerate demo data when the static demo next ships.
 6. **Later / only if needed:** Option C — node mapping for evaluated
    accumulators, if eval purity becomes a blocker, and for node-id exposure.
 

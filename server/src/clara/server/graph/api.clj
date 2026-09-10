@@ -76,8 +76,11 @@
 
 (s/defschema LhsBindingInfo
   "Per-condition binding summary attached under `:bindings` on serialized LHS
-   leaves.  Values are keywords pre-JSON (the API validates the in-memory
-   shape); the UI receives strings after JSON encoding.
+   leaves and groups alike (one vocabulary everywhere).  A group's `:bindings`
+   is the componentwise union of its children's — derived, not additional:
+   consumers aggregate over leaves *or* read group summaries, never both.
+   Values are keywords pre-JSON (the API validates the in-memory shape); the
+   UI receives strings after JSON encoding.
    `:join-filter-join-bindings` is present only when the condition has
    non-equality unifications that reference an upstream binding."
   {:binding-keys [s/Keyword]
@@ -87,7 +90,10 @@
 (s/defschema LhsCondition
   "A serialized LHS condition.  Leaf conditions carry :type / :constraints /
    :args / :accumulator / :from / :result-binding / :fact-binding / :bindings
-   as applicable; group conditions carry :condition-type and :children."
+   as applicable; group conditions carry :condition-type, :children, and their
+   own :bindings union.  `:bindings-deferred` marks a node the analysis
+   explicitly did not cover (with the reason); it is a transitional safety net
+   — no node carries neither `:bindings` nor `:bindings-deferred`."
   {(s/optional-key :type) TypeReference
    (s/optional-key :constraints) s/Str
    (s/optional-key :args) s/Str
@@ -96,6 +102,7 @@
    (s/optional-key :result-binding) s/Any
    (s/optional-key :fact-binding) s/Any
    (s/optional-key :bindings) LhsBindingInfo
+   (s/optional-key :bindings-deferred) s/Keyword
    (s/optional-key :condition-type) (s/enum :and :or :not :exists)
    (s/optional-key :children) [(s/recursive #'LhsCondition)]})
 

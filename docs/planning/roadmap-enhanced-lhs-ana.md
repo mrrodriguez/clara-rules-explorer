@@ -4,10 +4,13 @@ Companion to [`enhanced-lhs-ana-plan.md`](./enhanced-lhs-ana-plan.md) and
 [`roadmap-enhanced-lhs-ana-review-1.md`](./roadmap-enhanced-lhs-ana-review-1.md).
 Tracks concrete work done and the next increments.
 
-Status: **accumulator info + leaf binding augmentation shipped; LHS entries
-homogenized into maps and normalized once at the top of the analysis.**
-Group-level (`:or` / `:exists`) and compound-negation binding info remain
-deferred (explicitly, not silently). Review-2 feedback (single accumulator
+Status: **accumulator info + full binding augmentation shipped (leaves, nested
+leaves, and groups); LHS entries homogenized into maps and normalized once at
+the top of the analysis.** Group-level (`:or` / `:exists` / negation) binding
+info is attached per
+[`enhanced-lhs-ana-group-bindings-problem.md`](./enhanced-lhs-ana-group-bindings-problem.md)
+(children first in their own scope, group as the union; no synthetic
+`:?__exists__…` binding ever surfaced). Review-2 feedback (single accumulator
 eval, `:join-filter-join-bindings` gating, idempotent normalization, clearer
 malformed-shape error, docstring alignment) is incorporated.
 
@@ -109,7 +112,27 @@ malformed-shape error, docstring alignment) is incorporated.
 - `analyze-lhs-bindings` `:attach-path` docstring now lists compound negations
   alongside `:or` / `:exists` (R2-3).
 
-### 9. Internal LHS keys serialized, stripped at the external-view boundary
+### 9. Group-level binding info (`conditions`, `api`, UI)
+
+- `conditions/analyze-node` recurses over groups in their own scope (`:or`
+  branches independent, `:and` sequential, nothing escapes negations or
+  `:exists`); every group's `:bindings` is the componentwise union of its
+  children's, and `merge-bindings-into-tree` attaches group summaries as well
+  as leaves (top-level `:and` groups union their flattened children).
+- Compound negations walk the inner `negation-expr` (what the compiler's helper
+  production actually builds — never the De Morgan expansion); the group's
+  `:binding-keys` equal `variables-as-keywords ∩ ancestor-bindings`.
+- `api/LhsCondition` gains optional `:bindings-deferred` (transitional safety
+  net; emitted nowhere — every node carries `:bindings`); `LhsBindingInfo`
+  docstring records the derived-union contract.
+- `LhsCondition.svelte` renders group `bindings` and surfaces
+  `bindings-deferred`; `api.ts` closes the shape with the optional key.
+- `conditions_test.clj`: flat/nested/identical/asymmetric `:or`, two-group
+  isolation, `:exists` group==child with no synthetic binding, compound-negation
+  sub-scope + `vars ∩ ancestor` check, no-leak outward, group-union structural
+  property, and the no-node-without-`:bindings` invariant.
+
+### 10. Internal LHS keys serialized, stripped at the external-view boundary
 
 - `serialize/serialize-condition` serializes each retained `:raw-condition`
   recursively as a condition (raw group vectors stay vectors; a raw
@@ -140,28 +163,24 @@ UI (`cd ui`):
 
 ## Current state / next increments
 
-1. **Leaf binding augmentation is shipped** for fact/test/accumulator leaves and
-   simple `:not` leaves, under one nested `:bindings` map per leaf.
-2. **Group-level binding info is deferred** for `:or` / `:exists` group leaves
-   and compound negations — analyzed for ancestor propagation but left
-   unaugmented, explicitly.
-3. **LHS entries are homogeneous maps** end-to-end; normalization is
+1. **Binding augmentation is shipped for every node** — fact/test/accumulator
+   leaves, nested leaves, and `:or` / `:exists` / negation groups — under one
+   nested `:bindings` map per node; a group's is the union of its children's.
+2. **LHS entries are homogeneous maps** end-to-end; normalization is
    idempotent, and the serialized `:lhs` retains the internal `:raw-condition`
    / `::normalized` keys, stripped only at the external-view boundary.
-4. **Regenerate demo data** when the static demo next needs to reflect the new
+3. **Regenerate demo data** when the static demo next needs to reflect the new
    wire shape (deferred; it is already stale for accumulator/bindings).
-5. **Optionally precompute/cache accumulator eval** if `->rulebase-analysis`
+4. **Optionally precompute/cache accumulator eval** if `->rulebase-analysis`
    purity or repeated-eval cost becomes a concern.
-6. **Optionally build the compiled-node mapper (Option C)** only if eval purity
+5. **Optionally build the compiled-node mapper (Option C)** only if eval purity
    becomes a blocker or node-id exposure is wanted.
 
 ---
 
 ## Open questions / concerns
 
-1. **Group-level binding exposure.** Whether/when to attach binding info to
-   `:or` / `:exists` / compound-negation leaves (requires more of the
-   compiler's extraction/DNF bookkeeping).
+1. **Group-level binding exposure.** Shipped (see §9 above).
 2. **Accumulator eval caching.** Where it should live if introduced.
 3. **`raw-condition` lifecycle.** It is an internal key on normalized nodes,
    serialized recursively into the in-memory `:lhs` and stripped at the

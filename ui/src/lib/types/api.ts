@@ -50,8 +50,11 @@ export interface AccumulatorInfo {
 
 /**
  * Per-condition binding summary attached under `bindings` on serialized LHS
- * leaves. Each group is a sorted vector of binding names (strings after JSON
- * encoding; keywords pre-JSON on the server).
+ * leaves and groups alike (one vocabulary everywhere). A group's `bindings`
+ * is the componentwise union of its children's — derived, not additional:
+ * aggregate over leaves *or* read group summaries, never both. Each group is
+ * a sorted vector of binding names (strings after JSON encoding; keywords
+ * pre-JSON on the server).
  */
 export interface LhsBindingInfo {
 	'binding-keys': string[];
@@ -75,6 +78,8 @@ export interface LhsElement {
 	'result-binding'?: string;
 	'fact-binding'?: string;
 	bindings?: LhsBindingInfo;
+	/** Present when the analysis explicitly deferred a node, with the reason. */
+	'bindings-deferred'?: string;
 }
 
 /**

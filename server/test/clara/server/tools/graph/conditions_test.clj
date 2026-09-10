@@ -1,8 +1,10 @@
 (ns clara.server.tools.graph.conditions-test
   (:require [clara.rules.accumulators :as acc]
+            [clara.rules.compiler :as com]
             [clara.server.tools.graph.conditions :as conditions]
             [clara.server.tools.graph.rules.loan-app-facts]
             [clara.server.tools.graph.rules.loan-doc-rules]
+            [clojure.set :as set]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [schema.test :as st])
   (:import [clara.server.tools.graph.rules.loan_app_facts
@@ -209,8 +211,8 @@
                            [{:constraints '[(> ?n 0)]}]
                            nil)))))
 
-(deftest test-augment-lhs--compound-negation-unaugmented
-  (testing "compound negation groups are deferred explicitly (left untouched)"
+(deftest test-augment-lhs--compound-negation-augmented
+  (testing "compound negation groups attach nested leaves from the sub-scope walk"
     (let [lhs [{:type Application
                 :constraints '[(= ?app-id app-id)]}
                [:not [:and {:type Application
@@ -222,11 +224,13 @@
           and-entry (first (:children not-entry))]
       (is (= :not (:condition-type not-entry)))
       (is (= :and (:condition-type and-entry)))
-      (is (every? #(not (contains? % :bindings)) (:children and-entry))
-          "compound-negation leaves must not be augmented"))))
+      (is (every? #(contains? % :bindings) (:children and-entry))
+          "compound-negation leaves must be augmented from the sub-scope walk")
+      (is (contains? not-entry :bindings))
+      (is (contains? and-entry :bindings)))))
 
 (deftest test-analyze-lhs-bindings--exists-deterministic
-  (testing "repeated analyses of the same :exists LHS are stable"
+  (testing "repeated analyses of the same :exists LHS are stable and synthetic-free"
     (let [lhs [{:type Application
                 :constraints '[(= ?app-id app-id)]}
                [:exists {:type GivenDocument
@@ -234,9 +238,17 @@
           r1 (conditions/analyze-lhs-bindings lhs nil)
           r2 (conditions/analyze-lhs-bindings lhs nil)]
       (is (= (mapv :condition r1) (mapv :condition r2)))
-      (let [exists-record (last r1)]
-        (is (= :?__exists__1__0 (:result-binding exists-record)))
-        (is (= :?__exists__1__0 (:result-binding (last r2))))))))
+      (is (every? #(not (contains? % :result-binding)) r1)
+          "no synthetic :?__exists__… binding is ever surfaced")
+      (is (= r1 r2))
+      (let [augmented (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                              {:prod-ns prod-ns :env nil})
+            exists-entry (second augmented)
+            child (first (:children exists-entry))]
+        (is (= (:bindings exists-entry) (:bindings child))
+            "group and child carry the same bindings")
+        (is (not (re-find #"__exists__" (pr-str augmented)))
+            ":?__exists__… appears nowhere")))))
 
 (deftest test-augment-lhs--not-group
   (let [lhs [{:type Application
@@ -253,7 +265,231 @@
     (testing "the nested leaf inside :not is augmented"
       (is (= {:binding-keys [:?app-id]
               :new-bindings []}
-             (:bindings not-leaf))))))
+             (:bindings not-leaf))))
+
+    (testing "the :not group carries the union of its children"
+      (is (= (:bindings not-leaf) (:bindings not-entry))))))
+
+(defn- union-of
+  "Test helper: componentwise union of `:bindings` maps over `children`."
+  [children]
+  (let [binding-keys (into #{} (mapcat (comp :binding-keys :bindings)) children)
+        new-bindings (into #{} (mapcat (comp :new-bindings :bindings)) children)
+        join-filter (into #{} (mapcat (comp :join-filter-join-bindings :bindings)) children)]
+    (cond-> {:binding-keys (vec (sort-by name binding-keys))
+             :new-bindings (vec (sort-by name new-bindings))}
+      (seq join-filter)
+      (assoc :join-filter-join-bindings (vec (sort-by name join-filter))))))
+
+(defn- every-group
+  "Collects every group node in an augmented LHS tree (walking `:children`, not
+   accumulator `:from` subtrees, which share the accumulator's bindings)."
+  [augmented]
+  (mapcat (fn [node]
+            (when (and (map? node) (contains? node :children))
+              (cons node (every-group (:children node)))))
+          augmented))
+
+(defn- every-node
+  "Collects every leaf and group node in an augmented LHS tree (walking
+   `:children`, not accumulator `:from` subtrees)."
+  [augmented]
+  (mapcat (fn [node]
+            (if (and (map? node) (contains? node :children))
+              (cons node (every-node (:children node)))
+              [node]))
+          augmented))
+
+(deftest test-augment-lhs--flat-or
+  (testing "flat :or: both branches attached; group equals their union"
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               [:or {:type GivenDocument
+                     :constraints '[(= ?app-id app-id) (= ?k kind)]}
+                {:type GivenDocument
+                 :constraints '[(= ?app-id app-id)]}]]
+          augmented (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                            {:prod-ns prod-ns :env nil})
+          or-entry (second augmented)
+          [doc flag] (:children or-entry)]
+      (is (= {:binding-keys [:?app-id] :new-bindings [:?k]} (:bindings doc)))
+      (is (= {:binding-keys [:?app-id] :new-bindings []} (:bindings flag)))
+      (is (= {:binding-keys [:?app-id] :new-bindings [:?k]} (:bindings or-entry)))
+      (is (= (union-of (:children or-entry)) (:bindings or-entry))))))
+
+(deftest test-augment-lhs--nested-or-over-and
+  (testing "nested :or over :and: every leaf attached at its real path"
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               [:or [:and {:type GivenDocument
+                           :constraints '[(= ?app-id app-id)]}
+                     {:type GivenDocument
+                      :constraints '[(= ?app-id app-id) (= ?k kind)]}]
+                [:and {:type GivenDocument
+                       :constraints '[(= ?app-id app-id)]}]]]
+          augmented (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                            {:prod-ns prod-ns :env nil})
+          or-entry (second augmented)
+          [and-a and-b] (:children or-entry)
+          [doc flag] (:children and-a)
+          [doc2] (:children and-b)]
+      (is (every? #(contains? % :bindings) [or-entry and-a and-b doc flag doc2]))
+      (is (= (union-of (:children and-a)) (:bindings and-a)))
+      (is (= (union-of (:children and-b)) (:bindings and-b)))
+      (is (= (union-of (:children or-entry)) (:bindings or-entry)))
+      (is (= {:binding-keys [:?app-id] :new-bindings [:?k]} (:bindings or-entry))))))
+
+(deftest test-augment-lhs--or-identical-children
+  (testing ":or with identical children: both attached, no duplicate-path throw"
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               [:or {:type GivenDocument
+                     :constraints '[(= ?app-id app-id)]}
+                {:type GivenDocument
+                 :constraints '[(= ?app-id app-id)]}]]
+          augmented (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                            {:prod-ns prod-ns :env nil})
+          or-entry (second augmented)
+          [a b] (:children or-entry)]
+      (is (= (:bindings a) (:bindings b)))
+      (is (= (:bindings a) (:bindings or-entry))))))
+
+(deftest test-augment-lhs--or-asymmetric-branches
+  (testing ":or with asymmetric branches: one-branch binding still appears on the group"
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               [:or {:type GivenDocument
+                     :constraints '[(= ?app-id app-id) (= ?k kind)]}
+                {:type Application
+                 :constraints '[(= ?app-id app-id)]}]]
+          augmented (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                            {:prod-ns prod-ns :env nil})
+          or-entry (second augmented)]
+      (is (= [:?k] (get-in or-entry [:bindings :new-bindings]))))))
+
+(deftest test-augment-lhs--two-or-groups-no-crosstalk
+  (testing "two :or groups in one LHS: no cross-talk between sub-scopes"
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               [:or {:type GivenDocument
+                     :constraints '[(= ?app-id app-id) (= ?k kind)]}
+                {:type GivenDocument
+                 :constraints '[(= ?app-id app-id)]}]
+               [:or {:type GivenDocument
+                     :constraints '[(= ?app-id app-id) (= ?m meta)]}
+                {:type GivenDocument
+                 :constraints '[(= ?app-id app-id)]}]]
+          augmented (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                            {:prod-ns prod-ns :env nil})
+          [acct or-a or-b] augmented]
+      (is (= {:binding-keys [] :new-bindings [:?app-id]} (:bindings acct)))
+      (is (= {:binding-keys [:?app-id] :new-bindings [:?k]} (:bindings or-a)))
+      (is (= {:binding-keys [:?app-id] :new-bindings [:?m]} (:bindings or-b)))
+      (is (not (contains? (set (get-in or-a [:bindings :new-bindings])) :?m)))
+      (is (not (contains? (set (get-in or-b [:bindings :new-bindings])) :?k))))))
+
+(deftest test-augment-lhs--compound-negation-subscope
+  (testing "compound negation: group binding-keys equal vars ∩ ancestor"
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               [:not [:and {:type GivenDocument
+                            :constraints '[(= ?app-id app-id)]}
+                      {:type GivenDocument
+                       :constraints '[(= ?app-id app-id)]}]]]
+          augmented (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                            {:prod-ns prod-ns :env nil})
+          not-entry (second augmented)
+          negation-expr (second (second (conditions/get-raw-lhs (conditions/normalize-lhs lhs))))
+          expected-keys (set/intersection (com/variables-as-keywords negation-expr)
+                                          #{:?app-id})]
+      (is (= expected-keys (set (get-in not-entry [:bindings :binding-keys]))))
+      (is (= [] (get-in not-entry [:bindings :new-bindings]))))))
+
+(deftest test-augment-lhs--negation-exists-no-leak
+  (testing "negation-internal and :exists-internal bindings do not leak outward"
+    ;; NOTE: a negation may only reference already-bound vars (Clara rejects a
+    ;; fresh binding inside a negation at sort time), so the negation half
+    ;; asserts the outer set is unchanged; the :exists half is the strong case
+    ;; (its child genuinely binds ?inner, which must not escape).
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               [:not [:and {:type GivenDocument
+                            :constraints '[(= ?app-id app-id)]}
+                      {:type GivenDocument
+                       :constraints '[(= ?app-id app-id)]}]]
+               {:type GivenDocument
+                :constraints '[(= ?app-id app-id) (= ?after kind)]}]
+          records (conditions/analyze-lhs-bindings (conditions/normalize-lhs lhs) nil)
+          downstream (first (filter #(= {:type GivenDocument
+                                         :constraints '[(= ?app-id app-id) (= ?after kind)]}
+                                        (:condition %))
+                                    records))]
+      (is (some? downstream))
+      (is (= #{:?app-id} (:ancestor-bindings downstream))
+          "negation contributes nothing to the outer ancestor set")
+      (is (= #{:?after} (:new-bindings downstream))))
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               [:exists {:type GivenDocument
+                         :constraints '[(= ?app-id app-id) (= ?inner kind)]}]
+               {:type GivenDocument
+                :constraints '[(= ?app-id app-id) (= ?after kind)]}]
+          records (conditions/analyze-lhs-bindings (conditions/normalize-lhs lhs) nil)
+          downstream (first (filter #(= {:type GivenDocument
+                                         :constraints '[(= ?app-id app-id) (= ?after kind)]}
+                                        (:condition %))
+                                    records))]
+      (is (some? downstream))
+      (is (= #{:?app-id} (:ancestor-bindings downstream))
+          "exists-internal ?inner must not leak into the outer ancestor set")
+      (is (= #{:?after} (:new-bindings downstream))))))
+
+(deftest test-augment-lhs--group-union-structural
+  (testing "every group's :bindings equals the union of its children's"
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               [:or [:and {:type GivenDocument
+                           :constraints '[(= ?app-id app-id)]}
+                     {:type GivenDocument
+                      :constraints '[(= ?app-id app-id) (= ?k kind)]}]
+                {:type GivenDocument
+                 :constraints '[(= ?app-id app-id)]}]
+               [:exists {:type GivenDocument
+                         :constraints '[(= ?app-id app-id)]}]
+               [:not [:and {:type GivenDocument
+                            :constraints '[(= ?app-id app-id)]}
+                      {:type GivenDocument
+                       :constraints '[(= ?app-id app-id)]}]]]
+          augmented (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                            {:prod-ns prod-ns :env nil})]
+      (is (seq (every-group augmented)))
+      (doseq [group (every-group augmented)]
+        (is (= (union-of (:children group)) (:bindings group))
+            (str "group mismatch at " (:condition-type group)))))))
+
+(deftest test-augment-lhs--no-node-without-bindings
+  (testing "no node in an augmented LHS lacks :bindings"
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               {:type GivenDocument
+                :constraints '[(= ?app-id app-id)]
+                :fact-binding :?doc}
+               [:or {:type GivenDocument
+                     :constraints '[(= ?app-id app-id) (= ?k kind)]}
+                {:type GivenDocument
+                 :constraints '[(= ?app-id app-id)]}]
+               [:exists {:type GivenDocument
+                         :constraints '[(= ?app-id app-id)]}]
+               [:not {:type GivenDocument
+                      :constraints '[(= ?app-id app-id)]}]
+               [:not [:and {:type GivenDocument
+                            :constraints '[(= ?app-id app-id)]}
+                      {:type GivenDocument
+                       :constraints '[(= ?app-id app-id)]}]]]
+          augmented (conditions/augment-lhs (conditions/normalize-lhs lhs)
+                                            {:prod-ns prod-ns :env nil})]
+      (doseq [node (every-node augmented)]
+        (is (contains? node :bindings) (str "node without :bindings: " (pr-str node)))))))
 
 (deftest test-augment-lhs--retains-internal-keys
   (testing "augment-lhs keeps :raw-condition and ::normalized for in-memory consumers"
