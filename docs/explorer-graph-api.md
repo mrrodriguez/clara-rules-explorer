@@ -224,7 +224,8 @@ High-level dashboard counts.  Always returns 200 — this endpoint does not requ
 #### `GET /v1/rulebase-analysis`
 
 Full static analysis of the rulebase: rules, queries, fact-types, nodes, the
-internal dependency graph, and unresolved detections.  (The internal id
+internal dependency graph, per-namespace static dependencies (`ns-deps`),
+and unresolved detections.  (The internal id
 reverse indexes are NOT included — handlers use them, API consumers do not.)
 
 **Response** `200`:
@@ -235,7 +236,16 @@ reverse indexes are NOT included — handlers use them, API consumers do not.)
   "fact-types": { "typeName": { ... fact type detail ... }, ... },
   "nodes": { nodeId: { ... node detail ... }, ... },
   "dep-graph": { "fqName": { "upstream": [...], "downstream": [...] }, ... },
-  "unresolved": [ { "rule": "...", "reason": "...", "hint": "..." } ]
+  "unresolved": [ { "rule": "...", "reason": "...", "hint": "..." } ],
+  "ns-deps": {
+    "<ns>": {
+      "require": [{ "ns-name-sym": "...", "refers": ["..."] }],
+      "aliases": [{ "ns-name-sym": "...", "alias-sym": "..." }],
+      "imports": ["..."],
+      "refer-clojure": { "excludes": ["..."], "renames": {} },
+      "unmapped-default-imports": []
+    }
+  }
 }
 ```
 
@@ -243,6 +253,23 @@ reverse indexes are NOT included — handlers use them, API consumers do not.)
 type-bridge `match` info lives on the per-rule `:upstream` / `:downstream`
 entries instead.  Prefer the list/detail endpoints for dependency
 navigation.
+
+`ns-deps` maps each production-owning namespace (rules and queries alike)
+to its static dependencies: `:require` entries carry the referred vars per
+namespace — `:refers` is the sorted symbol vector of referred vars; a
+`:refer :all` / bare `:use` spec is expanded to the required namespace's
+public vars, so the vector is always homogeneous.  Specs that refer nothing
+(bare `:require`, `:refer []`, `:only []`) produce no entry.  `:aliases`
+carry the `:as` aliases as a separate vector, `:imports` are
+fully-qualified class-name strings (flat, sorted; an import is excluded only
+when its class is exactly the `RT/DEFAULT_IMPORTS` class of that simple name
+— matched on the full class, not the simple name), `:refer-clojure` carries
+the `:exclude` list and `:rename` map against `clojure.core` defaults, and
+`:unmapped-default-imports` lists default `java.lang` imports missing from
+the live ns (dynamic `ns-unmap` only — empty in practice).  All symbols
+serialize as strings.  Entries prefer the classpath header source when
+present and fall back to the live namespace; a namespace with neither
+yields an empty entry.
 
 ---
 

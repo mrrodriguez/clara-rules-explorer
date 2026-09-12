@@ -9,6 +9,7 @@
             [clara.server.tools.graph.conditions :as conditions]
             [clara.server.tools.graph.fact-types :as ft]
             [clara.server.tools.graph.nodes :as nodes]
+            [clara.server.tools.graph.ns-deps :as ns-deps]
             [clara.server.tools.graph.serialize :as serialize]
             [clara.server.tools.graph.utils :as utils]
             [clojure.string :as str]))
@@ -151,7 +152,6 @@
   [{p-name :name :as production}
    {:keys [annotations dep-graph production-map known-set] :as ctx}]
   (let [ann (ann/production-annotation annotations production)
-        ;; Queries in clara.rules.schema/Query have no :ns-name — derive it.
         p-ns-name (get-production-ns-name-sym production)
         lhs-analysis (conditions/augment-lhs (:lhs production)
                                              {:prod-ns p-ns-name
@@ -239,15 +239,12 @@
        :hint "Add :clara-rules/insert-types to the rule's properties map or a sidecar annotation file."})))
 
 (defn ->type-analysis-map
-  "Builds the per-production raw type analysis map used by the dep-graph and
-   the serialized ancestors index: {:consumed-types [...] :produced-types
-   [...] :retract-types <set> :ns-name <sym-or-nil>} per production name.
-   `:produced-types` is `(into insert-types retract-types)` — it includes
-   retracts; `:retract-types` keeps the retract subset so type-bridge matches
-   can be flagged as retraction-based.  Each entry carries the production's
-   ns-name (queries have no `:ns-name`; derived via
-   `get-production-ns-name-sym`) so types can be serialized in per-production
-   ns context later."
+  "Builds the per-production raw type analysis map used by the dep-graph and the serialized
+  ancestors index: {:consumed-types [...] :produced-types [...] :retract-types <set> :ns-name
+  <sym-or-nil>} per production name. `:produced-types` is `(into insert-types retract-types)` — it
+  includes retracts; `:retract-types` keeps the retract subset so type-bridge matches can be flagged
+  as retraction-based. Each entry carries the production's ns-name so types can be serialized in
+  per-production ns context later."
   [productions production-annotation-map]
   (into {}
         (map (fn [{p-name :name :keys [lhs] :as production}]
@@ -359,6 +356,15 @@
         (for [p productions]
           [(:name p) (ann/production-annotation annotations p)])))
 
+(defn- ->production-ns-syms
+  "Returns the sorted vector of namespace symbols owning `productions`."
+  [productions]
+  (->> productions
+       (keep get-production-ns-name-sym)
+       distinct
+       sort
+       vec))
+
 (defn- coerce-annotations-arg
   "Normalizes the annotations argument of `->rulebase-analysis`: a
    `ann.merge/MergedAnnotations` value passes through; a bare rule→annotation
@@ -420,12 +426,14 @@
                                  (detect-unresolved p
                                                     (get production-annotation-map (:name p)))))
                          productions)
+        ns-deps (ns-deps/->ns-deps {:ns-syms (->production-ns-syms productions)})
         analysis {:rules rules
                   :queries queries
                   :fact-types fact-types
                   :nodes nodes
                   :dep-graph dep-graph
                   :unresolved (vec unresolved)
+                  :ns-deps ns-deps
                   :merged-annotations annotations}]
     (assoc analysis
            :fact-type-id-index (ft/->fact-type-id-index analysis)
@@ -439,6 +447,9 @@
    This function is pure: the result depends only on the rulebase and the
    annotations argument.  It touches no working memory and no mutable state,
    so callers may safely cache the result keyed on (rulebase, annotations).
+   (`:ns-deps` reflects namespace state — aliases, refers, imports — at
+   analysis time; those mappings do not change once the namespace is loaded,
+   so caching on (rulebase, annotations) remains sound.)
    The analysis map includes `:merged-annotations` — the normalized
    annotations used for computation — so a caller holding a cached analysis
    can test validity: `(= (:merged-annotations cached) current-annotations)`.
