@@ -6,13 +6,16 @@
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.conditions :as conditions]
             [clara.server.tools.graph.fact-types :as ft]
+            [clara.server.tools.graph.ns-deps :as ns-deps]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
             [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [jsonista.core :as j]
             [matcher-combinators.test :refer [match?]]
+            [schema.core :as s]
             [schema.test :as st])
   (:import [clara.server.tools.graph.rules.loan_app_facts
             Application
@@ -1160,3 +1163,21 @@
       (is (= :not (:condition-type lhs)))
       (is (not (contains? lhs :raw-condition)))
       (is (not (contains? lhs ::conditions/normalized))))))
+
+(deftest test-rulebase-analysis-ns-deps
+  (testing "->rulebase-analysis carries :ns-deps; the external view retains it JSON-safe"
+    (let [session (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules)
+          analysis (core/->rulebase-analysis session {})
+          deps (:ns-deps analysis)]
+      (is (sorted? deps))
+      (is (contains? deps 'clara.server.tools.graph.rules.loan-doc-rules))
+      (is (every? symbol? (keys deps)))
+      (doseq [[ns-sym entry] deps]
+        (is (nil? (s/check ns-deps/NsDepEntry entry)) (str "entry valid for " ns-sym)))
+      (let [ext (core/get-rulebase-analysis-external-view analysis)]
+        (is (= deps (:ns-deps ext)) "external view retains :ns-deps")
+        (is (not (contains? ext :merged-annotations)))
+        (let [round-tripped (j/read-value (j/write-value-as-string (:ns-deps ext))
+                                          (j/object-mapper {:decode-key-fn true}))]
+          (is (contains? round-tripped :clara.server.tools.graph.rules.loan-doc-rules)
+              "symbols survive the JSON layer as strings"))))))
