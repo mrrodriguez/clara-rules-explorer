@@ -8,7 +8,9 @@ Add a top-level `:ns-deps` key to `core/->rulebase-analysis` that maps each
 production-owning namespace (rules and queries alike) to its static
 dependencies, reusing the logic currently embedded in
 `analyze.synth/reconstruct-ns-source`. While there, fix the known inaccuracy
-in `synth/build-import-clauses` / `synth/unmapped-default-imports` (fuzzy
+in `synth/->import-clauses` (currently `build-import-clauses`) /
+`synth/->unmapped-default-imports` (currently `unmapped-default-imports`)
+(fuzzy
 `"java.lang."` prefix match vs. the authoritative
 `clojure.lang.RT/DEFAULT_IMPORTS` set).
 
@@ -43,7 +45,8 @@ File: `server/src/clara/server/tools/graph/analyze/synth.clj`.
 | `reconstruct-ns-source` | `ns-sym` | full `(ns ...)` + `(ns-unmap ...)` source string | Stays; becomes a *consumer* of the decomposed fns, behavior unchanged |
 
 Private helpers `var-ns-name` / `var-name` (var-meta readers) support
-`core-deviations` and move with it.
+`core-deviations` and move with it (renamed `get-var-ns-name` /
+`get-var-name` and `->core-deviations` respectively — see §4).
 
 Reflection-relevant interop (must keep working under
 `*warn-on-reflection* true`, enforced by `make reflection-check`):
@@ -96,7 +99,8 @@ All four shape questions are resolved; the schema below is locked.
   possibly empty — an entry exists only when the ns is actually referred).
 - **D2 — `:refer-clojure` is a nested map (DECIDED):**
   `{:excludes [<refer-sym> …] :renames {<local-sym> <core-var-sym>}}` — full
-  parity with `core-deviations`' `{:excluded :renamed}`, just kebabed under
+  parity with `->core-deviations`' (currently `core-deviations`)
+  `{:excluded :renamed}`, just kebabed under
   one top key. Both halves always present (empty vec / empty map when no
   deviation), so consumers never nil-check.
 - **D3 — `:unmapped-default-imports` included (DECIDED):**
@@ -148,37 +152,51 @@ the string/symbol path plus `core/get-production-ns-name-sym` (prefers
 
 ## 4. Decomposition design (reuse without copy-paste)
 
-`build-require-clauses` / `build-import-clauses` return *syntax* (clause
-vectors ready for `pr-str`). `ns-deps` needs *data*. Introduce data-first
-fns; keep the clause builders as thin syntax projections so
-`reconstruct-ns-source` output is byte-identical (pinned by the round-trip
-tests in §2.3).
+`->require-clauses` / `->import-clauses` (currently named `build-…`; renamed
+per below) return *syntax* (clause vectors ready for `pr-str`). `ns-deps`
+needs *data*. Introduce data-first `->ns-…` builder fns in the leaf ns; keep
+the clause builders as thin syntax projections so `reconstruct-ns-source`
+output is byte-identical (pinned by the round-trip tests in §2.3).
 
-New public fns (in the shared ns, §7 — naming per
-`docs/planning/naming-inconsistencies-server-plan.md`: `get-`/`ns-` pure
-readers for data extraction, `->` builders for entry points):
+Naming (repo convention: builders take `->`, pure extractions take `get-`):
+every new fn constructs a normalized data shape, so all take `->`. The existing `synth` fns are renamed
+to comply in the same pass — `build-` verbs become `->`, and the pure-noun
+fns are builders too (`->` + noun, same pattern as `core/->dep-graph` and
+`core/->type-analysis-map`), not mere lookups:
 
-| New fn | Derived from | Returns (data) |
+| New fn (leaf ns) | Derived from | Returns (data) |
 |--------|--------------|----------------|
-| `ns-required` | `build-require-clauses` body (refer half) | sorted `[{:ns-name-sym … :refers […] } …]` — one entry per ns with ≥1 referred var (`clojure.core` excluded, as today) |
-| `ns-aliases-data` | `build-require-clauses` body (alias half) | sorted `[{:ns-name-sym … :alias-sym …} …]` from `ns-aliases` |
-| `ns-imports-data` | `build-import-clauses` body | sorted `[<fq-class-sym> …]` — flat, *after* default-import exclusion (fixed predicate, §6) |
-| `ns-refer-clojure-data` | `core-deviations` (already data) | `{:excludes [...] :renames {...}}` — same content as `core-deviations`' `{:excluded :renamed}`, kebabed to match the `NsDepEntry` shape directly |
-| `ns-unmapped-default-imports-data` | `unmapped-default-imports` (already data) | unchanged semantics |
+| `->ns-required` | require-clause body (refer half) | sorted `[{:ns-name-sym … :refers […] } …]` — one entry per ns with ≥1 referred var (`clojure.core` excluded, as today) |
+| `->ns-aliases` | require-clause body (alias half) | sorted `[{:ns-name-sym … :alias-sym …} …]` from `ns-aliases` |
+| `->ns-imports` | import-clause body | sorted `[<fq-class-sym> …]` — flat, *after* default-import exclusion (fixed predicate, §6) |
+| `->ns-refer-clojure` | `core-deviations` (already data) | `{:excludes [...] :renames {...}}` — same content as today's `{:excluded :renamed}`, kebabed to match the `NsDepEntry` shape directly |
+| `->ns-unmapped-default-imports` | `unmapped-default-imports` (already data) | unchanged semantics |
 
-`core-deviations`, `build-require-clauses`, `build-import-clauses`, and
-`unmapped-default-imports` keep their public names/signatures in `synth`
-as thin delegates (compat for existing callers/tests):
+Existing `synth` renames (same pass; tests updated to the new names — all
+callers are in-repo, verified at implementation time; keep no deprecated
+aliases unless an external consumer turns up):
 
-- `build-require-clauses` = join of `ns-required` + `ns-aliases-data` into
+| Current | Renamed | Why |
+|---------|---------|-----|
+| `build-require-clauses` | `->require-clauses` | `build-` verb → `->` builder |
+| `build-import-clauses` | `->import-clauses` | `build-` verb → `->` builder |
+| `core-deviations` | `->core-deviations` | pure-noun builder → `->` + noun (cf. `core/->dep-graph`) |
+| `unmapped-default-imports` | `->unmapped-default-imports` | pure-noun builder → `->` + noun |
+| `var-ns-name` / `var-name` (private) | `get-var-ns-name` / `get-var-name` | pure extractions from var metadata, not builders → `get-` |
+
+Delegation after the move (implement once in the leaf, project in `synth`):
+
+- `->require-clauses` = join of `->ns-required` + `->ns-aliases` into
   the existing `[target :as a]` / `[target :refer [...]]` clause shapes, same
   sort. Note the join: one required ns may yield *two* clauses (alias +
   refer) exactly as today — the data split does not change clause output.
-- `build-import-clauses` = package-grouping projection of `ns-imports-data`
+- `->import-clauses` = package-grouping projection of `->ns-imports`
   (same package-grouped, package-sorted output as today).
-- `core-deviations` = delegate to `ns-refer-clojure-data` with keys mapped
-  back to `{:excluded :renamed}` (or vice versa — implement once, alias once;
+- `->core-deviations` = delegate to `->ns-refer-clojure` with keys mapped
+  back to `{:excluded :renamed}` (implement once, project once;
   record the direction in the implementing PR).
+- `->unmapped-default-imports` = delegate to `->ns-unmapped-default-imports`
+  (identical semantics; pure alias).
 - `reconstruct-ns-source` unchanged apart from calling the same builders
   (no output change — the existing tests are the proof).
 - `->ns-deps-entry` composes the five data fns into one `NsDepEntry`
@@ -232,9 +250,10 @@ predicate):
 (type (val (first clojure.lang.RT/DEFAULT_IMPORTS)))  ; expect java.lang.Class
 ```
 
-Current state: `unmapped-default-imports` is already exact (key-set
-difference against `RT/DEFAULT_IMPORTS` — no prefix logic). The bug is only
-in `build-import-clauses`' exclusion:
+Current state: `->unmapped-default-imports` (currently
+`unmapped-default-imports`) is already exact (key-set difference against
+`RT/DEFAULT_IMPORTS` — no prefix logic). The bug is only in
+`->import-clauses`' (currently `build-import-clauses`) exclusion:
 
 ```clojure
 (remove #(.startsWith (.getName ^Class (val %)) "java.lang."))
@@ -351,15 +370,16 @@ New tests (server/test, following `analyze_test.clj` fake-ns patterns):
 
 1. **Data-syntax parity:** for a representative set of live nses (at least
    `loan-doc-rules` + a fake ns with alias+refer+import+exclude+rename),
-   `(build-require-clauses nsobj)` / `(build-import-clauses nsobj)` /
-   `core-deviations` / `unmapped-default-imports` before vs. after the
-   refactor are `=` (guards the §4 delegation step).
+   `(->require-clauses nsobj)` / `(->import-clauses nsobj)` /
+   `(->core-deviations nsobj)` / `(->unmapped-default-imports nsobj)`
+   before vs. after the refactor are `=` (guards the §4 rename +
+   delegation step).
 2. **Reconstructed-source stability:** `reconstruct-ns-source` output for the
    same nses is string-identical before/after (except the intended §6 fix
    case).
 3. **`DEFAULT_IMPORTS` regression:** fake ns importing a verified non-default
    `java.lang` class → reconstructed source contains the `:import`; `ns-deps`
-   lists the FQ sym; `unmapped-default-imports` unaffected.
+   lists the FQ sym; `->unmapped-default-imports` unaffected.
 4. **Header parsing:** fake classpath sources (injected via `:base-source-fn`,
    no live ns needed) covering prefix-list requires, `:as` (→ `:aliases`) /
    `:refer` (→ `:require`), both `:import` shapes (→ flat `:imports`),
@@ -383,8 +403,9 @@ leaf ns introduces Malli — it won't (schema.core, matching `synth.clj`).
 1. **Confirm `RT/DEFAULT_IMPORTS` shape** at the REPL (keys/vals, §6) +
    pick a non-default `java.lang` class for the regression test. (No code.)
 2. **Create leaf ns** `tools.graph.ns-deps` with the three schemas +
-   the five data fns moved (not copied) out of `synth`, with the fixed
-   default-import predicate. `synth` delegates (§4); run parity tests (9.1,
+   the five `->ns-…` data fns moved (not copied) out of `synth`, with the
+   fixed default-import predicate; rename the four `synth` fns per §4 with
+   `synth` delegating to the leaf. Run parity tests (9.1,
    9.2) + `make test lint reflection-check`.
 3. **Header parser** in the leaf ns + `->ns-deps-entry` / `->ns-deps`
    (§5); tests 9.4–9.6.
@@ -401,5 +422,11 @@ leaf ns introduces Malli — it won't (schema.core, matching `synth.clj`).
 - **D4** — `:imports` are FQ class-name symbols, flat sorted vector.
 - **Scope** — every production-owning ns (rules + queries).
 - **Placement** — shared leaf ns `tools.graph.ns-deps`; move (not copy)
-  `core-deviations` / require+import logic out of `synth`, `synth`
-  delegates with unchanged public fns.
+  deviation / require+import logic out of `synth`, `synth` exposes the
+  renamed `->` fns delegating to the leaf (no deprecated aliases; see §4).
+- **Naming** — new data fns are `->ns-required`, `->ns-aliases`,
+  `->ns-imports`, `->ns-refer-clojure`, `->ns-unmapped-default-imports`;
+  existing `build-…` fns become `->require-clauses` / `->import-clauses`,
+  pure-noun builders become `->core-deviations` /
+  `->unmapped-default-imports`, and the private var-meta readers become
+  `get-var-ns-name` / `get-var-name`.
