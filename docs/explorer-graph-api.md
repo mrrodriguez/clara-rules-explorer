@@ -256,11 +256,15 @@ navigation.
 
 `ns-deps` maps each production-owning namespace (rules and queries alike)
 to its static dependencies: `:require` entries carry the referred vars per
-namespace (`:refers` always present, possibly empty — alias-only namespaces
-have no entry), `:aliases` carry the `:as` aliases as a separate vector,
-`:imports` are fully-qualified class-name strings (flat, sorted; only
-`RT/DEFAULT_IMPORTS` members are excluded), `:refer-clojure` carries the
-`:exclude` list and `:rename` map against `clojure.core` defaults, and
+namespace — `:refers` is the sorted symbol vector of referred vars; a
+`:refer :all` / bare `:use` spec is expanded to the required namespace's
+public vars, so the vector is always homogeneous.  Specs that refer nothing
+(bare `:require`, `:refer []`, `:only []`) produce no entry.  `:aliases`
+carry the `:as` aliases as a separate vector, `:imports` are
+fully-qualified class-name strings (flat, sorted; an import is excluded only
+when its class is exactly the `RT/DEFAULT_IMPORTS` class of that simple name
+— matched on the full class, not the simple name), `:refer-clojure` carries
+the `:exclude` list and `:rename` map against `clojure.core` defaults, and
 `:unmapped-default-imports` lists default `java.lang` imports missing from
 the live ns (dynamic `ns-unmap` only — empty in practice).  All symbols
 serialize as strings.  Entries prefer the classpath header source when

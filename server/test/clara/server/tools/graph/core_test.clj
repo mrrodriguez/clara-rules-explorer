@@ -9,6 +9,7 @@
             [clara.server.tools.graph.ns-deps :as ns-deps]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
+            [clara.server.tools.graph.rules.loan-doc-queries]
             [clara.server.tools.graph.rules.loan-doc-rules :as ldr]
             [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
             [clojure.string :as str]
@@ -1181,3 +1182,16 @@
                                           (j/object-mapper {:decode-key-fn true}))]
           (is (contains? round-tripped :clara.server.tools.graph.rules.loan-doc-rules)
               "symbols survive the JSON layer as strings"))))))
+
+(deftest test-rulebase-analysis-ns-deps-includes-query-ns
+  (testing "a query in its own namespace contributes that namespace to :ns-deps"
+    (let [query-ns 'clara.server.tools.graph.rules.loan-doc-queries
+          session (r/mk-session ['clara.server.tools.graph.rules.loan-doc-rules query-ns])
+          analysis (core/->rulebase-analysis session {})
+          deps (:ns-deps analysis)]
+      (is (contains? deps 'clara.server.tools.graph.rules.loan-doc-rules))
+      (is (contains? deps query-ns)
+          "the query's production ns must appear alongside the rule ns")
+      (is (contains? (:queries analysis)
+                     "clara.server.tools.graph.rules.loan-doc-queries/find-document-checks"))
+      (is (nil? (s/check ns-deps/NsDepEntry (get deps query-ns)))))))

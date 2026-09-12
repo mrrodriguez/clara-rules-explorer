@@ -22,6 +22,25 @@
                (:refer-clojure :exclude [read-string]
                                :rename {map my-map})))))
 
+;; Loaded target namespaces for refer-all expansion.  `:refer :all` / bare
+;; `:use` expand to the required ns's public vars, so the tests need live
+;; targets with known publics.
+(def ^:private all-target-sym 'fake.ns-deps-all-target)
+(def ^:private use-target-sym 'fake.ns-deps-use-target)
+
+(create-ns all-target-sym)
+(binding [*ns* (the-ns all-target-sym)]
+  (eval '(do (clojure.core/ns fake.ns-deps-all-target)
+             (def alpha 1)
+             (def beta 2)
+             (defn gamma [] :gamma))))
+
+(create-ns use-target-sym)
+(binding [*ns* (the-ns use-target-sym)]
+  (eval '(do (clojure.core/ns fake.ns-deps-use-target)
+             (def delta 1)
+             (def epsilon 2))))
+
 (deftest test-ns-data-fns--alias-refer-import-exclude-rename
   (testing "data fns decompose the live ns without overlap or loss"
     (let [nsobj (the-ns shape-ns-sym)]
@@ -66,7 +85,8 @@
   (testing "prefix lists, :as/:refer/:rename, both :import shapes, :refer-clojure"
     (let [sources {'fake.hdr-a (str "(ns fake.hdr-a "
                                     "(:require [clojure.set :as s :refer [union difference]] "
-                                    "(clojure [string :as str2 :refer [join]] [edn :refer :all]) "
+                                    "(clojure [string :as str2 :refer [join]]) "
+                                    "[fake.ns-deps-all-target :refer :all] "
                                     "[prefixed :as p :refer [a] :rename {a b}] plain.lib) "
                                     "(:import (java.util ArrayList HashMap) java.lang.StackWalker) "
                                     "(:refer-clojure :exclude [read-string] :rename {map my-map}))")}
@@ -74,11 +94,12 @@
                                    :base-source-fn (fn [ns-sym] (get sources ns-sym))})
           entry (get deps 'fake.hdr-a)]
       (is (sorted? deps))
-      (is (= [{:ns-name-sym 'clojure.edn :refers []}
-              {:ns-name-sym 'clojure.set :refers '[difference union]}
+      (is (= [{:ns-name-sym 'clojure.set :refers '[difference union]}
               {:ns-name-sym 'clojure.string :refers '[join]}
+              {:ns-name-sym 'fake.ns-deps-all-target :refers '[alpha beta gamma]}
               {:ns-name-sym 'prefixed :refers '[b]}]
-             (:require entry)))
+             (:require entry))
+          "`:refer :all` expands to the required ns's public vars")
       (is (= [{:ns-name-sym 'prefixed :alias-sym 'p}
               {:ns-name-sym 'clojure.set :alias-sym 's}
               {:ns-name-sym 'clojure.string :alias-sym 'str2}]
@@ -92,17 +113,19 @@
           "no live ns — unmapped defaults to empty")))
   (testing ":refer :all, :use, and :refer-clojure :only"
     (let [sources {'fake.hdr-b (str "(ns fake.hdr-b "
-                                    "(:require [clojure.set :refer :all]) "
-                                    "(:use clojure.walk [clojure.string :only [join]]) "
+                                    "(:require [prefixed2 :refer [a]] "
+                                    "          [fake.ns-deps-all-target :refer :all]) "
+                                    "(:use fake.ns-deps-use-target [clojure.string :only [join]]) "
                                     "(:refer-clojure :only [map filter]))")}
           entry (get (ns-deps/->ns-deps {:ns-syms ['fake.hdr-b]
                                          :base-source-fn (fn [ns-sym] (get sources ns-sym))})
                      'fake.hdr-b)]
-      (is (= [{:ns-name-sym 'clojure.set :refers []}
-              {:ns-name-sym 'clojure.string :refers '[join]}
-              {:ns-name-sym 'clojure.walk :refers []}]
+      (is (= [{:ns-name-sym 'clojure.string :refers '[join]}
+              {:ns-name-sym 'fake.ns-deps-all-target :refers '[alpha beta gamma]}
+              {:ns-name-sym 'fake.ns-deps-use-target :refers '[delta epsilon]}
+              {:ns-name-sym 'prefixed2 :refers '[a]}]
              (:require entry))
-          ":refer :all and bare :use yield entries with unknown (empty) refers")
+          ":refer :all and bare :use expand; :use + :only is an explicit list")
       (let [{:keys [excludes renames]} (:refer-clojure entry)]
         (is (not (contains? (set excludes) 'map)))
         (is (not (contains? (set excludes) 'filter)))
@@ -149,6 +172,41 @@
                          :ns 'fake.no-such-ns-at-all} %)
                     @tapped)))
         (finally (remove-tap tap-fn))))))
+
+(deftest test-refer-all--distinct-from-no-refers
+  (testing ":refer :all expands to the target's publics; no-refers specs add no entry"
+    (let [sources {'fake.no-refers (str "(ns fake.no-refers "
+                                        "(:require clojure.string [clojure.set :refer []])"
+                                        "(:use [clojure.walk :only []]))")
+                   'fake.refer-all "(ns fake.refer-all (:require [fake.ns-deps-all-target :refer :all]))"}
+          deps (ns-deps/->ns-deps {:ns-syms ['fake.no-refers 'fake.refer-all]
+                                   :base-source-fn (fn [ns-sym] (get sources ns-sym))})]
+      (is (= [] (:require (get deps 'fake.no-refers)))
+          "bare :require, :refer [] and :only [] add no :require entries")
+      (is (= [{:ns-name-sym 'fake.ns-deps-all-target :refers '[alpha beta gamma]}]
+             (:require (get deps 'fake.refer-all)))))))
+
+(deftest test-use-equivalence
+  (testing ":use = :refer :all; :use + :only = :require + :refer"
+    (let [requires (fn [src]
+                     (:require (get (ns-deps/->ns-deps {:ns-syms ['fake.use-eq]
+                                                        :base-source-fn (fn [_] src)})
+                                    'fake.use-eq)))]
+      (is (= (requires "(ns fake.use-eq (:use fake.ns-deps-all-target))")
+             (requires "(ns fake.use-eq (:require [fake.ns-deps-all-target :refer :all]))"))
+          "bare :use is exactly :require with :refer :all")
+      (is (= (requires "(ns fake.use-eq (:use [clojure.string :only [join]]))")
+             (requires "(ns fake.use-eq (:require [clojure.string :refer [join]]))"))
+          ":use + :only is exactly :require + :refer"))))
+
+(deftest test-ns-imports-compares-fully-qualified-class
+  (testing "default detection compares the class, not just the simple name"
+    (with-redefs [ns-imports (fn [_] {'String java.lang.String      ; default -> excluded
+                                      'Integer java.lang.Integer    ; default -> excluded
+                                      'Thread java.lang.Integer     ; name collides, class differs -> kept
+                                      'StackWalker java.lang.StackWalker})] ; non-default -> kept
+      (is (= '[java.lang.Integer java.lang.StackWalker]
+             (ns-deps/->ns-imports nil))))))
 
 (deftest test-ns-imports-excludes-only-default-imports
   (testing "explicit non-default java.lang import is preserved"

@@ -95,8 +95,11 @@ All four shape questions are resolved; the schema below is locked.
   referring are independent axes (a ns can be aliased without any refers and
   vice versa); keeping them separate means neither side needs nil/optional
   placeholders, and each vec has one uniform element shape. `:require`
-  entries stay `{:ns-name-sym … :refers […]}` (`:refers` always present,
-  possibly empty — an entry exists only when the ns is actually referred).
+  entries stay `{:ns-name-sym … :refers […]}` where `:refers` is the sorted
+  symbol vector of referred vars; a `:refer :all` / bare `:use` spec is
+  expanded to the required namespace's public vars, so the vector stays
+  homogeneous. A spec that refers nothing (bare `:require`, `:refer []`)
+  produces no entry.
 - **D2 — `:refer-clojure` is a nested map (DECIDED):**
   `{:excludes [<refer-sym> …] :renames {<local-sym> <core-var-sym>}}` — full
   parity with `->core-deviations`' (currently `core-deviations`)
@@ -121,7 +124,7 @@ edge-only `s/validate` per repo practice):
 ```clojure
 (s/defschema NsRequireEntry
   {:ns-name-sym s/Symbol
-   :refers [s/Symbol]})                          ; sorted, possibly empty
+   :refers [s/Symbol]})                          ; refer-all expands to publics
 
 (s/defschema NsAliasEntry
   {:ns-name-sym s/Symbol
@@ -267,17 +270,21 @@ reconstructed source (latent `ClassNotFoundException` on re-eval — the
 round-trip tests would catch it only if a fixture imported such a class,
 which none currently does) and the new `ns-deps` data.
 
-Fix: exclude exactly the default-import set. Since `ns-imports` keys are
-simple-name symbols and `DEFAULT_IMPORTS` keys are (to confirm) the same
-domain, the predicate becomes a key-set lookup:
+Fix: exclude exactly the default-import set, comparing the *class*
+(package included), not the simple name alone. `ns-imports` maps
+simple-name symbol → `Class`; `DEFAULT_IMPORTS` maps simple-name symbol →
+`Class`. An import is default only when the two classes are identical:
 
 ```clojure
-(let [default-imports (into #{} (keys clojure.lang.RT/DEFAULT_IMPORTS))]
-  (remove (comp default-imports key) (ns-imports nsobj)))
+(remove (fn [[simple-name ^Class cls]]
+          (when-let [^Class default-cls (get clojure.lang.RT/DEFAULT_IMPORTS simple-name)]
+            (= default-cls cls)))
+        (ns-imports nsobj))
 ```
 
-i.e. compare *which class the simple name resolves to by default*, not the
-package prefix. Keep the `^Class` hints on the remaining `.getName` /
+A simple-name key-set check is *not* enough: it would drop an explicitly
+imported class from another package that happens to share a simple name
+with a default. Keep the `^Class` hints on the remaining `.getName` /
 `.getPackageName` uses (needed for `*warn-on-reflection*`).
 
 Consequence for `reconstruct-ns-source`: output changes *only* for nses that
@@ -417,6 +424,10 @@ leaf ns introduces Malli — it won't (schema.core, matching `synth.clj`).
 ## 11. Resolved questions (record)
 
 - **D1** — aliases as separate `:aliases [{:ns-name-sym :alias-sym}]` vec.
+  Amended in review: `:refers` is always the sorted symbol vector — a
+  refer-all spec expands to the required ns's `ns-publics`; specs that refer
+  nothing produce no entry. `:imports` default-detection compares the
+  fully-qualified class, not the simple name.
 - **D2** — `:refer-clojure {:excludes […] :renames {…}}` nested map.
 - **D3** — `:unmapped-default-imports` included.
 - **D4** — `:imports` are FQ class-name symbols, flat sorted vector.

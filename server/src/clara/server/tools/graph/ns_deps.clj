@@ -13,6 +13,10 @@
             [schema.core :as s]))
 
 (s/defschema NsRequireEntry
+  "One `:require` mapping.  `:refers` is the sorted vector of referred
+   symbols.  A refer-all spec (`:refer :all`, bare `:use`) is expanded to
+   the required namespace's public vars, so the vector is always homogeneous;
+   a spec that refers nothing produces no entry at all."
   {:ns-name-sym s/Symbol
    :refers [s/Symbol]})
 
@@ -29,7 +33,8 @@
    :unmapped-default-imports [s/Symbol]})
 
 (s/defschema NsDepsOptions
-  "Options for `->ns-deps` — validated with `s/validate` at entry.
+  "Options for `->ns-deps` — checked as the function's argument schema
+   (test-time via `schema.test/validate-schemas`, not at runtime).
    `:base-source-fn` is `(fn [ns-sym] -> source-str-or-nil)`; when absent
    the classpath (`io/resource`, `.clj`/`.cljc`) is consulted."
   {:ns-syms [s/Symbol]
@@ -60,8 +65,8 @@
 (defn ->ns-required
   "Returns a sorted vector of `[{:ns-name-sym … :refers […] } …]` — one entry
    per namespace with at least one referred var (`clojure.core` excluded, as
-   with the `:require` clause projection). `:refers` is sorted, possibly
-   empty is never emitted (an entry exists only when the ns is referred)."
+   with the `:require` clause projection). `:refers` is sorted; an entry
+   exists only when the ns is referred, so it is never empty."
   [nsobj]
   (let [refers (into []
                      (comp (remove #(= 'clojure.core
@@ -71,7 +76,7 @@
     (->> refer-groups
          (mapv (fn [[target kvs]]
                  {:ns-name-sym target
-                  :refers (vec (sort (map first kvs)))}))
+                  :refers (->> kvs (map first) sort vec)}))
          (sort-by (comp str :ns-name-sym))
          vec)))
 
@@ -86,18 +91,24 @@
        (sort-by (comp str :alias-sym))
        vec))
 
-(def ^:private default-import-syms
-  (into #{} (keys clojure.lang.RT/DEFAULT_IMPORTS)))
+(defn- default-import?
+  "True when `simple-name` resolves to exactly `cls` in
+   `RT/DEFAULT_IMPORTS`.  Compares the fully-qualified class (package
+   included) rather than the simple name alone, so an explicitly imported
+   class whose simple name collides with a default import is preserved."
+  [simple-name ^Class cls]
+  (when-let [^Class default-cls (get clojure.lang.RT/DEFAULT_IMPORTS simple-name)]
+    (= default-cls cls)))
 
 (defn ->ns-imports
   "Returns a sorted vector of fully-qualified class-name symbols imported by
    the namespace, *after* excluding exactly the `RT/DEFAULT_IMPORTS` set
-   (key-set lookup on the simple-name key, so explicitly imported
-   non-default `java.lang` classes such as `java.lang.StackWalker` are
-   preserved)."
+   (full-class comparison, so explicitly imported non-default classes —
+   e.g. `java.lang.StackWalker`, or any class whose simple name collides
+   with a default — are preserved)."
   [nsobj]
   (->> (ns-imports nsobj)
-       (remove (comp default-import-syms key))
+       (remove (fn [[simple-name ^Class cls]] (default-import? simple-name cls)))
        (mapv (fn [[_ ^Class c]] (symbol (.getName ^Class c))))
        sort
        vec))
@@ -119,7 +130,7 @@
         present-core-names (into #{} (map (comp get-var-name val)) core-entries)]
     {:excludes (->> core-publics (remove present-core-names) sort vec)
      :renames (into {}
-                    (comp (filter (fn [[sym v]] (not= sym (get-var-name v))))
+                    (comp (remove (fn [[sym v]] (= sym (get-var-name v))))
                           (map (fn [[sym v]]
                                  [sym (symbol (str (get-var-ns-name v))
                                               (str (get-var-name v)))])))
@@ -136,16 +147,15 @@
          sort
          vec)))
 
-(defn ->ns-deps-entry
+(s/defn ->ns-deps-entry :- NsDepEntry
   "Composes the five data fns into one `NsDepEntry` for a live `Namespace`
    object (the runtime-object path of `->ns-deps`)."
   [nsobj]
-  (s/validate NsDepEntry
-              {:require (->ns-required nsobj)
-               :aliases (->ns-aliases nsobj)
-               :imports (->ns-imports nsobj)
-               :refer-clojure (->ns-refer-clojure nsobj)
-               :unmapped-default-imports (->ns-unmapped-default-imports nsobj)}))
+  {:require (->ns-required nsobj)
+   :aliases (->ns-aliases nsobj)
+   :imports (->ns-imports nsobj)
+   :refer-clojure (->ns-refer-clojure nsobj)
+   :unmapped-default-imports (->ns-unmapped-default-imports nsobj)})
 
 ;; ---------------------------------------------------------------------------
 ;; ns-header parser (classpath-source path)
@@ -214,31 +224,72 @@
   "Applies a `:rename {orig new}` map to a refer sym vector. Rename keys
    outside the refer set are ignored — without `:refer` the spec refers
    nothing."
-  [refers rename-map]
+  [rename-map refers]
   (if (map? rename-map)
     (mapv (fn [s] (get rename-map s s)) refers)
     (vec refers)))
 
+(defn- ->ns-public-syms
+  "Sorted public var symbols of the loaded namespace named `ns-sym`; empty
+   when that namespace is not loaded.  This is how a refer-all spec
+   (`:refer :all`, bare `:use`) is expanded: `:all` *means* the required
+   namespace's publics, so both the source and runtime paths yield the same
+   concrete refer set."
+  [ns-sym]
+  (if-let [nsobj (find-ns ns-sym)]
+    (->> (ns-publics nsobj) keys sort vec)
+    []))
+
 (defn- libspec-target-entries
   "Returns `[alias-entries require-entries]` for one resolved target ns and
-   its opts map. `default-refers` covers specs naming no refer source: nil
+   its opts map.  `default-refers` covers specs naming no refer source: nil
    for `:require` (bare requires vanish from both vecs, as on the runtime
-   path) and `:all` for `:use` (refers-all, statically unknown — an entry
-   with empty `:refers`)."
+   path) and `:all` for `:use` (refer-all).
+
+   `:refers` is the sorted vector of referred symbols.  A refer-all spec is
+   expanded to the target's live `ns-publics` (minus any `:exclude`, with
+   `:rename` applied); a spec that refers nothing (`:refer []`, bare
+   `:require`) yields no entry."
   [target opts default-refers]
   (let [raw-refers (cond
                      (sequential? (:refer opts)) (:refer opts)
                      (= :all (:refer opts)) :all
                      (sequential? (:only opts)) (:only opts)
                      :else default-refers)
-        refers (when (some? raw-refers)
-                 (if (= :all raw-refers)
-                   []
-                   (vec (sort (apply-rename raw-refers (:rename opts))))))]
+        refers (cond
+                 (= :all raw-refers)
+                 (->> (->ns-public-syms target)
+                      (remove (set (:exclude opts)))
+                      (apply-rename (:rename opts))
+                      sort
+                      vec)
+
+                 (and (sequential? raw-refers) (seq raw-refers))
+                 (->> raw-refers
+                      (apply-rename (:rename opts))
+                      sort
+                      vec)
+
+                 :else nil)]
     [(when (symbol? (:as opts))
        [{:ns-name-sym target :alias-sym (:as opts)}])
      (when (some? refers)
        [{:ns-name-sym target :refers refers}])]))
+
+(defn- expand-prefixed-subspec
+  "Resolves one sub-spec of a prefix list `(prefix sub …)` against `prefix`,
+   yielding `[target opts-map]` pairs (nil for an unrecognized sub)."
+  [prefix sub]
+  (cond
+    (symbol? sub)
+    [[(symbol (str prefix "." (name sub))) nil]]
+
+    (vector? sub)
+    (let [[target & opts] sub]
+      (when (symbol? target)
+        [[(symbol (str prefix "." (name target))) (spec-opt-map opts)]]))
+
+    :else nil))
 
 (defn- expand-libspec
   "Yields `[target opts-map]` pairs for one `:require`/`:use` spec: a bare
@@ -257,18 +308,7 @@
     (sequential? spec)
     (let [[prefix & subs] spec]
       (when (symbol? prefix)
-        (mapcat (fn [sub]
-                  (cond
-                    (symbol? sub)
-                    [[(symbol (str prefix "." (name sub))) nil]]
-
-                    (vector? sub)
-                    (let [[target & opts] sub]
-                      (when (symbol? target)
-                        [[(symbol (str prefix "." (name target))) (spec-opt-map opts)]]))
-
-                    :else nil))
-                subs)))
+        (into [] (mapcat (partial expand-prefixed-subspec prefix)) subs)))
 
     :else nil))
 
@@ -276,18 +316,13 @@
   "Parses the specs of `:require` (`default-refers` nil) or `:use`
    (`default-refers` `:all`) into `{:aliases [...] :requires [...]}`."
   [specs default-refers]
-  (reduce (fn [acc spec]
-            (reduce (fn [acc [target opts]]
-                      (let [[aliases requires] (libspec-target-entries target
-                                                                       opts
-                                                                       default-refers)]
-                        (-> acc
-                            (update :aliases into aliases)
-                            (update :requires into requires))))
-                    acc
-                    (expand-libspec spec)))
-          {:aliases [] :requires []}
-          specs))
+  (let [entries (into []
+                      (comp (mapcat expand-libspec)
+                            (map (fn [[target opts]]
+                                   (libspec-target-entries target opts default-refers))))
+                      specs)]
+    {:aliases (into [] (mapcat first) entries)
+     :requires (into [] (mapcat second) entries)}))
 
 (defn- merge-requires
   "Merges require entries by ns (union of refers) and sorts by ns name."
@@ -311,8 +346,10 @@
     (sequential? spec)
     (let [[pkg & classes] spec]
       (when (symbol? pkg)
-        (mapv (fn [c] (symbol (str (name pkg) "." (name c))))
-              (filter symbol? classes))))
+        (into []
+              (comp (filter symbol?)
+                    (map (fn [c] (symbol (str (name pkg) "." (name c))))))
+              classes)))
 
     :else nil))
 
@@ -324,6 +361,7 @@
   [opts]
   (let [opt-map (spec-opt-map opts)
         only (:only opt-map)
+        rename-map (:rename opt-map)
         excludes (if (sequential? only)
                    (let [kept (set only)]
                      (->> (ns-publics 'clojure.core)
@@ -334,19 +372,36 @@
                           sort
                           vec))
                    (vec (:exclude opt-map)))
-        renames (into {}
-                      (map (fn [[orig local]]
-                             [local (symbol "clojure.core" (name orig))]))
-                      (when (map? (:rename opt-map))
-                        (:rename opt-map)))]
+        renames (if (map? rename-map)
+                  (into {}
+                        (map (fn [[orig local]]
+                               [local (symbol "clojure.core" (name orig))]))
+                        rename-map)
+                  {})]
     {:excludes excludes
      :renames renames}))
 
-(defn parse-ns-source
+(defn- merge-refer-clojure
+  "Folds the `(:refer-clojure …)` clauses into one `{:excludes :renames}`."
+  [clauses]
+  (reduce (fn [acc opts]
+            (let [{:keys [excludes renames]} (parse-refer-clojure-opts opts)]
+              (-> acc
+                  (update :excludes into excludes)
+                  (update :renames merge renames))))
+          {:excludes [] :renames {}}
+          (->> clauses
+               (filter #(= :refer-clojure (first %)))
+               (map rest))))
+
+(s/defn parse-ns-source :- (s/maybe NsDepEntry)
   "Parses an ns header source string into an `NsDepEntry` — the static
    counterpart of `->ns-deps-entry`. `:as` specs feed `:aliases`, `:refer`
    (and `:use` `:only`) specs feed `:require`, both `:import` shapes feed a
    flat `:imports` vector, and `:refer-clojure` feeds `{:excludes :renames}`.
+   A refer-all spec (`:refer :all`, bare `:use`) is expanded to the required
+   namespace's public vars (its live `ns-publics`); a spec that refers
+   nothing (bare `:require`, `:refer []`) produces no `:require` entry.
    `:unmapped-default-imports` is always empty here (a header cannot express
    dynamic `ns-unmap`); `->ns-deps` fills it from the live ns when present.
    Returns nil when the source does not start with an `(ns …)` form.
@@ -354,18 +409,12 @@
    `.cljc` note: headers read with `:features #{:clj}`, matching kondo's
    effective `:lang :clj` view; deps expressed only for other platforms are
    skipped, shared (unconditional) specs are included as-is."
-  [source-str]
+  [source-str :- s/Str]
   (when-let [form (read-ns-form source-str)]
     (let [clauses (ns-header-clauses form)
           req (parse-libspec-clause (clause-specs clauses :require) nil)
           use (parse-libspec-clause (clause-specs clauses :use) :all)
-          refer-clojure (reduce (fn [acc opts]
-                                  (let [parsed (parse-refer-clojure-opts opts)]
-                                    (-> acc
-                                        (update :excludes into (:excludes parsed))
-                                        (update :renames merge (:renames parsed)))))
-                                {:excludes [] :renames {}}
-                                (map rest (filter #(= :refer-clojure (first %)) clauses)))]
+          refer-clojure (merge-refer-clojure clauses)]
       {:require (merge-requires (into (:requires req) (:requires use)))
        :aliases (->> (into (:aliases req) (:aliases use))
                      distinct
@@ -387,41 +436,45 @@
    :refer-clojure {:excludes [] :renames {}}
    :unmapped-default-imports []})
 
-(defn- runtime-or-missing
+(s/defn ^:private runtime-or-missing :- NsDepEntry
   "Runtime-path entry for `ns-sym`, or an empty entry plus a `tap>` report
    when the ns is not loaded either."
-  [ns-sym]
+  [ns-sym :- s/Symbol]
   (if-let [nsobj (find-ns ns-sym)]
     (->ns-deps-entry nsobj)
     (do (tap> {:event :clara-rules/ns-deps-missing
                :ns ns-sym})
         empty-entry)))
 
-(defn- ns-dep-for-ns
+(defn- unmapped-default-imports-for
+  "`:unmapped-default-imports` for `ns-sym` from the live namespace, or an
+   empty vector when it is not loaded."
+  [ns-sym]
+  (if-let [nsobj (find-ns ns-sym)]
+    (->ns-unmapped-default-imports nsobj)
+    []))
+
+(s/defn ^:private ns-dep-for-ns :- NsDepEntry
   "One `NsDepEntry` for `ns-sym`: the parsed classpath source when present
    (with `:unmapped-default-imports` from the live ns when loaded), else the
    runtime path. An unparseable source falls back to the runtime path."
-  [ns-sym base-source-fn]
+  [ns-sym :- s/Symbol
+   base-source-fn :- (s/=> (s/maybe s/Str) s/Symbol)]
   (let [source (try (base-source-fn ns-sym)
                     (catch Exception _ nil))]
     (if (nil? source)
       (runtime-or-missing ns-sym)
       (if-let [parsed (parse-ns-source source)]
-        (s/validate NsDepEntry
-                    (assoc parsed :unmapped-default-imports
-                           (if-let [nsobj (find-ns ns-sym)]
-                             (->ns-unmapped-default-imports nsobj)
-                             [])))
+        (assoc parsed :unmapped-default-imports
+               (unmapped-default-imports-for ns-sym))
         (runtime-or-missing ns-sym)))))
 
-(defn ->ns-deps
+(s/defn ->ns-deps :- NsDepsMap
   "Maps `ns-syms` to `NsDepEntry` (a sorted-map by ns name): the parsed
    classpath source when present, else the live `Namespace` object, else an
    empty entry with a `:clara-rules/ns-deps-missing` `tap>` report."
-  [{:keys [ns-syms base-source-fn] :as options}]
-  (s/validate NsDepsOptions options)
+  [{:keys [ns-syms base-source-fn]} :- NsDepsOptions]
   (let [base-source-fn (or base-source-fn default-base-source-fn)]
-    (s/validate NsDepsMap
-                (into (sorted-map)
-                      (map (fn [ns-sym] [ns-sym (ns-dep-for-ns ns-sym base-source-fn)]))
-                      ns-syms))))
+    (into (sorted-map)
+          (map (fn [ns-sym] [ns-sym (ns-dep-for-ns ns-sym base-source-fn)]))
+          ns-syms)))
