@@ -13,6 +13,7 @@
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.analyze-test-rules :as atr]
+            [clara.server.tools.graph.test-utils :as tu]
             [schema.test :as st])
   (:import [clara.server.tools.graph.rules.loan_app_facts
             AllGivenDocuments
@@ -899,60 +900,54 @@
       (is (str/includes? source "(clojure.core/defn helper-a [x] (clojure.core/inc x))")))))
 
 (deftest test-synthesize-ns-source--var-defs-unreadable-skipped
-  (let [ns-sym 'fake.eval-var-defs-unreadable
-        tapped (atom [])
-        tap-fn (fn [e] (swap! tapped conj e))]
+  (let [ns-sym 'fake.eval-var-defs-unreadable]
     (create-ns ns-sym)
     (binding [*ns* (the-ns ns-sym)]
       (eval '(clojure.core/defn helper-a [x] (clojure.core/inc x))))
-    (add-tap tap-fn)
-    (try
-      (let [result (synth/synthesize-ns-source
-                    {:ns-sym ns-sym
-                     :productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
-                     :base-source-fn (fn [_] nil)
-                     :normalize-key-fn identity
-                     :var-defs-fn (fn [_] [{:name 'helper-a
-                                            :form '(clojure.core/defn helper-a [x] (clojure.core/inc x))}
-                                           {:name 'helper-bad
-                                            :form (Object.)}])})
-            source (:source result)]
-        (is (str/includes? source "(clojure.core/defn helper-a [x] (clojure.core/inc x))"))
-        (is (not (str/includes? source "#object"))
-            "the unreadable form is skipped, so the rest of the namespace still analyzes")
-        (is (= 1 (count @tapped)))
-        (is (= {:event :clara-rules/var-def-skipped
-                :ns ns-sym
-                :var 'helper-bad
-                :reason :unreadable}
-               (dissoc (first @tapped) :printed))))
-      (finally (remove-tap tap-fn)))))
+    (let [{:keys [result events]}
+          (tu/capture-taps
+           #(synth/synthesize-ns-source
+             {:ns-sym ns-sym
+              :productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
+              :base-source-fn (fn [_] nil)
+              :normalize-key-fn identity
+              :var-defs-fn (fn [_] [{:name 'helper-a
+                                     :form '(clojure.core/defn helper-a [x] (clojure.core/inc x))}
+                                    {:name 'helper-bad
+                                     :form (Object.)}])})
+           #(= :clara-rules/var-def-skipped (:event %)))
+          source (:source result)]
+      (is (str/includes? source "(clojure.core/defn helper-a [x] (clojure.core/inc x))"))
+      (is (not (str/includes? source "#object"))
+          "the unreadable form is skipped, so the rest of the namespace still analyzes")
+      (is (= [{:event :clara-rules/var-def-skipped
+               :ns ns-sym
+               :var 'helper-bad
+               :reason :unreadable}]
+             (mapv #(dissoc % :printed) events))))))
 
 (deftest test-synthesize-ns-source--var-defs-multiline-skipped
-  (let [ns-sym 'fake.eval-var-defs-multiline
-        tapped (atom [])
-        tap-fn (fn [e] (swap! tapped conj e))]
+  (let [ns-sym 'fake.eval-var-defs-multiline]
     (create-ns ns-sym)
     (binding [*ns* (the-ns ns-sym)]
       (eval '(clojure.core/defn helper-a [x] (clojure.core/inc x))))
-    (add-tap tap-fn)
-    (try
-      (let [result (synth/synthesize-ns-source
-                    {:ns-sym ns-sym
-                     :productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
-                     :base-source-fn (fn [_] nil)
-                     :normalize-key-fn identity
-                     :var-defs-fn (fn [_] [{:name 'helper-a
-                                            :form '(clojure.core/defn helper-a [x] (clojure.core/inc x))}
-                                           {:name 'helper-multiline
-                                            :form (symbol "a\nb")}])})
-            source (:source result)]
-        (is (str/includes? source "(clojure.core/defn helper-a [x] (clojure.core/inc x))"))
-        (is (not (str/includes? source "helper-multiline"))
-            "a form that prints across lines is skipped")
-        (is (= 1 (count @tapped)))
-        (is (= :multiline (:reason (first @tapped)))))
-      (finally (remove-tap tap-fn)))))
+    (let [{:keys [result events]}
+          (tu/capture-taps
+           #(synth/synthesize-ns-source
+             {:ns-sym ns-sym
+              :productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
+              :base-source-fn (fn [_] nil)
+              :normalize-key-fn identity
+              :var-defs-fn (fn [_] [{:name 'helper-a
+                                     :form '(clojure.core/defn helper-a [x] (clojure.core/inc x))}
+                                    {:name 'helper-multiline
+                                     :form (symbol "a\nb")}])})
+           #(= :clara-rules/var-def-skipped (:event %)))
+          source (:source result)]
+      (is (str/includes? source "(clojure.core/defn helper-a [x] (clojure.core/inc x))"))
+      (is (not (str/includes? source "helper-multiline"))
+          "a form that prints across lines is skipped")
+      (is (= [:multiline] (mapv :reason events))))))
 
 (deftest test-synthesize-ns-source--no-var-defs-fn-identical
   (let [ns-sym 'fake.eval-no-var-defs]
@@ -1789,24 +1784,23 @@
 
 (deftest test-type-fallback-skipped-tap
   (testing "filtered types are reported via tap> with full context (off without a tap)"
-    (let [tapped (atom [])
-          tap-fn (fn [v] (swap! tapped conj v))]
-      (add-tap tap-fn)
-      (try
-        (analyze/->annotations-from-rule-source-analysis
-         {:rule-source-analysis edge-case-analysis
-          :session-or-rulebase edge-case-session})
-        (finally
-          (remove-tap tap-fn)))
-      (let [events (filter #(= :clara-rules/type-fallback-skipped (:event %)) @tapped)]
-        (is (seq events))
-        (is (some #(and (= `DocumentCheck (:skipped-type %))
-                        (= `atr/rule-nested-helper-call (:inserter-var %))
-                        (= :insert (:boundary %))
-                        (= :rulebase-fact-types-only (:mode %))
-                        (= 'map->DocumentCheck (:ctor-name %))
-                        (= 'clara.server.tools.graph.rules.loan-app-facts (:ctor-ns %))
-                        (string? (:filename %)))
-                  events)
-            "the skipped DocumentCheck scan hit carries the full tap context")
-        (is (some #(= `UnrelatedScanRecord (:skipped-type %)) events))))))
+    (let [{:keys [events]}
+          (tu/capture-taps
+           #(analyze/->annotations-from-rule-source-analysis
+             {:rule-source-analysis edge-case-analysis
+              :session-or-rulebase edge-case-session})
+           #(= :clara-rules/type-fallback-skipped (:event %))
+           (fn [evs]
+             (and (some #(= `DocumentCheck (:skipped-type %)) evs)
+                  (some #(= `UnrelatedScanRecord (:skipped-type %)) evs))))]
+      (is (seq events))
+      (is (some #(and (= `DocumentCheck (:skipped-type %))
+                      (= `atr/rule-nested-helper-call (:inserter-var %))
+                      (= :insert (:boundary %))
+                      (= :rulebase-fact-types-only (:mode %))
+                      (= 'map->DocumentCheck (:ctor-name %))
+                      (= 'clara.server.tools.graph.rules.loan-app-facts (:ctor-ns %))
+                      (string? (:filename %)))
+                events)
+          "the skipped DocumentCheck scan hit carries the full tap context")
+      (is (some #(= `UnrelatedScanRecord (:skipped-type %)) events)))))

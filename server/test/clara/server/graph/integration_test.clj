@@ -27,6 +27,7 @@
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.rules.loan-app-facts :as laf]
             [clara.server.tools.graph.rules.loan-app-rules]
+            [clara.server.tools.graph.rules.loan-doc-queries]
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
             [clojure.java.io :as io]
@@ -70,7 +71,8 @@
    for a bare session (rulebase analysis only, empty working memory)."
   ([{:keys [with-facts?] :or {with-facts? true}}]
    (cond-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
-                         'clara.server.tools.graph.rules.loan-app-rules)
+                         'clara.server.tools.graph.rules.loan-app-rules
+                         'clara.server.tools.graph.rules.loan-doc-queries)
      with-facts? run-app-outcome-approved))
   ([]
    (run-loan-app-rules {})))
@@ -266,7 +268,13 @@
         (let [summary (get-rulebase-summary)
               analysis (get-analysis)]
           (is (some? summary))
-          (is (some? analysis))))
+          (is (some? analysis))
+          (is (contains? analysis "ns-deps")
+              "the analysis response exposes per-namespace static dependencies")
+          (let [ns-deps (get analysis "ns-deps")]
+            (is (contains? ns-deps "clara.server.tools.graph.rules.loan-doc-rules"))
+            (is (contains? ns-deps "clara.server.tools.graph.rules.loan-doc-queries")
+                "the query-only ns appears alongside the rule nses"))))
 
       (testing "Rules endpoints"
         (let [rules (get-rules)
@@ -276,9 +284,13 @@
 
       (testing "Queries endpoints"
         (let [queries (get-queries)
-              query (get-query "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome")]
+              query (get-query "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome")
+              doc-query (get-query "clara.server.tools.graph.rules.loan-doc-queries/find-document-checks")]
           (is (seq queries))
-          (is (= "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome" (get query "name")))))
+          (is (= "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome" (get query "name")))
+          (is (= "clara.server.tools.graph.rules.loan-doc-queries/find-document-checks"
+                 (get doc-query "name"))
+              "the query-only ns is part of the loan-doc/app session")))
 
       (testing "Fact types endpoints"
         (let [fact-types (get-fact-types)

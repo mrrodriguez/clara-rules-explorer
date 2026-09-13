@@ -20,7 +20,8 @@
    (see `VarDef`).  Those defs are emitted between the `(declare …)` of the
    reconstructed ns and the rule snippets, restoring the call graph through
    helper vars that the `declare` alone cannot express."
-  (:require [clojure.string :as str]
+  (:require [clara.server.tools.graph.ns-deps :as ns-deps]
+            [clojure.string :as str]
             [clojure.tools.logging :as log]
             [schema.core :as s]))
 
@@ -41,80 +42,64 @@
 ;; reconstruct-ns-source helpers
 ;; ---------------------------------------------------------------------------
 
-(defn- var-ns-name
-  "Returns the namespace name of a var's metadata `:ns`."
-  [v]
-  (ns-name (:ns (meta v))))
-
-(defn- var-name
-  "Returns the name symbol from a var's metadata."
-  [v]
-  (:name (meta v)))
-
-(defn core-deviations
-  "Returns `{:excluded [...] :renamed {...}}` describing how the given
-   namespace deviates from the default `clojure.core` mappings.  Excluded
-   are `clojure.core` publics not present in the ns; renamed are entries
-   whose local symbol differs from the var's own name."
-  [nsobj]
-  (let [core-publics      (->> 'clojure.core ns-publics keys set)
-        core-entries      (into {}
-                                (filter (fn [[_ v]]
-                                          (and (var? v)
-                                               (= 'clojure.core (var-ns-name v)))))
-                                (ns-map nsobj))
-        present-core-names (into #{} (map (comp var-name val)) core-entries)]
-    {:excluded (->> core-publics (remove present-core-names) sort vec)
-     :renamed  (into {}
-                     (filter (fn [[sym v]] (not= sym (var-name v))))
-                     core-entries)}))
-
-(defn build-require-clauses
+(defn ->require-clauses
   "Builds a sorted vector of `:require` clause vectors from the namespace's
    aliases and refers, excluding `clojure.core` refers."
   [nsobj]
-  (let [alias-clauses (->> (ns-aliases nsobj)
-                           (mapv (fn [[a target]] [(ns-name target) :as a])))
-        refers        (into []
-                            (comp (remove #(= 'clojure.core
-                                              (var-ns-name (val %)))))
-                            (ns-refers nsobj))
-        refer-groups  (group-by (fn [[_ v]] (var-ns-name v)) refers)
-        refer-clauses (mapv (fn [[target kvs]]
-                              [target :refer (vec (sort (map first kvs)))])
-                            refer-groups)]
+  (let [alias-clauses (mapv (fn [{:keys [ns-name-sym alias-sym]}]
+                              [ns-name-sym :as alias-sym])
+                            (ns-deps/->ns-aliases nsobj))
+        refer-clauses (mapv (fn [{:keys [ns-name-sym refers]}]
+                              [ns-name-sym :refer (vec refers)])
+                            (ns-deps/->ns-required nsobj))]
     (->> (concat alias-clauses refer-clauses)
          (sort-by (comp str first))
          vec)))
 
-(defn build-import-clauses
+(defn- fq-sym-package
+  "Returns the package portion of a fully-qualified class-name symbol
+   (everything before the last `.`), or the empty string for a
+   default-package class."
+  [fq-sym]
+  (let [n (name fq-sym)
+        idx (str/last-index-of n ".")]
+    (if idx (subs n 0 idx) "")))
+
+(defn- fq-sym-simple-name
+  "Returns the simple-name symbol of a fully-qualified class-name symbol."
+  [fq-sym]
+  (let [n (name fq-sym)
+        idx (str/last-index-of n ".")]
+    (symbol (if idx (subs n (inc idx)) n))))
+
+(defn ->import-clauses
   "Builds a sorted vector of `:import` clause vectors from the namespace's
-   imports, excluding `java.lang.*` (which are automatic in any new `ns`)."
+   imports, excluding exactly the `RT/DEFAULT_IMPORTS` set (which are
+   automatic in any new `ns`)."
   [nsobj]
-  (let [imports       (into []
-                            (comp (remove #(.startsWith (.getName ^Class (val %))
-                                                        "java.lang.")))
-                            (ns-imports nsobj))
-        import-groups (group-by (fn [[_ ^Class c]] (.getPackageName c)) imports)]
+  (let [import-groups (group-by fq-sym-package (ns-deps/->ns-imports nsobj))]
     (->> import-groups
-         (map (fn [[pkg kvs]]
-                (->> kvs
-                     (map first)
+         (map (fn [[pkg fq-syms]]
+                (->> fq-syms
+                     (map fq-sym-simple-name)
                      sort
                      (into [(symbol pkg)]))))
          (sort-by (comp str first))
          vec)))
 
-(defn unmapped-default-imports
+(defn- renamed-clause-map
+  "Inverts a `{local fq-core-sym}` renames map into the `{orig local}` shape
+   the `ns` `:rename` spec accepts, with both sides simple symbols."
+  [renamed]
+  (into {}
+        (map (fn [[local fq-sym]] [(symbol (name fq-sym)) local]))
+        renamed))
+
+(defn ->unmapped-default-imports
   "Returns the sorted vector of default `java.lang.*` import symbols missing
    from the given namespace (possible only via dynamic `ns-unmap`)."
   [nsobj]
-  (let [imported (-> nsobj ns-imports keys set)]
-    (->> clojure.lang.RT/DEFAULT_IMPORTS
-         keys
-         (remove imported)
-         sort
-         vec)))
+  (ns-deps/->ns-unmapped-default-imports nsobj))
 
 (defn reconstruct-ns-source
   "Builds a synthetic source string containing only an `(ns ...)` form
@@ -129,14 +114,15 @@
    the original ns)."
   [ns-sym]
   (let [nsobj            (the-ns ns-sym)
-        {:keys [excluded renamed]} (core-deviations nsobj)
-        require-clauses   (build-require-clauses nsobj)
-        import-clauses    (build-import-clauses nsobj)
-        unmapped-defaults (unmapped-default-imports nsobj)
-        refer-clojure-clause (when (or (seq excluded) (seq renamed))
+        {:keys [excludes renames]} (ns-deps/->ns-refer-clojure nsobj)
+        require-clauses   (->require-clauses nsobj)
+        import-clauses    (->import-clauses nsobj)
+        unmapped-defaults (->unmapped-default-imports nsobj)
+        refer-clojure-clause (when (or (seq excludes) (seq renames))
                                (concat (list :refer-clojure)
-                                       (when (seq excluded) (list :exclude excluded))
-                                       (when (seq renamed)  (list :rename renamed))))
+                                       (when (seq excludes) (list :exclude excludes))
+                                       (when (seq renames)
+                                         (list :rename (renamed-clause-map renames)))))
         require-clause (when (seq require-clauses)
                          (cons :require require-clauses))
         import-clause (when (seq import-clauses)
