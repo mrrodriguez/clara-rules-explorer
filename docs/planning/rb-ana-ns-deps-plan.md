@@ -1,6 +1,6 @@
 # Rulebase-Analysis `ns-deps` — Plan
 
-Status: **Draft (decisions locked §3)** · Scope: `server/` (Clojure) · Related: `analyze/synth.clj`, `analyze.clj`, `core.clj`, `docs/explorer-graph-api.md`
+Status: **Implemented** (tracker: `rb-ana-ns-deps-roadmap.md`) · Scope: `server/` (Clojure) · Related: `analyze/synth.clj`, `analyze.clj`, `core.clj`, `docs/explorer-graph-api.md`
 
 ## 1. Goal
 
@@ -38,15 +38,17 @@ File: `server/src/clara/server/tools/graph/analyze/synth.clj`.
 
 | Fn | Input | Output today | Reusable core |
 |----|-------|--------------|---------------|
-| `core-deviations` | live `Namespace` obj | `{:excluded [...] :renamed {...}}` vs `clojure.core` defaults | Yes — the `:refer-clojure` data source |
+| `core-deviations` (now `ns-deps/->ns-refer-clojure`) | live `Namespace` obj | `{:excludes [...] :renames {...}}` vs `clojure.core` defaults | Yes — the `:refer-clojure` data source (moved and kebabed; `synth` reads it directly — no `->core-deviations` wrapper) |
 | `build-require-clauses` | live `Namespace` obj | sorted vector of `:require` clause vectors (`[target :as a]`, `[target :refer [...]]`), `clojure.core` refers removed | Yes — but returns *syntax*, not *data* (see §4) |
 | `build-import-clauses` | live `Namespace` obj | sorted vector of `:import` clause vectors grouped by package, `java.lang.*` removed by **prefix check** | Yes — but exclusion predicate is the bug (see §6) |
 | `unmapped-default-imports` | live `Namespace` obj | sorted vector of `RT/DEFAULT_IMPORTS` keys missing from `ns-imports` (key-set difference — already exact) | Yes, as-is |
 | `reconstruct-ns-source` | `ns-sym` | full `(ns ...)` + `(ns-unmap ...)` source string | Stays; becomes a *consumer* of the decomposed fns, behavior unchanged |
 
-Private helpers `var-ns-name` / `var-name` (var-meta readers) support
-`core-deviations` and move with it (renamed `get-var-ns-name` /
-`get-var-name` and `->core-deviations` respectively — see §4).
+Private helpers `var-ns-name` / `var-name` (var-meta readers) supported
+`core-deviations` and move with it into the leaf as `get-var-ns-name` /
+`get-var-name` (see §4).  `core-deviations` itself was dropped during
+implementation — `synth/reconstruct-ns-source` reads the leaf's
+`->ns-refer-clojure` directly (roadmap Log).
 
 Reflection-relevant interop (must keep working under
 `*warn-on-reflection* true`, enforced by `make reflection-check`):
@@ -56,27 +58,27 @@ the `^Class` hints on the same expressions.
 
 ### 2.2 Callers today
 
-- `analyze/->rule-source-analysis` (`analyze.clj:816`) builds
+- `analyze/->rule-source-analysis` builds
   `ns-source-map` via `synth/synthesize-ns-source` (which calls
   `reconstruct-ns-source` only on the no-classpath-source path), then
   `->rule-source-analysis-from-namespaces` analyzes the combined sources.
   This is the **annotations-gen** piece — out of scope except as a consumer
   that must keep passing after the refactor.
-- `core/->rulebase-analysis` (`core.clj:434`, impl `->rulebase-analysis*`
-  at `:372`) builds `{:rules :queries :fact-types :nodes :dep-graph
+- `core/->rulebase-analysis` (impl `->rulebase-analysis*`) builds `{:rules :queries :fact-types :nodes :dep-graph
   :unresolved :merged-annotations}` plus id indexes. **`:ns-deps` attaches
   here.** `core` currently does *not* depend on `analyze` (and `analyze`
   requires `core/extract-ancestors-fn`) — see §7 for the cycle constraint.
-- `find-ns-resource` / `ns->resource-base` live in `analyze.clj`
-  (`:324/:331`). `core` has no equivalent; the ns-header-parse path (§5)
+- `find-ns-resource` / `ns->resource-base` live in `analyze.clj`.  `core`
+  has no equivalent; the ns-header-parse path (§5)
   needs one (or needs `core` to call into a leaf ns that owns it).
 
 ### 2.3 Tests that pin current behavior
 
-- `analyze_test.clj:716-800` — reconstructed-ns fallback, `:refer` round
-  trip, `:refer-clojure` list shape, `(declare …)` emission, `:fact-constructors`
-  via declared helpers.
-- `analyze_test.clj:840-1060` — `:ns-var-defs-fn` hook family.
+- `analyze/synth_test.clj` — clause projection (`->require-clauses` /
+  `->import-clauses`), `reconstruct-ns-source` round trips.
+- `analyze_test.clj` — reconstructed-ns fallback, `(declare …)` emission,
+  `:fact-constructors` via declared helpers, and the `:ns-var-defs-fn` hook
+  family.
 - `core_test.clj` — `->rulebase-analysis` shape (loan fixtures); any new
   top-level key must not break `match?`-style assertions there (check before
   finalizing — most use `get-in`, safe, but verify).
@@ -102,8 +104,8 @@ All four shape questions are resolved; the schema below is locked.
   produces no entry.
 - **D2 — `:refer-clojure` is a nested map (DECIDED):**
   `{:excludes [<refer-sym> …] :renames {<local-sym> <core-var-sym>}}` — full
-  parity with `->core-deviations`' (currently `core-deviations`)
-  `{:excluded :renamed}`, just kebabed under
+  parity with the leaf's `->ns-refer-clojure` (which superseded
+  `synth/core-deviations`), kebabed under
   one top key. Both halves always present (empty vec / empty map when no
   deviation), so consumers never nil-check.
 - **D3 — `:unmapped-default-imports` included (DECIDED):**
@@ -119,7 +121,9 @@ All four shape questions are resolved; the schema below is locked.
   clauses, not a data concern.
 
 Locked schema (`s/defschema`, schema.core following `synth.clj` conventions;
-edge-only `s/validate` per repo practice):
+the leaf uses `s/defn` — test-time validation via
+`schema.test/validate-schemas`, as in `api.clj`/`conditions.clj`; `synth.clj`
+validates its public edge with `s/validate`):
 
 ```clojure
 (s/defschema NsRequireEntry
@@ -183,7 +187,7 @@ aliases unless an external consumer turns up):
 |---------|---------|-----|
 | `build-require-clauses` | `->require-clauses` | `build-` verb → `->` builder |
 | `build-import-clauses` | `->import-clauses` | `build-` verb → `->` builder |
-| `core-deviations` | `->core-deviations` | pure-noun builder → `->` + noun (cf. `core/->dep-graph`) |
+| `core-deviations` | *removed* | superseded by `ns-deps/->ns-refer-clojure` (kebabed keys); `reconstruct-ns-source` reads the leaf directly |
 | `unmapped-default-imports` | `->unmapped-default-imports` | pure-noun builder → `->` + noun |
 | `var-ns-name` / `var-name` (private) | `get-var-ns-name` / `get-var-name` | pure extractions from var metadata, not builders → `get-` |
 
@@ -195,9 +199,10 @@ Delegation after the move (implement once in the leaf, project in `synth`):
   refer) exactly as today — the data split does not change clause output.
 - `->import-clauses` = package-grouping projection of `->ns-imports`
   (same package-grouped, package-sorted output as today).
-- `->core-deviations` = delegate to `->ns-refer-clojure` with keys mapped
-  back to `{:excluded :renamed}` (implement once, project once;
-  record the direction in the implementing PR).
+- `->core-deviations` was removed rather than kept as a key-remap
+  pass-through (it had a single caller).  `reconstruct-ns-source`
+  destructures `->ns-refer-clojure` directly and inverts its `:renames`
+  for the `:rename` clause via `renamed-clause-map`.
 - `->unmapped-default-imports` = delegate to `->ns-unmapped-default-imports`
   (identical semantics; pure alias).
 - `reconstruct-ns-source` unchanged apart from calling the same builders
@@ -245,8 +250,8 @@ analyzes).
 
 ## 6. `DEFAULT_IMPORTS` fix
 
-Facts to confirm at implementation time via REPL (before changing the
-predicate):
+Facts confirmed at implementation time via REPL (roadmap Phase 0, before
+changing the predicate):
 
 ```clojure
 (keys clojure.lang.RT/DEFAULT_IMPORTS)   ; expect simple-name syms: String Object ...
@@ -306,8 +311,8 @@ an `:import` clause naming it, and `ns-deps` must list its FQ symbol.
   `->ns-deps-entry` / `->ns-deps`. `analyze.synth` requires it (clause
   builders delegate; `synth.clj` keeps its public fns as-is for compat).
   `core` requires it for `->rulebase-analysis*`. No cycle: the leaf requires
-  only `clojure.string`, `schema.core`, `clojure.tools.logging` (for the
-  contained-exception path, if any) — never `analyze` or `core`.
+  only `clojure.java.io` (the default `base-source-fn`), `clojure.string`,
+  and `schema.core` — never `analyze` or `core`.
 - **Why this name/level.** The ns answers "what does namespace X depend on"
   for *any* consumer: `core/->rulebase-analysis` (static rulebase info) and
   `analyze`+`synth` (annotations-gen source reconstruction) both pull from
@@ -328,7 +333,8 @@ an `:import` clause naming it, and `ns-deps` must list its FQ symbol.
 own tiny `ns->resource-base` equivalent (or `core`'s call passes a
 `base-source-fn` hook in the style of `synth/synthesize-ns-source`'s
 `:base-source-fn` — `(fn [ns-sym] -> source-str-or-nil)` — keeping classpath
-lookup injectable and the leaf free of `clojure.java.io` opinions).
+lookup injectable; the leaf's default does the `io/resource` lookup itself,
+so the leaf requires `clojure.java.io`).
 Recommend the hook: `->rulebase-analysis` gains no new arity; `->ns-deps`
 takes `{:ns-syms … :base-source-fn …}` with a default that does the
 `io/resource` lookup. Tests inject fake sources without touching the
@@ -378,9 +384,9 @@ New tests (server/test, following `analyze_test.clj` fake-ns patterns):
 1. **Data-syntax parity:** for a representative set of live nses (at least
    `loan-doc-rules` + a fake ns with alias+refer+import+exclude+rename),
    `(->require-clauses nsobj)` / `(->import-clauses nsobj)` /
-   `(->core-deviations nsobj)` / `(->unmapped-default-imports nsobj)`
-   before vs. after the refactor are `=` (guards the §4 rename +
-   delegation step).
+   `(->ns-refer-clojure nsobj)` / `(->unmapped-default-imports nsobj)`
+   return the expected literal values (pinned in `analyze/synth_test.clj`;
+   guards the §4 rename + delegation step).
 2. **Reconstructed-source stability:** `reconstruct-ns-source` output for the
    same nses is string-identical before/after (except the intended §6 fix
    case).
@@ -408,7 +414,8 @@ leaf ns introduces Malli — it won't (schema.core, matching `synth.clj`).
 ## 10. Work breakdown (suggested order)
 
 1. **Confirm `RT/DEFAULT_IMPORTS` shape** at the REPL (keys/vals, §6) +
-   pick a non-default `java.lang` class for the regression test. (No code.)
+   pick a non-default `java.lang` class for the regression test. (No code;
+   done — see roadmap Phase 0.)
 2. **Create leaf ns** `tools.graph.ns-deps` with the three schemas +
    the five `->ns-…` data fns moved (not copied) out of `synth`, with the
    fixed default-import predicate; rename the four `synth` fns per §4 with
@@ -438,6 +445,7 @@ leaf ns introduces Malli — it won't (schema.core, matching `synth.clj`).
 - **Naming** — new data fns are `->ns-required`, `->ns-aliases`,
   `->ns-imports`, `->ns-refer-clojure`, `->ns-unmapped-default-imports`;
   existing `build-…` fns become `->require-clauses` / `->import-clauses`,
-  pure-noun builders become `->core-deviations` /
-  `->unmapped-default-imports`, and the private var-meta readers become
-  `get-var-ns-name` / `get-var-name`.
+  `unmapped-default-imports` becomes `->unmapped-default-imports`,
+  `core-deviations` is removed (its data lives on as `->ns-refer-clojure`),
+  and the private var-meta readers become `get-var-ns-name` /
+  `get-var-name`.

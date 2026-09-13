@@ -268,7 +268,13 @@
         (let [summary (get-rulebase-summary)
               analysis (get-analysis)]
           (is (some? summary))
-          (is (some? analysis))))
+          (is (some? analysis))
+          (is (contains? analysis "ns-deps")
+              "the analysis response exposes per-namespace static dependencies")
+          (let [ns-deps (get analysis "ns-deps")]
+            (is (contains? ns-deps "clara.server.tools.graph.rules.loan-doc-rules"))
+            (is (contains? ns-deps "clara.server.tools.graph.rules.loan-doc-queries")
+                "the query-only ns appears alongside the rule nses"))))
 
       (testing "Rules endpoints"
         (let [rules (get-rules)

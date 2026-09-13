@@ -226,3 +226,35 @@
         (is (not (contains? imports 'java.lang.Object)))
         (is (= [] (ns-deps/->ns-unmapped-default-imports nsobj)))))))
 
+(deftest test-missing-source-falls-back-to-runtime
+  (testing "nil source and a throwing base-source-fn both fall back to the live-ns entry"
+    (let [expected (ns-deps/->ns-deps-entry (the-ns shape-ns-sym))]
+      (is (= expected
+             (get (ns-deps/->ns-deps {:ns-syms [shape-ns-sym]
+                                      :base-source-fn (constantly nil)})
+                  shape-ns-sym)))
+      (is (= expected
+             (get (ns-deps/->ns-deps {:ns-syms [shape-ns-sym]
+                                      :base-source-fn (fn [_] (throw (ex-info "boom" {})))})
+                  shape-ns-sym))))))
+
+(deftest test-unparseable-source-falls-back-to-runtime
+  (testing "a source whose first form is not (ns …) falls back to the live-ns entry"
+    (let [expected (ns-deps/->ns-deps-entry (the-ns shape-ns-sym))]
+      (is (= expected
+             (get (ns-deps/->ns-deps {:ns-syms [shape-ns-sym]
+                                      :base-source-fn (fn [_] "(comment leading form)")})
+                  shape-ns-sym))))))
+
+(deftest test-cljc-header-read-cond
+  (testing "a .cljc header resolves the :clj branch"
+    (let [src (str "#?(:clj (ns fake.hdr-cljc "
+                   "(:require [clojure.string :as str])) "
+                   ":cljs (ns fake.hdr-cljc "
+                   "(:require [goog.string :as gstr])))")
+          entry (ns-deps/parse-ns-source src)]
+      (is (= [{:ns-name-sym 'clojure.string :alias-sym 'str}]
+             (:aliases entry))
+          "the :clj branch's require feeds :aliases; the :cljs branch is skipped")
+      (is (= [] (:imports entry))))))
+
