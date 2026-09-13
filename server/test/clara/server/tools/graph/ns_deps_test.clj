@@ -5,6 +5,7 @@
             [matcher-combinators.test :refer [match?]]
             [clara.server.tools.graph.ns-deps :as ns-deps]
             [clara.server.tools.graph.rules.loan-doc-rules]
+            [clara.server.tools.graph.test-utils :as tu]
             [schema.test :as st]))
 
 (use-fixtures :once st/validate-schemas)
@@ -156,22 +157,20 @@
 
 (deftest test-missing-everywhere--empty-entry-plus-tap
   (testing "ns with neither source nor live ns yields an empty entry and a tap> report"
-    (let [tapped (atom [])
-          tap-fn (fn [x] (swap! tapped conj x))]
-      (add-tap tap-fn)
-      (try
-        (let [deps (ns-deps/->ns-deps {:ns-syms ['fake.no-such-ns-at-all]})]
-          (is (= {'fake.no-such-ns-at-all
-                  {:require []
-                   :aliases []
-                   :imports []
-                   :refer-clojure {:excludes [] :renames {}}
-                   :unmapped-default-imports []}}
-                 deps))
-          (is (some #(= {:event :clara-rules/ns-deps-missing
-                         :ns 'fake.no-such-ns-at-all} %)
-                    @tapped)))
-        (finally (remove-tap tap-fn))))))
+    (let [{:keys [result events]}
+          (tu/capture-taps
+           #(ns-deps/->ns-deps {:ns-syms ['fake.no-such-ns-at-all]})
+           #(= :clara-rules/ns-deps-missing (:event %)))]
+      (is (= {'fake.no-such-ns-at-all
+              {:require []
+               :aliases []
+               :imports []
+               :refer-clojure {:excludes [] :renames {}}
+               :unmapped-default-imports []}}
+             result))
+      (is (= [{:event :clara-rules/ns-deps-missing
+               :ns 'fake.no-such-ns-at-all}]
+             events)))))
 
 (deftest test-refer-all--distinct-from-no-refers
   (testing ":refer :all expands to the target's publics; no-refers specs add no entry"
