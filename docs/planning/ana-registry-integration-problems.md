@@ -1,0 +1,233 @@
+# Artifact registry — integration problems found
+
+Status: **Open** · Scope: `server/` (Clojure) · Related:
+[`artifact-registry-plan.md`](artifact-registry-plan.md),
+[`artifact-registry-roadmap.md`](artifact-registry-roadmap.md),
+`tools/graph/artifacts/federate.clj`, `tools/graph/artifacts/compose.clj`,
+`tools/graph/artifacts/registry.clj`
+
+Found integrating the registry from a downstream host: a real registry of
+independently generated units, plus the two units checked in under
+`server/test-resources/rules-annos/`. Every repro below runs against those
+checked-in units, so nothing here needs a private registry to reproduce.
+
+Findings are ordered by severity. 1 and 2 are wrong answers; 3 is a misleading
+diagnostic; 4 and 5 are consistency and ergonomics.
+
+## 1. `:entry-points` and `:orphans` are sets of `:lhs-types` **vectors**, not fact types
+
+`federate/->consumed-types` builds the consumed set with `map` where it needs
+`mapcat`:
+
+```clojure
+(defn- ->consumed-types
+  [{:keys [rules queries]}]
+  (into #{} (comp cat (map :lhs-types)) [(vals rules) (vals queries)]))
+```
+
+`cat` flattens the outer pair into productions; `(map :lhs-types)` then yields
+each production's `:lhs-types` **vector**. The result is a set of vectors — the
+element type every consumer of it assumes is a fact-type name.
+
+Both consumers are therefore wrong, and wrong in the direction that always
+reports a problem:
+
+- `->entry-points` subtracts a set of *types* (`all-satisfies`) from a set of
+  *vectors*. Nothing is ever subtracted, so **every production's `:lhs-types`
+  vector is reported as an entry point**, including the empty vector of a
+  production that matches no type at all.
+- `->orphans` runs `->satisfies` over that same set of vectors, so `consumed`
+  matches no real type and **every produced type is reported as an orphan**.
+
+`federate/grade`'s `:reference-produced-entry-points` reads `:entry-points`, and
+`->digest`'s `:entry-point-count` / `:orphan-count` read both, so the digest and
+the grade inherit it.
+
+### Repro
+
+```clojure
+;; clojure -M:test -i probe.clj -e nil, from server/
+(require '[clara.server.tools.graph.artifacts.registry :as registry]
+         '[clara.server.tools.graph.artifacts.federate :as federate])
+(let [reg   (registry/discover {:root "test-resources/rules-annos"})
+      index (federate/->index reg (registry/units reg))]
+  (println (first (get (:entry-points index) "loan-disposition-ruleset"))))
+;; => [":loan-app/application-outcome"]      ; a vector, not a fact type
+```
+
+Counts on those two units, current versus what the `mapcat` correction gives:
+
+| | current | corrected |
+| --- | ---: | ---: |
+| entry points, `loan-app-ruleset` | 12 | 6 |
+| entry points, `loan-disposition-ruleset` | 3 | 0 |
+| orphans, `loan-app-ruleset` | 14 | 7 |
+| orphans, `loan-disposition-ruleset` | 2 | 0 |
+
+The `loan-disposition-ruleset` column is the point. Corrected, it has **no**
+entry points and **no** orphans, because its one consumed type is satisfied
+through the hierarchy by the other unit's producer — which is exactly the
+cross-unit contract those two fixtures exist to demonstrate. Today the index
+reports that contract as an unexplained entry point.
+
+### Fix
+
+`(comp cat (mapcat :lhs-types))`. Note `->unit-edges` already flattens correctly
+with its own `(mapcat :lhs-types)`, which is why the unit edge is right while
+the entry points are not.
+
+### Why the suite missed it
+
+`federate-test` has no assertion on `:entry-points` or `:orphans` contents. The
+one assertion that touches them —
+`(is (empty? (:reference-produced-entry-points graded)))` in
+`grade-against-a-composed-reference-test` — passes *because* the entry points
+are vectors the reference can never be said to produce. A test pinning the
+element type (every member of `:entry-points` is a key of `:fact-types`) would
+have caught it, and is the regression test worth adding alongside the fix.
+
+## 2. A `UnitRef`'s `:namespaces` filter narrows nothing
+
+`artifacts/schema.clj`'s `UnitRef` says:
+
+> `:namespaces`, when present, narrows the unit to the named namespaces for the
+> merge
+
+It does not. It narrows the *reported* `:scope :namespaces` and feeds
+`:coverage :unknown-namespaces`; no production is excluded from either merge.
+`federate/->index` passes only `analyses-by-unit` to `->production-maps`,
+`->unit-edges`, `->entry-points`, `->orphans` and `->fact-types-index`, and
+`compose/->composed-analysis` never looks at `:namespaces` at all. The
+server's `RegistryConfig` takes `[UnitRef]`, so registry-backed serving inherits
+the same no-op.
+
+### Repro
+
+```clojure
+(let [reg   (registry/discover {:root "test-resources/rules-annos"})
+      units (registry/units reg)
+      all   (federate/->index reg units)
+      none  (federate/->index reg (mapv #(assoc % :namespaces ["no.such.ns"]) units))]
+  [(count (:fact-types all)) (count (:fact-types none))     ;; => [38 38]
+   (count (:unit-edges all)) (count (:unit-edges none))     ;; => [1 1]
+   (get-in none [:scope :namespaces])])                     ;; => all units narrowed to []
+```
+
+Composing the same fully-narrowed selection still yields all 20 rules.
+
+A host cannot work around this: both entry points read the analyses off the
+registry themselves, so there is no seam to hand in a pre-filtered analysis.
+Any caller whose scope is *a subset of a unit's namespaces* — a deployment that
+composes some of a unit's namespaces and excludes others — currently gets an
+answer that includes rules which are not in its scope, silently.
+
+### Fix, and the decisions it needs
+
+Narrow the analysis when it is read for a merge — filter `:rules` / `:queries`
+to productions whose `:ns` is in the filter. Three things to settle while doing
+it, because they are visible in the output either way:
+
+- **`:fact-types`.** Cheapest is to leave the map whole (it is keyed by type,
+  not by namespace) and let the index's forward keys thin out naturally. The
+  alternative — dropping types no surviving production mentions — changes
+  `:hierarchy`, and the hierarchy is the one thing that benefits from being
+  global. Leaving it whole is the recommendation.
+- **`:dep-graph`.** `compose` already recomputes it over the merged production
+  set, so it follows for free once the productions are filtered. `federate`
+  does not read it.
+- **Unknown namespaces.** A filter naming a namespace no unit covers is already
+  reported; the same report should keep working when the filter actually bites,
+  so it has to be computed before the narrowing, not after.
+
+Until this lands, either implement it or delete the promise from `UnitRef`'s
+docstring — a documented filter that silently does nothing is worse than no
+filter.
+
+## 3. `compatibility-report` lets units with no analysis vote for the majority shape
+
+`registry/->unit-info` only assocs `:slim-dropped` when
+`merged-rulebase-analysis/meta.edn` is readable. A unit without an analysis
+therefore has `nil` for its shape, and `compatibility-report` groups by that
+value like any other shape — so `nil` competes in the majority vote.
+
+On a registry that is mid-migration, where most units predate the current
+artifact layout and a few have been regenerated, this inverts the report: the
+majority shape is `nil`, and the units that are *correct* are named as the
+mismatch. `assert-compatible!` then throws naming them, which sends a reader to
+fix the one thing that is not broken.
+
+### Repro
+
+```sh
+mkdir -p /tmp/reg-probe && cd server
+cp -R test-resources/rules-annos/loan-app-ruleset \
+      test-resources/rules-annos/loan-disposition-ruleset /tmp/reg-probe/
+for n in a b c; do
+  cp -R /tmp/reg-probe/loan-app-ruleset /tmp/reg-probe/legacy-$n
+  rm -rf /tmp/reg-probe/legacy-$n/merged-rulebase-analysis
+done
+```
+
+```clojure
+(let [reg (registry/discover {:root "/tmp/reg-probe"})]
+  (registry/compatibility-report reg (registry/units reg)))
+;; :majority-shape  nil
+;; :shape-mismatch  [{:repo "loan-app-ruleset"} {:repo "loan-disposition-ruleset"}]
+;; throw: Cannot merge registry units with differing slim shapes:
+;;        ["loan-app-ruleset" "loan-disposition-ruleset"]
+```
+
+With two legacy units instead of three the tie-break happens to pick the real
+shape, so the report's correctness currently depends on which group is larger.
+
+### Fix
+
+Partition the units before voting: those with a `:slim-dropped` and those
+without. Vote only among the former, and report the latter under their own key
+(`:no-analysis`, say) rather than as a shape. `assert-compatible!` should then
+distinguish the two failures in its message — "N units have no analysis to
+merge" is a different instruction to the reader than "N units have a different
+slim shape". The information is already there: `:missing-artifacts` names
+`:rulebase-analysis` for exactly those units.
+
+Related: `federate/->index` and `compose/->composed-analysis` both call
+`assert-compatible!` before `read-analysis-or-throw`, so today the shape error
+fires first and the clearer "Unit X has no merged-rulebase-analysis" is never
+seen on this path. Fixing the report fixes the ordering symptom too.
+
+## 4. Three definitions of "produced" inside one index
+
+The three fns that ask "does this unit produce this type" disagree:
+
+| fn | produced = |
+| --- | --- |
+| `->unit-edges` | `:insert-types` + `:retract-types` |
+| `->entry-points` | `:insert-types` only |
+| `->orphans` | `:insert-types` + `:retract-types` |
+
+So a type that one unit only retracts and another consumes can simultaneously
+carry a producer→consumer edge, not be an orphan of the producer, and be an
+entry point of the consumer — the index saying both "A supplies it to B" and
+"nothing in scope produces it". `producers-of` reads a fourth path
+(`->fact-type-entry`'s `producer-units`, inserts only), which agrees with
+`->entry-points` and not with the edges.
+
+One predicate, defined once and used by all four, with the choice stated in the
+namespace docstring. Insert-only is the defensible reading — retracting a type
+is not producing it — which makes `->unit-edges` and `->orphans` the two to
+change. Whichever way it goes, the fix for finding 1 touches both call sites, so
+it is cheap to settle at the same time.
+
+## 5. Minor
+
+- **No supported way to select the readable units.** On a registry that is
+  partially regenerated, the only path to a working selection is for each host
+  to write the same `(filter #(some? (registry/read-analysis reg %)) units)`
+  loop — which also warms the cache with analyses it may not want. A
+  `registry/units-with-analysis` (or a `:skip-unreadable?` option on the merges,
+  reporting skipped units in `:coverage`) keeps that decision in one place.
+- **`paths-between` returns one path.** The name reads plural and the plan
+  called it a bounded BFS; the implementation returns the first shortest path or
+  nil, which its docstring says plainly. Either rename to `path-between` or
+  return the set of shortest paths — a reviewer asking "how does a fact get from
+  A to B" usually wants to know whether there is more than one route.
