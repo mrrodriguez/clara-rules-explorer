@@ -69,9 +69,12 @@ manifest, that outlives the process. A library has no standing to guess it.
 
 ### The checked-in example
 
-`server/test-resources/rules-annos/` is a committed example of the whole set, generated from the
+`clara.server.tools.graph.artifacts.regen-example/example-out-dir` (relative to `server/`) is a
+committed example of the whole set, generated from the
 loan-doc-rules + loan-app-rules + loan-doc-queries session (the same session
 `clara.server.graph.integration-test/run-loan-app-rules` builds, with approved-app working memory).
+The `rules-annos/` parent is the registry root and the `loan-app-ruleset` subdir one named ruleset
+under it — the layout a rules registry keeps for holding more than one ruleset later.
 It is there so a change to any generation step shows up as a reviewable diff rather than a silent
 format drift. Regenerate it (from `server/`) with `make regen-artifacts`, which runs
 `dev/regen_artifacts.clj`; a regeneration is byte-identical when nothing has changed, and anything

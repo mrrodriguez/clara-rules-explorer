@@ -1,5 +1,6 @@
 (ns clara.server.tools.graph.artifacts.regen-example-test
-  "Golden test for the checked-in persistence example under test-resources/rules-annos.
+  "Golden test for the checked-in persistence example under
+   `example/example-out-dir`.
 
    Regenerates the whole artifact set into a temp dir via
   `clara.server.tools.graph.artifacts.regen-example/generate-example-artifacts!` and asserts the

@@ -1,5 +1,5 @@
-;; Regenerates the checked-in persistence example under
-;; test-resources/rules-annos/ (see server/docs/persisted-artifacts.md).
+;; Regenerates the checked-in persistence example under `example/example-out-dir`
+;; (see server/docs/persisted-artifacts.md).
 ;;
 ;; Run from server/:
 ;;   make regen-artifacts

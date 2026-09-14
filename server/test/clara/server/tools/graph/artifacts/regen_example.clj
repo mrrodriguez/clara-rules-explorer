@@ -1,6 +1,6 @@
 (ns clara.server.tools.graph.artifacts.regen-example
   "The one definition of how the checked-in persistence example under
-   `test-resources/rules-annos/` is generated.
+   `example-out-dir` is generated.
 
    Both the regeneration entry point (`regen-artifacts/-main`, reachable as
    `make regen-artifacts`) and the golden test
@@ -45,7 +45,7 @@
   (format "test-resources/%s" example-resource-base))
 
 ;; ---------------------------------------------------------------------------
-;; The session — mirrors clara.server.graph.integration-test/run-loan-app-rules
+;; The session — mirrors `clara.server.graph.integration-test/run-loan-app-rules`
 ;; ---------------------------------------------------------------------------
 
 (defn- run-app-outcome-approved
