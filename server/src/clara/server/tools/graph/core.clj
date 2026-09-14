@@ -14,10 +14,10 @@
             [clara.server.tools.graph.utils :as utils]
             [clojure.string :as str]))
 
-(defn- get-rulebase [session-or-rulebase]
-  (if (satisfies? eng/ISession session-or-rulebase)
-    (-> session-or-rulebase eng/components :rulebase)
-    session-or-rulebase))
+(def ^:private get-rulebase
+  "See `clara.server.tools.graph.utils/get-rulebase`, where the
+   session-or-rulebase either-or is defined once for the whole library."
+  utils/get-rulebase)
 
 (defn working-memory-available?
   "True when `session-or-rulebase` is a live session with inspectable working memory."

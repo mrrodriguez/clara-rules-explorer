@@ -9,6 +9,12 @@
         org.clojure/tools.cli {:mvn/version "1.0.214"}
         clj-kondo/clj-kondo {:mvn/version "2026.05.25"}
 
+        ;; The EDN pretty-printer every persisted artifact goes through
+        ;; (`clara.server.tools.graph.edn-io`), and the `:form-printer` the
+        ;; artifact flow hands `->rulebase-analysis` so its rendered LHS/RHS
+        ;; strings stay off `clojure.pprint`.
+        fipp/fipp {:mvn/version "0.6.29"}
+
         ;; Logging facade (no runtime deps — see :dev for the standalone backend).
         ;; tools.logging auto-detects SLF4J -> commons-logging -> log4j2 ->
         ;; log4j -> java.util.logging, so it never forces a backend onto a
@@ -61,7 +67,7 @@
           ;; (single-threaded, before the server accepts connections) closes the
           ;; race; both paths then just resolve an already-loaded var.
           :main-opts ["-e" "(require 'cider.nrepl.pprint)"
-                      "-m" "nrepl.cmdline" 
+                      "-m" "nrepl.cmdline"
                       "--middleware" "[cider.nrepl/cider-middleware]"
                       "--interactive"]}
 

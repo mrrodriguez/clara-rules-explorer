@@ -43,8 +43,8 @@
             [clara.server.tools.graph.annotations :as ann]
             [clara.server.tools.graph.annotations.callsite :as ann.callsite]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
-            [clara.rules.engine :as eng])
-  (:import [clara.rules.engine LocalSession]))
+            [clara.server.tools.graph.utils :as graph-utils]
+            [clara.rules.engine :as eng]))
 
 ;; `ns->resource-base` is defined below but used in private helper fns above
 ;; it, hence the forward declaration.
@@ -132,10 +132,10 @@
   (let [resource-path (format "%s.clj" (ns->resource-base ns-sym))]
     (analyze-source-code source-code resource-path config-dir)))
 
-(defn- get-rulebase [session-or-rulebase]
-  (if (instance? LocalSession session-or-rulebase)
-    (-> session-or-rulebase eng/components :rulebase)
-    session-or-rulebase))
+(def ^:private get-rulebase
+  "See `clara.server.tools.graph.utils/get-rulebase`, where the
+   session-or-rulebase either-or is defined once for the whole library."
+  graph-utils/get-rulebase)
 
 (defn- heuristic-fallback-callsites
   "Emits scan-derived record-ctor types as heuristic callsites for the given
@@ -603,16 +603,46 @@
            :alias-by-rule alias-by-rule
            :dynamic-type-fallback-resolution fallback-mode)))
 
+(s/defschema ConstructorMatchFn
+  "A spec's `:match-fn`: decides whether a fully-qualified var symbol is a
+   constructor of interest.
+
+   A **set of fully-qualified symbols** is the usual form, and the one to reach
+   for — most specs are a membership test, and a set says so without a closure
+   around it.  A predicate `(fn [fq-var-sym] -> truthy/nil)` is the escape hatch
+   for a rule a set cannot express (a namespace prefix, say).
+
+   clj-kondo resolves every callee to a fully-qualified symbol before a
+   `:match-fn` sees it, so matching is unambiguous — a set names
+   `my.ns/->fact`, never the bare `->fact`, which means a different var per
+   namespace."
+  (s/cond-pre #{s/Symbol} (s/=> s/Any s/Symbol)))
+
 (s/defschema FactConstructorSpec
   "One constructor of interest for `:fact-constructors`.
-   `:match-fn` — (fn [fq-var-sym] -> truthy/nil) — decides whether a
-   fully-qualified var symbol is a constructor of interest.
+   `:match-fn` — a `ConstructorMatchFn`: a set of fully-qualified constructor
+   symbols, or a predicate over one.
    `:type-resolver-fn` — (fn [callsite/ConstructorTypeResolverContext] -> nil
    or {:resolved-types [token …]}) — extracts fact types from its callsite.
-   (The `s/=>` fn schemas are documentation: prismatic FnSchema does not
+   (The `s/=>` fn schema is documentation: prismatic FnSchema does not
    validate fn-ness; `s/validate` enforces the required keys only.)"
-  {:match-fn (s/=> s/Any s/Symbol)
+  {:match-fn ConstructorMatchFn
    :type-resolver-fn (s/=> s/Any callsite/ConstructorTypeResolverContext)})
+
+(defn normalize-fact-constructor-specs
+  "`specs` with every `:match-fn` given as a set replaced by a predicate over
+   it, leaving every other key untouched — nothing else about a spec is
+   inferred.
+
+   Sets are already `IFn`, so a set works today by accident.  Normalizing means
+   the invariant is stated once: everything downstream of
+   `->annotations-from-rule-source-analysis` — `analyze.index`, `analyze.callsite` —
+   holds a fn, and is entitled to."
+  [specs]
+  (mapv (fn [{:keys [match-fn] :as spec}]
+          (cond-> spec
+            (set? match-fn) (assoc :match-fn (fn [sym] (contains? match-fn sym)))))
+        specs))
 
 (defn- type-name-str
   "Canonical name string for a fact type: Class objects become their binary
@@ -714,9 +744,11 @@
 
    * `:fact-constructors` — optional vector of `FactConstructorSpec` maps
   `[{:match-fn … :type-resolver-fn} …]` declaring additional constructors of
-  interest.  When a boundary-call argument chain reaches a callsite whose
-  callee a `:match-fn` accepts (fully-qualified match; first matching spec in
-  vector order wins), that spec's `:type-resolver-fn` is invoked with a
+  interest.  A `:match-fn` may be given as a set of fully-qualified symbols
+  (`ConstructorMatchFn`); it is normalized to a predicate on entry here, so
+  nothing downstream has to accept both.  When a boundary-call argument chain
+  reaches a callsite whose callee a `:match-fn` accepts (fully-qualified match;
+  first matching spec in vector order wins), that spec's `:type-resolver-fn` is invoked with a
   `callsite/ConstructorTypeResolverContext` (including a `:via` provenance
   chain), and the callsite is owned by the constructor path — it never also
   reaches `:callsite-resolver-fn`.
@@ -728,7 +760,7 @@
   `:event :clara-rules/type-fallback-skipped` context — register a tap with
   `add-tap` to trace what was skipped."
   [{:keys [rule-source-analysis rules-filter session-or-rulebase callsite-resolver-fn
-           fact-type-spec-fn fact-constructors dynamic-type-fallback-resolution] :as options}]
+           fact-type-spec-fn dynamic-type-fallback-resolution] :as options}]
   (s/validate RuleSourceAnnotationsOptions options)
   (when-not session-or-rulebase
     (throw (ex-info "->annotations-from-rule-source-analysis requires :session-or-rulebase"
@@ -739,7 +771,11 @@
                             (comp (keep :ns) (distinct))))]
     (try (require ns-sym) (catch Exception _ nil)))
 
-  (let [get-source (build-source-loader (::combined-sources rule-source-analysis))
+  (let [;; Normalized here because this is the single place `:fact-constructors`
+        ;; arrives before being threaded down: no caller can forget to, and
+        ;; everything below keeps its "a `:match-fn` is a fn" invariant.
+        fact-constructors (normalize-fact-constructor-specs (:fact-constructors options))
+        get-source (build-source-loader (::combined-sources rule-source-analysis))
         rulebase (get-rulebase session-or-rulebase)
         productions (mapv #(update % :lhs conditions/normalize-lhs)
                           (:productions rulebase))

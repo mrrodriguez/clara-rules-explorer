@@ -120,6 +120,11 @@ Layers are **sparse**: omitting a key means "no opinion" — the lower layer's
 value survives.  Layers are read via `->layer` and written
 with `write-layer!`; in-memory layers are first-class (`->layer`).
 
+A layer file is one input to a whole persisted artifact set — the fold beside it,
+the analysis over that fold, a provenance manifest. That side of things is
+[Persisted artifacts](persisted-artifacts.md); nothing below this line is about
+files.
+
 ---
 
 ## Annotation Merging

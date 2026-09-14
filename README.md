@@ -62,6 +62,8 @@ See the sub-project READMEs for detailed prerequisites and instructions:
 - [GitHub Actions Setup](./docs/gha-setup.md) — CI workflow configuration.
 - [UI Architecture](./ui/docs/app-arch.md) — UI component architecture and
   design decisions.
+- [Persisted Artifacts](./server/docs/persisted-artifacts.md) — writing an
+  analysis to disk and reading it back with no session, no classpath and no JVM.
 - Server internals: see [`server/docs/`](./server/docs/) for rule annotations,
   internal models, and analysis notes.
 

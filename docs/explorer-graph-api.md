@@ -566,6 +566,10 @@ callsite `:resolved-types` are raw type tokens (strings), not `TypeReference`
 objects (that serialization happens on the analysis endpoints).  Layer
 membership and `:provenance` are library-internal and not exposed over HTTP.
 
+The server is given the layer *files* and folds them itself; it never reads a
+persisted merge. See
+[Persisted artifacts](../server/docs/persisted-artifacts.md).
+
 **Response** `200`:
 ```json
 {
