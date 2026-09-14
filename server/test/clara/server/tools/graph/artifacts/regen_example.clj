@@ -136,6 +136,24 @@
   "The checked-in example rulesets, in generation order."
   [loan-app-ruleset loan-disposition-ruleset])
 
+(def composed-example-repo
+  "The repo (registry-relative path) of the checked-in composed unit."
+  "composed/loan-app-plus-disposition")
+
+(def composed-example
+  "The composed unit persisted from the two source rulesets — the same merge
+   `compose-test` and `compose-persist-test` exercise. Checked in so
+   `make regen-artifacts` pins the materialized composition byte-for-byte."
+  {:repo composed-example-repo
+   :units [{:repo "loan-app-ruleset"}
+           {:repo "loan-disposition-ruleset"}]
+   :analysis-run
+   {:scope "composed loan-app + loan-disposition"}})
+
+(def example-repos
+  "Every repo generated into the example registry, source bundles first."
+  (conj (mapv :repo example-rulesets) composed-example-repo))
+
 ;; ---------------------------------------------------------------------------
 ;; Generation
 ;; ---------------------------------------------------------------------------
@@ -169,6 +187,24 @@
      :memory-rule-count (if memory-layer (count (:annotations memory-layer)) 0)
      :manifest manifest-file}))
 
+(defn- persist-composed-example!
+  "Compose the source rulesets under `root` into one unit-shaped directory and
+   return the summary. Runs after `persist-ruleset!` for both sources, since
+   `flow/compose-persist!` reads them back off disk."
+  [root {:keys [repo units analysis-run]}]
+  (let [dir (str (io/file root repo))
+        opts {:root root
+              :repo repo
+              :dir dir
+              :generated-by example-generated-by
+              :units units}
+        {:keys [rule-count manifest]} (flow/compose-persist!
+                                       (assoc opts :analysis-run analysis-run))]
+    {:repo repo
+     :dir dir
+     :rule-count rule-count
+     :manifest manifest}))
+
 (defn generate-example-artifacts!
   "Generate the full checked-in artifact registry — every ruleset in
    `example-rulesets` — under `dir`, and return a summary map.
@@ -185,4 +221,5 @@
    environment, not generation."
   [dir]
   {:dir dir
-   :rulesets (mapv #(persist-ruleset! dir %) example-rulesets)})
+   :rulesets (mapv #(persist-ruleset! dir %) example-rulesets)
+   :composed (persist-composed-example! dir composed-example)})

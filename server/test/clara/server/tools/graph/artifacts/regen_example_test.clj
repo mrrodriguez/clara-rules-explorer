@@ -98,7 +98,8 @@
 
 (deftest regenerated-artifacts-match-checked-in-example-test
   (let [tmp (create-temp-dir)
-        repos (mapv :repo example/example-rulesets)]
+        repos example/example-repos
+        source-repos (mapv :repo example/example-rulesets)]
     (try
       (let [result (example/generate-example-artifacts! tmp)
             expected (get-snapshot (checked-in-dir))
@@ -109,14 +110,16 @@
           (is (seq expected-files)
               (format "no checked-in artifacts found under %s"
                       example/example-registry-base)))
-        (testing "both checked-in ruleset bundles are present"
+        (testing "every checked-in bundle is present"
           (doseq [repo repos]
             (is (some #(str/starts-with? % (str "/" repo "/"))
                       (keys expected-files))
                 (str repo " bundle is checked in"))))
-        (testing "generation returns both rulesets"
-          (is (= (set repos)
-                 (set (map :repo (:rulesets result))))))
+        (testing "generation returns the source rulesets and composed unit"
+          (is (= (set source-repos)
+                 (set (map :repo (:rulesets result)))))
+          (is (= (:repo example/composed-example)
+                 (get-in result [:composed :repo]))))
         (testing "the single-ns disposition ruleset has no memory layer"
           (let [disposition (first (filter #(= "loan-disposition-ruleset" (:repo %))
                                            (:rulesets result)))]
@@ -128,7 +131,7 @@
           (doseq [path (keys expected-files)]
             (is (= (get expected-files path) (get actual-files path))
                 (str path " is not reproduced by regeneration"))))
-        (testing "every ruleset provenance manifest matches apart from its environment fields"
+        (testing "every provenance manifest matches apart from its environment fields"
           (doseq [repo repos]
             (is (= (normalize-manifest (read-manifest (io/file (checked-in-dir) repo)))
                    (normalize-manifest (read-manifest (io/file tmp repo))))

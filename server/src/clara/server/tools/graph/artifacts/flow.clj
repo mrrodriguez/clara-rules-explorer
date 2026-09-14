@@ -395,7 +395,6 @@
       (let [manifest-file (manifest/write-manifest!
                            (assoc opts
                                   :analysis-run (merge {:mode :compose
-                                                        :root root
                                                         :units units}
                                                        analysis-run)))]
         {:dir (store/get-out-dir opts)

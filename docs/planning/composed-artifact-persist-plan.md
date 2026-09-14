@@ -249,6 +249,8 @@ Each phase leaves `make test lint reflection-check` green in `server/`.
    assert the directory shape, composed `:slim` survival, and manifest
    provenance. Extend `bb_report_test.clj` to run the existing script against
    the composed dir unchanged, pinning `consumers` / `edges` / `layers` output.
+   Extend the `regen-example` golden test so `make regen-artifacts` writes the
+   composed unit into the checked-in registry and pins it byte-for-byte.
 3. **CLI wrapper** — `dev/compose_artifacts.clj`, a thin entry point reading an
    inline EDN opts map (or an `.edn` file path) and calling
    `flow/compose-persist!`, mirroring how `dev/regen_artifacts.clj` wraps the

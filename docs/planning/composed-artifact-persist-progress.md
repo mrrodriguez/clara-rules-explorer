@@ -16,6 +16,7 @@ Progress tracker for the implementation. Checked = done + verified.
 - [x] `compose_test.clj` — `->standard-role-layers` folds the two checked-in units per role and strips derived `:from-layer`
 - [x] New `compose_persist_test.clj` — `flow/compose-persist!` writes a composed unit; directory shape, `:slim` survival, manifest provenance
 - [x] `bb_report_test.clj` — run `annotations_report.bb` against a composed dir unchanged (`summary`/`consumers`/`edges`/`layers`)
+- [x] `regen-example` — `make regen-artifacts` writes the composed unit into `test-resources/rules-annos/composed/` and the golden test pins it
 
 ## Phase 3 — CLI wrapper
 
@@ -36,3 +37,4 @@ Progress tracker for the implementation. Checked = done + verified.
 
 - 2026-09-14: Progress doc created. Starting Phase 1.
 - 2026-09-14: Implemented `compose/->standard-role-layers` + `flow/compose-persist!`; wired schemas; added `compose-persist-test` and the bb composed-unit test; added `dev/compose_artifacts.clj` and the docs note. Full gates green (383 tests, 2346 assertions, 0 failures).
+- 2026-09-14: Added the composed unit to the checked-in example registry via `make regen-artifacts` (`composed/loan-app-plus-disposition`), and extended the golden test to pin it. `regen-example-test` green.

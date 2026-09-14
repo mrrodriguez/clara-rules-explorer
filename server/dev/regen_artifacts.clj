@@ -25,10 +25,12 @@
 (defn -main
   [& _]
   (delete-tree! example/example-out-dir)
-  (let [{:keys [dir rulesets]} (example/generate-example-artifacts! example/example-out-dir)]
+  (let [{:keys [dir rulesets composed]} (example/generate-example-artifacts! example/example-out-dir)]
     (println "wrote artifact registry to" dir)
     (doseq [{:keys [repo generated-rule-count memory-rule-count manifest]} rulesets]
       (println repo "generated layer:" generated-rule-count "rules")
       (println repo "memory layer:" memory-rule-count "rules")
       (println repo "manifest:" manifest))
+    (println (:repo composed) "composed:" (:rule-count composed) "rules")
+    (println (:repo composed) "manifest:" (:manifest composed))
     (System/exit 0)))
