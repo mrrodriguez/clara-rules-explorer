@@ -217,6 +217,59 @@
       (let [reg (registry/discover {:root root})]
         (is (= ["a"] (mapv registry/unit-key (registry/units-with-analysis reg))))))))
 
+(defn- write-aggregate-unit!
+  "A minimal unit whose manifest claims an aggregate `:mode` (and, when given,
+  the units it was composed from)."
+  [root repo mode composed-from]
+  (let [dir (io/file root repo)
+        file (io/file dir (:manifest layout/artifact-files))]
+    (io/make-parents file)
+    (edn-io/write-edn-file!
+     file
+     (cond-> (assoc (manifest {:repo repo})
+                    :analysis-run {:layer-ids store/layer-artifacts
+                                   :mode mode})
+       (seq composed-from) (assoc-in [:analysis-run :units] composed-from)))
+    (str dir)))
+
+(deftest discover-records-aggregate-mode-and-composed-from-test
+  (with-temp-root
+    (fn [root]
+      (write-unit! root "src" #{:nodes :id})
+      (write-aggregate-unit! root "composed" :compose [{:repo "src"}])
+
+      (let [reg (registry/discover {:root root})
+            src-info (registry/unit-info reg {:repo "src"})
+            agg-info (registry/unit-info reg {:repo "composed"})]
+        (testing "a source unit carries no :mode and is not an aggregate"
+          (is (not (contains? src-info :mode)))
+          (is (false? (registry/aggregate-unit? reg {:repo "src"}))))
+        (testing "an aggregate unit records its mode and composed-from"
+          (is (= :compose (:mode agg-info)))
+          (is (= [{:repo "src"}] (:composed-from agg-info)))
+          (is (true? (registry/aggregate-unit? reg {:repo "composed"}))))
+        (testing "a unit claiming a mode but no units is still an aggregate"
+          (write-aggregate-unit! root "captured" :captured-session nil)
+          (let [reg (registry/discover {:root root})]
+            (is (= :captured-session
+                   (:mode (registry/unit-info reg {:repo "captured"}))))
+            (is (not (contains? (registry/unit-info reg {:repo "captured"})
+                                :composed-from))
+                "no :composed-from key when the manifest names none")))))))
+
+(deftest source-units-excludes-aggregate-units-test
+  (with-temp-root
+    (fn [root]
+      (write-unit! root "a" #{:nodes :id})
+      (write-unit! root "b" #{:nodes :id})
+      (write-aggregate-unit! root "agg" :captured-session nil)
+
+      (let [reg (registry/discover {:root root})]
+        (is (= ["a" "agg" "b"]
+               (mapv registry/unit-key (registry/units reg))))
+        (is (= ["a" "b"]
+               (mapv registry/unit-key (registry/source-units reg))))))))
+
 (deftest compatibility-report-lists-missing-artifacts
   (with-temp-root
     (fn [root]

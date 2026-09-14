@@ -65,6 +65,17 @@
   [^Registry registry unit]
   (get (:units-by-key registry) (unit-key unit)))
 
+(defn aggregate-unit?
+  "Is `unit` an aggregate — a unit whose manifest's `:analysis-run :mode` is
+  present? A composition (`clara.server.tools.graph.artifacts.flow/compose-persist!`
+  writes `:mode :compose`) and a host's own captured whole-rulebase unit are
+  aggregates; absence of `:mode` is what marks a source unit. The `:mode` value
+  is host-set and deliberately open — a closed enum would only push hosts back
+  to reading the raw manifest — so this reads presence, never a specific value.
+  An unknown unit is not an aggregate."
+  [^Registry registry unit]
+  (some? (:mode (unit-info registry unit))))
+
 (defn same-registry?
   "Structural equality of two registries, ignoring the memoization `:cache` atom
   — the one field that keeps the record from being a pure value. Two registries
@@ -149,8 +160,11 @@
 
 (defn- ->unit-info
   "What `discover` records per unit: the ref, the resolved dir, present
-  artifacts, the slim `:dropped` shape, the manifest's layer ids, and the
-  manifest head (`:created`, `:sha`, `:history` head)."
+  artifacts, the slim `:dropped` shape, the manifest's layer ids, the
+  manifest head (`:created`, `:sha`, `:history` head), and — when the manifest
+  claims an aggregate — its `:analysis-run :mode` (as `:mode`) and the units it
+  was composed from (`:analysis-run :units`, as `:composed-from`). Absence of
+  `:mode` is what marks a source unit."
   [root ref]
   (let [dir (store/get-out-dir (assoc ref :root root))
         present (into #{}
@@ -158,7 +172,9 @@
                               (when (.exists (io/file dir filename)) k)))
                       store/unit-artifact-files)
         manifest (read-manifest-file (io/file dir))
-        meta (read-meta-file (io/file dir))]
+        meta (read-meta-file (io/file dir))
+        mode (get-in manifest [:analysis-run :mode])
+        composed-from (not-empty (mapv unit-ref (get-in manifest [:analysis-run :units])))]
     (cond-> (assoc (unit-ref ref)
                    :dir dir
                    :artifacts present)
@@ -169,7 +185,13 @@
       (assoc :layer-ids (get-in manifest [:analysis-run :layer-ids])
              :manifest-head {:created (:created manifest)
                              :sha (get-in manifest [:source :sha])
-                             :history (vec (take 1 (:history manifest)))}))))
+                             :history (vec (take 1 (:history manifest)))})
+
+      (some? mode)
+      (assoc :mode mode)
+
+      (seq composed-from)
+      (assoc :composed-from composed-from))))
 
 (s/defn ->registry :- Registry
   "A registry of the explicit `:units` under `:root`. `units` is a vector of
@@ -275,6 +297,15 @@
   (->> (units registry)
        (filter #(contains? (:artifacts (unit-info registry %)) :rulebase-analysis))
        vec))
+
+(defn source-units
+  "The units of `registry` with no aggregate `:mode` — the source units a
+  federation is usually asking about. Excludes compositions and captured
+  whole-rulebase units, which describe the same productions as the units they
+  overlap and would silently double-count them in
+  `clara.server.tools.graph.artifacts.federate/->index`."
+  [^Registry registry]
+  (into [] (remove #(aggregate-unit? registry %)) (units registry)))
 
 ;; ===========================================================================
 ;; compatibility

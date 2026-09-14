@@ -50,6 +50,60 @@
         (map (fn [unit] [(unit-key unit) (read-analysis-or-throw registry unit)]))
         selection))
 
+;; ===========================================================================
+;; aggregate overlap refusal
+;;
+;; An aggregate unit (a composition, or a host's own captured whole-rulebase
+;; unit) describes the same productions as the units it overlaps. Federating it
+;; beside those units would silently double-count every per-unit answer, so
+;; `->index` refuses the selection unless the caller opts in. See
+;; `clara.server.tools.graph.artifacts.registry/aggregate-unit?`.
+;; ===========================================================================
+
+(defn- ->aggregate-units
+  "The selected units recorded with an aggregate `:mode`, as
+  `{:key unit-key :composed-from [unit-key …]}`."
+  [registry selection]
+  (into []
+        (keep (fn [unit]
+                (when (registry/aggregate-unit? registry unit)
+                  {:key (unit-key unit)
+                   :composed-from (mapv registry/unit-key
+                                        (:composed-from (registry/unit-info registry unit)))})))
+        selection))
+
+(defn- assert-no-aggregate-overlap!
+  "Refuse a selection that would silently double-count, before any analysis is
+  read.
+
+  An aggregate whose `:composed-from` names another selected unit is refused
+  outright — that selection double-counts by construction, the same way
+  `clara.server.tools.graph.artifacts.compose/->composed-analysis` refuses a
+  production name claimed by two units. Any other mix of aggregate and source
+  units is refused too: a captured whole-rulebase unit (an aggregate naming no
+  `:composed-from`) overlaps every unit and the index cannot see which, so those
+  two are never one question."
+  [registry selection]
+  (let [selected-keys (into #{} (map unit-key) selection)
+        aggregates (->aggregate-units registry selection)]
+    (doseq [{:keys [key composed-from]} aggregates
+            :let [overlap (vec (sort (set/intersection selected-keys (set composed-from))))]
+            :when (seq overlap)]
+      (throw (ex-info (format "Cannot index: aggregate unit %s is composed from selected unit(s) %s — its productions already contain theirs, so selecting both would double-count"
+                              key (pr-str overlap))
+                      {:unit key
+                       :composed-from composed-from
+                       :selected-overlap overlap})))
+    (when (and (seq aggregates)
+               (< (count aggregates) (count selection)))
+      (throw (ex-info (format "Cannot index: selection mixes %d aggregate unit(s) with %d source unit(s) — an aggregate describes the same rules as the units it overlaps"
+                              (count aggregates)
+                              (- (count selection) (count aggregates)))
+                      {:aggregate-units (mapv :key aggregates)
+                       :source-units (->> selection
+                                          (remove #(registry/aggregate-unit? registry %))
+                                          (mapv unit-key))})))))
+
 (defn- narrow-analyses-by-unit
   "The per-unit analyses narrowed to each unit's `:namespaces` filter (a no-op
   for unfiltered units). Runs after coverage and unknown-namespace reporting,
@@ -382,8 +436,14 @@
   "The federated index over `selection` (an ordered vector of `UnitRef`s, each
   optionally narrowed by a `:namespaces` filter), a value. Units are read as
   slim, then narrowed to their filter; the hierarchy is unioned and re-closed;
-  shape skew is refused via `registry/assert-compatible!`."
+  shape skew is refused via `registry/assert-compatible!`.
+
+  A selection that mixes aggregate and source units is refused — an aggregate
+  unit describes the same productions as the units it overlaps, so federating
+  both silently double-counts. An aggregate whose `:composed-from` names
+  another selected unit is refused outright."
   [registry selection]
+  (assert-no-aggregate-overlap! registry selection)
   (registry/assert-compatible! registry selection)
   (let [analyses-by-unit (->analyses-by-unit registry selection)
         covered-by-unit (->covered-namespaces-by-unit analyses-by-unit)

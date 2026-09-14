@@ -288,7 +288,12 @@ Four namespaces answer that, all under
   variants of the parent unit rather than units of their own.
   `registry/compatibility-report` compares each unit's `:slim :dropped` key set
   and names the units that do not share a shape — the question a merge answers
-  first.
+  first. `unit-info` records, for an aggregate unit, the manifest's
+  `:analysis-run :mode` (as `:mode`) and `:analysis-run :units` (as
+  `:composed-from`); absence of `:mode` marks a source unit.
+  `registry/aggregate-unit?` and `registry/source-units` turn that marker into
+  the selection a federation usually wants (the source units, no compositions
+  or captured whole-rulebase units), beside `units-with-analysis`.
 - **`rehydrate`** — the inverse of `slim`. Rebuilds the reverse directions a
   persisted analysis drops because they are recomputable: fact-type
   `:used-by-*` / `:inserted-by-rules` / `:retracted-by-rules` (with the two
@@ -313,7 +318,10 @@ Four namespaces answer that, all under
   `unit-dependency-graph` answer over it; `->digest` + `persist!` write
   `registry-index.edn` / `registry-digest.edn` to an explicit `:dir`. `grade`
   checks the union against a composed reference (a captured session or
-  monolithic run).
+  monolithic run). `->index` refuses a selection that mixes aggregate and
+  source units (an aggregate describes the same productions as the units it
+  overlaps, so both would silently double-count), and always refuses an
+  aggregate whose `:composed-from` names another selected unit.
 
 The library discovers and merges; it never decides *which* sets belong together
 or *what a set means* — every entry point takes the selection explicitly. The
@@ -346,7 +354,9 @@ It writes the three standard layers, compact `merged-annotations.edn`,
 `merged-rulebase-analysis/`, `rulebase-analysis-digest.edn`, and a manifest —
 the same shape `bin/annotations_report.bb` already reads. Per-unit provenance
 lives in the manifest's `:analysis-run` block rather than in the flattened
-layer files.
+layer files; the manifest's `:analysis-run :mode :compose` and `:units` are
+exactly the aggregate marker `registry/unit-info` reads back, so a composed
+unit is not mistaken for a source unit when discovered again.
 
 ## Related
 

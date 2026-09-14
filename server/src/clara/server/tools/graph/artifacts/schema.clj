@@ -714,13 +714,18 @@
   `clara.server.tools.graph.artifacts.registry/discover` records per unit: its
   `UnitRef`, the resolved `:dir`, the artifact roles present, the slim
   `:dropped` key set (the merge's shape), the layer ids the manifest records,
-  and the manifest's `:created` / `:sha` / `:history` head."
+  the manifest's `:created` / `:sha` / `:history` head, and — for an aggregate
+  unit — the manifest's `:analysis-run :mode` and the units it was composed
+  from (`:analysis-run :units`). Absence of `:mode` marks a source unit; the
+  `:mode` value is host-set and open."
   (merge UnitRef
          {:dir s/Str
           :artifacts #{ArtifactKey}
           (s/optional-key :slim-dropped) (s/maybe #{s/Keyword})
           (s/optional-key :layer-ids) {s/Keyword s/Any}
-          (s/optional-key :manifest-head) {s/Keyword s/Any}}))
+          (s/optional-key :manifest-head) {s/Keyword s/Any}
+          (s/optional-key :mode) s/Any
+          (s/optional-key :composed-from) [UnitRef]}))
 
 (s/defschema CompatibilityReport
   "What

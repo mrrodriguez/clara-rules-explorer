@@ -1,6 +1,6 @@
 # Artifact registry — integration problems found
 
-Status: **1–5 resolved, 6 open** · Scope: `server/` (Clojure) · Related:
+Status: **1–6 resolved** · Scope: `server/` (Clojure) · Related:
 [`artifact-registry-plan.md`](artifact-registry-plan.md),
 [`artifact-registry-roadmap.md`](artifact-registry-roadmap.md),
 `tools/graph/artifacts/federate.clj`, `tools/graph/artifacts/compose.clj`,
@@ -398,3 +398,36 @@ The first is the one that matters; the others are cheap once it exists.
 `composed-artifact-persist-plan.md` §7 raises where the federated sidecar files
 should live, which is adjacent, but not this: the hazard is the composed unit
 itself being indistinguishable from what it was composed from.
+
+### Resolution
+
+The three options above landed, weakest first:
+
+- [x] **Record the mode.** `registry/->unit-info` records `:mode` (the
+  manifest's `:analysis-run :mode`) and `:composed-from` (the
+  `:analysis-run :units`, normalized to `UnitRef`s); absence of `:mode` marks a
+  source unit. The `:mode` value is host-set and open — `compose-persist!`
+  writes `:compose`, a captured session writes whatever the host calls it — so
+  no closed enum. `schema/UnitInfo` carries both keys.
+- [x] **Offer the selection.** `registry/aggregate-unit?` is the presence
+  predicate and `registry/source-units` is the "units someone analyzed"
+  selection beside `units-with-analysis` — excluding compositions and captured
+  whole-rulebase units that would double-count them.
+- [x] **Refuse the overlap.** `federate/->index` refuses before any analysis
+  is read:
+  - an aggregate whose `:composed-from` names another selected unit throws
+    outright, the way `compose/->composed-analysis` already refuses a name
+    claimed by two units;
+  - any other mix of aggregate and source units also throws — those two are
+    never one question.
+- [x] Tests pin all of it: `registry` records the mode/composed-from and
+  `source-units` excludes aggregates
+  (`discover-records-aggregate-mode-and-composed-from-test`,
+  `source-units-excludes-aggregate-units-test`); `federate` refuses the
+  composed unit beside its sources and the mix
+  (`aggregate-unit-beside-its-sources-is-refused-test`,
+  `aggregate-source-mix-is-refused-test`).
+
+The checked-in repro now refuses: indexing `units-with-analysis` over
+`rules-annos/` names the composition and its selected sources, where it
+previously reported four edges and no message.

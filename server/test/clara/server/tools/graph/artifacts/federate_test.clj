@@ -86,15 +86,18 @@
   (doseq [f (reverse (file-seq (io/file dir)))]
     (io/delete-file f true)))
 
-(defn- write-manifest! [dir repo]
-  (let [file (io/file dir (:manifest layout/artifact-files))]
-    (io/make-parents file)
-    (edn-io/write-edn-file! file {:repo repo
-                                  :generated-by "federate-test"
-                                  :created "2025-01-01"
-                                  :analysis-run {:layer-ids store/layer-artifacts}
-                                  :history []})
-    (str file)))
+(defn- write-manifest!
+  ([dir repo] (write-manifest! dir repo {}))
+  ([dir repo analysis-run]
+   (let [file (io/file dir (:manifest layout/artifact-files))]
+     (io/make-parents file)
+     (edn-io/write-edn-file! file {:repo repo
+                                   :generated-by "federate-test"
+                                   :created "2025-01-01"
+                                   :analysis-run (merge {:layer-ids store/layer-artifacts}
+                                                        analysis-run)
+                                   :history []})
+     (str file))))
 
 (defn- write-analysis! [dir rules fact-types]
   (store/write-analysis-parts!
@@ -190,6 +193,61 @@
             (is (= #{} (get-in index [:fact-types "T" :producers])))
             (is (= {"retractor" #{"a.ns/retract-t"}}
                    (get-in index [:fact-types "T" :retracted-by]))))))
+      (finally (delete-tree dir)))))
+
+(deftest aggregate-unit-beside-its-sources-is-refused-test
+  (let [dir (temp-dir)]
+    (try
+      (let [src-a (io/file dir "src-a")
+            src-b (io/file dir "src-b")
+            agg (io/file dir "agg")]
+        (write-manifest! src-a "src-a")
+        (write-analysis! src-a
+                         {"a.ns/insert-t" {:ns "a.ns" :name "a.ns/insert-t"
+                                           :lhs-types [] :insert-types ["T"] :retract-types []}}
+                         {"T" {:name "T" :ns nil :ancestors []}})
+        (write-manifest! src-b "src-b")
+        (write-analysis! src-b
+                         {"b.ns/consume-t" {:ns "b.ns" :name "b.ns/consume-t"
+                                            :lhs-types ["T"] :insert-types [] :retract-types []}}
+                         {"T" {:name "T" :ns nil :ancestors []}})
+        (write-manifest! agg "agg" {:mode :compose
+                                    :units [{:repo "src-a"} {:repo "src-b"}]})
+        (write-analysis! agg {} {"T" {:name "T" :ns nil :ancestors []}})
+        (let [reg (registry/discover {:root dir})
+              selection [{:repo "src-a"} {:repo "src-b"} {:repo "agg"}]]
+          (testing "an aggregate selected beside its sources is refused outright"
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                  #"is composed from selected"
+                                  (federate/->index reg selection))))
+          (testing "the sources alone keep the one cross-unit edge"
+            (is (= 1 (count (:unit-edges
+                             (federate/->index reg [{:repo "src-a"} {:repo "src-b"}]))))))))
+      (finally (delete-tree dir)))))
+
+(deftest aggregate-source-mix-is-refused-test
+  (let [dir (temp-dir)]
+    (try
+      (let [src (io/file dir "src")
+            agg (io/file dir "agg")]
+        (write-manifest! src "src")
+        (write-analysis! src
+                         {"a.ns/insert-t" {:ns "a.ns" :name "a.ns/insert-t"
+                                           :lhs-types [] :insert-types ["T"] :retract-types []}}
+                         {"T" {:name "T" :ns nil :ancestors []}})
+        ;; a captured whole-rulebase unit: an aggregate naming no composed-from
+        (write-manifest! agg "agg" {:mode :captured-session})
+        (write-analysis! agg {} {"T" {:name "T" :ns nil :ancestors []}})
+        (let [reg (registry/discover {:root dir})
+              selection [{:repo "src"} {:repo "agg"}]]
+          (testing "aggregate + source is never one question"
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                  #"mixes 1 aggregate unit"
+                                  (federate/->index reg selection))))
+          (testing "an aggregate alone indexes normally"
+            (is (= ["agg"]
+                   (get-in (federate/->index reg [{:repo "agg"}])
+                           [:coverage :units]))))))
       (finally (delete-tree dir)))))
 
 (deftest grade-against-a-composed-reference-test
