@@ -14,11 +14,6 @@
             [clara.server.tools.graph.utils :as utils]
             [clojure.string :as str]))
 
-(def ^:private get-rulebase
-  "See `clara.server.tools.graph.utils/get-rulebase`, where the
-   session-or-rulebase either-or is defined once for the whole library."
-  utils/get-rulebase)
-
 (defn working-memory-available?
   "True when `session-or-rulebase` is a live session with inspectable working memory."
   [session-or-rulebase]
@@ -31,7 +26,7 @@
    `clara.server.tools.graph.analyze/build-fallback-type-filter`; only a hand-built rulebase lacks the
    meta."
   [session-or-rulebase]
-  (or (-> session-or-rulebase get-rulebase :get-alphas-fn meta :ancestors-fn)
+  (or (-> session-or-rulebase utils/get-rulebase :get-alphas-fn meta :ancestors-fn)
       clojure.core/ancestors))
 
 (defn- ->memoized-ancestors
@@ -379,7 +374,7 @@
    multi-arity `->rulebase-analysis`, which manages the `*form-printer*`
    dynamic binding."
   [session-or-rulebase annotations]
-  (let [{:keys [productions id-to-node] :as rulebase} (get-rulebase session-or-rulebase)
+  (let [{:keys [productions id-to-node] :as rulebase} (utils/get-rulebase session-or-rulebase)
         ;; Normalize the LHS once, up front, so every downstream pass
         ;; (fact-type extraction, binding augmentation, serialization) works
         ;; on the homogeneous shape.

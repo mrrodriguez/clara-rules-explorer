@@ -132,11 +132,6 @@
   (let [resource-path (format "%s.clj" (ns->resource-base ns-sym))]
     (analyze-source-code source-code resource-path config-dir)))
 
-(def ^:private get-rulebase
-  "See `clara.server.tools.graph.utils/get-rulebase`, where the
-   session-or-rulebase either-or is defined once for the whole library."
-  graph-utils/get-rulebase)
-
 (defn- heuristic-fallback-callsites
   "Emits scan-derived record-ctor types as heuristic callsites for the given
    fallback inserter vars — direct-inserter vars whose boundary arguments no
@@ -420,7 +415,7 @@
   "Returns the fq symbols of the session's rules — productions that carry an
    :rhs (queries excluded)."
   [session-or-rulebase]
-  (let [{:keys [productions]} (get-rulebase session-or-rulebase)]
+  (let [{:keys [productions]} (graph-utils/get-rulebase session-or-rulebase)]
     (into []
           (comp (filter :rhs)
                 (map :name)
@@ -776,7 +771,7 @@
         ;; everything below keeps its "a `:match-fn` is a fn" invariant.
         fact-constructors (normalize-fact-constructor-specs (:fact-constructors options))
         get-source (build-source-loader (::combined-sources rule-source-analysis))
-        rulebase (get-rulebase session-or-rulebase)
+        rulebase (graph-utils/get-rulebase session-or-rulebase)
         productions (mapv #(update % :lhs conditions/normalize-lhs)
                           (:productions rulebase))
         query-lhs (mapv #(conditions/normalize-lhs (get-in % [:query :lhs]))
@@ -832,7 +827,7 @@
 (defn extract-rule-names
   "Extracts all rule and query names (symbols) from a Clara session or rulebase."
   [session-or-rulebase]
-  (let [{:keys [productions]} (get-rulebase session-or-rulebase)]
+  (let [{:keys [productions]} (graph-utils/get-rulebase session-or-rulebase)]
     (into []
           (comp (map :name)
                 (distinct))
@@ -892,7 +887,7 @@
            ns-var-defs-fn]
     :or {config-dir @bundled-kondo-config-dir
          cache-atom (atom {})}}]
-  (let [rulebase (get-rulebase session-or-rulebase)
+  (let [rulebase (graph-utils/get-rulebase session-or-rulebase)
         rules-by-ns (rulebase-rules-by-ns rulebase)
         prune-vars (set (map (comp normalize-fq-name-key :name)
                              (:productions rulebase)))
