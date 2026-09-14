@@ -18,7 +18,8 @@
    :used-by-rules
    :clara.server.tools.graph.conditions/normalized},
   :references "Cross-references to a production or fact type are the bare :name string, not the explorer's {:name :id :ns :type} / {:name :id :known} record. Look the name up in :rules, :queries or :fact-types for the rest; GET /v1/rules/:fq-name and GET /v1/fact-types serve the expanded form. Names that carried :known false are listed once in :unknown-fact-types.",
-  :unknown-fact-types #{"clojure.lang.Associative"
+  :unknown-fact-types #{":loan-app/application-outcome"
+   "clojure.lang.Associative"
    "clojure.lang.Counted"
    "clojure.lang.IHashEq"
    "clojure.lang.IKeywordLookup"

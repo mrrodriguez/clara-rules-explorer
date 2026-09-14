@@ -485,8 +485,10 @@
             hierarchy-keys (drop (count loan-app-fact-type-order) all-keys)]
         (is (seq hierarchy-keys)
             "Record types have Java interface ancestors (IPersistentMap, Object, etc.)")
+        (is (= ":loan-app/application-outcome" (first hierarchy-keys))
+            "Derived keyword ancestor sorts ahead of the Java interface ancestors")
         (is (every? (fn [k] (str/starts-with? k "clojure.lang."))
-                    (take 3 hierarchy-keys)))
+                    (take 3 (rest hierarchy-keys))))
         (is (= (sort hierarchy-keys) hierarchy-keys)
             "Hierarchy-only types are sorted alphabetically")))
 

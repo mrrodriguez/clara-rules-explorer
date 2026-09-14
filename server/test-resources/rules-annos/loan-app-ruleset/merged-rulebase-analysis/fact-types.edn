@@ -3,6 +3,9 @@
  ":doc-check-count-min" {:ns nil, :name ":doc-check-count-min", :ancestors []},
  ":doc-check-count-satisfies-min" {:ns nil, :name ":doc-check-count-satisfies-min", :ancestors []},
  ":extract-doc-meta" {:ns nil, :name ":extract-doc-meta", :ancestors []},
+ ":loan-app/application-outcome" {:ns "loan-app",
+  :name ":loan-app/application-outcome",
+  :ancestors []},
  ":loan-doc-rules/document-check-input" {:ns "loan-doc-rules",
   :name ":loan-doc-rules/document-check-input",
   :ancestors []},
@@ -161,7 +164,8 @@
    "java.util.Map"]},
  "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome" {:ns "clara.server.tools.graph.rules.loan_app_rules",
   :name "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome",
-  :ancestors ["clojure.lang.IHashEq"
+  :ancestors [":loan-app/application-outcome"
+   "clojure.lang.IHashEq"
    "clojure.lang.IKeywordLookup"
    "clojure.lang.IObj"
    "clojure.lang.IMeta"

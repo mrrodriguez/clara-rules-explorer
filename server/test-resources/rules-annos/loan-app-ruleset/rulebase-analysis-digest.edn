@@ -1,4 +1,4 @@
-{:summary {:rule-count 18, :query-count 3, :fact-type-count 35},
+{:summary {:rule-count 18, :query-count 3, :fact-type-count 36},
  :counts {:node-count 79, :dep-edge-count 26, :unresolved-count 0},
  :namespaces {"clara.server.tools.graph.rules.loan-app-rules" {:rules 4, :queries 1},
   "clara.server.tools.graph.rules.loan-doc-queries" {:rules 0, :queries 1},
