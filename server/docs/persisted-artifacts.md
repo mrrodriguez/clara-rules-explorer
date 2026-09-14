@@ -325,6 +325,29 @@ from the composed, rehydrated analysis with no live session (session routes
 return 409 `:no-session`). See
 [`../../docs/explorer-graph-api.md`](../../docs/explorer-graph-api.md).
 
+### Composing into a unit
+
+`flow/compose-persist!` materializes a composed selection as a normal
+single-unit artifact directory, so the offline report reads it without knowing
+it is a composition:
+
+```clojure
+(require '[clara.server.tools.graph.artifacts.flow :as flow])
+
+(flow/compose-persist!
+  {:root "rules-annos"
+   :repo "composed/loan-app-plus-disposition"
+   :units [{:repo "loan-app-ruleset"}
+           {:repo "loan-disposition-ruleset"}]
+   :generated-by "me"})
+```
+
+It writes the three standard layers, compact `merged-annotations.edn`,
+`merged-rulebase-analysis/`, `rulebase-analysis-digest.edn`, and a manifest —
+the same shape `bin/annotations_report.bb` already reads. Per-unit provenance
+lives in the manifest's `:analysis-run` block rather than in the flattened
+layer files.
+
 ## Related
 
 - [`rule-annotations.md`](rule-annotations.md) — the layer model, the fold, and

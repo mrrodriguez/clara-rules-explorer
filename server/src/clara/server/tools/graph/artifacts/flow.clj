@@ -30,7 +30,10 @@
    [clara.server.tools.graph.analyze :as analyze]
    [clara.server.tools.graph.annotations :as ann]
    [clara.server.tools.graph.annotations.merge :as ann.merge]
+   [clara.server.tools.graph.artifacts.compose :as compose]
    [clara.server.tools.graph.artifacts.digest :as digest]
+   [clara.server.tools.graph.artifacts.manifest :as manifest]
+   [clara.server.tools.graph.artifacts.registry :as registry]
    [clara.server.tools.graph.artifacts.schema :as schema]
    [clara.server.tools.graph.artifacts.slim :as slim]
    [clara.server.tools.graph.artifacts.store :as store]
@@ -354,3 +357,50 @@
       (store/write-layer! :memory opts memory-layer))
     (merge-persisted! (assoc opts :rulebase-analysis-in-hand annotation-data))
     dir))
+
+(s/defn compose-persist! :- schema/ComposePersistResult
+  "Compose a registry selection into one unit-shaped artifact directory the
+   caller names, so the offline bb report (and any single-unit reader) can
+   consume it without knowing it is a composition.
+
+   The analysis is `compose/->composed-analysis`, written to
+   `merged-rulebase-analysis/` **as composed** — not re-slimmed — so the
+   composed `:slim` block (source units' dropped-set union plus `:nodes`) is
+   preserved. Layers are flattened to the three standard roles by
+   `compose/->standard-role-layers`, then folded and compacted exactly as a
+   single-unit `merge-persisted!` would.
+
+   Output placement follows `ArtifactOpts`: `:dir` when given, else
+   `<:root>/<:repo>`. `:root` is the source registry root (and default output
+   root); `:repo` is the composed unit's registry-relative identity and default
+   subdir."
+  [{:keys [root units analysis-run session-hint]
+    :as opts} :- schema/ComposePersistOptions]
+  (let [reg (registry/->registry {:root root :units units})
+        analysis (compose/->composed-analysis reg units)
+        role-layers (compose/->standard-role-layers reg units)
+        standard-layers (mapv (fn [[_ layer]] layer) role-layers)]
+    (doseq [[role layer] role-layers]
+      (store/write-layer! role opts layer))
+    (let [merged (store/fold-layers standard-layers)
+          analysis-dir (store/get-artifact-path :rulebase-analysis opts)
+          digest-file (store/get-artifact-file :rulebase-analysis-digest opts)]
+      (store/write-merged-annotations!
+       opts merged
+       (store/->file-layer-annotations standard-layers))
+      (store/write-analysis-parts! opts analysis)
+      (edn-io/write-edn-file!
+       digest-file
+       (digest/->rulebase-analysis-digest analysis session-hint))
+      (let [manifest-file (manifest/write-manifest!
+                           (assoc opts
+                                  :analysis-run (merge {:mode :compose
+                                                        :root root
+                                                        :units units}
+                                                       analysis-run)))]
+        {:dir (store/get-out-dir opts)
+         :layers (mapv :id (:layers merged))
+         :rule-count (count (:annotations merged))
+         :rulebase-analysis analysis-dir
+         :rulebase-analysis-digest (str digest-file)
+         :manifest manifest-file}))))

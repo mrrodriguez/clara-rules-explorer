@@ -81,8 +81,8 @@ pure helper in `compose.clj` (§3.3), next to `fold-layers` and
 
 ```clojure
 (flow/compose-persist!
-  {:root  "…"                                 ; registry root — output lives under it
-   :repo  "composed/my-named-merged-ruleset"   ; output unit path, relative to :root
+  {:root  "…"                                 ; source registry root (and default output root)
+   :repo  "composed/my-named-merged-ruleset"   ; output unit identity + default subdir
    :units [{:repo "loan-app-ruleset"}
            {:repo "loan-disposition-ruleset"}]
    :generated-by "…"
@@ -97,13 +97,14 @@ same shape over a registry selection. `compose` is the right home for the
 preparation piece because it already owns `fold-layers`, `qualified-layer-id`,
 and the cross-unit layer vocabulary.
 
-The output directory is not passed separately: `store/get-out-dir` derives it
-as `<:root>/<:repo>`, the same single source of truth every other artifact
-writer uses. `:repo` therefore names both the on-disk subdir and the manifest's
-`:repo`. Taking `:dir` too would state the same path twice and force this tool
-to police agreement for no benefit. `ArtifactOpts` already offers `:dir` as an
-explicit-location alternative, but the discoverable-unit workflow here is
-`:root` + `:repo`.
+Output placement follows the existing `ArtifactOpts` contract, not a new pair
+of aligned keys: `store/get-out-dir` writes to an explicit `:dir` when one is
+given, else to `<:root>/<:repo>`. `:root` is therefore the source registry root
+and the default output root; `:repo` is the output unit's registry-relative
+identity (what the manifest claims) and its default subdir. The two are
+independent concerns — location vs. identity — and are not required to agree.
+The discoverable-unit workflow omits `:dir`; a caller that wants the merged
+result elsewhere passes `:dir` and keeps `:repo` as the manifest's identity.
 
 A thin `dev/` CLI entry point (the same pattern as
 `dev/regen_artifacts.clj`) can wrap it for manual use.
@@ -248,8 +249,10 @@ Each phase leaves `make test lint reflection-check` green in `server/`.
    assert the directory shape, composed `:slim` survival, and manifest
    provenance. Extend `bb_report_test.clj` to run the existing script against
    the composed dir unchanged, pinning `consumers` / `edges` / `layers` output.
-3. **CLI wrapper** — a `dev/` entry point taking `--root --units --out` (or EDN
-   opts), mirroring `dev/regen_artifacts.clj`.
+3. **CLI wrapper** — `dev/compose_artifacts.clj`, a thin entry point reading an
+   inline EDN opts map (or an `.edn` file path) and calling
+   `flow/compose-persist!`, mirroring how `dev/regen_artifacts.clj` wraps the
+   example generator.
 4. **Docs** — `server/docs/persisted-artifacts.md` gains a short "Composing into
    a unit" note beside the registry chapter; this plan graduates to a roadmap
    once work starts.

@@ -27,7 +27,8 @@
    [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
    [clara.server.tools.graph.artifacts.registry :as registry]
    [clara.server.tools.graph.artifacts.store :as store]
-   [clojure.set :as set]))
+   [clojure.set :as set]
+   [clojure.walk :as walk]))
 
 (set! *warn-on-reflection* true)
 
@@ -58,6 +59,53 @@
                     (assoc layer :id (qualified-layer-id unit (:id layer))))
                   (store/get-layer-stack (->opts registry unit))))
            selection)))
+
+(defn- strip-derived-callsite-provenance
+  "Remove the `:from-layer` stamps `ann.merge/merge-layers` computes.
+
+   A layer file carries no `:from-layer` of its own — the merge computes it.
+   The intermediate fold in `->standard-role-layers` runs over re-id'd layers,
+   so it stamps every callsite with a qualified id that would otherwise leak
+   into the flattened role layer written back to disk."
+  [annotations]
+  (walk/postwalk
+   (fn [x]
+     (if (and (map? x) (some #{:callsites} (keys x)))
+       (update x :callsites (fn [callsites]
+                              (mapv #(dissoc % :from-layer) callsites)))
+       x))
+   annotations))
+
+(defn ->standard-role-layers
+  "Flatten `selection`'s file-backed layers into at most one layer per standard
+   artifact role (`:auto`, `:memory`, `:agent`).
+
+   Each unit's layer for a role is re-id'd with `qualified-layer-id` so the
+   per-role fold can attribute origins correctly; the resulting layer then
+   carries the standard role `:id` so it can be written as a normal single-unit
+   layer file. Unit-level provenance is deliberately left out of the returned
+   layers — it belongs in the manifest / federated sidecar — so the on-disk
+   shape is indistinguishable from any other unit's.
+
+   Returns an ordered `{role Layer}` map, omitting roles no selected unit
+   contributed."
+  [registry selection]
+  (into (array-map)
+        (keep (fn [[role role-id]]
+                (let [layers (mapcat (fn [unit]
+                                       (keep #(when (= role-id (:id %))
+                                                (assoc % :id (qualified-layer-id unit role-id)))
+                                             (store/get-layer-stack (->opts registry unit))))
+                                     selection)]
+                  (when (seq layers)
+                    (let [folded (ann.merge/merge-layers layers)]
+                      [role (ann.merge/->layer
+                             {:id role-id
+                              :annotations (strip-derived-callsite-provenance
+                                            (ann.merge/annotations folded))
+                              :source {:composed-of (mapv registry/unit-key selection)
+                                       :role role}})]))))
+              store/layer-artifacts)))
 
 ;; ===========================================================================
 ;; composed analysis

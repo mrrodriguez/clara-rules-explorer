@@ -53,6 +53,28 @@
         (is (contains? names app-approved))
         (is (contains? names notice-approved))))))
 
+(deftest standard-role-layers-flatten-and-strip-test
+  (let [reg (->registry)
+        layers (compose/->standard-role-layers reg [(unit "loan-app-ruleset")
+                                                    (unit "loan-disposition-ruleset")])]
+    (testing "one standard layer per role, in fold order, absent roles omitted"
+      (is (= [:auto :memory] (vec (keys layers))))
+      (is (= :clara.tools.graph.analyze/generated (get-in layers [:auto :id])))
+      (is (= :memory (get-in layers [:memory :id]))))
+    (testing "the auto layer folds both units' generated layers"
+      (let [names (set (keys (get-in layers [:auto :annotations])))]
+        (is (contains? names app-approved))
+        (is (contains? names notice-approved))))
+    (testing "the memory layer keeps only the unit that contributed one"
+      (let [names (set (keys (get-in layers [:memory :annotations])))]
+        (is (contains? names "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail"))
+        (is (not (contains? names notice-approved)))))
+    (testing "flattened layer files carry no derived :from-layer stamps"
+      (let [cs (get-in layers [:auto :annotations app-approved
+                               :clara-rules/dynamic-insert-types-detected :callsites])]
+        (is (seq cs))
+        (is (every? #(not (contains? % :from-layer)) cs))))))
+
 (deftest composed-analysis-joins-the-two-rulesets-test
   (let [reg (->registry)
         composed (-> reg

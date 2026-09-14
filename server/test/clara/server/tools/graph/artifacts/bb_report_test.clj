@@ -117,3 +117,48 @@
       (testing "`gaps` reads the generated layer directly, so it never touches
                 the merge or the analysis"
         (is (str/includes? (run-report "gaps") "a.ns/gap-rule"))))))
+
+(def ^:private app-approved
+  "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?")
+
+(def ^:private notice-approved
+  "clara.server.tools.graph.rules.loan-outcome-notices/notice-approved-app")
+
+(defn- registry-root []
+  (-> (io/resource "rules-annos/loan-app-ruleset/rules-inspect-manifest.edn")
+      .getPath
+      io/file
+      .getParentFile
+      .getParentFile
+      .getPath))
+
+(deftest bb-report-reads-a-composed-unit-test
+  (if-not (runnable?)
+    (println "SKIPPING bb-report-composed-test — babashka is not on PATH, or the script moved:"
+             (str report-script))
+    (let [opts (assoc *artifact-opts*
+                      :root (registry-root)
+                      :repo "composed/demo"
+                      :units [{:repo "loan-app-ruleset"}
+                              {:repo "loan-disposition-ruleset"}])
+          _ (ann/compose-persist! opts)
+          run (fn [& args]
+                (let [{:keys [exit out err]}
+                      (apply shell/sh "bb" (str report-script) (:dir *artifact-opts*) args)]
+                  (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
+                  out))]
+      (testing "summary expands the composed merge"
+        (is (str/includes? (run "summary") "rules:")))
+
+      (testing "consumers reads the composed production-index"
+        (let [out (run "consumers" ":loan-app/application-outcome")]
+          (is (str/includes? out notice-approved))))
+
+      (testing "edges reads the composed dep-graph across units"
+        (let [out (run "edges" notice-approved)]
+          (is (str/includes? out app-approved))))
+
+      (testing "layers reports the flattened standard layers"
+        (let [out (run "layers")]
+          (is (str/includes? out ":clara.tools.graph.analyze/generated"))
+          (is (str/includes? out ":memory")))))))

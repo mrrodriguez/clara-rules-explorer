@@ -678,6 +678,37 @@
    (s/optional-key :branch) (s/maybe s/Str)
    (s/optional-key :namespaces) [(s/cond-pre s/Str s/Symbol)]})
 
+(s/defschema ComposePersistOptions
+  "Options for `clara.server.tools.graph.artifacts.flow/compose-persist!`.
+
+  `:root` is the registry root the source `:units` are read from, and — absent an
+  explicit `:dir` — the root the composed unit is written under. `:repo` is the
+  composed unit's registry-relative identity (the manifest's `:repo`) and its
+  default output subdir. `:dir` overrides the output location without changing
+  `:repo`'s identity claim, so the two are independent.
+
+  `:units` is the ordered source selection. `:generated-by` is required by
+  `ProvenanceOpts`; `:analysis-run` is merged into the manifest's
+  `:analysis-run` block as the seam for recording the composition."
+  (merge (dissoc ArtifactOpts
+                 (s/optional-key :repo)
+                 (s/optional-key :root))
+         ProvenanceOpts
+         {:root s/Str
+          :repo s/Str
+          :units [UnitRef]
+          (s/optional-key :analysis-run) {s/Keyword s/Any}}))
+
+(s/defschema ComposePersistResult
+  "What `flow/compose-persist!` returns: the output dir, the layer ids that
+  folded, the composed rule count, and the paths it wrote."
+  {:dir s/Str
+   :layers [LayerId]
+   :rule-count s/Int
+   :rulebase-analysis s/Str
+   :rulebase-analysis-digest s/Str
+   :manifest s/Str})
+
 (s/defschema UnitInfo
   "What
   `clara.server.tools.graph.artifacts.registry/discover` records per unit: its
