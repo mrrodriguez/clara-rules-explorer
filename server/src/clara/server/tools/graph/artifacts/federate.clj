@@ -270,6 +270,23 @@
 ;; the index
 ;; ===========================================================================
 
+(defn- ->covered-namespaces
+  "The namespaces a unit's rules and queries live in."
+  [{:keys [rules queries]}]
+  (into #{} (comp cat (keep :ns)) [(vals rules) (vals queries)]))
+
+(defn- ->requested-namespaces
+  "A unit's `:namespaces` filter as a set of strings, or nil when unfiltered."
+  [unit]
+  (when-let [nses (:namespaces unit)]
+    (into #{} (map str) nses)))
+
+(defn- ->scoped-namespaces
+  "`covered` narrowed to `requested` — or `covered` when the unit is unfiltered —
+  as a sorted vector."
+  [covered requested]
+  (vec (sort (if requested (set/intersection covered requested) covered))))
+
 (defn- ->namespaces
   "`{unit-key [ns …]}` — the namespaces each unit covers, narrowed to the
   caller's per-unit `:namespaces` filter when one is given. A namespace the
@@ -278,15 +295,10 @@
   [analyses-by-unit selection]
   (into {}
         (map (fn [unit]
-               (let [uk (unit-key unit)
-                     covered (into #{} (keep :ns)
-                                   (concat (vals (get-in analyses-by-unit [uk :rules]))
-                                           (vals (get-in analyses-by-unit [uk :queries]))))
-                     requested (when-let [nses (:namespaces unit)]
-                                 (into #{} (map str) nses))]
-                 [uk (vec (sort (if requested
-                                  (set/intersection covered requested)
-                                  covered)))])))
+               (let [uk (unit-key unit)]
+                 [uk (->scoped-namespaces
+                      (->covered-namespaces (get analyses-by-unit uk))
+                      (->requested-namespaces unit))])))
         selection))
 
 (defn- ->unknown-namespaces
