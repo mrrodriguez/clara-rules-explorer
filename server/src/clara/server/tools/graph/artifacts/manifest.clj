@@ -142,7 +142,7 @@
               :generated-by generated-by
               :created today
               :updated today
-              :artifacts store/artifact-files
+              :artifacts store/unit-artifact-files
               :source (merge {:working-tree-notes (or working-tree-notes "")}
                              (get-git-info (or repo-path (System/getProperty "user.dir"))))
               :analysis-run (->analysis-run-provenance opts)

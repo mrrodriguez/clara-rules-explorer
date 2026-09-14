@@ -148,7 +148,7 @@
         present (into #{}
                       (keep (fn [[k filename]]
                               (when (.exists (io/file dir filename)) k)))
-                      store/artifact-files)
+                      store/unit-artifact-files)
         manifest (read-manifest-file (io/file dir))
         meta (read-meta-file (io/file dir))]
     (cond-> (assoc (unit-ref ref)
@@ -242,7 +242,7 @@
   (pr-str (some-> shape (->> (into (sorted-set))))))
 
 (defn- all-artifacts [_unit-info]
-  (into #{} (keys store/artifact-files)))
+  (into #{} (keys store/unit-artifact-files)))
 
 (s/defn compatibility-report
   "The one question a merge has to answer first: do the selected units have the

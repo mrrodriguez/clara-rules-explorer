@@ -261,8 +261,12 @@
 (s/defschema ArtifactKey
   "Which of a run's artifacts. The keys of
   `clara.server.tools.graph.artifacts.store/artifact-files`, which holds the
-  filename for each — `artifacts.schema-test` pins the two in step."
-  (s/enum :auto :memory :agent :merged :rulebase-analysis :rulebase-analysis-digest :manifest))
+  filename for each — `artifacts.schema-test` pins the two in step.
+
+  `:registry-index` / `:registry-digest` are registry-level, written beside
+  units rather than inside one — see `layout/unit-artifact-files`."
+  (s/enum :auto :memory :agent :merged :rulebase-analysis :rulebase-analysis-digest :manifest
+          :registry-index :registry-digest))
 
 (s/defschema AnalysisPartKey
   "Which file of the `merged-rulebase-analysis/` directory. The keys of

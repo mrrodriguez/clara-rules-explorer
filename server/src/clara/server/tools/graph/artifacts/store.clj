@@ -145,6 +145,13 @@
   Defined in `layout/artifact-files` so the babashka report script shares it."
   layout/artifact-files)
 
+(def unit-artifact-files
+  "The artifact roles a single unit has — `artifact-files` minus the
+  registry-level pair. Defined in `layout/unit-artifact-files`; used by unit
+  presence checks and the provenance manifest, so a registry index never shows
+  up as one unit's own artifact."
+  layout/unit-artifact-files)
+
 (def layer-artifacts
   "The artifacts that are layer files (`schema/LayerArtifactKey`), and the `:id`
   each one carries. The keys of this map are exactly the fold order, lowest

@@ -15,7 +15,11 @@
   units, build the index, ask it."
   (:require
    [clara.server.tools.graph.artifacts.registry :as registry]
-   [clojure.set :as set]))
+   [clara.server.tools.graph.artifacts.store :as store]
+   [clara.server.tools.graph.edn-io :as edn-io]
+   [clojure.java.io :as io]
+   [clojure.set :as set]
+   [clojure.string :as str]))
 
 (set! *warn-on-reflection* true)
 
@@ -443,3 +447,47 @@
   cover, and units whose slim shape differs from the majority."
   [index]
   (:coverage index))
+
+;; ===========================================================================
+;; digest + persist!
+;; ===========================================================================
+
+(defn ->digest
+  "An agent-readable reduction of the index: counts, the unit edge list, entry
+  points, orphans, hierarchy conflicts, coverage gaps, and per-unit provenance.
+  A function on the index, so an answer never depends on the persistence step.
+  `:more` names what it omits, for a reader without the classpath."
+  [index]
+  (let [{:keys [fact-types unit-edges entry-points orphans hierarchy coverage provenance]} index]
+    {:summary {:unit-count (count (:units coverage))
+               :fact-type-count (count fact-types)
+               :unit-edge-count (count unit-edges)
+               :entry-point-count (count entry-points)
+               :orphan-count (count orphans)
+               :hierarchy-conflict-count (count (:conflicts hierarchy))}
+     :unit-edges unit-edges
+     :entry-points entry-points
+     :orphans orphans
+     :hierarchy-conflicts (:conflicts hierarchy)
+     :coverage coverage
+     :provenance provenance
+     :more (str "The full registry index is registry-index.edn, beside this file. "
+                "Ask it with clara.server.tools.graph.artifacts.federate/impact-of, "
+                "producers-of, dependents-of, paths-between, unit-dependency-graph, "
+                "and coverage-report.")}))
+
+(defn persist!
+  "Write `registry-index.edn` and `registry-digest.edn` to an explicit `:dir`.
+  Takes no root and derives no directory name: how a host names the answer to
+  one cross-unit question is the host's, and the same registry answers many.
+  Returns `{:index path :digest path}`."
+  [index {:keys [dir]}]
+  (when (str/blank? dir)
+    (throw (ex-info "federate/persist! requires an explicit :dir" {})))
+  (let [index-file (store/get-artifact-file :registry-index {:dir dir})
+        digest-file (store/get-artifact-file :registry-digest {:dir dir})]
+    (io/make-parents index-file)
+    (edn-io/write-edn-file! index-file index)
+    (edn-io/write-edn-file! digest-file (->digest index))
+    {:index (str index-file)
+     :digest (str digest-file)}))

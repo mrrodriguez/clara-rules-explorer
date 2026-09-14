@@ -7,6 +7,7 @@
   (:require
    [clara.server.tools.graph.artifacts.federate :as federate]
    [clara.server.tools.graph.artifacts.registry :as registry]
+   [clara.server.tools.graph.edn-io :as edn-io]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
@@ -50,6 +51,15 @@
       (is (= {:via #{keyword-outcome} :rules 2}
              (get (:unit-edges index) ["loan-app-ruleset" "loan-disposition-ruleset"]))))))
 
+(defn- temp-dir []
+  (str (java.nio.file.Files/createTempDirectory
+        "clara-federate-test"
+        (into-array java.nio.file.attribute.FileAttribute []))))
+
+(defn- delete-tree [dir]
+  (doseq [f (reverse (file-seq (io/file dir)))]
+    (io/delete-file f true)))
+
 (deftest query-fns-answer-over-the-index-test
   (let [index (->index)]
     (testing "impact-of names the downstream rules that break"
@@ -68,3 +78,21 @@
 
     (testing "coverage reports no shape skew between the two units"
       (is (= [] (:shape-mismatch (federate/coverage-report index)))))))
+
+(deftest digest-and-persist-round-trip-test
+  (let [index (->index)
+        digest (federate/->digest index)]
+    (testing "->digest reduces the index to counts + the work lists"
+      (is (= 2 (get-in digest [:summary :unit-count])))
+      (is (= 1 (get-in digest [:summary :unit-edge-count])))
+      (is (= #{keyword-outcome}
+             (:via (get (:unit-edges digest) ["loan-app-ruleset" "loan-disposition-ruleset"]))))
+      (is (string? (:more digest))))
+
+    (testing "persist! writes both files and they read back equal"
+      (let [dir (temp-dir)]
+        (try
+          (let [{written-index :index written-digest :digest} (federate/persist! index {:dir dir})]
+            (is (= (->index) (edn-io/read-edn-file (io/file written-index))))
+            (is (= (federate/->digest (->index)) (edn-io/read-edn-file (io/file written-digest)))))
+          (finally (delete-tree dir)))))))
