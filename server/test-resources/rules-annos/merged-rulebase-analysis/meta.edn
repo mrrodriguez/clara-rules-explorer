@@ -1,0 +1,54 @@
+{:slim {:written-by "clara.server.tools.graph.artifacts.slim",
+  :dropped #{:descendants
+   :downstream
+   :dynamic-insert-types-detected
+   :dynamic-retract-types-detected
+   :fact-type-id-index
+   :id
+   :inserted-by-rules
+   :lhs-form
+   :merged-annotations
+   :nodes
+   :ns-deps
+   :production-id-index
+   :raw-condition
+   :retracted-by-rules
+   :upstream
+   :used-by-queries
+   :used-by-rules
+   :clara.server.tools.graph.conditions/normalized},
+  :references "Cross-references to a production or fact type are the bare :name string, not the explorer's {:name :id :ns :type} / {:name :id :known} record. Look the name up in :rules, :queries or :fact-types for the rest; GET /v1/rules/:fq-name and GET /v1/fact-types serve the expanded form. Names that carried :known false are listed once in :unknown-fact-types.",
+  :unknown-fact-types #{"clojure.lang.Associative"
+   "clojure.lang.Counted"
+   "clojure.lang.IHashEq"
+   "clojure.lang.IKeywordLookup"
+   "clojure.lang.ILookup"
+   "clojure.lang.IMeta"
+   "clojure.lang.IObj"
+   "clojure.lang.IPersistentCollection"
+   "clojure.lang.IPersistentMap"
+   "clojure.lang.IRecord"
+   "clojure.lang.Seqable"
+   "java.io.Serializable"
+   "java.lang.Iterable"
+   "java.lang.Object"
+   "java.util.Map"},
+  :recover {:downstream "dropped at two levels, and answered differently at each. On a production: :dep-graph in this file, keyed by production name, or GET /v1/rules/:fq-name. On a :dep-graph entry: the transpose of :upstream across that same map — a node is downstream of exactly the nodes listing it upstream. Verified exact (3411 of 3411 nodes on a repo, 4768 of 4768 on a restored session, no drift).",
+   :fact-type-id-index "a flat {id -> name} map the explorer added to rulebase-analysis. Every entry is exactly the :id this file already drops paired with a :name that is already a key in :fact-types, so it carries nothing this file doesn't. GET /v1/fact-types/:fq-name if a caller does have an id to resolve.",
+   :dynamic-insert-types-detected "the annotation layers hold these callsites as authored (symbols, raw type tokens) under :clara-rules/dynamic-insert-types-detected, and merged-annotations.edn resolves to them. GET /v1/rules/:fq-name serves the resolved/serialized form this file omits.",
+   :retracted-by-rules "as :inserted-by-rules, over :retract-types rather than :insert-types",
+   :lhs-form "a rendering of :lhs, which is kept and carries strictly more. GET /v1/rules/:fq-name serves the same string.",
+   :used-by-queries "as :used-by-rules, inverting :lhs-types over :queries rather than over :rules. Verified exact (344 of 344 fact types on a repo, 493 of 493 on a restored session, no drift).",
+   :ns-deps "the requires, aliases, imports and :refer-clojure of every rule-owning namespace. Dropped deliberately rather than by omission: nothing reading these artifacts consumes it yet, and its :refers is expanded to every public var of each required namespace, so it is large. GET /v1/rulebase-analysis serves it, or clara.server.tools.graph.core/->rulebase-analysis at a REPL.",
+   :used-by-rules "the inverse of each rule's :lhs-types, which is kept, closed over the DESCENDANTS of each type — transpose the kept :ancestors to get them: a rule matching T uses T and everything deriving from T. Note this closure runs the OPPOSITE way from :inserted-by-rules'. The closure is required: inverting :lhs-types alone matches only 2033 of the 3687. Verified exact (3687 of 3687 fact types on a repo, 4764 of 4764 on a restored session, no drift). GET /v1/fact-types/:fq-name serves it directly.",
+   :descendants "the transpose of :ancestors, which is kept, over this same :fact-types map: a type is a descendant of every name in its own :ancestors. Invert it — the two carry one edge set between them, so holding both doubles what the hierarchy costs here. GET /v1/fact-types/:fq-name serves it directly, shallowest-first.",
+   :raw-condition "the raw Clara condition a normalized :lhs group or accumulator node was built from, which the explorer retains for its compiler-coupled binding walk. A duplicate of the node carrying it: :condition-type + :children describe the same group and :from the same accumulator source, both kept, and :lhs-form renders the same source. Nothing serves it — GET /v1/rules/:fq-name strips it too — so clara.server.tools.graph.core/->rulebase-analysis at a REPL is the only place it survives.",
+   :production-id-index "as :fact-type-id-index, over :rules / :queries instead of :fact-types",
+   :nodes "the Rete node graph. Needs a live session: GET /v1/rulebase-analysis, or clara.server.tools.graph.core/->rulebase-analysis at a REPL. Only the explorer's Rete view consumes it.",
+   :clara.server.tools.graph.conditions/normalized "the explorer's marker that a :lhs node has been through clara.server.tools.graph.conditions/normalize-lhs. True of every node of every :lhs in this file by construction, so it distinguishes nothing here. Same recovery as :raw-condition.",
+   :id "the explorer's URL-safe handle for a production or fact type. Every map in this file is keyed by :name, which is kept, and every route takes a name: GET /v1/rules/:fq-name.",
+   :dynamic-retract-types-detected "as :dynamic-insert-types-detected, under :clara-rules/dynamic-retract-types-detected",
+   :upstream "GET /v1/rules/:fq-name, or :dep-graph in this file, keyed by production name",
+   :merged-annotations "the annotations the analysis was computed over, which the explorer stamps onto its result so a caller can tell whether a cached analysis is still current. merged-annotations.edn, beside this file, is the same map under :annotations — with the layers and per-key provenance that produced it, which this key does not carry. Read it through clara.server.tools.graph.artifacts.store/read-merged-annotations: on disk it points at the layer files rather than restating them, and that reader resolves the references.",
+   :inserted-by-rules "the inverse of each rule's :insert-types, which is kept, closed over the ANCESTORS in :ancestors, which is kept: a rule inserting T inserts T and every ancestor of T, since the fact it makes is one of each. GET /v1/fact-types serves it directly."}},
+ :unresolved []}
