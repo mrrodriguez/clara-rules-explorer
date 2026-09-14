@@ -725,14 +725,16 @@
 (s/defschema CompatibilityReport
   "What
   `clara.server.tools.graph.artifacts.registry/compatibility-report` returns:
-  whether every selected unit has the same slim `:dropped` key set (the one
-  question a merge must answer first), which units disagree with the majority
-  shape, the per-unit dropped sets, and the artifacts each unit is missing.
+  whether every selected unit is mergeable (the analyzed units share one slim
+  `:dropped` key set and no selected unit is missing its analysis), which
+  analyzed units disagree with the majority shape, which units have no analysis
+  to read, the per-unit dropped sets, and the artifacts each unit is missing.
   Keyed by `registry/unit-key` rather than by the `UnitRef` map, which is not a
   comparable map key."
   {:compatible? s/Bool
    :majority-shape (s/maybe #{s/Keyword})
    :shape-mismatch [UnitRef]
+   :no-analysis [UnitRef]
    :dropped-key-sets {s/Str (s/maybe #{s/Keyword})}
    :missing-artifacts {s/Str #{ArtifactKey}}})
 

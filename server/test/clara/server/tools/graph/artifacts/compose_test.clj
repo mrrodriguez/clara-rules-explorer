@@ -108,6 +108,24 @@
       (is (nil? (:nodes composed)))
       (is (contains? (get-in composed [:slim :dropped]) :nodes)))))
 
+(deftest composed-analysis-narrows-to-unit-namespace-filter-test
+  (let [reg (->registry)
+        composed (compose/->composed-analysis
+                  reg [{:repo "loan-app-ruleset"
+                        :namespaces ["clara.server.tools.graph.rules.loan-doc-rules"]}
+                       {:repo "loan-disposition-ruleset"}])]
+    (testing "only the in-scope namespace's productions compose"
+      (is (= 16 (count (:rules composed))))
+      (is (= 3 (count (:queries composed))))
+      (is (= #{"clara.server.tools.graph.rules.loan-doc-rules"
+               "clara.server.tools.graph.rules.loan-outcome-notices"}
+             (into #{} (map (comp :ns val))
+                   (concat (:rules composed) (:queries composed))))))
+    (testing "a production from the filtered-out namespace is absent"
+      (is (not (contains? (:rules composed) app-approved))))
+    (testing "the unfiltered unit still contributes its productions"
+      (is (contains? (:rules composed) notice-approved)))))
+
 (deftest composed-analysis-refuses-a-name-collision-test
   (let [reg (->registry)]
     ;; The two units do not collide; composing the same unit twice must.

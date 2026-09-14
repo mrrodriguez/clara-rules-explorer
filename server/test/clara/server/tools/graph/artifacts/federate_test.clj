@@ -8,7 +8,9 @@
    [clara.rules :as r]
    [clara.server.tools.graph.annotations.merge :as am]
    [clara.server.tools.graph.artifacts.federate :as federate]
+   [clara.server.tools.graph.artifacts.layout :as layout]
    [clara.server.tools.graph.artifacts.registry :as registry]
+   [clara.server.tools.graph.artifacts.store :as store]
    [clara.server.tools.graph.core :as core]
    [clara.server.tools.graph.edn-io :as edn-io]
    [clara.server.tools.graph.rules.loan-app-rules]
@@ -84,6 +86,30 @@
   (doseq [f (reverse (file-seq (io/file dir)))]
     (io/delete-file f true)))
 
+(defn- write-manifest! [dir repo]
+  (let [file (io/file dir (:manifest layout/artifact-files))]
+    (io/make-parents file)
+    (edn-io/write-edn-file! file {:repo repo
+                                  :generated-by "federate-test"
+                                  :created "2025-01-01"
+                                  :analysis-run {:layer-ids store/layer-artifacts}
+                                  :history []})
+    (str file)))
+
+(defn- write-analysis! [dir rules fact-types]
+  (store/write-analysis-parts!
+   {:dir (str dir)}
+   {:rules rules
+    :queries {}
+    :fact-types fact-types
+    :dep-graph {}
+    :unresolved []
+    :slim {:written-by "clara.server.tools.graph.artifacts.slim"
+           :dropped #{:nodes :id}
+           :references "test"
+           :unknown-fact-types #{}
+           :recover {}}}))
+
 (deftest query-fns-answer-over-the-index-test
   (let [index (->index)]
     (testing "impact-of names the downstream rules that break"
@@ -97,11 +123,74 @@
     (testing "dependents-of and paths-between expose the unit dependency"
       (is (= {"loan-disposition-ruleset" {:via #{keyword-outcome} :rules 2}}
              (federate/dependents-of index "loan-app-ruleset")))
-      (is (= ["loan-app-ruleset" "loan-disposition-ruleset"]
+      (is (= #{["loan-app-ruleset" "loan-disposition-ruleset"]}
              (federate/paths-between index "loan-app-ruleset" "loan-disposition-ruleset"))))
 
     (testing "coverage reports no unknown namespaces between the two units"
       (is (= [] (:unknown-namespaces (federate/coverage-report index)))))))
+
+(deftest entry-points-and-orphans-are-fact-types-not-lhs-vectors-test
+  (let [index (->index)
+        entries (:entry-points index)
+        orphans (:orphans index)]
+    (testing "every entry point and orphan is a fact-type name, not an :lhs-types vector"
+      (is (every? (fn [[_ fts]] (every? #(contains? (:fact-types index) %) fts)) entries))
+      (is (every? (fn [[_ fts]] (every? #(contains? (:fact-types index) %) fts)) orphans)))
+    (testing "the consuming unit has no entry points or orphans: its consumed
+              type is produced by the other unit through the hierarchy"
+      (is (not (contains? entries "loan-disposition-ruleset")))
+      (is (not (contains? orphans "loan-disposition-ruleset"))))
+    (testing "the producer unit keeps only the types nothing in scope satisfies"
+      (is (= 6 (count (get entries "loan-app-ruleset"))))
+      (is (= 6 (count (get orphans "loan-app-ruleset")))))))
+
+(deftest namespace-filter-narrows-productions-not-just-scope-test
+  (let [index (federate/->index (registry/discover {:root (registry-root)})
+                                [{:repo "loan-app-ruleset"
+                                  :namespaces ["clara.server.tools.graph.rules.loan-doc-rules"]}
+                                 {:repo "loan-disposition-ruleset"}])]
+    (testing "the fact-type map stays whole (keyed by type, not namespace)"
+      (is (= 38 (count (:fact-types index)))))
+    (testing "the cross-unit edge disappears once its producer is filtered out"
+      (is (not (contains? (:unit-edges index)
+                          ["loan-app-ruleset" "loan-disposition-ruleset"]))))
+    (testing "the type the excluded producer supplied becomes an entry point"
+      (is (contains? (get-in index [:entry-points "loan-disposition-ruleset"])
+                     keyword-outcome)))
+    (testing "scope still reports the narrowed namespace"
+      (is (= ["clara.server.tools.graph.rules.loan-doc-rules"]
+             (get-in index [:scope :namespaces "loan-app-ruleset"]))))))
+
+(deftest retract-couples-units-but-does-not-supply-test
+  (let [dir (temp-dir)]
+    (try
+      (let [retractor (io/file dir "retractor")
+            consumer (io/file dir "consumer")]
+        (write-manifest! retractor "retractor")
+        (write-analysis! retractor
+                         {"a.ns/retract-t" {:ns "a.ns" :name "a.ns/retract-t"
+                                            :lhs-types [] :insert-types [] :retract-types ["T"]}}
+                         {"T" {:name "T" :ns nil :ancestors []}})
+        (write-manifest! consumer "consumer")
+        (write-analysis! consumer
+                         {"b.ns/consume-t" {:ns "b.ns" :name "b.ns/consume-t"
+                                            :lhs-types ["T"] :insert-types [] :retract-types []}}
+                         {"T" {:name "T" :ns nil :ancestors []}})
+
+        (let [index (federate/->index (registry/discover {:root dir})
+                                      [{:repo "retractor"} {:repo "consumer"}])]
+          (testing "a retract couples the units, so the edge exists"
+            (is (= {:via #{"T"} :rules 1}
+                   (get (:unit-edges index) ["retractor" "consumer"]))))
+          (testing "a retract does not supply the type, so it is still an entry point"
+            (is (= #{"T"} (get-in index [:entry-points "consumer"]))))
+          (testing "a retract-only rule produces no orphan"
+            (is (not (contains? (:orphans index) "retractor"))))
+          (testing "the type records the retract apart from its producers"
+            (is (= #{} (get-in index [:fact-types "T" :producers])))
+            (is (= {"retractor" #{"a.ns/retract-t"}}
+                   (get-in index [:fact-types "T" :retracted-by]))))))
+      (finally (delete-tree dir)))))
 
 (deftest grade-against-a-composed-reference-test
   (let [index (->index)

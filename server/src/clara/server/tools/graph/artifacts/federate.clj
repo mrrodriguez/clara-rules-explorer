@@ -11,6 +11,14 @@
   transitively, and records the disagreements under `:hierarchy :conflicts`
   rather than picking a winner.
 
+  Two couplings are named separately. A type is *produced* by a rule that
+  inserts it (or inserts a descendant of it); retracting a type does not
+  produce it — it removes it. That supply reading (insert-only) is behind
+  `:entry-points`, `:orphans`, and `:producers`. A rule *couples* to consumers
+  through insert and retract alike, since both change the fact set the
+  consumers match; that coupling reading is behind `:unit-edges`, matching the
+  live dep-graph in `clara.server.tools.graph.core`.
+
   The index is a value — nothing is persisted on the path to an answer. Read the
   units, build the index, ask it."
   (:require
@@ -40,6 +48,17 @@
   [registry selection]
   (into {}
         (map (fn [unit] [(unit-key unit) (read-analysis-or-throw registry unit)]))
+        selection))
+
+(defn- narrow-analyses-by-unit
+  "The per-unit analyses narrowed to each unit's `:namespaces` filter (a no-op
+  for unfiltered units). Runs after coverage and unknown-namespace reporting,
+  which read the *un*-narrowed analyses."
+  [analyses-by-unit selection]
+  (into {}
+        (map (fn [unit]
+               (let [uk (unit-key unit)]
+                 [uk (registry/narrow-analysis (get analyses-by-unit uk) unit)])))
         selection))
 
 ;; ===========================================================================
@@ -135,6 +154,24 @@
     @acc))
 
 ;; ===========================================================================
+;; supply vs coupling: two named readings
+;; ===========================================================================
+
+(defn- production-produced-types
+  "The fact types a production *produces* (supplies): its `:insert-types` only.
+  Retracting a type does not produce it — it removes it. The supply reading
+  behind `:entry-points`, `:orphans`, and `:producers`."
+  [{:keys [insert-types]}]
+  (set insert-types))
+
+(defn- ->satisfies
+  "`base-types` plus their closure under `hierarchy` — ancestors when
+  `hierarchy` is the ancestor map, descendants when it is the descendant map.
+  A consumer matching any of these is satisfied by the holder of `base-types`."
+  [hierarchy base-types]
+  (reduce (fn [acc t] (into acc (cons t (get hierarchy t #{})))) #{} base-types))
+
+;; ===========================================================================
 ;; fact-type entries
 ;; ===========================================================================
 
@@ -156,12 +193,13 @@
              (get rule-polarities rule {})))
 
 (defn- producer-units
-  "Units that produce `ft` — a rule inserts a type that IS `ft` or derives from
-  it, so the fact it makes is one of each ancestor."
+  "Units that produce (supply) `ft` — a rule inserts a type that IS `ft` or
+  derives from it, so the fact it makes is one of each ancestor. Uses the
+  supply reading of `production-produced-types`, so it agrees with
+  `:entry-points` and `:orphans`."
   [analyses-by-unit ancestors ft]
   (let [produces? (fn [[_ rule]]
-                    (some (fn [t] (or (= ft t) (contains? (get ancestors t #{}) ft)))
-                          (:insert-types rule)))]
+                    (contains? (->satisfies ancestors (production-produced-types rule)) ft))]
     (into #{}
           (keep (fn [[uk analysis]]
                   (when (some produces? (:rules analysis)) uk)))
@@ -198,32 +236,42 @@
 ;; ===========================================================================
 
 (defn- ->consumed-types
-  "Every `:lhs-types` value a unit's rules and queries match."
+  "Every fact type a unit's rules and queries match — each production's
+  `:lhs-types` vector flattened, so the result is a set of fact-type names, not
+  a set of vectors."
   [{:keys [rules queries]}]
-  (into #{} (comp cat (map :lhs-types)) [(vals rules) (vals queries)]))
+  (into #{} (comp cat (mapcat :lhs-types)) [(vals rules) (vals queries)]))
 
-(defn- ->satisfies
-  "The types `produced` satisfies: each produced type plus its ancestors — a
-  consumer matching any of these is satisfied by the producer."
-  [ancestors produced]
-  (reduce (fn [acc t] (into acc (cons t (get ancestors t #{})))) #{} produced))
+(defn- ->produced-types
+  "Every fact type `analysis`'s rules produce (supply) —
+  `production-produced-types` unioned across the rules. Queries do not produce."
+  [{:keys [rules]}]
+  (into #{} (mapcat (fn [[_ rule]] (production-produced-types rule))) rules))
+
+(defn- ->coupled-types
+  "Every fact type `analysis`'s rules couple to their consumers — insert and
+  retract alike, since both change the fact set the consumers match. The
+  coupling reading behind `:unit-edges`, matching the live dep-graph in
+  `clara.server.tools.graph.core`."
+  [{:keys [rules]}]
+  (into #{} (mapcat (fn [[_ {:keys [insert-types retract-types]}]]
+                      (into (set insert-types) retract-types)))
+        rules))
 
 (defn- ->unit-edges
-  "Cross-unit rule data-flow edges: `{[producer consumer] {:via #{ft} :rules n}}`.
-  Only rules participate — a query consumes but does not drive the producer→
-  consumer dependency an edge records."
+  "Cross-unit rule data-flow edges: `{[producer consumer] {:via #{ft} :rules n}}`,
+  where `:via` is the coupled types — insert and retract alike, both of which
+  change the consumer's fact set. Only rules participate — a query consumes but
+  does not drive the producer→consumer dependency an edge records."
   [analyses-by-unit ancestors]
-  (let [produced (into {}
-                       (map (fn [[uk {:keys [rules]}]]
-                              [uk (into #{} (mapcat (fn [[_ r]]
-                                                      (concat (:insert-types r) (:retract-types r))))
-                                        rules)]))
-                       analyses-by-unit)
+  (let [coupled (into {}
+                      (map (fn [[uk analysis]] [uk (->coupled-types analysis)]))
+                      analyses-by-unit)
         consumed (into {}
                        (map (fn [[uk {:keys [rules]}]]
                               [uk (into #{} (mapcat :lhs-types) (vals rules))]))
                        analyses-by-unit)
-        satisfies (fn [uk] (->satisfies ancestors (get produced uk #{})))
+        satisfies (fn [uk] (->satisfies ancestors (get coupled uk #{})))
         edges (volatile! (sorted-map))]
     (doseq [[p-uk _] analyses-by-unit
             [c-uk _] analyses-by-unit
@@ -241,9 +289,7 @@
   "`{unit-key #{ft}}` — types consumed in scope that no selected unit produces
   (or produces an ancestor of)."
   [analyses-by-unit ancestors]
-  (let [produced (into #{} (mapcat (fn [[_ {:keys [rules]}]]
-                                     (mapcat :insert-types (vals rules))))
-                       analyses-by-unit)
+  (let [produced (into #{} (mapcat ->produced-types) (vals analyses-by-unit))
         all-satisfies (->satisfies ancestors produced)]
     (into {}
           (keep (fn [[uk analysis]]
@@ -252,17 +298,14 @@
           analyses-by-unit)))
 
 (defn- ->orphans
-  "`{unit-key #{ft}}` — types a unit produces (inserts or retracts) that nothing
-  in scope consumes, nor consumes a descendant of."
+  "`{unit-key #{ft}}` — types a unit produces (inserts) that nothing in scope
+  consumes, nor consumes a descendant of."
   [analyses-by-unit descendants]
   (let [consumed (->satisfies descendants
                               (into #{} (mapcat ->consumed-types) (vals analyses-by-unit)))]
     (into {}
-          (keep (fn [[uk {:keys [rules]}]]
-                  (let [produced (into #{} (mapcat (fn [[_ r]]
-                                                     (concat (:insert-types r) (:retract-types r))))
-                                       rules)
-                        orphan (set/difference produced consumed)]
+          (keep (fn [[uk analysis]]
+                  (let [orphan (set/difference (->produced-types analysis) consumed)]
                     (when (seq orphan) [uk orphan]))))
           analyses-by-unit)))
 
@@ -274,6 +317,14 @@
   "The namespaces a unit's rules and queries live in."
   [{:keys [rules queries]}]
   (into #{} (comp cat (keep :ns)) [(vals rules) (vals queries)]))
+
+(defn- ->covered-namespaces-by-unit
+  "`{unit-key #{ns}}` — the full namespace coverage of each unit, before any
+  per-unit `:namespaces` filter narrows it."
+  [analyses-by-unit]
+  (into {}
+        (map (fn [[uk analysis]] [uk (->covered-namespaces analysis)]))
+        analyses-by-unit))
 
 (defn- ->requested-namespaces
   "A unit's `:namespaces` filter as a set of strings, or nil when unfiltered."
@@ -290,25 +341,26 @@
 (defn- ->namespaces
   "`{unit-key [ns …]}` — the namespaces each unit covers, narrowed to the
   caller's per-unit `:namespaces` filter when one is given. A namespace the
-  caller names but the unit does not cover is reported under `:coverage
+  caller names but no unit covers is reported under `:coverage
   :unknown-namespaces`, not here."
-  [analyses-by-unit selection]
+  [covered-by-unit selection]
   (into {}
         (map (fn [unit]
                (let [uk (unit-key unit)]
                  [uk (->scoped-namespaces
-                      (->covered-namespaces (get analyses-by-unit uk))
+                      (get covered-by-unit uk #{})
                       (->requested-namespaces unit))])))
         selection))
 
 (defn- ->unknown-namespaces
   "Requested namespaces (the union of per-unit `:namespaces` filters) that no
-  selected unit covers."
-  [selection namespaces]
+  selected unit covers. Computed from the *full* coverage — before any
+  narrowing — so a namespace one unit covers but another's filter excludes is
+  not misreported as unknown."
+  [covered-by-unit selection]
   (let [requested (into #{} (mapcat #(map str (:namespaces %))) selection)
-        covered (into #{} (mapcat val) namespaces)]
-    (->> covered
-         (set/difference requested)
+        covered (into #{} (mapcat val) covered-by-unit)]
+    (->> (set/difference requested covered)
          sort
          vec)))
 
@@ -327,21 +379,24 @@
 (defn ->index
   "The federated index over `selection` (an ordered vector of `UnitRef`s, each
   optionally narrowed by a `:namespaces` filter), a value. Units are read as
-  slim; the hierarchy is unioned and re-closed; shape skew is refused via
-  `registry/assert-compatible!`."
+  slim, then narrowed to their filter; the hierarchy is unioned and re-closed;
+  shape skew is refused via `registry/assert-compatible!`."
   [registry selection]
   (registry/assert-compatible! registry selection)
   (let [analyses-by-unit (->analyses-by-unit registry selection)
+        covered-by-unit (->covered-namespaces-by-unit analyses-by-unit)
+        unknown-namespaces (->unknown-namespaces covered-by-unit selection)
+        analyses-by-unit (narrow-analyses-by-unit analyses-by-unit selection)
         ancestors (hierarchy/closed-ancestors
                    (hierarchy/union-ancestors (map :fact-types (vals analyses-by-unit))))
         descendants (hierarchy/->descendants ancestors)
         maps (->production-maps analyses-by-unit descendants)
-        namespaces (->namespaces analyses-by-unit selection)]
+        namespaces (->namespaces covered-by-unit selection)]
     {:scope {:units (mapv #(select-keys % [:repo :branch :namespaces]) selection)
              :namespaces namespaces}
      :provenance (->provenance registry selection)
      :coverage {:units (mapv unit-key selection)
-                :unknown-namespaces (->unknown-namespaces selection namespaces)}
+                :unknown-namespaces unknown-namespaces}
      :hierarchy {:ancestors ancestors
                  :descendants descendants
                  :conflicts (->ancestor-conflicts analyses-by-unit)}
@@ -391,24 +446,26 @@
   (:unit-edges index))
 
 (defn paths-between
-  "The first shortest unit-dependency path from `a` to `b` (bounded BFS), or nil."
+  "Every shortest unit-dependency path from `a` to `b` (bounded BFS), as a set
+  of vectors, or nil when there is no path. A reviewer asking how a fact gets
+  from `a` to `b` usually wants to know whether there is more than one route."
   [index a b]
   (let [a (if (map? a) (unit-key a) a)
         b (if (map? b) (unit-key b) b)
         adj (reduce (fn [m [[p c] _]] (update m p (fnil conj #{}) c)) {} (:unit-edges index))]
     (if (= a b)
-      [a]
-      (loop [queue (list [a])
+      #{[a]}
+      (loop [frontier (list [a])
              seen #{a}]
-        (when (seq queue)
-          (let [path (peek queue)
-                node (peek path)]
-            (if (= node b)
-              path
-              (recur (into (pop queue)
-                           (map #(conj path %))
-                           (remove seen (get adj node #{})))
-                     (into seen (get adj node #{}))))))))))
+        (when (seq frontier)
+          (let [next (mapcat (fn [path]
+                               (let [node (peek path)]
+                                 (map #(conj path %) (remove seen (get adj node #{})))))
+                             frontier)
+                found (into #{} (filter #(= (peek %) b)) next)]
+            (if (seq found)
+              found
+              (recur next (into seen (map peek) next)))))))))
 
 (defn coverage-report
   "What this index cannot answer: its units and the requested namespaces no

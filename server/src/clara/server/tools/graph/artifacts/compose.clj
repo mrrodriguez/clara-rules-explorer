@@ -222,13 +222,17 @@
 
 (defn ->composed-analysis
   "One slim `RulebaseAnalysis` over the selected units, which the caller asserts
-  are components of ONE rulebase. Rules/queries merge by fq name (collision
-  refused), fact types merge per name with ancestors unioned, the dep-graph is
-  recomputed over the merged set, and each production gains `:unit`. Rehydrate
-  the result to rebuild the inverses over the whole composition."
+  are components of ONE rulebase. Each unit is narrowed to its `:namespaces`
+  filter first; rules/queries merge by fq name (collision refused), fact types
+  merge per name with ancestors unioned, the dep-graph is recomputed over the
+  merged set, and each production gains `:unit`. Rehydrate the result to rebuild
+  the inverses over the whole composition."
   [registry selection]
   (registry/assert-compatible! registry selection)
-  (let [analyses (mapv #(read-analysis-or-throw registry %) selection)
+  (let [analyses (mapv (fn [unit]
+                         (registry/narrow-analysis (read-analysis-or-throw registry unit)
+                                                   unit))
+                       selection)
         rules (merge-production-map analyses selection :rules)
         queries (merge-production-map analyses selection :queries)
         fact-types (union-fact-types (map :fact-types analyses))

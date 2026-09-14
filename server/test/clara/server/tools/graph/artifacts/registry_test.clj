@@ -187,6 +187,36 @@
                                 #"differing slim shapes"
                                 (registry/assert-compatible! reg (registry/units reg)))))))))
 
+(deftest compatibility-report-keeps-units-without-analysis-out-of-the-vote
+  (with-temp-root
+    (fn [root]
+      (write-unit! root "a" #{:nodes :id})
+      (write-unit! root "b" #{:nodes :id})
+      (write-manifest! (io/file root "legacy-1") "legacy-1")
+      (write-manifest! (io/file root "legacy-2") "legacy-2")
+
+      (let [reg (registry/discover {:root root})
+            report (registry/compatibility-report reg)]
+        (is (false? (:compatible? report)))
+        (is (= #{:nodes :id} (:majority-shape report))
+            "the majority vote runs over analyzed units only")
+        (is (= [] (:shape-mismatch report))
+            "units that agree on the real shape are not mismatches")
+        (is (= [{:repo "legacy-1"} {:repo "legacy-2"}] (:no-analysis report)))
+
+        (testing "assert-compatible! distinguishes the no-analysis failure"
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"no merged-rulebase-analysis to merge"
+                                (registry/assert-compatible! reg (registry/units reg)))))))))
+
+(deftest units-with-analysis-returns-only-readable-units
+  (with-temp-root
+    (fn [root]
+      (write-unit! root "a" #{:nodes :id})
+      (write-manifest! (io/file root "b") "b")
+      (let [reg (registry/discover {:root root})]
+        (is (= ["a"] (mapv registry/unit-key (registry/units-with-analysis reg))))))))
+
 (deftest compatibility-report-lists-missing-artifacts
   (with-temp-root
     (fn [root]

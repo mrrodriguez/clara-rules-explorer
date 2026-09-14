@@ -241,6 +241,41 @@
   (memo-read registry [:annotations (unit-key unit)]
              #(store/read-merged-annotations (->opts registry unit))))
 
+(defn narrow-analysis
+  "Narrow `analysis` to `unit`'s `:namespaces` filter, when present: `:rules`
+  and `:queries` keep only the productions whose `:ns` is in the filter (as
+  strings). `:fact-types` stays whole — keyed by type, not namespace, and the
+  hierarchy benefits from staying global — and `:dep-graph` is left alone,
+  because `clara.server.tools.graph.artifacts.compose/->composed-analysis`
+  recomputes it over the merged productions. `:unresolved` and `:slim` pass
+  through.
+
+  Without a filter the analysis is returned unchanged. Both
+  `clara.server.tools.graph.artifacts.federate/->index` and
+  `clara.server.tools.graph.artifacts.compose/->composed-analysis` apply this
+  when they read a unit for a merge, so a `UnitRef` narrowed to a subset of a
+  unit's namespaces excludes the productions outside that subset."
+  [analysis unit]
+  (if-let [nses (:namespaces unit)]
+    (let [nses (into #{} (map str) nses)
+          keep? (fn [[_ {:keys [ns]}]] (contains? nses (str ns)))
+          narrow (fn [productions]
+                   (into (sorted-map) (filter keep?) productions))]
+      (cond-> analysis
+        (contains? analysis :rules) (update :rules narrow)
+        (contains? analysis :queries) (update :queries narrow)))
+    analysis))
+
+(defn units-with-analysis
+  "The units of `registry` that have a `merged-rulebase-analysis/` directory,
+  as `UnitRef`s — the selection a host can safely merge or index. Tests artifact
+  presence off `unit-info`; it reads no analysis, so it warms nothing in the
+  memo cache."
+  [^Registry registry]
+  (->> (units registry)
+       (filter #(contains? (:artifacts (unit-info registry %)) :rulebase-analysis))
+       vec))
+
 ;; ===========================================================================
 ;; compatibility
 ;; ===========================================================================
@@ -260,6 +295,10 @@
   merge would otherwise silently union. Also reports, per unit, which artifacts
   are missing.
 
+  Units with no analysis to read have no shape, so they do not vote: the
+  majority shape is decided among the analyzed units alone, and the rest are
+  reported under `:no-analysis` rather than as a shape.
+
   With one arity, the whole registry; with two, the caller's selection. An empty
   selection is trivially compatible (no units disagree)."
   ([registry :- Registry]
@@ -269,14 +308,18 @@
    (let [infos (into []
                      (keep #(unit-info registry %))
                      selection)
-         by-shape (group-by :slim-dropped infos)
-         ;; The majority shape is the most common dropped set; on ties the
-         ;; sorted shape wins, which keeps the report deterministic.
+         [no-analysis analyzed] ((juxt (partial remove :slim-dropped)
+                                       (partial filter :slim-dropped))
+                                 infos)
+         by-shape (group-by :slim-dropped analyzed)
+         ;; The majority shape is the most common dropped set among the analyzed
+         ;; units; on ties the sorted shape wins, which keeps the report
+         ;; deterministic.
          [majority-shape _] (or (first (sort-by (fn [[shape infos]]
                                                   [(- (count infos)) (shape-sort-key shape)])
                                                 by-shape))
                                 [nil nil])
-         shape-mismatch (->> infos
+         shape-mismatch (->> analyzed
                              (remove #(= (:slim-dropped %) majority-shape))
                              (mapv unit-ref))
          dropped-key-sets (into (sorted-map)
@@ -290,19 +333,26 @@
                                            (when (seq missing)
                                              [(unit-key info) missing]))))
                                  infos)]
-     {:compatible? (empty? shape-mismatch)
+     {:compatible? (and (empty? no-analysis) (empty? shape-mismatch))
       :majority-shape majority-shape
       :shape-mismatch shape-mismatch
+      :no-analysis (mapv unit-ref no-analysis)
       :dropped-key-sets dropped-key-sets
       :missing-artifacts missing-artifacts})))
 
 (s/defn assert-compatible! :- s/Bool
-  "Throw when `selection` does not share one slim shape, naming the differing
-  units and key sets. Returns true on success."
+  "Throw when `selection` is not mergeable: some units have no analysis to
+  merge, or the analyzed units do not share one slim shape. Returns true on
+  success."
   [registry :- Registry
    selection :- [schema/UnitRef]]
   (let [report (compatibility-report registry selection)]
-    (when-not (:compatible? report)
+    (when (seq (:no-analysis report))
+      (throw (ex-info (format "%d unit(s) have no merged-rulebase-analysis to merge: %s"
+                              (count (:no-analysis report))
+                              (pr-str (mapv unit-key (:no-analysis report))))
+                      report)))
+    (when (seq (:shape-mismatch report))
       (throw (ex-info (format "Cannot merge registry units with differing slim shapes: %s"
                               (pr-str (mapv unit-key (:shape-mismatch report))))
                       report)))
