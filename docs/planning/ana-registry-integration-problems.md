@@ -1,6 +1,6 @@
 # Artifact registry — integration problems found
 
-Status: **Open** · Scope: `server/` (Clojure) · Related:
+Status: **1–5 resolved, 6 open** · Scope: `server/` (Clojure) · Related:
 [`artifact-registry-plan.md`](artifact-registry-plan.md),
 [`artifact-registry-roadmap.md`](artifact-registry-roadmap.md),
 `tools/graph/artifacts/federate.clj`, `tools/graph/artifacts/compose.clj`,
@@ -311,3 +311,90 @@ from the live dep-graph in `clara.server.tools.graph.core` and from
 - [x] Renamed the vague `produced-types` extraction to `->produced-types`, and
   corrected `->satisfies`'s misleading `[ancestors produced]` params to
   `[hierarchy base-types]`.
+
+## 6. An aggregate unit is indistinguishable from a source unit, and silently double-counts
+
+Found while verifying the fixes above, against the composed unit now checked in
+at `test-resources/rules-annos/composed/loan-app-plus-disposition/`.
+
+`flow/compose-persist!` writes a composition as a unit-shaped directory inside
+the registry, which is the point — the bb script and the server read it like any
+other unit. But `registry/discover` then returns it alongside the units it was
+composed *from*, and nothing in the registry API says which is which:
+`unit-info` records `:repo`, `:dir`, `:artifacts`, `:slim-dropped`,
+`:layer-ids`, `:manifest-head` — not `:mode`. The only tell is
+`(get-in (registry/read-manifest reg unit) [:analysis-run :mode])`, an extra
+read per unit that a caller has to know to make.
+
+The two merges then fail differently, and only one of them fails loudly:
+
+- **`compose/->composed-analysis` throws** — the composed unit claims every
+  production name its sources claim, so `merge-production-map` refuses. Correct
+  and obvious.
+- **`federate/->index` silently double-counts.** Over the three checked-in
+  units, the one real cross-unit edge becomes four (composition ↔ each source),
+  and the six entry points of `loan-app-ruleset` are reported a second time
+  under the composition's name. Every per-unit count in the digest inflates the
+  same way, and no message is emitted.
+
+```clojure
+(let [reg (registry/discover {:root "test-resources/rules-annos"})
+      all (registry/units-with-analysis reg)                       ; includes composed/…
+      src (filterv #(not= "composed/loan-app-plus-disposition" (:repo %)) all)]
+  [(count (:unit-edges (federate/->index reg src)))    ;; => 1
+   (count (:unit-edges (federate/->index reg all)))])  ;; => 4
+```
+
+`units-with-analysis` (finding 5) makes this easier to hit, not harder: it is
+the natural "give me everything readable" call, and on a registry that holds one
+composition it hands back a selection that quietly answers wrong.
+
+### `compose-persist!` is not the only aggregate
+
+A host that analyzes a **whole assembled rulebase** — a restored serialized
+session, a monolithic run over everything at once — persists that as a unit too,
+beside the per-component units it overlaps. It is the same shape of unit as a
+composition, produced by a different route, and it needs the same treatment.
+
+That case is worse in one respect. A host whose compiler rewrites namespaces
+when it assembles a rulebase (appending a content hash to each production
+namespace, say) yields an aggregate whose fq production names match **no**
+source unit's. So:
+
+- `compose`'s name-collision refusal — the one loud failure that catches the
+  `compose-persist!` overlap — never fires.
+- `federate/->index` sees two disjoint production sets over one shared
+  fact-type vocabulary and reports a full mesh of unit edges between the
+  aggregate and every component, plus every component's producers duplicated
+  under the aggregate's name.
+
+There is no error, no warning, and nothing in the artifact set that says the two
+describe the same rules. Whatever marker closes this has to be one the host can
+set for an aggregate it produced itself, not a flag only `compose-persist!`
+writes.
+
+### Fix options, in increasing strength
+
+- **Record the mode.** `->unit-info` reads the manifest already; carrying
+  `:mode` (and `:composed-from`, the `:analysis-run :units`) costs nothing and
+  makes every host-side decision a pure function of the registry value.
+  `:mode` should be **host-settable** through the existing manifest
+  contributions — `:compose` for `compose-persist!`, whatever a host calls its
+  own aggregates otherwise — with the absence of the key meaning "a source
+  unit". A closed enum would only push hosts back to reading the raw manifest.
+- **Offer the selection.** `registry/source-units` — units with no aggregate
+  mode — beside `units-with-analysis`, since "the units someone analyzed" is the
+  selection nearly every federation wants.
+- **Refuse the overlap.** `federate/->index` can detect that a selected unit
+  declares an aggregate mode and throw unless the caller says it means it. For a
+  `:composed-from` that names other selected units, refusing outright is right,
+  the way compose already does. For an aggregate that names nothing — a captured
+  session — refusing any mix of aggregate and source units in one selection is
+  the only check available, and it is the correct default: those two are never
+  one question.
+
+The first is the one that matters; the others are cheap once it exists.
+
+`composed-artifact-persist-plan.md` §7 raises where the federated sidecar files
+should live, which is adjacent, but not this: the hazard is the composed unit
+itself being indistinguishable from what it was composed from.
