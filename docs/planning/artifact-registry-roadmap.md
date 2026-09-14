@@ -32,11 +32,11 @@ Namespaces are under `clara.server.tools.graph.artifacts.*` (the plan's short
   - [x] `:dep-graph` recomputed over the merged set, `:slim` union + `:nodes`, `:unit` per production
   - [x] test merging the two `test-resources/rules-annos/` rulesets (they connect via `ApplicationOutcome`)
 
-- [ ] **4. `artifacts/federate.clj`** — hierarchy union/re-closure, `->index`, query fns, polarity.
-  - [ ] `->index` over a selection
-  - [ ] global hierarchy closure + `:conflicts`
-  - [ ] query fns (`impact-of`, `producers-of`, `dependents-of`, `paths-between`, `unit-dependency-graph`, `coverage-report`)
-  - [ ] polarity walk over `:lhs`
+- [x] **4. `artifacts/federate.clj`** — hierarchy union/re-closure, `->index`, query fns, polarity.
+  - [x] `->index` over a selection
+  - [x] global hierarchy closure + `:conflicts`
+  - [x] query fns (`impact-of`, `producers-of`, `dependents-of`, `paths-between`, `unit-dependency-graph`, `coverage-report`)
+  - [x] polarity walk over `:lhs`
 
 - [ ] **5. `->digest` + `persist!`** — `layout/artifact-files` entries + babashka view.
   - [ ] `federate/->digest`
