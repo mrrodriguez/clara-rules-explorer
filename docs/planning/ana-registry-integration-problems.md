@@ -231,3 +231,83 @@ it is cheap to settle at the same time.
   nil, which its docstring says plainly. Either rename to `path-between` or
   return the set of shortest paths — a reviewer asking "how does a fact get from
   A to B" usually wants to know whether there is more than one route.
+
+---
+
+## Resolution checklist
+
+Changes made in `server/` to close these findings. Every item leaves
+`make test lint reflection-check format-check` green.
+
+### Finding 1 — entry points / orphans were `:lhs-types` vectors
+
+- [x] `federate/->consumed-types` flattens with `(comp cat (mapcat :lhs-types))`,
+  so the result is a set of fact-type names, not a set of vectors.
+- [x] Regression test pins the element type: every member of `:entry-points` and
+  `:orphans` is a key of `:fact-types`
+  (`entry-points-and-orphans-are-fact-types-not-lhs-vectors-test`).
+- [x] The corrected fixture counts are pinned: `loan-app-ruleset` has 6 entry
+  points and 6 orphans; `loan-disposition-ruleset` has neither (its one consumed
+  type is satisfied through the hierarchy by the other unit's producer).
+
+### Finding 2 — `UnitRef` `:namespaces` narrowed nothing
+
+- [x] `registry/narrow-analysis` filters an analysis's `:rules` / `:queries` to
+  productions whose `:ns` is in the filter (strings), leaving `:fact-types`,
+  `:dep-graph`, `:unresolved`, and `:slim` alone.
+- [x] `federate/->index` applies it (via `narrow-analyses-by-unit`) and
+  `compose/->composed-analysis` applies it before the merge — so the server's
+  `RegistryConfig` path inherits it.
+- [x] Unknown-namespace reporting is computed from **full** coverage before
+  narrowing, so a namespace one unit covers but another's filter excludes is not
+  misreported.
+- [x] Tests: `namespace-filter-narrows-productions-not-just-scope-test` and
+  `composed-analysis-narrows-to-unit-namespace-filter-test`.
+
+### Finding 3 — no-analysis units voted as the `nil` shape
+
+- [x] `registry/compatibility-report` partitions units into `:no-analysis` vs
+  analyzed before voting; only analyzed units vote for the majority shape.
+- [x] `:compatible?` now requires both no missing analyses and no shape skew;
+  `:no-analysis` is a first-class report key and is in `schema/CompatibilityReport`.
+- [x] `registry/assert-compatible!` throws two distinct messages: "N unit(s) have
+  no merged-rulebase-analysis to merge" vs "differing slim shapes". This also
+  fixes the ordering symptom (the clearer missing-analysis error now fires first).
+- [x] Tests: `compatibility-report-keeps-units-without-analysis-out-of-the-vote`
+  and `units-with-analysis-returns-only-readable-units`.
+
+### Finding 4 — three definitions of "produced"
+
+Resolved as **two named readings**, not the single insert-only predicate this
+section proposed. The proposed insert-only `:unit-edges` would have diverged
+from the live dep-graph in `clara.server.tools.graph.core` and from
+`compose/->dep-graph`, which both treat retract as a coupling (core tags it
+`:via :retract`).
+
+- [x] Supply reading (insert-only): `federate/production-produced-types` and
+  `->produced-types`, used by `:entry-points`, `:orphans`, and `:producers` —
+  retracting a type removes it, so it neither supplies an entry point nor makes
+  an orphan.
+- [x] Coupling reading (insert + retract): `federate/->coupled-types`, used by
+  `:unit-edges` — both directions change the consumer's fact set, matching
+  `core/->dep-graph` and `compose/->dep-graph`.
+- [x] `->orphans` moved to the supply reading (it was the odd one out);
+  `->unit-edges` stayed on the coupling reading.
+- [x] Both readings are stated in the `federate` namespace docstring.
+- [x] Regression test `retract-couples-units-but-does-not-supply-test` pins all
+  four behaviors for a retract-only producer.
+
+### Finding 5 — minor
+
+- [x] `registry/units-with-analysis` returns the readable units (tests artifact
+  presence, warms nothing).
+- [x] `federate/paths-between` returns the **set** of all shortest paths (kept the
+  plural name) rather than one path.
+- [x] Tests cover both; the `paths-between` callers were updated to the set
+  shape.
+
+### Follow-up correction
+
+- [x] Renamed the vague `produced-types` extraction to `->produced-types`, and
+  corrected `->satisfies`'s misleading `[ancestors produced]` params to
+  `[hierarchy base-types]`.
