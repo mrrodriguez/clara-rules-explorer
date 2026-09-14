@@ -70,17 +70,22 @@ manifest, that outlives the process. A library has no standing to guess it.
 ### The checked-in example
 
 `clara.server.tools.graph.artifacts.regen-example/example-out-dir` (relative to `server/`) is a
-committed example of the whole set, generated from the
-loan-doc-rules + loan-app-rules + loan-doc-queries session (the same session
-`clara.server.graph.integration-test/run-loan-app-rules` builds, with approved-app working memory).
-The `rules-annos/` parent is the registry root and the `loan-app-ruleset` subdir one named ruleset
-under it — the layout a rules registry keeps for holding more than one ruleset later.
-It is there so a change to any generation step shows up as a reviewable diff rather than a silent
-format drift. Regenerate it (from `server/`) with `make regen-artifacts`, which runs
+committed example of the whole registry, holding two named ruleset bundles under the `rules-annos/`
+root — the layout a rules registry keeps for more than one ruleset:
+
+- `loan-app-ruleset` — the loan-doc-rules + loan-app-rules + loan-doc-queries session (the same
+  session `clara.server.graph.integration-test/run-loan-app-rules` builds, with approved-app working
+  memory), including a fired working-memory layer.
+- `loan-disposition-ruleset` — the single-ns
+  `clara.server.tools.graph.rules.loan-outcome-notices` session, unfired, so it records the
+  downstream consume/produce contract with no memory-derived layer.
+
+The example is there so a change to any generation step shows up as a reviewable diff rather than a
+silent format drift. Regenerate it (from `server/`) with `make regen-artifacts`, which runs
 `dev/regen_artifacts.clj`; a regeneration is byte-identical when nothing has changed, and anything
 that did change is exactly what the diff should be read for. The golden test
-`clara.server.tools.graph.artifacts.regen-example-test` regenerates the set into a temp dir and
-pins it against the checked-in copy.
+`clara.server.tools.graph.artifacts.regen-example-test` regenerates the whole registry into a temp
+dir and pins it against the checked-in copy.
 
 One byte-level caveat: the `def-fact-fn` macro emits an auto-gensym
 (`resolved__N__auto__`) for `extract-doc-meta-rule`'s var-as-fact local, and `N` depends on the

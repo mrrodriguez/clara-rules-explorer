@@ -1,12 +1,12 @@
 (ns clara.server.tools.graph.artifacts.regen-example-test
-  "Golden test for the checked-in persistence example under
+  "Golden test for the checked-in persistence examples under
    `example/example-out-dir`.
 
-   Regenerates the whole artifact set into a temp dir via
+   Regenerates the whole artifact registry into a temp dir via
   `clara.server.tools.graph.artifacts.regen-example/generate-example-artifacts!` and asserts the
   checked-in copy is reproduced: every `clara.server.tools.graph.artifacts.flow/persist!` artifact,
-  and the provenance manifest apart from the fields that are environment rather than generation, eg.
-  run dates and git state.
+  and each ruleset's provenance manifest apart from the fields that are environment rather than
+  generation, eg. run dates and git state.
 
    Two exceptions are normalized, not because generation is allowed to change them but because they
   are not functions of generation at all: the compiler auto-gensym the from macros for, eg.
@@ -35,12 +35,15 @@
     (io/delete-file f true)))
 
 (defn- checked-in-dir []
-  (-> (io/resource (format "%s/auto-gen-annotations.edn"
-                           example/example-resource-base))
-      .getPath
-      io/file
-      .getParentFile
-      .getPath))
+  (let [first-repo (:repo (first example/example-rulesets))]
+    (-> (io/resource (format "%s/%s/auto-gen-annotations.edn"
+                             example/example-registry-base
+                             first-repo))
+        .getPath
+        io/file
+        .getParentFile
+        .getParentFile
+        .getPath)))
 
 (def ^:private auto-gensym-re
   #"__\d+__auto__")
@@ -72,6 +75,15 @@
                       (normalize-gensyms (slurp f))])))
         (file-seq (io/file dir))))
 
+(defn- dissoc-manifests
+  "Manifest files are compared field-wise below, not byte-for-byte, so drop
+   every `rules-inspect-manifest.edn` path (one per ruleset bundle)."
+  [snapshot]
+  (into (sorted-map)
+        (remove (fn [[path _]]
+                  (str/ends-with? path "/rules-inspect-manifest.edn")))
+        snapshot))
+
 (def ^:private manifest-volatile-keys
   "The manifest fields that record *when* and *where* a run happened, not what
   it generated: run dates and the git state of the checkout it was generated
@@ -85,26 +97,41 @@
   (edn/read-string (slurp (io/file dir "rules-inspect-manifest.edn"))))
 
 (deftest regenerated-artifacts-match-checked-in-example-test
-  (let [tmp (create-temp-dir)]
+  (let [tmp (create-temp-dir)
+        repos (mapv :repo example/example-rulesets)]
     (try
-      (example/generate-example-artifacts! tmp)
-      (let [expected (get-snapshot (checked-in-dir))
+      (let [result (example/generate-example-artifacts! tmp)
+            expected (get-snapshot (checked-in-dir))
             actual (get-snapshot tmp)
-            ;; the manifest is compared field-wise below, not byte-for-byte
-            expected-files (dissoc expected "/rules-inspect-manifest.edn")
-            actual-files (dissoc actual "/rules-inspect-manifest.edn")]
-        (testing "the checked-in example is non-empty"
+            expected-files (dissoc-manifests expected)
+            actual-files (dissoc-manifests actual)]
+        (testing "the checked-in registry is non-empty"
           (is (seq expected-files)
               (format "no checked-in artifacts found under %s"
-                      example/example-resource-base)))
+                      example/example-registry-base)))
+        (testing "both checked-in ruleset bundles are present"
+          (doseq [repo repos]
+            (is (some #(str/starts-with? % (str "/" repo "/"))
+                      (keys expected-files))
+                (str repo " bundle is checked in"))))
+        (testing "generation returns both rulesets"
+          (is (= (set repos)
+                 (set (map :repo (:rulesets result))))))
+        (testing "the single-ns disposition ruleset has no memory layer"
+          (let [disposition (first (filter #(= "loan-disposition-ruleset" (:repo %))
+                                           (:rulesets result)))]
+            (is (zero? (:memory-rule-count disposition))
+                "loan-disposition-ruleset is unfired and has no memory-derived rules")))
         (testing "regeneration produces the same set of files"
           (is (= (set (keys expected-files)) (set (keys actual-files)))))
         (testing "every flow/persist! artifact is reproduced byte-for-byte"
           (doseq [path (keys expected-files)]
             (is (= (get expected-files path) (get actual-files path))
                 (str path " is not reproduced by regeneration"))))
-        (testing "the provenance manifest matches apart from its environment fields"
-          (is (= (normalize-manifest (read-manifest (checked-in-dir)))
-                 (normalize-manifest (read-manifest tmp))))))
+        (testing "every ruleset provenance manifest matches apart from its environment fields"
+          (doseq [repo repos]
+            (is (= (normalize-manifest (read-manifest (io/file (checked-in-dir) repo)))
+                   (normalize-manifest (read-manifest (io/file tmp repo))))
+                (str repo " manifest is reproduced")))))
       (finally
         (delete-tree tmp)))))
