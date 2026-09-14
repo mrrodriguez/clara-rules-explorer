@@ -38,10 +38,10 @@ Namespaces are under `clara.server.tools.graph.artifacts.*` (the plan's short
   - [x] query fns (`impact-of`, `producers-of`, `dependents-of`, `paths-between`, `unit-dependency-graph`, `coverage-report`)
   - [x] polarity walk over `:lhs`
 
-- [ ] **5. `->digest` + `persist!`** — `layout/artifact-files` entries + babashka view.
-  - [ ] `federate/->digest`
-  - [ ] `federate/persist!`
-  - [ ] `layout/artifact-files` gains `:registry-index` / `:registry-digest`
+- [x] **5. `->digest` + `persist!`** — `layout/artifact-files` entries + babashka view.
+  - [x] `federate/->digest`
+  - [x] `federate/persist!`
+  - [x] `layout/artifact-files` gains `:registry-index` / `:registry-digest` (with `unit-artifact-files` keeping unit presence checks honest)
 
 - [ ] **6. Serving** — `ServerState`, `cache`, the 409 `:no-session`, config schema, route tests.
   - [ ] `ServerState` gains `:rulebase-analysis` as alternative to `:session`
