@@ -43,12 +43,12 @@ Namespaces are under `clara.server.tools.graph.artifacts.*` (the plan's short
   - [x] `federate/persist!`
   - [x] `layout/artifact-files` gains `:registry-index` / `:registry-digest` (with `unit-artifact-files` keeping unit presence checks honest)
 
-- [ ] **6. Serving** — `ServerState`, `cache`, the 409 `:no-session`, config schema, route tests.
-  - [ ] `ServerState` gains `:rulebase-analysis` as alternative to `:session`
-  - [ ] `cache/get-rulebase-analysis` returns supplied analysis as-is
-  - [ ] session routes answer 409 `:no-session`
-  - [ ] `:annotations` via `compose/fold-layers`
-  - [ ] route tests over a registry-backed server with no session
+- [x] **6. Serving** — `ServerState`, `cache`, the 409 `:no-session`, config schema, route tests.
+  - [x] `ServerState` gains `:rulebase-analysis` as alternative to `:session`
+  - [x] `cache/get-rulebase-analysis` returns supplied analysis as-is
+  - [x] session routes answer 409 `:no-session`
+  - [x] `:annotations` via `compose/fold-layers`
+  - [x] route tests over a registry-backed server with no session
 
 - [ ] **7. `grade`** — `federate/grade index reference-analysis`.
 

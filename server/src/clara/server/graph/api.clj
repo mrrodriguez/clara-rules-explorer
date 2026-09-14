@@ -344,37 +344,37 @@
 
 (s/defn handle-get-rulebase-summary :- {:status (s/eq 200) :body RulebaseSummary}
   [state-atom cache working-memory-enabled? _req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom
+  (let [state @state-atom
         working-memory-available (boolean
                                   (and working-memory-enabled?
-                                       (core/working-memory-available? session)))]
+                                       (core/working-memory-available? (:session state))))]
     {:status 200
      :body (-> cache
-               (cache/get-rulebase-analysis session annotations memory-analysis)
+               (cache/get-rulebase-analysis state)
                core/get-rulebase-counts
                (assoc :working-memory-available working-memory-available))}))
 
 (defn- handle-get-rulebase-analysis
   [state-atom cache _req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom]
+  (let [state @state-atom]
     {:status 200
      :body (-> cache
-               (cache/get-rulebase-analysis session annotations memory-analysis)
+               (cache/get-rulebase-analysis state)
                core/get-rulebase-analysis-external-view)}))
 
 (s/defn handle-get-rules :- {:status (s/eq 200) :body {:rules [RuleListItem]}}
   [state-atom cache _req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom]
+  (let [state @state-atom]
     {:status 200
      :body {:rules (-> cache
-                       (cache/get-rulebase-analysis session annotations memory-analysis)
+                       (cache/get-rulebase-analysis state)
                        core/get-rules-list)}}))
 
 (s/defn handle-get-rule :- GetRuleResponse
   [state-atom cache req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom
+  (let [state @state-atom
         id (get-in req [:path-params :id])
-        analysis (cache/get-rulebase-analysis cache session annotations memory-analysis)
+        analysis (cache/get-rulebase-analysis cache state)
         name (get (:production-id-index analysis) id)
         rule (get-in analysis [:rules name])]
     (if rule
@@ -383,17 +383,17 @@
 
 (s/defn handle-get-queries :- {:status (s/eq 200) :body {:queries [QueryListItem]}}
   [state-atom cache _req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom]
+  (let [state @state-atom]
     {:status 200
      :body {:queries (-> cache
-                         (cache/get-rulebase-analysis session annotations memory-analysis)
+                         (cache/get-rulebase-analysis state)
                          core/get-queries-list)}}))
 
 (s/defn handle-get-query :- GetQueryResponse
   [state-atom cache req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom
+  (let [state @state-atom
         id (get-in req [:path-params :id])
-        analysis (cache/get-rulebase-analysis cache session annotations memory-analysis)
+        analysis (cache/get-rulebase-analysis cache state)
         name (get (:production-id-index analysis) id)
         query (get-in analysis [:queries name])]
     (if query
@@ -402,17 +402,17 @@
 
 (s/defn handle-get-fact-types :- {:status (s/eq 200) :body {:fact-types [FactTypeListItem]}}
   [state-atom cache _req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom]
+  (let [state @state-atom]
     {:status 200
      :body {:fact-types (-> cache
-                            (cache/get-rulebase-analysis session annotations memory-analysis)
+                            (cache/get-rulebase-analysis state)
                             ft/get-fact-types-list)}}))
 
 (s/defn handle-get-fact-type :- GetFactTypeResponse
   [state-atom cache req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom
+  (let [state @state-atom
         id (get-in req [:path-params :id])
-        analysis (cache/get-rulebase-analysis cache session annotations memory-analysis)
+        analysis (cache/get-rulebase-analysis cache state)
         name (get (:fact-type-id-index analysis) id)
         fact-type (get-in analysis [:fact-types name])]
     (if fact-type
@@ -421,28 +421,29 @@
 
 (defn- no-working-memory-response
   "Returns a 409 with a machine-readable `:reason` key.
-   `cause` is :rulebase-input or :disabled-by-config."
+   `cause` is :rulebase-input, :disabled-by-config, or :no-session."
   [cause]
   (let [messages {:rulebase-input "No working memory: the server was started with a rulebase, not a session"
-                  :disabled-by-config "No working memory: disabled by configuration (:working-memory-enabled false)"}]
+                  :disabled-by-config "No working memory: disabled by configuration (:working-memory-enabled false)"
+                  :no-session "No working memory: the server is serving a registry selection, not a session"}]
     {:status 409
      :body {:error (get messages cause "No working memory")
             :reason cause}}))
 
 (defn- with-memory-analysis
-  "Invokes `f` with the memory-analysis, or returns 409 :rulebase-input
-   when the session is a rulebase (no working memory).  Session capability
-   is checked per request because the session atom can be hot-swapped at
-   runtime; the static `:working-memory-enabled` config flag is resolved
-   once at router construction instead (see `router`)."
+  "Invokes `f` with the memory-analysis, or returns 409 when working memory is
+  unavailable.  Registry mode (`:rulebase-analysis` present) is 409
+  `:no-session`; a session that is a bare rulebase is 409 `:rulebase-input`.
+  Session capability is checked per request because the state atom can be
+  hot-swapped at runtime; the static `:working-memory-enabled` config flag is
+  resolved once at router construction instead (see `router`)."
   [state-atom cache f]
   (let [state @state-atom]
-    (if-let [memory-analysis (cache/get-memory-analysis cache
-                                                        (:session state)
-                                                        (:annotations state)
-                                                        (:memory-analysis state))]
-      (f memory-analysis)
-      (no-working-memory-response :rulebase-input))))
+    (if (:rulebase-analysis state)
+      (no-working-memory-response :no-session)
+      (if-let [memory-analysis (cache/get-memory-analysis cache state)]
+        (f memory-analysis)
+        (no-working-memory-response :rulebase-input)))))
 
 (s/defn handle-get-session-fact-types
   :- GetSessionFactTypesResponse

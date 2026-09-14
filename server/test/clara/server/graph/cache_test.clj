@@ -28,6 +28,13 @@
   [session]
   (ann.merge/annotations (ann.merge/merge-layers [(ann.merge/->props-layer session)])))
 
+(defn- ->state
+  "A session-mode server state map, the shape the cache consumes."
+  [session annotations memory-analysis]
+  {:session session
+   :annotations annotations
+   :memory-analysis memory-analysis})
+
 (deftest test-warm-reuses-enrichment-memory-analysis
   (testing "warm! with a memory-analysis stores a re-stamped memory-analysis equal to a fresh build"
     (let [session (->test-session)
@@ -35,11 +42,12 @@
           enrichment-memory-analysis (memory/->memory-analysis session)
           analysis (core/->rulebase-analysis session annotations)
           expected (memory/->memory-analysis session (-> analysis :fact-types keys set))
-          c (cache/->cache)]
+          c (cache/->cache)
+          state (->state session annotations enrichment-memory-analysis)]
       (is (every? (comp false? :known :type) (vals (:facts enrichment-memory-analysis)))
           "the enrichment memory-analysis starts with every fact type unknown")
-      (cache/warm! c session annotations enrichment-memory-analysis)
-      (is (= expected (cache/get-memory-analysis c session annotations enrichment-memory-analysis))
+      (cache/warm! c state)
+      (is (= expected (cache/get-memory-analysis c state))
           "the request path serves the re-stamped memory-analysis"))))
 
 (deftest test-memory-analysis-miss-reuses-memory-analysis
@@ -50,15 +58,17 @@
         expected (memory/->memory-analysis session (-> analysis :fact-types keys set))]
     (testing "a cold-cache miss re-stamps a provided memory-analysis instead of re-inspecting"
       (let [rebuilt? (atom false)
-            c (cache/->cache)]
+            c (cache/->cache)
+            state (->state session annotations enrichment-memory-analysis)]
         (with-redefs [memory/->memory-analysis
                       (fn [_ _]
                         (reset! rebuilt? true)
                         expected)]
-          (let [served (cache/get-memory-analysis c session annotations enrichment-memory-analysis)]
+          (let [served (cache/get-memory-analysis c state)]
             (is (false? @rebuilt?)
                 "a miss with a memory-analysis must re-stamp, not re-inspect")
             (is (= expected served))))))
     (testing "a cold-cache miss without a memory-analysis falls back to a fresh memory-analysis"
-      (let [c (cache/->cache)]
-        (is (= expected (cache/get-memory-analysis c session annotations nil)))))))
+      (let [c (cache/->cache)
+            state (->state session annotations nil)]
+        (is (= expected (cache/get-memory-analysis c state)))))))

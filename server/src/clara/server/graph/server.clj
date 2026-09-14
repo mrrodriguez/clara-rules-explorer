@@ -16,6 +16,10 @@
             [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.analyze.callsite :as callsite]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
+            [clara.server.tools.graph.artifacts.compose :as compose]
+            [clara.server.tools.graph.artifacts.registry :as registry]
+            [clara.server.tools.graph.artifacts.rehydrate :as rehydrate]
+            [clara.server.tools.graph.artifacts.schema :as artifact-schema]
             [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.utils :as utils]
             [clojure.set :as set]
@@ -100,12 +104,27 @@
                 (map? x)))
           'annotations-arg?))
 
+(s/defschema RegistryConfig
+  "Config for registry-backed serving: compose a selection of artifact units
+  into one analysis and serve it with no live session."
+  {:root s/Str
+   :units [artifact-schema/UnitRef]
+   :mode (s/enum :compose)})
+
 (s/defschema StartOpts
-  "Validated config for `start!` / `start-system!`."
-  {:session SessionOrRulebase
-   (s/optional-key :annotations) (s/maybe AnnotationsArg)
-   (s/optional-key :port) s/Int
-   (s/optional-key :working-memory-enabled) s/Bool})
+  "Validated config for `start!` / `start-system!`. Exactly one of `:session`
+  or `:registry` is present."
+  (s/conditional
+   #(contains? % :registry)
+   {:registry RegistryConfig
+    (s/optional-key :annotations) (s/maybe AnnotationsArg)
+    (s/optional-key :port) s/Int
+    (s/optional-key :working-memory-enabled) s/Bool}
+   :else
+   {:session SessionOrRulebase
+    (s/optional-key :annotations) (s/maybe AnnotationsArg)
+    (s/optional-key :port) s/Int
+    (s/optional-key :working-memory-enabled) s/Bool}))
 
 (s/defschema SwapSessionOpts
   "Options for `swap-session!`.  At least one of :session or :annotations
@@ -131,13 +150,21 @@
 
 (s/defschema ServerState
   "The consolidated server state held in the system's state atom.  The source
-   of truth for the state contract (the ns docstring refers here).  Optional
-   keys are omitted from the map when their value would be nil."
-  {:session                           SessionOrRulebase
-   (s/optional-key :annotations-spec) AnnotationsArg
-   :annotations                       BareAnnotations
-   (s/optional-key :memory-analysis)  MemoryAnalysis
-   :analyze-cache                     (s/pred map? 'analyze-cache?)})
+   of truth for the state contract (the ns docstring refers here).  Exactly one
+   of `:session` and `:rulebase-analysis` is present: session mode holds a live
+   session, registry mode holds the composed, rehydrated analysis supplied by
+   `:registry` config."
+  (s/conditional
+   #(contains? % :rulebase-analysis)
+   {:rulebase-analysis (s/pred map? 'rulebase-analysis?)
+    :annotations ann.merge/MergedAnnotations
+    (s/optional-key :registry) RegistryConfig}
+   :else
+   {:session SessionOrRulebase
+    (s/optional-key :annotations-spec) AnnotationsArg
+    :annotations BareAnnotations
+    (s/optional-key :memory-analysis) MemoryAnalysis
+    :analyze-cache (s/pred map? 'analyze-cache?)}))
 
 ;; ---------------------------------------------------------------------------
 ;; Annotation building — shared by transitions
@@ -340,16 +367,25 @@
 
 (s/defn ^:private transition-start :- ServerState
   "Config -> State.  Builds fresh state from a validated config map.
-   `:annotations-spec` is the raw spec as-given (may be nil for no annotations)."
-  [{:keys [session annotations-spec]}]
-  (let [tmp   (atom {})
-        built (->resolved-annotations* session annotations-spec nil tmp)]
-    (utils/remove-nil-vals
-     {:session          session
-      :annotations-spec annotations-spec
-      :annotations      (:annotations built)
-      :memory-analysis  (:memory-analysis built)
-      :analyze-cache    @tmp})))
+   Session mode builds annotations through the annotation spec; registry mode
+   composes the selection and folds its layer stacks instead."
+  [{:keys [session annotations-spec registry-config] :as _config}]
+  (if registry-config
+    (let [reg (registry/discover {:root (:root registry-config)})
+          selection (:units registry-config)
+          analysis (-> (compose/->composed-analysis reg selection)
+                       rehydrate/rehydrate-analysis)]
+      {:rulebase-analysis analysis
+       :annotations (compose/fold-layers reg selection)
+       :registry registry-config})
+    (let [tmp   (atom {})
+          built (->resolved-annotations* session annotations-spec nil tmp)]
+      (utils/remove-nil-vals
+       {:session          session
+        :annotations-spec annotations-spec
+        :annotations      (:annotations built)
+        :memory-analysis  (:memory-analysis built)
+        :analyze-cache    @tmp}))))
 
 (s/defn ^:private transition-swap :- ServerState
   "State -> {:keys [session annotations-spec]} -> State.
@@ -401,10 +437,14 @@
   [config]
   (let [_ (s/validate StartOpts config)
         {:keys [port working-memory-enabled] :or {port 9999 working-memory-enabled true}} config
-        state (transition-start (clojure.set/rename-keys config {:annotations :annotations-spec}))
+        state (transition-start (-> config
+                                    (clojure.set/rename-keys {:annotations :annotations-spec
+                                                              :registry :registry-config})))
         state-atom (atom state)
         wm-available? (core/working-memory-available? (:session state))]
-    (when-not wm-available?
+    (when (:registry state)
+      (log/info "[server] Serving a registry selection; session routes answer 409 :no-session"))
+    (when (and (not (:registry state)) (not wm-available?))
       (log/warn "[server] Working-memory routes disabled: started with a rulebase, not a session"))
     (when (and wm-available? (not working-memory-enabled))
       (log/warn "[server] Working-memory routes disabled by configuration (:working-memory-enabled false)"))
@@ -413,7 +453,7 @@
       ;; Warm before binding Jetty — defensive: a request in the gap builds
       ;; on demand, but warming first means the first real request never
       ;; pays the cold-build penalty.
-      (cache/warm! cache (:session state) (:annotations state) (:memory-analysis state))
+      (cache/warm! cache state)
       (let [jetty (jetty/run-jetty handler {:port port :join? false})]
         {:config      config
          :state-atom  state-atom
@@ -466,8 +506,7 @@
                             {:session session
                              :annotations-spec annotations})]
        (when warm-cache?
-         (cache/warm! (:cache system) (:session new-state) (:annotations new-state)
-                      (:memory-analysis new-state)))
+         (cache/warm! (:cache system) new-state))
        (:annotations new-state)))))
 
 (defn reload-annotations!
@@ -479,6 +518,6 @@
   ([]
    (reload-annotations! (require-system @default-system)))
   ([{:keys [cache state-atom] :as _system}]
-   (let [{:keys [session annotations memory-analysis]} (swap! state-atom transition-reload)]
-     (cache/warm! cache session annotations memory-analysis)
-     annotations)))
+   (let [new-state (swap! state-atom transition-reload)]
+     (cache/warm! cache new-state)
+     (:annotations new-state))))

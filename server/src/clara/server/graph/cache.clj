@@ -5,9 +5,11 @@
    memory-analysis.  Both `clara.server.graph.api` (HTTP handlers) and
    `clara.server.graph.server` (lifecycle) use this namespace.
 
-   Invalidation is automatic: every access compares the current session and
-   annotations **values** against the cached ones via `identical?`.  When
-   either value changes identity, the cache misses and rebuilds."
+   Invalidation is automatic: every access compares the current inputs
+   **values** against the cached ones via `identical?`.  In session mode the
+   inputs are the session and annotations; in registry mode the input is the
+   supplied `:rulebase-analysis` value, which is returned as-is (nothing is
+   recomputed — the registry mode already composed and rehydrated it)."
   (:require [clara.server.tools.graph.core :as core]
             [clara.server.tools.graph.memory :as memory]
             [clara.server.tools.graph.annotations.merge :as ann.merge]))
@@ -25,7 +27,7 @@
 ;; Internal builders
 ;; ---------------------------------------------------------------------------
 
-(defn- ->state
+(defn- ->session-state
   "Builds the rulebase-analysis state and memory-analysis from the current
    session and annotations.  Annotations are unwrapped to bare form; session
    working-memory enrichment is NOT applied here — it is the caller's
@@ -52,45 +54,49 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- get-state
-  "Returns the cached state map, rebuilding when the session or annotations
-   reference has changed (identity check).  The state map includes
-   `:rulebase-analysis`, reverse indexes, and `:memory-analysis` (nil when
-   working memory is unavailable)."
-  [cache session annotations memory-analysis]
+  "Returns the cached state map, rebuilding when the inputs' identity changes.
+   `state` is a server state map: registry mode (`:rulebase-analysis` present)
+   returns the supplied analysis as-is, invalidated by `identical?` on that
+   value; session mode rebuilds from session + annotations as before."
+  [cache {:keys [session rulebase-analysis annotations memory-analysis]}]
   (let [cached @cache]
-    (if (and cached
-             (identical? (:session cached) session)
-             (identical? (:annotations cached) annotations))
-      cached
-      (let [state (->state session annotations memory-analysis)]
-        (reset! cache (assoc state
-                             :session session
-                             :annotations annotations))))))
+    (if rulebase-analysis
+      (if (and cached (identical? (:rulebase-analysis cached) rulebase-analysis))
+        cached
+        (let [built {:rulebase-analysis rulebase-analysis
+                     :memory-analysis   nil
+                     :registry-mode?    true}]
+          (reset! cache built)
+          built))
+      (if (and cached
+               (identical? (:session cached) session)
+               (identical? (:annotations cached) annotations))
+        cached
+        (let [built (assoc (->session-state session annotations memory-analysis)
+                           :session session
+                           :annotations annotations)]
+          (reset! cache built)
+          built)))))
 
 (defn get-rulebase-analysis
-  "Returns the cached rulebase-analysis map for the current session and
-   annotations, rebuilding transparently when inputs change.
-
-   `memory-analysis` is the enrichment-phase memory-analysis (nil when none);
-   on a miss it is reused instead of re-inspecting the session."
-  [cache session annotations memory-analysis]
-  (:rulebase-analysis (get-state cache session annotations memory-analysis)))
+  "Returns the cached rulebase-analysis map for the current server state,
+   rebuilding transparently when inputs change.  In registry mode the supplied
+   analysis is returned as-is."
+  [cache state]
+  (:rulebase-analysis (get-state cache state)))
 
 (defn get-memory-analysis
-  "Returns the cached memory-analysis for the current session (nil when
-   working memory is unavailable), rebuilding transparently on change.
-
-   `memory-analysis` is the enrichment-phase memory-analysis (nil when none);
-   on a miss it is reused instead of re-inspecting the session."
-  [cache session annotations memory-analysis]
-  (:memory-analysis (get-state cache session annotations memory-analysis)))
+  "Returns the cached memory-analysis for the current server state (nil when
+   working memory is unavailable — always nil in registry mode), rebuilding
+   transparently on change."
+  [cache state]
+  (:memory-analysis (get-state cache state)))
 
 (defn warm!
-  "Eagerly populates the cache so the next request avoids the full
-   `core/->rulebase-analysis` + `memory/->memory-analysis` build.
+  "Eagerly populates the cache so the next request avoids the full build.
 
-   `memory-analysis` is the enrichment-phase memory-analysis (nil when none);
-   when non-nil it is reused instead of re-inspecting the session."
-  [cache session annotations memory-analysis]
-  (get-state cache session annotations memory-analysis)
+   `state` is the server state map; in session mode `:memory-analysis` (when
+   non-nil) is reused instead of re-inspecting the session."
+  [cache state]
+  (get-state cache state)
   nil)

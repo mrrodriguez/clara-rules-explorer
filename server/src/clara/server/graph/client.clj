@@ -143,8 +143,7 @@
   []
   (if-let [sys (get-current-system)]
     (let [{:keys [state-atom cache]} sys
-          {:keys [session annotations memory-analysis]} @state-atom
-          analysis (cache/get-rulebase-analysis cache session annotations memory-analysis)]
+          analysis (cache/get-rulebase-analysis cache @state-atom)]
       (into {}
             (map (fn [name] [name (get-production-source name)]))
             (concat (keys (:rules analysis)) (keys (:queries analysis)))))
@@ -558,8 +557,7 @@
       (let [result
             (if-let [sys (get-current-system)]
               (let [{:keys [state-atom cache]} sys
-                    {:keys [session annotations memory-analysis]} @state-atom
-                    analysis (cache/get-rulebase-analysis cache session annotations memory-analysis)
+                    analysis (cache/get-rulebase-analysis cache @state-atom)
                     caller-ns-sym (some-> caller-ns symbol)]
                 (if (nil? production)
                   (navigate-global analysis caller-ns-sym token side)
