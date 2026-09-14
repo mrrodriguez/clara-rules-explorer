@@ -75,7 +75,7 @@
   :doc "When doc check passes, retract any stale-document notice via Java constructor.\n   The analyzer captures the retract callsite with source coordinates.",
   :props {}},
  "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule" {:notes nil,
-  :rhs-form "(do\n (clojure.core/let\n  [resolved__48151__auto__ (var extract-doc-meta)]\n  (clara.rules/insert! resolved__48151__auto__)))\n",
+  :rhs-form "(do\n (clojure.core/let\n  [resolved__48158__auto__ (var extract-doc-meta)]\n  (clara.rules/insert! resolved__48158__auto__)))\n",
   :doc nil,
   :props {}},
  "clara.server.tools.graph.rules.loan-doc-rules/find-document-check" {:params #{"?app-id"},

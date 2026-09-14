@@ -148,11 +148,11 @@
       :resolved-types [clara.server.tools.graph.rules.loan_doc_rules.StaleDocumentNotice],
       :callsite-id "clara.server.tools.graph.rules.loan-doc-rules:-:2197b1a6:0"}],
     :resolution :full}},
-  "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule" {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "resolved__48151__auto__",
+  "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule" {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "resolved__48158__auto__",
       :ns-name-sym clara.server.tools.graph.rules.loan-doc-rules,
       :filename "clara/server/tools/graph/rules/loan_doc_rules.clj",
       :status :none,
       :via {:boundary-var-name-sym clara.rules/insert!,
        :boundary-in-var clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule},
-      :callsite-id "clara.server.tools.graph.rules.loan-doc-rules:-:88827bd7:0"}],
+      :callsite-id "clara.server.tools.graph.rules.loan-doc-rules:-:2f32ba3c:0"}],
     :resolution :none}}}}
