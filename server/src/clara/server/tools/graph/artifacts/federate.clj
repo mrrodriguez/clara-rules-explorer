@@ -33,7 +33,7 @@
 (defn- read-analysis-or-throw
   [registry unit]
   (or (registry/read-analysis registry unit)
-      (throw (ex-info (str "Unit " (unit-key unit) " has no merged-rulebase-analysis")
+      (throw (ex-info (format "Unit %s has no merged-rulebase-analysis" (unit-key unit))
                       {:unit unit}))))
 
 (defn- ->analyses-by-unit
@@ -319,7 +319,8 @@
                (let [info (registry/unit-info registry unit)]
                  [(unit-key unit)
                   (cond-> {:artifacts (set (:artifacts info))
-                           :created (get-in info [:manifest-head :created])}
+                           :created (get-in info [:manifest-head :created])
+                           :sha (get-in info [:manifest-head :sha])}
                     (:branch unit) (assoc :branch (:branch unit)))])))
         selection))
 
@@ -340,8 +341,7 @@
              :namespaces namespaces}
      :provenance (->provenance registry selection)
      :coverage {:units (mapv unit-key selection)
-                :unknown-namespaces (->unknown-namespaces selection namespaces)
-                :shape-mismatch (:shape-mismatch (registry/compatibility-report registry selection))}
+                :unknown-namespaces (->unknown-namespaces selection namespaces)}
      :hierarchy {:ancestors ancestors
                  :descendants descendants
                  :conflicts (->ancestor-conflicts analyses-by-unit)}
@@ -411,8 +411,9 @@
                      (into seen (get adj node #{}))))))))))
 
 (defn coverage-report
-  "What this index cannot answer: its units, requested namespaces it does not
-  cover, and units whose slim shape differs from the majority."
+  "What this index cannot answer: its units and the requested namespaces no
+  selected unit covers. Shape skew is not reported here — it is refused before
+  the index is built, by `registry/assert-compatible!`."
   [index]
   (:coverage index))
 

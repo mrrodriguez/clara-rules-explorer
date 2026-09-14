@@ -39,7 +39,7 @@
   "A layer id qualified with its unit, so `:provenance` names whose layer a fold
   credited. `<repo>[@<branch>]/<layer-id>`."
   [unit layer-id]
-  (str (registry/unit-key unit) "/" layer-id))
+  (format "%s/%s" (registry/unit-key unit) layer-id))
 
 (defn- ->opts
   [registry unit]
@@ -66,8 +66,8 @@
 (defn- read-analysis-or-throw
   [registry unit]
   (or (registry/read-analysis registry unit)
-      (throw (ex-info (str "Unit " (registry/unit-key unit)
-                           " has no merged-rulebase-analysis to compose")
+      (throw (ex-info (format "Unit %s has no merged-rulebase-analysis to compose"
+                              (registry/unit-key unit))
                       {:unit unit}))))
 
 (defn- merge-production-map
@@ -81,8 +81,8 @@
       (let [uk (registry/unit-key unit)
             existing (get-in @acc [:units p-name])]
         (when existing
-          (throw (ex-info (str "Cannot compose: " p-name
-                               " is claimed by both " existing " and " uk)
+          (throw (ex-info (format "Cannot compose: %s is claimed by both %s and %s"
+                                  p-name existing uk)
                           {:production p-name :units [existing uk]})))
         (vswap! acc (fn [a]
                       (-> a

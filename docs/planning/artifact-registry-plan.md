@@ -203,7 +203,7 @@ composes the subset it decides really is one rulebase.
 ```clojure
 {:scope       {:units [UnitRef] :namespaces {unit [ns]}}
  :provenance  {unit {:sha … :created … :branch … :artifacts […]}}
- :coverage    {:units [unit] :unknown-namespaces [ns] :shape-mismatch [unit]}
+ :coverage    {:units [unit] :unknown-namespaces [ns]}
  :hierarchy   {:ancestors   {ft #{ft}}
                :descendants {ft #{ft}}
                :conflicts   {ft {unit #{ft}}}}
@@ -328,8 +328,7 @@ analysis from it. The registry mode supplies the analysis instead:
 
 ```clojure
 (server/start! {:registry {:root "…"
-                           :units [{:repo "a"} {:repo "b" :branch "spike"}]
-                           :mode :compose}
+                           :units [{:repo "a"} {:repo "b" :branch "spike"}]}
                 :port 8080})
 ```
 

@@ -320,7 +320,7 @@ or *what a set means* — every entry point takes the selection explicitly. The
 join key is the fact type name, and shape skew is refused, not bridged.
 
 The server serves a composed selection directly: `server/start!` accepts
-`{:registry {:root … :units […] :mode :compose}}`, and the analysis routes answer
+`{:registry {:root … :units […]}}`, and the analysis routes answer
 from the composed, rehydrated analysis with no live session (session routes
 return 409 `:no-session`). See
 [`../../docs/explorer-graph-api.md`](../../docs/explorer-graph-api.md).

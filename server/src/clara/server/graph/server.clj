@@ -106,19 +106,23 @@
 
 (s/defschema RegistryConfig
   "Config for registry-backed serving: compose a selection of artifact units
-  into one analysis and serve it with no live session."
+  into one analysis and serve it with no live session.
+
+  There is one merge mode (`:compose`), so no `:mode` key is carried — the shape
+  is the mode. `:annotations` is not accepted here either: the served
+  annotations are folded from the selection's own layer files."
   {:root s/Str
-   :units [artifact-schema/UnitRef]
-   :mode (s/enum :compose)})
+   :units [artifact-schema/UnitRef]})
 
 (s/defschema StartOpts
   "Validated config for `start!` / `start-system!`. Exactly one of `:session`
   or `:registry` is present — `s/conditional` validates each branch as a closed
-  map, so a config carrying both is refused."
+  map, so a config carrying both is refused. `:annotations` belongs to session
+  mode only: in registry mode the served annotations are folded from the
+  selection's layer files, so passing it is rejected rather than ignored."
   (s/conditional
    #(contains? % :registry)
    {:registry RegistryConfig
-    (s/optional-key :annotations) (s/maybe AnnotationsArg)
     (s/optional-key :port) s/Int
     (s/optional-key :working-memory-enabled) s/Bool}
    :else
@@ -372,12 +376,14 @@
    composes the selection and folds its layer stacks instead."
   [{:keys [session annotations-spec registry-config] :as _config}]
   (if registry-config
-    (let [reg (registry/discover {:root (:root registry-config)})
-          selection (:units registry-config)
+    (let [selection (:units registry-config)
+          reg (registry/->registry {:root (:root registry-config)
+                                    :units selection})
+          annotations (compose/fold-layers reg selection)
           analysis (-> (compose/->composed-analysis reg selection)
                        rehydrate/rehydrate-analysis)]
       {:rulebase-analysis analysis
-       :annotations (compose/fold-layers reg selection)
+       :annotations annotations
        :registry registry-config})
     (let [tmp   (atom {})
           built (->resolved-annotations* session annotations-spec nil tmp)]

@@ -25,8 +25,7 @@
 (defn- ->registry-config []
   {:root (registry-root)
    :units [{:repo "loan-app-ruleset"}
-           {:repo "loan-disposition-ruleset"}]
-   :mode :compose})
+           {:repo "loan-disposition-ruleset"}]})
 
 (deftest start-system-builds-registry-state-test
   (let [system (server/start-system! {:registry (->registry-config) :port 0})
@@ -36,6 +35,11 @@
         (is (contains? state :rulebase-analysis))
         (is (nil? (:session state)))
         (is (nil? (:memory-analysis state))))
+      (testing "the folded annotations carry the authored dynamic detections the
+                analysis routes omit (served via /v1/annotations)"
+        (let [approved (get-in state [:annotations :annotations
+                                      "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"])]
+          (is (contains? approved :clara-rules/dynamic-insert-types-detected))))
       (testing "annotations are the cross-unit layer fold, with provenance"
         (is (contains? (:annotations state) :layers))
         (is (contains? (:annotations state) :provenance)))

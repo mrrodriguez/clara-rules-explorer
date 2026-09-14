@@ -49,8 +49,7 @@ The session and merged annotations are held in atoms so the host application can
 ;; rehydrated analysis; session routes return 409 :no-session.
 (def s4 (server/start! {:registry {:root  "/path/to/artifacts"
                                    :units [{:repo "loan-app-ruleset"}
-                                           {:repo "loan-disposition-ruleset"}]
-                                   :mode  :compose}
+                                           {:repo "loan-disposition-ruleset"}]}
                         :port    9999}))
 (server/stop!)  ;; when done
 ```
@@ -60,7 +59,7 @@ The session and merged annotations are held in atoms so the host application can
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `:session` | session or rulebase | _required unless `:registry` is given_ | Clara session (working memory enabled) or raw Rete rulebase (working memory disabled; session routes return 409 `:rulebase-input`) |
-| `:registry` | map | _none_ | Registry-backed serving: `{:root … :units […] :mode :compose}` composes a selection of artifact units into one rehydrated analysis and serves it with no live session. Session routes return 409 `:no-session`. Exactly one of `:session` / `:registry` is present. See [Persisted artifacts](../server/docs/persisted-artifacts.md). |
+| `:registry` | map | _none_ | Registry-backed serving: `{:root … :units […]}` composes a selection of artifact units into one rehydrated analysis and serves it with no live session. Session routes return 409 `:no-session`. Exactly one of `:session` / `:registry` is present. See [Persisted artifacts](../server/docs/persisted-artifacts.md). |
 | `:port` | int | `9999` | HTTP listen port |
 | `:annotations` | annotations spec or legacy form | `nil` | Annotation source + enrichment (an `AnnotationsSpec` map, or a legacy vector-of-layers / path string / bare map / `MergedAnnotations`) |
 | `:working-memory-enabled` | boolean | `true` | When `false`, all `/v1/session/*` and `/v1/memory-analysis` routes return 409 `:disabled-by-config` regardless of session type |

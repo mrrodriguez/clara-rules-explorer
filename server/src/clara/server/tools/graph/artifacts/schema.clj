@@ -683,7 +683,7 @@
   `clara.server.tools.graph.artifacts.registry/discover` records per unit: its
   `UnitRef`, the resolved `:dir`, the artifact roles present, the slim
   `:dropped` key set (the merge's shape), the layer ids the manifest records,
-  and the manifest's `:created` / `:history` head."
+  and the manifest's `:created` / `:sha` / `:history` head."
   (merge UnitRef
          {:dir s/Str
           :artifacts #{ArtifactKey}

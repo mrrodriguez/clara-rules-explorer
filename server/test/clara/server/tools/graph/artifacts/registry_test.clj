@@ -116,6 +116,17 @@
         (is (nil? (registry/read-manifest reg {:repo "missing"}))
             "an absent unit reads as nil rather than throwing")))))
 
+(deftest same-registry-ignores-the-memo-cache-test
+  (with-temp-root
+    (fn [root]
+      (write-unit! root "a" #{:nodes :id})
+      (let [a (registry/->registry {:root root :units [{:repo "a"}]})
+            b (registry/->registry {:root root :units [{:repo "a"}]})]
+        (is (not= a b)
+            "the memoization atom makes the record identity-bearing, not a pure value")
+        (is (registry/same-registry? a b)
+            "same-registry? compares root + units and ignores the cache atom")))))
+
 ;; ---------------------------------------------------------------------------
 ;; reads
 ;; ---------------------------------------------------------------------------

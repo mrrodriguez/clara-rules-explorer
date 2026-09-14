@@ -67,7 +67,13 @@
 
     (testing "the unit edge is the fact a per-unit artifact cannot contain"
       (is (= {:via #{keyword-outcome} :rules 2}
-             (get (:unit-edges index) ["loan-app-ruleset" "loan-disposition-ruleset"]))))))
+             (get (:unit-edges index) ["loan-app-ruleset" "loan-disposition-ruleset"]))))
+
+    (testing "provenance carries each unit's manifest sha"
+      (let [manifest (edn-io/read-edn-file
+                      (io/file (registry-root) "loan-app-ruleset" "rules-inspect-manifest.edn"))]
+        (is (= (get-in manifest [:source :sha])
+               (get-in index [:provenance "loan-app-ruleset" :sha])))))))
 
 (defn- temp-dir []
   (str (java.nio.file.Files/createTempDirectory
@@ -94,8 +100,8 @@
       (is (= ["loan-app-ruleset" "loan-disposition-ruleset"]
              (federate/paths-between index "loan-app-ruleset" "loan-disposition-ruleset"))))
 
-    (testing "coverage reports no shape skew between the two units"
-      (is (= [] (:shape-mismatch (federate/coverage-report index)))))))
+    (testing "coverage reports no unknown namespaces between the two units"
+      (is (= [] (:unknown-namespaces (federate/coverage-report index)))))))
 
 (deftest grade-against-a-composed-reference-test
   (let [index (->index)

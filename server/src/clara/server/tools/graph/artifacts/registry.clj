@@ -65,6 +65,15 @@
   [^Registry registry unit]
   (get (:units-by-key registry) (unit-key unit)))
 
+(defn same-registry?
+  "Structural equality of two registries, ignoring the memoization `:cache` atom
+  — the one field that keeps the record from being a pure value. Two registries
+  over the same `:root` and `:units` answer the same reads, whether or not
+  either has cached one yet."
+  [^Registry a ^Registry b]
+  (and (= (:root a) (:root b))
+       (= (:units a) (:units b))))
+
 ;; ===========================================================================
 ;; discovery
 ;; ===========================================================================
@@ -116,7 +125,7 @@
   [root]
   (let [root-file (io/file root)]
     (when-not (.isDirectory root-file)
-      (throw (ex-info (str "Registry root is not a directory: " root) {:root root})))
+      (throw (ex-info (format "Registry root is not a directory: %s" root) {:root root})))
     (->> (file-seq root-file)
          (filter #(.isDirectory ^File %))
          (filter unit-dir?)
@@ -141,7 +150,7 @@
 (defn- ->unit-info
   "What `discover` records per unit: the ref, the resolved dir, present
   artifacts, the slim `:dropped` shape, the manifest's layer ids, and the
-  manifest head."
+  manifest head (`:created`, `:sha`, `:history` head)."
   [root ref]
   (let [dir (store/get-out-dir (assoc ref :root root))
         present (into #{}
@@ -159,6 +168,7 @@
       (some? manifest)
       (assoc :layer-ids (get-in manifest [:analysis-run :layer-ids])
              :manifest-head {:created (:created manifest)
+                             :sha (get-in manifest [:source :sha])
                              :history (vec (take 1 (:history manifest)))}))))
 
 (s/defn ->registry :- Registry
@@ -293,7 +303,7 @@
    selection :- [schema/UnitRef]]
   (let [report (compatibility-report registry selection)]
     (when-not (:compatible? report)
-      (throw (ex-info (str "Cannot merge registry units with differing slim shapes: "
-                           (pr-str (mapv unit-key (:shape-mismatch report))))
+      (throw (ex-info (format "Cannot merge registry units with differing slim shapes: %s"
+                              (pr-str (mapv unit-key (:shape-mismatch report))))
                       report)))
     true))
