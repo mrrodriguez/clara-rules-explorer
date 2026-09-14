@@ -230,8 +230,8 @@
   [registry selection]
   (registry/assert-compatible! registry selection)
   (let [analyses (mapv (fn [unit]
-                         (registry/narrow-analysis (read-analysis-or-throw registry unit)
-                                                   unit))
+                         (-> (read-analysis-or-throw registry unit)
+                             (registry/narrow-analysis unit)))
                        selection)
         rules (merge-production-map analyses selection :rules)
         queries (merge-production-map analyses selection :queries)

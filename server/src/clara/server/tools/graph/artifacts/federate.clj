@@ -280,9 +280,10 @@
             :when (seq via)]
       (vswap! edges assoc [p-uk c-uk]
               {:via via
-               :rules (count (filter (fn [[_ r]]
-                                       (seq (set/intersection (set (:lhs-types r)) via)))
-                                     (get-in analyses-by-unit [c-uk :rules])))}))
+               :rules (->> (get-in analyses-by-unit [c-uk :rules])
+                           (filter (fn [[_ r]]
+                                     (seq (set/intersection (set (:lhs-types r)) via))))
+                           count)}))
     @edges))
 
 (defn- ->entry-points
@@ -301,8 +302,9 @@
   "`{unit-key #{ft}}` — types a unit produces (inserts) that nothing in scope
   consumes, nor consumes a descendant of."
   [analyses-by-unit descendants]
-  (let [consumed (->satisfies descendants
-                              (into #{} (mapcat ->consumed-types) (vals analyses-by-unit)))]
+  (let [consumed (->> (vals analyses-by-unit)
+                      (into #{} (mapcat ->consumed-types))
+                      (->satisfies descendants))]
     (into {}
           (keep (fn [[uk analysis]]
                   (let [orphan (set/difference (->produced-types analysis) consumed)]
@@ -387,8 +389,10 @@
         covered-by-unit (->covered-namespaces-by-unit analyses-by-unit)
         unknown-namespaces (->unknown-namespaces covered-by-unit selection)
         analyses-by-unit (narrow-analyses-by-unit analyses-by-unit selection)
-        ancestors (hierarchy/closed-ancestors
-                   (hierarchy/union-ancestors (map :fact-types (vals analyses-by-unit))))
+        ancestors (->> (vals analyses-by-unit)
+                       (map :fact-types)
+                       hierarchy/union-ancestors
+                       hierarchy/closed-ancestors)
         descendants (hierarchy/->descendants ancestors)
         maps (->production-maps analyses-by-unit descendants)
         namespaces (->namespaces covered-by-unit selection)]
@@ -445,6 +449,22 @@
   [index]
   (:unit-edges index))
 
+(defn- ->unit-adjacency
+  "`index`'s unit edges as an adjacency map `{unit-key #{unit-key …}}`."
+  [index]
+  (reduce (fn [m [[p c] _]] (update m p (fnil conj #{}) c))
+          {}
+          (:unit-edges index)))
+
+(defn- ->successor-paths
+  "The BFS paths one step beyond `frontier`: each path's terminal node's
+  successors that `seen` has not visited, appended to the path."
+  [adj seen frontier]
+  (mapcat (fn [path]
+            (let [node (peek path)]
+              (map #(conj path %) (remove seen (get adj node #{})))))
+          frontier))
+
 (defn paths-between
   "Every shortest unit-dependency path from `a` to `b` (bounded BFS), as a set
   of vectors, or nil when there is no path. A reviewer asking how a fact gets
@@ -452,20 +472,17 @@
   [index a b]
   (let [a (if (map? a) (unit-key a) a)
         b (if (map? b) (unit-key b) b)
-        adj (reduce (fn [m [[p c] _]] (update m p (fnil conj #{}) c)) {} (:unit-edges index))]
+        adj (->unit-adjacency index)]
     (if (= a b)
       #{[a]}
       (loop [frontier (list [a])
              seen #{a}]
         (when (seq frontier)
-          (let [next (mapcat (fn [path]
-                               (let [node (peek path)]
-                                 (map #(conj path %) (remove seen (get adj node #{})))))
-                             frontier)
-                found (into #{} (filter #(= (peek %) b)) next)]
+          (let [next-paths (->successor-paths adj seen frontier)
+                found (into #{} (filter #(= (peek %) b)) next-paths)]
             (if (seq found)
               found
-              (recur next (into seen (map peek) next)))))))))
+              (recur next-paths (into seen (map peek) next-paths)))))))))
 
 (defn coverage-report
   "What this index cannot answer: its units and the requested namespaces no
@@ -505,11 +522,28 @@
   derives from it (the ancestor closure)."
   [reference ft]
   (let [fact-types (get reference :fact-types {})
-        ancestors-of (fn [t] (set (map type-name (get-in fact-types [t :ancestors] []))))
+        ancestors-of (fn [t] (into #{} (map type-name) (get-in fact-types [t :ancestors] [])))
         produces? (fn [[_ rule]]
-                    (some (fn [t] (or (= ft t) (contains? (ancestors-of t) ft)))
-                          (map type-name (:insert-types rule))))]
+                    (->> (:insert-types rule)
+                         (map type-name)
+                         (some (fn [t] (or (= ft t) (contains? (ancestors-of t) ft))))))]
     (boolean (some produces? (get reference :rules {})))))
+
+(defn- reference-covers-upstream?
+  "Whether `covers?` accepts any `upstream` production name for `producer`."
+  [covers? producer upstream]
+  (boolean (some #(covers? producer %) upstream)))
+
+(defn- reference-confirms-edge?
+  "Whether the reference dep-graph confirms the index's `[producer consumer]`
+  unit edge: some reference production in the consumer's namespace has an
+  upstream production in the producer's namespace."
+  [ref-dep-graph covers? [producer consumer]]
+  (boolean
+   (some (fn [[consumer-name {:keys [upstream]}]]
+           (and (covers? consumer consumer-name)
+                (reference-covers-upstream? covers? producer upstream)))
+         ref-dep-graph)))
 
 (defn- ->confirmed-and-contradicted-edges
   "Split the index's unit edges into the ones the reference dep-graph confirms
@@ -521,18 +555,13 @@
         ref-dep-graph (get reference :dep-graph {})
         covers? (fn [unit p-name]
                   (contains? (get ns->units (get ref-ns p-name) #{}) unit))
-        confirmed? (fn [[P C]]
-                     (boolean
-                      (some (fn [[consumer-name {:keys [upstream]}]]
-                              (and (covers? C consumer-name)
-                                   (some #(covers? P %) upstream)))
-                            ref-dep-graph)))]
-    (reduce (fn [[confirmed contradicted] edge]
-              (if (confirmed? edge)
-                [(conj confirmed edge) contradicted]
-                [confirmed (conj contradicted edge)]))
-            [[] []]
-            (keys (get index :unit-edges)))))
+        confirmed? (partial reference-confirms-edge? ref-dep-graph covers?)]
+    (->> (keys (get index :unit-edges))
+         (reduce (fn [[confirmed contradicted] edge]
+                   (if (confirmed? edge)
+                     [(conj confirmed edge) contradicted]
+                     [confirmed (conj contradicted edge)]))
+                 [[] []]))))
 
 (defn- ->reference-produced-entry-points
   [index reference]
@@ -542,10 +571,12 @@
 (defn- ->uncovered-namespaces
   [index reference]
   (let [covered (into #{} (mapcat val) (get-in index [:scope :namespaces]))
-        reference-nses (into #{} (keep :ns)
-                             (concat (vals (get reference :rules {}))
-                                     (vals (get reference :queries {}))))]
-    (vec (sort (set/difference reference-nses covered)))))
+        reference-nses (into #{} (comp cat (keep :ns))
+                             [(vals (get reference :rules {}))
+                              (vals (get reference :queries {}))])]
+    (->> (set/difference reference-nses covered)
+         sort
+         vec)))
 
 (defn grade
   "Grade the union (`index`) against a composed reference (`reference-analysis`)
