@@ -2,16 +2,19 @@
 ;; caller names, so `server/bin/annotations_report.bb` can read it as a normal
 ;; single unit (see docs/planning/composed-artifact-persist-plan.md).
 ;;
-;; Run from server/:
-;;   clojure -M:test -i dev/compose_artifacts.clj \
-;;     -e '(compose-artifacts/-main {:root "rules-annos" :repo "composed/demo" :units [{:repo "loan-app-ruleset"} {:repo "loan-disposition-ruleset"}] :generated-by "me"})'
+;; Run from server/. The :dev alias puts this file's dir on the classpath, so
+;; `-m` finds the namespace; :test supplies the `test-resources` registry the
+;; example reads from:
+;;   clojure -M:test:dev -m compose-artifacts \
+;;     '{:root "test-resources/rules-annos" :repo "composed/demo" :units [{:repo "loan-app-ruleset"} {:repo "loan-disposition-ruleset"}] :generated-by "me"}'
 ;;
-;; The single argument is an opts map for `flow/compose-persist!`, passed either
-;; as a literal form (as above) or as a string holding an inline EDN map or the
-;; path to an .edn file. Single-quoting the -e expression lets the shell hand
-;; the map through untouched, so the map itself needs no escaping. The function
-;; itself is clara.server.tools.graph.artifacts.flow/compose-persist!, so this
-;; namespace only reads the argument and reports what was written.
+;; Single-quoting the map keeps the shell from touching its `"..."`, so it needs
+;; no escaping. As an alternative to `-m`, the argument may be passed as a
+;; literal map via `-e`, alongside an inline EDN string or an .edn file path:
+;;   clojure -M:test:dev -e '(compose-artifacts/-main {:root "test-resources/rules-annos" :repo "composed/demo" :units [{:repo "loan-app-ruleset"} {:repo "loan-disposition-ruleset"}] :generated-by "me"})'
+;;
+;; The function itself is clara.server.tools.graph.artifacts.flow/compose-persist!,
+;; so this namespace only reads the argument and reports what was written.
 
 (ns compose-artifacts
   (:require [clara.server.tools.graph.artifacts.flow :as flow]
