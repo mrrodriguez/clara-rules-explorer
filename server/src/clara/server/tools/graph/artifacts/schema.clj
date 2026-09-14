@@ -653,6 +653,47 @@
               s/Str
               [(s/cond-pre LayerArtifactKey s/Str)]))
 
+;; ===========================================================================
+;; the registry (plural artifact sets)
+;; ===========================================================================
+
+(s/defschema UnitRef
+  "One artifact unit: a `:repo` subdir under a registry `:root`, optionally
+  nested under `<repo>/branches/<label>/` as `:branch`. `:repo` is the path
+  relative to the root, `/`-joined; `:branch` is a caller label, never git's.
+
+  Addressed by the same pair
+  `clara.server.tools.graph.artifacts.store/get-out-dir` already resolves."
+  {:repo s/Str
+   (s/optional-key :branch) (s/maybe s/Str)})
+
+(s/defschema UnitInfo
+  "What
+  `clara.server.tools.graph.artifacts.registry/discover` records per unit: its
+  `UnitRef`, the resolved `:dir`, the artifact roles present, the slim
+  `:dropped` key set (the merge's shape), the layer ids the manifest records,
+  and the manifest's `:created` / `:history` head."
+  (merge UnitRef
+         {:dir s/Str
+          :artifacts #{ArtifactKey}
+          (s/optional-key :slim-dropped) (s/maybe #{s/Keyword})
+          (s/optional-key :layer-ids) {s/Keyword s/Any}
+          (s/optional-key :manifest-head) {s/Keyword s/Any}}))
+
+(s/defschema CompatibilityReport
+  "What
+  `clara.server.tools.graph.artifacts.registry/compatibility-report` returns:
+  whether every selected unit has the same slim `:dropped` key set (the one
+  question a merge must answer first), which units disagree with the majority
+  shape, the per-unit dropped sets, and the artifacts each unit is missing.
+  Keyed by `registry/unit-key` rather than by the `UnitRef` map, which is not a
+  comparable map key."
+  {:compatible? s/Bool
+   :majority-shape (s/maybe #{s/Keyword})
+   :shape-mismatch [UnitRef]
+   :dropped-key-sets {s/Str (s/maybe #{s/Keyword})}
+   :missing-artifacts {s/Str #{ArtifactKey}}})
+
 (s/defschema SwapSourceEntry
   "One entry of the `:source` stack handed to a running server: a `Layer` held in
   memory, or a path to a layer file the server re-reads."
