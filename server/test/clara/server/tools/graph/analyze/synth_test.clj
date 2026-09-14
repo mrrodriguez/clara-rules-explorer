@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clara.server.tools.graph.analyze.synth :as synth]
+            [clara.server.tools.graph.ns-deps :as ns-deps]
             [clara.server.tools.graph.rules.loan-doc-rules]
             [schema.test :as st]))
 
@@ -31,7 +32,7 @@
       (is (= '[[java.lang StackWalker] [java.util ArrayList]]
              (synth/->import-clauses nsobj))
           "package-grouped imports, non-default java.lang classes preserved")
-      (is (= [] (synth/->unmapped-default-imports nsobj)))))
+      (is (= [] (ns-deps/->ns-unmapped-default-imports nsobj)))))
   (testing "alias-only ns yields alias clauses"
     (is (= '[[clara.rules :as r]
              [clara.rules.accumulators :as acc]

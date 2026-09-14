@@ -10,7 +10,6 @@
   that was added and never listed. So those are asserted directly, off the
   schema's own values."
   (:require
-   [clara.server.tools.graph.artifacts.overlay :as overlay]
    [clara.server.tools.graph.artifacts.parts :as parts]
    [clara.server.tools.graph.artifacts.schema :as schema]
    [clara.server.tools.graph.artifacts.store :as store]
@@ -46,7 +45,7 @@
   (testing "DetectionDimension names exactly the dimensions the overlay can file
             a resolution under. A dimension the report emits but this enum omits
             would make every resolution for it fail validation"
-    (is (= (set (keys @#'overlay/dimension-detection-keys))
+    (is (= (set (keys schema/detection-keys-by-dimension))
            (enum-values schema/DetectionDimension)))))
 
 (deftest session-or-rulebase-accepts-both-shapes-test

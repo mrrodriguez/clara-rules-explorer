@@ -95,12 +95,6 @@
         (map (fn [[local fq-sym]] [(symbol (name fq-sym)) local]))
         renamed))
 
-(defn ->unmapped-default-imports
-  "Returns the sorted vector of default `java.lang.*` import symbols missing
-   from the given namespace (possible only via dynamic `ns-unmap`)."
-  [nsobj]
-  (ns-deps/->ns-unmapped-default-imports nsobj))
-
 (defn reconstruct-ns-source
   "Builds a synthetic source string containing only an `(ns ...)` form
    reconstructed from the live Namespace object — used for namespaces whose
@@ -117,7 +111,7 @@
         {:keys [excludes renames]} (ns-deps/->ns-refer-clojure nsobj)
         require-clauses   (->require-clauses nsobj)
         import-clauses    (->import-clauses nsobj)
-        unmapped-defaults (->unmapped-default-imports nsobj)
+        unmapped-defaults (ns-deps/->ns-unmapped-default-imports nsobj)
         refer-clojure-clause (when (or (seq excludes) (seq renames))
                                (concat (list :refer-clojure)
                                        (when (seq excludes) (list :exclude excludes))

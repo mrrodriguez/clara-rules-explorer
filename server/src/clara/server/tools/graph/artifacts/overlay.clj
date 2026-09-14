@@ -30,19 +30,13 @@
   [opts :- schema/StackOpts]
   (ann.report/unresolved-report (store/->merged-annotations opts)))
 
-(def ^:private dimension-detection-keys
-  "`schema/DetectionDimension` → the annotation key holding its detection map.
-  Mirrors the report ns's own (private) mapping, which is what
-  `get-unresolved-report` keys its `:rules` entries by."
-  schema/detection-keys-by-dimension)
-
 (s/defn ^:private ->callsites-by-id :- schema/DiscoveredCallsites
   "Index every callsite of a merge by id, tagged with the rule and dimension it
   was found under."
   [merged :- schema/MergedAnnotations]
   (into {}
         (for [[rule-name annotation] (:annotations merged)
-              [dimension k] dimension-detection-keys
+              [dimension k] schema/detection-keys-by-dimension
               cs (:callsites (get annotation k))]
           [(:callsite-id cs) (assoc cs :rule rule-name :dimension dimension)])))
 
@@ -105,7 +99,7 @@
   (reduce (fn [acc resolution]
             (let [found (get discovered (:callsite-id resolution))
                   rule (get-resolution-rule-key resolution found)
-                  k (get dimension-detection-keys
+                  k (get schema/detection-keys-by-dimension
                          (or (:dimension found) (:dimension resolution) :insert))]
               (update-in acc [rule k :callsites]
                          upsert-callsite
