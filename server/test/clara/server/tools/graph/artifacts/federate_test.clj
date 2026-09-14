@@ -127,3 +127,13 @@
             (is (= (->index) (edn-io/read-edn-file (io/file written-index))))
             (is (= (federate/->digest (->index)) (edn-io/read-edn-file (io/file written-digest)))))
           (finally (delete-tree dir)))))))
+
+(deftest namespace-filter-narrows-scope-and-reports-unknowns-test
+  (let [index (federate/->index (registry/discover {:root (registry-root)})
+                                [{:repo "loan-app-ruleset" :namespaces ["no.such.ns"]}
+                                 {:repo "loan-disposition-ruleset"}])]
+    (testing "a requested namespace the unit does not cover is reported, not in scope"
+      (is (= ["no.such.ns"] (get-in index [:coverage :unknown-namespaces])))
+      (is (= [] (get-in index [:scope :namespaces "loan-app-ruleset"]))))
+    (testing "a unit without a filter keeps its full namespace scope"
+      (is (seq (get-in index [:scope :namespaces "loan-disposition-ruleset"]))))))

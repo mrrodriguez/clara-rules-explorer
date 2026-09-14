@@ -666,10 +666,17 @@
   nested under `<repo>/branches/<label>/` as `:branch`. `:repo` is the path
   relative to the root, `/`-joined; `:branch` is a caller label, never git's.
 
+  `:namespaces`, when present, narrows the unit to the named namespaces for the
+  merge — a filter the caller supplies, not a claim about what the unit covers.
+  A namespace the caller names but no selected unit covers is reported by
+  `clara.server.tools.graph.artifacts.federate`'s `:coverage
+  :unknown-namespaces`.
+
   Addressed by the same pair
   `clara.server.tools.graph.artifacts.store/get-out-dir` already resolves."
   {:repo s/Str
-   (s/optional-key :branch) (s/maybe s/Str)})
+   (s/optional-key :branch) (s/maybe s/Str)
+   (s/optional-key :namespaces) [(s/cond-pre s/Str s/Symbol)]})
 
 (s/defschema UnitInfo
   "What

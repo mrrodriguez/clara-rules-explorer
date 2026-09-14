@@ -122,10 +122,25 @@
        (sort-by (fn [d] [(descendant-depth fact-types type-name d) d]))
        vec))
 
+(defn- usage-vectors
+  "The four usage vectors for one type name from its accumulated
+  `{prop #{p-name}}`, each a name-sorted vector of production refs."
+  [rules queries accumulated]
+  (reduce-kv (fn [m prop pnames]
+               (assoc m prop (->> pnames
+                                  (map #(->production-ref rules queries %))
+                                  (sort-by :name)
+                                  vec)))
+             {:used-by-rules []
+              :used-by-queries []
+              :inserted-by-rules []
+              :retracted-by-rules []}
+             accumulated))
+
 (defn- ->usage-maps
-  "The four fact-type usage vectors, keyed by type name and property, each a
-  name-sorted vector of production refs. This is the shipped form of the
-  inversion `slim-test/dropped-directions-invert-back-test` pins:
+  "The four fact-type usage vectors, keyed by type name and property. This is
+  the shipped form of the inversion
+  `slim-test/dropped-directions-invert-back-test` pins:
 
     :used-by-rules     :lhs-types over :rules,     closed over DESCENDANTS
     :used-by-queries   :lhs-types over :queries,   closed over DESCENDANTS
@@ -157,17 +172,7 @@
         (doseq [a (ancestors-of t)] (add! a :retracted-by-rules))))
     (into {}
           (map (fn [type-name]
-                 [type-name
-                  (reduce-kv (fn [m prop pnames]
-                               (assoc m prop (->> pnames
-                                                  (map #(->production-ref rules queries %))
-                                                  (sort-by :name)
-                                                  vec)))
-                             {:used-by-rules []
-                              :used-by-queries []
-                              :inserted-by-rules []
-                              :retracted-by-rules []}
-                             (get @acc type-name))]))
+                 [type-name (usage-vectors rules queries (get @acc type-name))]))
           (keys fact-types))))
 
 (defn- ->fact-types

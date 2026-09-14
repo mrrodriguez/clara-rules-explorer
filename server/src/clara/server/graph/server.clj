@@ -113,7 +113,8 @@
 
 (s/defschema StartOpts
   "Validated config for `start!` / `start-system!`. Exactly one of `:session`
-  or `:registry` is present."
+  or `:registry` is present — `s/conditional` validates each branch as a closed
+  map, so a config carrying both is refused."
   (s/conditional
    #(contains? % :registry)
    {:registry RegistryConfig

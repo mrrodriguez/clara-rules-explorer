@@ -14,6 +14,7 @@
   The index is a value — nothing is persisted on the path to an answer. Read the
   units, build the index, ask it."
   (:require
+   [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
    [clara.server.tools.graph.artifacts.registry :as registry]
    [clara.server.tools.graph.artifacts.store :as store]
    [clara.server.tools.graph.edn-io :as edn-io]
@@ -45,18 +46,6 @@
 ;; hierarchy union + re-closure
 ;; ===========================================================================
 
-(defn- ->raw-ancestors
-  "`{type-name #{ancestor-name …}}` unioned across every unit's slim fact-type
-  map."
-  [analyses]
-  (reduce (fn [acc analysis]
-            (reduce-kv (fn [acc ft {:keys [ancestors]}]
-                         (update acc ft (fnil into #{}) ancestors))
-                       acc
-                       (:fact-types analysis)))
-          {}
-          analyses))
-
 (defn- ->ancestor-conflicts
   "The fact types whose ancestor sets differ between units: `{ft {unit #{ft}}}`.
   A single set (or units that agree) is no conflict and is not recorded."
@@ -73,26 +62,6 @@
                   (when (> (count (into #{} (vals unit-sets))) 1)
                     [ft unit-sets])))
           per-ft)))
-
-(defn- ->closed-ancestors
-  "Transitively close the unioned ancestor sets: a `derive` that lived in a
-  component one unit did not load is absent from that unit, so the union can
-  contain a type that a locally-correct unit's list never reached."
-  [raw]
-  (loop [m raw]
-    (let [m' (reduce-kv (fn [acc ft as]
-                          (let [expanded (into as (mapcat #(get m % #{})) as)]
-                            (if (= as expanded) acc (assoc acc ft expanded))))
-                        m m)]
-      (if (= m' m) m' (recur m')))))
-
-(defn- ->descendants
-  "Transpose of the closed ancestor map: `{ancestor-name #{descendant-name …}}`."
-  [ancestors]
-  (reduce-kv (fn [acc ft as]
-               (reduce (fn [acc a] (update acc a (fnil conj #{}) ft)) acc as))
-             {}
-             ancestors))
 
 ;; ===========================================================================
 ;; polarity over the persisted LHS
@@ -133,17 +102,6 @@
 ;; one pass over productions
 ;; ===========================================================================
 
-(defn- add-matched-via-ancestor
-  "Record `p-name` under every descendant of `t` (except `t` itself — that is
-  the exact match `:matched-by` already records)."
-  [m p-name t descendants]
-  (reduce (fn [m d]
-            (if (= d t)
-              m
-              (update-in m [d] (fnil conj #{}) p-name)))
-          m
-          (get descendants t #{})))
-
 (defn- ->production-maps
   "`{:matched-by {uk {ft #{rule}}} :matched-via-ancestor {uk {ft #{rule}}}
     :inserted-by {uk {ft #{rule}}} :retracted-by {uk {ft #{rule}}}
@@ -151,41 +109,30 @@
 
   `:matched-via-ancestor` is the descendant expansion of each rule's `:lhs-types`:
   a rule matching `T` is reached by any descendant of `T`, so every descendant
-  records the rule."
+  records the rule (the exact match itself is `:matched-by`'s)."
   [analyses-by-unit descendants]
-  (reduce
-   (fn [acc [uk analysis]]
-     (let [rules (get analysis :rules {})
-           queries (get analysis :queries {})
-           productions (concat (map #(conj % true) rules)
-                               (map #(conj % false) queries))]
-       (reduce
-        (fn [acc [p-name production rule?]]
-          (let [lhs-types (:lhs-types production)
-                acc (assoc-in acc [:rule-polarities p-name]
-                              (->type-polarities (:lhs production)))
-                acc (reduce (fn [acc t]
-                              (-> acc
-                                  (update-in [:matched-by uk t] (fnil conj #{}) p-name)
-                                  (update-in [:matched-via-ancestor uk]
-                                             #(add-matched-via-ancestor % p-name t descendants))))
-                            acc
-                            lhs-types)
-                acc (if rule?
-                      (reduce (fn [acc t] (update-in acc [:inserted-by uk t] (fnil conj #{}) p-name))
-                              acc
-                              (:insert-types production))
-                      acc)
-                acc (if rule?
-                      (reduce (fn [acc t] (update-in acc [:retracted-by uk t] (fnil conj #{}) p-name))
-                              acc
-                              (:retract-types production))
-                      acc)]
-            acc))
-        acc
-        productions)))
-   {:matched-by {} :matched-via-ancestor {} :inserted-by {} :retracted-by {} :rule-polarities {}}
-   analyses-by-unit))
+  (let [acc (volatile! {:matched-by {}
+                        :matched-via-ancestor {}
+                        :inserted-by {}
+                        :retracted-by {}
+                        :rule-polarities {}})
+        add! (fn [m t p-name]
+               (vswap! acc update-in (conj m t) (fnil conj #{}) p-name))]
+    (doseq [[uk analysis] analyses-by-unit
+            [p-name production rule?] (concat (map #(conj % true) (:rules analysis))
+                                              (map #(conj % false) (:queries analysis)))]
+      (vswap! acc assoc-in [:rule-polarities p-name] (->type-polarities (:lhs production)))
+      (doseq [t (:lhs-types production)]
+        (add! [:matched-by uk] t p-name)
+        (doseq [d (get descendants t #{})]
+          (when (not= d t)
+            (add! [:matched-via-ancestor uk] d p-name))))
+      (when rule?
+        (doseq [t (:insert-types production)]
+          (add! [:inserted-by uk] t p-name))
+        (doseq [t (:retract-types production)]
+          (add! [:retracted-by uk] t p-name))))
+    @acc))
 
 ;; ===========================================================================
 ;; fact-type entries
@@ -208,26 +155,17 @@
              #{}
              (get rule-polarities rule {})))
 
-(defn- all-fact-type-names
-  [analyses]
-  (into (sorted-set)
-        (mapcat (fn [analysis]
-                  (concat (keys (:fact-types analysis))
-                          (mapcat :ancestors (vals (:fact-types analysis))))))
-        analyses))
-
 (defn- producer-units
   "Units that produce `ft` — a rule inserts a type that IS `ft` or derives from
   it, so the fact it makes is one of each ancestor."
   [analyses-by-unit ancestors ft]
-  (into #{}
-        (keep (fn [[uk analysis]]
-                (when (some (fn [[_ rule]]
-                              (some (fn [t] (or (= ft t) (contains? (get ancestors t #{}) ft)))
-                                    (:insert-types rule)))
-                            (:rules analysis))
-                  uk)))
-        analyses-by-unit))
+  (let [produces? (fn [[_ rule]]
+                    (some (fn [t] (or (= ft t) (contains? (get ancestors t #{}) ft)))
+                          (:insert-types rule)))]
+    (into #{}
+          (keep (fn [[uk analysis]]
+                  (when (some produces? (:rules analysis)) uk)))
+          analyses-by-unit)))
 
 (defn- ->fact-type-entry
   [ft analyses-by-unit ancestors descendants maps]
@@ -253,32 +191,39 @@
   [analyses-by-unit ancestors descendants maps]
   (into (sorted-map)
         (map (fn [ft] [ft (->fact-type-entry ft analyses-by-unit ancestors descendants maps)]))
-        (all-fact-type-names (vals analyses-by-unit))))
+        (keys ancestors)))
 
 ;; ===========================================================================
 ;; unit edges, entry points, orphans
 ;; ===========================================================================
 
+(defn- ->consumed-types
+  "Every `:lhs-types` value a unit's rules and queries match."
+  [{:keys [rules queries]}]
+  (into #{} (comp cat (map :lhs-types)) [(vals rules) (vals queries)]))
+
+(defn- ->satisfies
+  "The types `produced` satisfies: each produced type plus its ancestors — a
+  consumer matching any of these is satisfied by the producer."
+  [ancestors produced]
+  (reduce (fn [acc t] (into acc (cons t (get ancestors t #{})))) #{} produced))
+
 (defn- ->unit-edges
+  "Cross-unit rule data-flow edges: `{[producer consumer] {:via #{ft} :rules n}}`.
+  Only rules participate — a query consumes but does not drive the producer→
+  consumer dependency an edge records."
   [analyses-by-unit ancestors]
   (let [produced (into {}
-                       (map (fn [[uk analysis]]
+                       (map (fn [[uk {:keys [rules]}]]
                               [uk (into #{} (mapcat (fn [[_ r]]
                                                       (concat (:insert-types r) (:retract-types r))))
-                                        (:rules analysis))]))
+                                        rules)]))
                        analyses-by-unit)
         consumed (into {}
-                       (map (fn [[uk analysis]]
-                              [uk (into #{} (mapcat :lhs-types)
-                                        (concat (vals (:rules analysis))
-                                                (vals (:queries analysis))))]))
+                       (map (fn [[uk {:keys [rules]}]]
+                              [uk (into #{} (mapcat :lhs-types) (vals rules))]))
                        analyses-by-unit)
-        satisfies (fn [uk]
-                    (reduce (fn [acc t] (into acc (cons t (get ancestors t #{}))))
-                            #{} (get produced uk #{})))
-        consumer-productions (fn [uk]
-                               (concat (get-in analyses-by-unit [uk :rules])
-                                       (get-in analyses-by-unit [uk :queries])))
+        satisfies (fn [uk] (->satisfies ancestors (get produced uk #{})))
         edges (volatile! (sorted-map))]
     (doseq [[p-uk _] analyses-by-unit
             [c-uk _] analyses-by-unit
@@ -289,47 +234,35 @@
               {:via via
                :rules (count (filter (fn [[_ r]]
                                        (seq (set/intersection (set (:lhs-types r)) via)))
-                                     (consumer-productions c-uk)))}))
+                                     (get-in analyses-by-unit [c-uk :rules])))}))
     @edges))
 
 (defn- ->entry-points
+  "`{unit-key #{ft}}` — types consumed in scope that no selected unit produces
+  (or produces an ancestor of)."
   [analyses-by-unit ancestors]
-  (let [all-satisfies (reduce (fn [acc [_ analysis]]
-                                (reduce (fn [acc [_ r]]
-                                          (reduce (fn [acc t] (into acc (cons t (get ancestors t #{}))))
-                                                  acc
-                                                  (:insert-types r)))
-                                        acc
-                                        (:rules analysis)))
-                              #{}
-                              analyses-by-unit)]
+  (let [produced (into #{} (mapcat (fn [[_ {:keys [rules]}]]
+                                     (mapcat :insert-types (vals rules))))
+                       analyses-by-unit)
+        all-satisfies (->satisfies ancestors produced)]
     (into {}
           (keep (fn [[uk analysis]]
-                  (let [consumed (into #{} (mapcat :lhs-types)
-                                       (concat (vals (:rules analysis))
-                                               (vals (:queries analysis))))
-                        entry (set/difference consumed all-satisfies)]
+                  (let [entry (set/difference (->consumed-types analysis) all-satisfies)]
                     (when (seq entry) [uk entry]))))
           analyses-by-unit)))
 
 (defn- ->orphans
+  "`{unit-key #{ft}}` — types a unit produces (inserts or retracts) that nothing
+  in scope consumes, nor consumes a descendant of."
   [analyses-by-unit descendants]
-  (let [consumed-closure (reduce (fn [acc [_ analysis]]
-                                   (reduce (fn [acc production]
-                                             (reduce (fn [acc t] (into acc (cons t (get descendants t #{}))))
-                                                     acc
-                                                     (:lhs-types production)))
-                                           acc
-                                           (concat (vals (:rules analysis))
-                                                   (vals (:queries analysis)))))
-                                 #{}
-                                 analyses-by-unit)]
+  (let [consumed (->satisfies descendants
+                              (into #{} (mapcat ->consumed-types) (vals analyses-by-unit)))]
     (into {}
-          (keep (fn [[uk analysis]]
+          (keep (fn [[uk {:keys [rules]}]]
                   (let [produced (into #{} (mapcat (fn [[_ r]]
                                                      (concat (:insert-types r) (:retract-types r))))
-                                       (:rules analysis))
-                        orphan (set/difference produced consumed-closure)]
+                                       rules)
+                        orphan (set/difference produced consumed)]
                     (when (seq orphan) [uk orphan]))))
           analyses-by-unit)))
 
@@ -338,13 +271,34 @@
 ;; ===========================================================================
 
 (defn- ->namespaces
-  [analyses-by-unit]
+  "`{unit-key [ns …]}` — the namespaces each unit covers, narrowed to the
+  caller's per-unit `:namespaces` filter when one is given. A namespace the
+  caller names but the unit does not cover is reported under `:coverage
+  :unknown-namespaces`, not here."
+  [analyses-by-unit selection]
   (into {}
-        (map (fn [[uk analysis]]
-               [uk (vec (sort (into #{} (keep :ns)
-                                    (concat (vals (:rules analysis))
-                                            (vals (:queries analysis))))))]))
-        analyses-by-unit))
+        (map (fn [unit]
+               (let [uk (unit-key unit)
+                     covered (into #{} (keep :ns)
+                                   (concat (vals (get-in analyses-by-unit [uk :rules]))
+                                           (vals (get-in analyses-by-unit [uk :queries]))))
+                     requested (when-let [nses (:namespaces unit)]
+                                 (into #{} (map str) nses))]
+                 [uk (vec (sort (if requested
+                                  (set/intersection covered requested)
+                                  covered)))])))
+        selection))
+
+(defn- ->unknown-namespaces
+  "Requested namespaces (the union of per-unit `:namespaces` filters) that no
+  selected unit covers."
+  [selection namespaces]
+  (let [requested (into #{} (mapcat #(map str (:namespaces %))) selection)
+        covered (into #{} (mapcat val) namespaces)]
+    (->> covered
+         (set/difference requested)
+         sort
+         vec)))
 
 (defn- ->provenance
   [registry selection]
@@ -358,21 +312,23 @@
         selection))
 
 (defn ->index
-  "The federated index over `selection` (an ordered vector of `UnitRef`s), a
-  value. Units are read as slim; the hierarchy is unioned and re-closed; shape
-  skew is refused via `registry/assert-compatible!`."
+  "The federated index over `selection` (an ordered vector of `UnitRef`s, each
+  optionally narrowed by a `:namespaces` filter), a value. Units are read as
+  slim; the hierarchy is unioned and re-closed; shape skew is refused via
+  `registry/assert-compatible!`."
   [registry selection]
   (registry/assert-compatible! registry selection)
   (let [analyses-by-unit (->analyses-by-unit registry selection)
-        raw (->raw-ancestors (vals analyses-by-unit))
-        ancestors (->closed-ancestors raw)
-        descendants (->descendants ancestors)
-        maps (->production-maps analyses-by-unit descendants)]
-    {:scope {:units (mapv #(select-keys % [:repo :branch]) selection)
-             :namespaces (->namespaces analyses-by-unit)}
+        ancestors (hierarchy/closed-ancestors
+                   (hierarchy/union-ancestors (map :fact-types (vals analyses-by-unit))))
+        descendants (hierarchy/->descendants ancestors)
+        maps (->production-maps analyses-by-unit descendants)
+        namespaces (->namespaces analyses-by-unit selection)]
+    {:scope {:units (mapv #(select-keys % [:repo :branch :namespaces]) selection)
+             :namespaces namespaces}
      :provenance (->provenance registry selection)
      :coverage {:units (mapv unit-key selection)
-                :unknown-namespaces []
+                :unknown-namespaces (->unknown-namespaces selection namespaces)
                 :shape-mismatch (:shape-mismatch (registry/compatibility-report registry selection))}
      :hierarchy {:ancestors ancestors
                  :descendants descendants
@@ -455,17 +411,18 @@
 (defn- ->ns->units
   "Namespace → the units whose `:scope :namespaces` cover it."
   [index]
-  (reduce (fn [m [uk nses]]
-            (reduce (fn [m ns] (update m ns (fnil conj #{}) uk)) m nses))
-          {}
-          (get-in index [:scope :namespaces])))
+  (let [m (volatile! {})]
+    (doseq [[uk nses] (get-in index [:scope :namespaces])
+            ns nses]
+      (vswap! m update ns (fnil conj #{}) uk))
+    @m))
 
 (defn- ->reference-ns
   "Production name → its namespace, off the reference's own production maps."
   [reference]
   (into {}
-        (map (fn [[name production]] [name (:ns production)]))
-        (concat (get reference :rules {}) (get reference :queries {}))))
+        (comp cat (map (fn [[name production]] [name (:ns production)])))
+        [(get reference :rules {}) (get reference :queries {})]))
 
 (defn- type-name
   "A fact-type token as a name — a persisted reference has bare names, a live
@@ -478,17 +435,11 @@
   derives from it (the ancestor closure)."
   [reference ft]
   (let [fact-types (get reference :fact-types {})
-        ancestors-of (fn [t] (set (map type-name (get-in fact-types [t :ancestors] []))))]
-    (boolean
-     (some (fn [[_ rule]]
-             (some (fn [t] (or (= ft t) (contains? (ancestors-of t) ft)))
-                   (map type-name (get rule :insert-types))))
-           (get reference :rules {})))))
-
-(defn- ->reference-produced-entry-points
-  [index reference]
-  (let [entry-points (into #{} (mapcat val) (get index :entry-points))]
-    (into #{} (filter #(reference-produces? reference %)) entry-points)))
+        ancestors-of (fn [t] (set (map type-name (get-in fact-types [t :ancestors] []))))
+        produces? (fn [[_ rule]]
+                    (some (fn [t] (or (= ft t) (contains? (ancestors-of t) ft)))
+                          (map type-name (:insert-types rule))))]
+    (boolean (some produces? (get reference :rules {})))))
 
 (defn- ->confirmed-and-contradicted-edges
   "Split the index's unit edges into the ones the reference dep-graph confirms
@@ -497,21 +448,26 @@
   [index reference]
   (let [ns->units (->ns->units index)
         ref-ns (->reference-ns reference)
-        ref-dep-graph (get reference :dep-graph {})]
-    (reduce (fn [[confirmed contradicted] [P C]]
-              (let [confirmed?
-                    (boolean
-                     (some (fn [[consumer-name {:keys [upstream]}]]
-                             (and (contains? (get ns->units (get ref-ns consumer-name) #{}) C)
-                                  (some (fn [producer-name]
-                                          (contains? (get ns->units (get ref-ns producer-name) #{}) P))
-                                        upstream)))
-                           ref-dep-graph))]
-                (if confirmed?
-                  [(conj confirmed [P C]) contradicted]
-                  [confirmed (conj contradicted [P C])])))
+        ref-dep-graph (get reference :dep-graph {})
+        covers? (fn [unit p-name]
+                  (contains? (get ns->units (get ref-ns p-name) #{}) unit))
+        confirmed? (fn [[P C]]
+                     (boolean
+                      (some (fn [[consumer-name {:keys [upstream]}]]
+                              (and (covers? C consumer-name)
+                                   (some #(covers? P %) upstream)))
+                            ref-dep-graph)))]
+    (reduce (fn [[confirmed contradicted] edge]
+              (if (confirmed? edge)
+                [(conj confirmed edge) contradicted]
+                [confirmed (conj contradicted edge)]))
             [[] []]
             (keys (get index :unit-edges)))))
+
+(defn- ->reference-produced-entry-points
+  [index reference]
+  (let [entry-points (into #{} (mapcat val) (get index :entry-points))]
+    (into #{} (filter #(reference-produces? reference %)) entry-points)))
 
 (defn- ->uncovered-namespaces
   [index reference]

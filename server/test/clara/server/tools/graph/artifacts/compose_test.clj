@@ -93,3 +93,22 @@
                           #"claimed by both"
                           (compose/->composed-analysis reg [(unit "loan-app-ruleset")
                                                             (unit "loan-app-ruleset")])))))
+
+(deftest union-fact-types-recloses-and-orders-ancestors-test
+  (testing "a hierarchy split across units is re-closed transitively"
+    (let [merged (compose/union-fact-types
+                  [{"D" {:name "D" :ns "x" :ancestors ["C"]}
+                    "C" {:name "C" :ns "x" :ancestors []}}
+                   {"C" {:name "C" :ns "x" :ancestors ["B"]}
+                    "B" {:name "B" :ns "x" :ancestors ["A"]}
+                    "A" {:name "A" :ns "x" :ancestors []}}])]
+      (is (= ["C" "B" "A"] (get-in merged ["D" :ancestors])))
+      (is (= ["B" "A"] (get-in merged ["C" :ancestors])))))
+
+  (testing "ancestors are ordered deepest-first, not shallowest-first"
+    (let [merged (compose/union-fact-types
+                  [{"A" {:name "A" :ns "x" :ancestors []}
+                    "B" {:name "B" :ns "x" :ancestors ["A"]}
+                    "C" {:name "C" :ns "x" :ancestors ["A" "B"]}}])]
+      (is (= ["B" "A"] (get-in merged ["C" :ancestors])))
+      (is (= [] (get-in merged ["A" :ancestors]))))))

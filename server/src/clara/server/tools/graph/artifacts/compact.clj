@@ -108,14 +108,13 @@
   starting point: `->compact-provenance` checks it against every rule and writes
   out any it fails to reproduce."
   [provenance rule-names]
-  (into (sorted-map)
-        (map (fn [[k origins]] [k (->dominant origins)]))
-        (reduce (fn [acc rule-name]
-                  (reduce (fn [a [k origin]] (update a k conj origin))
-                          acc
-                          (get provenance rule-name)))
-                {}
-                rule-names)))
+  (let [origins-by-key (volatile! {})]
+    (doseq [rule-name rule-names
+            [k origin] (get provenance rule-name)]
+      (vswap! origins-by-key update k (fnil conj []) origin))
+    (into (sorted-map)
+          (map (fn [[k origins]] [k (->dominant origins)]))
+          @origins-by-key)))
 
 (defn- ->compact-provenance
   "`:provenance` as the template plus every rule the template does not reproduce.
@@ -174,9 +173,10 @@
                               (remove (fn [[_ layer-id]] (= layer-id default)))
                               layer-of)}
      :annotations (into (sorted-map) (remove (comp layer-of key)) annotations)
-     :provenance (->compact-provenance (:provenance merged) annotations
-                                       (->provenance-template (:provenance merged)
-                                                              (keys layer-of)))}))
+     :provenance (let [provenance (:provenance merged)]
+                   (->compact-provenance provenance annotations
+                                         (->provenance-template provenance
+                                                                (keys layer-of))))}))
 
 ;; ===========================================================================
 ;; expand

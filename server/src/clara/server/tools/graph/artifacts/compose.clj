@@ -24,6 +24,7 @@
   The selection is explicit and ordered; nothing here discovers intent."
   (:require
    [clara.server.tools.graph.annotations.merge :as ann.merge]
+   [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
    [clara.server.tools.graph.artifacts.registry :as registry]
    [clara.server.tools.graph.artifacts.store :as store]
    [clojure.set :as set]))
@@ -89,73 +90,49 @@
                           (assoc-in [:units p-name] uk))))))
     (:productions @acc)))
 
-(defn- hierarchy-order
-  "Order a set of type names descendant-first (deepest first, ties by name), the
-  same rule `clara.server.tools.graph.fact-types/hierarchy-order` applies. A
-  pathological cycle falls back to the lexicographically smallest remaining
-  name."
-  [ancestor-sets raw]
-  (loop [remaining (set raw)
-         ordered []]
-    (if (empty? remaining)
-      ordered
-      (let [pick (or (->> remaining
-                          (filter (fn [x]
-                                    (not-any? (fn [d]
-                                                (contains? (get ancestor-sets d #{}) x))
-                                              remaining)))
-                          (sort)
-                          first)
-                     (first (sort remaining)))]
-        (recur (disj remaining pick) (conj ordered pick))))))
-
 (defn union-fact-types
   "Merge slim fact-type maps from multiple units. Per name, `:ancestors` is the
-  union of every unit's ancestor edge set, re-ordered descendant-first — the
-  same closure the federated index computes. `:ns` comes from the first unit
-  that has the name."
+  union of every unit's ancestor edge set, re-closed transitively and ordered
+  deepest-first — the same closure the federated index computes, via
+  `clara.server.tools.graph.artifacts.hierarchy`. `:ns` comes from the first
+  unit that has the name."
   [fact-type-maps]
   (let [fact-type-maps (into [] (remove nil?) fact-type-maps)
-        names (into (sorted-set) (mapcat keys) fact-type-maps)
-        ;; ancestors-of: name -> set of ancestors, over the unioned edge set.
-        ancestors-of (into {}
-                           (map (fn [name]
-                                  [name (into #{} (mapcat #(get-in % [name :ancestors]))
-                                              fact-type-maps)]))
-                           names)
-        ;; ancestors-of is extended with each ancestor's own ancestors, so the
-        ;; order walk can decide which remaining node is deepest.
-        ancestor-sets (reduce (fn [m [name as]]
-                                (reduce (fn [m a] (update m a (fnil conj #{}) name)) m as))
-                              ancestors-of
-                              (mapcat (fn [name] (map (fn [a] [a (get ancestors-of a #{})]) (get ancestors-of name))) names))]
+        ancestors (hierarchy/closed-ancestors
+                   (hierarchy/union-ancestors fact-type-maps))]
     (into (sorted-map)
           (map (fn [name]
-                 (let [entry (some #(get % name) fact-type-maps)]
-                   [name {:name name
-                          :ns (:ns entry)
-                          :ancestors (vec (hierarchy-order ancestor-sets
-                                                           (get ancestors-of name #{})))}]))
-               names))))
+                 [name {:name name
+                        :ns (:ns (some #(get % name) fact-type-maps))
+                        :ancestors (hierarchy/hierarchy-order
+                                    ancestors
+                                    (get ancestors name #{}))}]))
+          (keys ancestors))))
 
 ;; ===========================================================================
 ;; dep-graph recomputation over the merged production set
 ;; ===========================================================================
 
 (defn- ->type-analysis-map
+  "`{p-name {:consumed-types #{t} :produced-types #{t}}}` over rules and
+  queries."
   [rules queries]
   (into {}
-        (map (fn [[p-name production]]
-               [p-name {:consumed-types (set (:lhs-types production))
-                        :produced-types (set (concat (:insert-types production)
-                                                     (:retract-types production)))}]))
-        (concat rules queries)))
+        (comp cat
+              (map (fn [[p-name production]]
+                     [p-name {:consumed-types (set (:lhs-types production))
+                              :produced-types (set (concat (:insert-types production)
+                                                           (:retract-types production)))}])))
+        [rules queries]))
 
 (defn- ->consumers-by-type
+  "`{type #{p-name}}` — the consumers of each consumed type."
   [type-analysis-map]
-  (reduce-kv (fn [idx p-name {:keys [consumed-types]}]
-               (reduce #(update %1 %2 (fnil conj #{}) p-name) idx consumed-types))
-             {} type-analysis-map))
+  (let [idx (volatile! {})]
+    (doseq [[p-name {:keys [consumed-types]}] type-analysis-map
+            t consumed-types]
+      (vswap! idx update t (fnil conj #{}) p-name))
+    @idx))
 
 (defn- ->dep-graph
   "The composed dep-graph over the merged productions, in slim form (`:upstream`
@@ -163,24 +140,23 @@
   is recomputed over the unioned fact-type hierarchy rather than unioned."
   [rules queries fact-types]
   (let [type-analysis (->type-analysis-map rules queries)
-        ancestors-set-fn (fn [t] (set (get-in fact-types [t :ancestors] [])))
+        ancestors-of (fn [t] (get-in fact-types [t :ancestors] []))
         consumers-by-type (->consumers-by-type type-analysis)
-        graph (volatile! {})]
+        upstreams (volatile! {})]
     (doseq [[producer-name {:keys [produced-types]}] type-analysis
-            :when (seq produced-types)
             pt produced-types
             :let [consumers (reduce into #{} (keep consumers-by-type
-                                                   (cons pt (ancestors-set-fn pt))))]
+                                                   (cons pt (ancestors-of pt))))]
             consumer-name consumers
             :when (not= producer-name consumer-name)]
-      (vswap! graph (fn [g]
-                      (-> g
-                          (update-in [producer-name :downstream] (fnil conj #{}) consumer-name)
-                          (update-in [consumer-name :upstream] (fnil conj #{}) producer-name)))))
+      (vswap! upstreams update consumer-name (fnil conj #{}) producer-name))
+    ;; Every production is a node; a source node keeps no :upstream key.
     (into (sorted-map)
-          (map (fn [[node {:keys [upstream]}]]
-                 [node (cond-> {} (seq upstream) (assoc :upstream (set upstream)))])
-               @graph))))
+          (map (fn [[p-name _]]
+                 [p-name (cond-> {}
+                           (seq (get @upstreams p-name))
+                           (assoc :upstream (get @upstreams p-name)))]))
+          type-analysis)))
 
 ;; ===========================================================================
 ;; slim block + entry point

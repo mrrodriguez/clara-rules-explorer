@@ -38,7 +38,7 @@
 ;; Registry value
 ;; ===========================================================================
 
-(defrecord Registry [root units cache])
+(defrecord Registry [root units units-by-key cache])
 
 (defn unit-key
   "The string handle for a unit ref: `<repo>[@<branch>]`. A `UnitRef` map is not
@@ -63,8 +63,7 @@
   "The recorded info for `unit` (its artifacts, slim shape, layer ids, manifest
   head), or nil when the registry does not hold it."
   [^Registry registry unit]
-  (let [k (unit-key unit)]
-    (some #(when (= k (unit-key %)) %) (:units registry))))
+  (get (:units-by-key registry) (unit-key unit)))
 
 ;; ===========================================================================
 ;; discovery
@@ -169,7 +168,8 @@
                             :units [schema/UnitRef]}]
   (when (str/blank? root)
     (throw (ex-info "registry requires :root (an artifact root)" {})))
-  (->Registry root (mapv #(->unit-info root %) units) (atom {})))
+  (let [infos (mapv #(->unit-info root %) units)]
+    (->Registry root infos (into {} (map (fn [i] [(unit-key i) i])) infos) (atom {}))))
 
 (s/defn discover :- Registry
   "Discover every unit under `:root` — a directory holding

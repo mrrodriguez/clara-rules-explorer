@@ -306,11 +306,14 @@ Four namespaces answer that, all under
   units that share a fact-type vocabulary but are NOT claimed to compose: the
   globally re-closed hierarchy (with `:conflicts` where units disagree),
   per-type producers/consumers with polarity, cross-unit `:unit-edges`, entry
-  points, and orphans. `impact-of`, `producers-of`, `dependents-of`,
-  `paths-between`, and `unit-dependency-graph` answer over it; `->digest` +
-  `persist!` write `registry-index.edn` / `registry-digest.edn` to an explicit
-  `:dir`. `grade` checks the union against a composed reference (a captured
-  session or monolithic run).
+  points, and orphans. A `UnitRef` may carry a `:namespaces` filter that
+  narrows the unit's scope; requested namespaces no selected unit covers are
+  reported under `:coverage :unknown-namespaces`. `impact-of`,
+  `producers-of`, `dependents-of`, `paths-between`, and
+  `unit-dependency-graph` answer over it; `->digest` + `persist!` write
+  `registry-index.edn` / `registry-digest.edn` to an explicit `:dir`. `grade`
+  checks the union against a composed reference (a captured session or
+  monolithic run).
 
 The library discovers and merges; it never decides *which* sets belong together
 or *what a set means* — every entry point takes the selection explicitly. The
