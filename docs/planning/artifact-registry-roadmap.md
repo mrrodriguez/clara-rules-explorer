@@ -50,7 +50,7 @@ Namespaces are under `clara.server.tools.graph.artifacts.*` (the plan's short
   - [x] `:annotations` via `compose/fold-layers`
   - [x] route tests over a registry-backed server with no session
 
-- [ ] **7. `grade`** — `federate/grade index reference-analysis`.
+- [x] **7. `grade`** — `federate/grade index reference-analysis`.
 
 ## Cross-cutting
 

@@ -5,9 +5,16 @@
   the keyword), `loan-disposition-ruleset` matches the keyword. The index is
   where the cross-unit contract becomes queryable."
   (:require
+   [clara.rules :as r]
+   [clara.server.tools.graph.annotations.merge :as am]
    [clara.server.tools.graph.artifacts.federate :as federate]
    [clara.server.tools.graph.artifacts.registry :as registry]
+   [clara.server.tools.graph.core :as core]
    [clara.server.tools.graph.edn-io :as edn-io]
+   [clara.server.tools.graph.rules.loan-app-rules]
+   [clara.server.tools.graph.rules.loan-doc-queries]
+   [clara.server.tools.graph.rules.loan-doc-rules]
+   [clara.server.tools.graph.rules.loan-outcome-notices]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
@@ -30,6 +37,17 @@
   (federate/->index (registry/discover {:root (registry-root)})
                     [{:repo "loan-app-ruleset"}
                      {:repo "loan-disposition-ruleset"}]))
+
+(defn- ->reference-analysis
+  "The monolithic truth: the loan-doc/app session with the downstream notices
+  ruleset wired on, the same session `integration-test/run-loan-outcome-notices`
+  builds."
+  []
+  (let [session (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                              'clara.server.tools.graph.rules.loan-app-rules
+                              'clara.server.tools.graph.rules.loan-doc-queries
+                              'clara.server.tools.graph.rules.loan-outcome-notices)]
+    (core/->rulebase-analysis session (am/annotations (am/merge-layers [(am/->props-layer session)])))))
 
 (deftest index-records-the-cross-unit-contract-test
   (let [index (->index)]
@@ -78,6 +96,19 @@
 
     (testing "coverage reports no shape skew between the two units"
       (is (= [] (:shape-mismatch (federate/coverage-report index)))))))
+
+(deftest grade-against-a-composed-reference-test
+  (let [index (->index)
+        graded (federate/grade index (->reference-analysis))]
+    (testing "the reference confirms the cross-unit edge"
+      (is (contains? (set (:confirmed-unit-edges graded))
+                     ["loan-app-ruleset" "loan-disposition-ruleset"])))
+    (testing "no index edge is contradicted"
+      (is (= [] (:contradicted-unit-edges graded))))
+    (testing "every reference namespace is covered by a unit"
+      (is (= [] (:uncovered-namespaces graded))))
+    (testing "the union had no entry point the reference actually produces"
+      (is (empty? (:reference-produced-entry-points graded))))))
 
 (deftest digest-and-persist-round-trip-test
   (let [index (->index)

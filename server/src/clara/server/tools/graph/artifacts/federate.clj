@@ -449,6 +449,98 @@
   (:coverage index))
 
 ;; ===========================================================================
+;; grading against a composed reference
+;; ===========================================================================
+
+(defn- ->ns->units
+  "Namespace → the units whose `:scope :namespaces` cover it."
+  [index]
+  (reduce (fn [m [uk nses]]
+            (reduce (fn [m ns] (update m ns (fnil conj #{}) uk)) m nses))
+          {}
+          (get-in index [:scope :namespaces])))
+
+(defn- ->reference-ns
+  "Production name → its namespace, off the reference's own production maps."
+  [reference]
+  (into {}
+        (map (fn [[name production]] [name (:ns production)]))
+        (concat (get reference :rules {}) (get reference :queries {}))))
+
+(defn- type-name
+  "A fact-type token as a name — a persisted reference has bare names, a live
+  one has serialized `TypeReference` maps."
+  [t]
+  (if (map? t) (:name t) t))
+
+(defn- reference-produces?
+  "Whether the reference produces `ft`: a rule inserts a type that IS `ft` or
+  derives from it (the ancestor closure)."
+  [reference ft]
+  (let [fact-types (get reference :fact-types {})
+        ancestors-of (fn [t] (set (map type-name (get-in fact-types [t :ancestors] []))))]
+    (boolean
+     (some (fn [[_ rule]]
+             (some (fn [t] (or (= ft t) (contains? (ancestors-of t) ft)))
+                   (map type-name (get rule :insert-types))))
+           (get reference :rules {})))))
+
+(defn- ->reference-produced-entry-points
+  [index reference]
+  (let [entry-points (into #{} (mapcat val) (get index :entry-points))]
+    (into #{} (filter #(reference-produces? reference %)) entry-points)))
+
+(defn- ->confirmed-and-contradicted-edges
+  "Split the index's unit edges into the ones the reference dep-graph confirms
+  (a production edge from the producer unit to the consumer unit exists) and
+  the ones it does not."
+  [index reference]
+  (let [ns->units (->ns->units index)
+        ref-ns (->reference-ns reference)
+        ref-dep-graph (get reference :dep-graph {})]
+    (reduce (fn [[confirmed contradicted] [P C]]
+              (let [confirmed?
+                    (boolean
+                     (some (fn [[consumer-name {:keys [upstream]}]]
+                             (and (contains? (get ns->units (get ref-ns consumer-name) #{}) C)
+                                  (some (fn [producer-name]
+                                          (contains? (get ns->units (get ref-ns producer-name) #{}) P))
+                                        upstream)))
+                           ref-dep-graph))]
+                (if confirmed?
+                  [(conj confirmed [P C]) contradicted]
+                  [confirmed (conj contradicted [P C])])))
+            [[] []]
+            (keys (get index :unit-edges)))))
+
+(defn- ->uncovered-namespaces
+  [index reference]
+  (let [covered (into #{} (mapcat val) (get-in index [:scope :namespaces]))
+        reference-nses (into #{} (keep :ns)
+                             (concat (vals (get reference :rules {}))
+                                     (vals (get reference :queries {}))))]
+    (vec (sort (set/difference reference-nses covered)))))
+
+(defn grade
+  "Grade the union (`index`) against a composed reference (`reference-analysis`)
+  — a captured session or monolithic run that really did compose. Reports:
+
+    :reference-produced-entry-points — union entry points the reference has a
+        producer for, so the union was missing a component rather than the
+        rulebase lacking one
+    :confirmed-unit-edges / :contradicted-unit-edges — the index's cross-unit
+        edges the reference dep-graph confirms and contradicts
+    :uncovered-namespaces — reference namespaces no unit in the index covers
+
+  Grades the union; it does not replace it."
+  [index reference]
+  (let [[confirmed contradicted] (->confirmed-and-contradicted-edges index reference)]
+    {:reference-produced-entry-points (->reference-produced-entry-points index reference)
+     :confirmed-unit-edges confirmed
+     :contradicted-unit-edges contradicted
+     :uncovered-namespaces (->uncovered-namespaces index reference)}))
+
+;; ===========================================================================
 ;; digest + persist!
 ;; ===========================================================================
 
