@@ -54,9 +54,9 @@ Namespaces are under `clara.server.tools.graph.artifacts.*` (the plan's short
 
 ## Cross-cutting
 
-- [ ] `server/docs/persisted-artifacts.md` gains the registry chapter
-- [ ] `docs/explorer-graph-api.md` gains the registry-backed server mode + 409 list
-- [ ] `README.md` gains one Documentation line
+- [x] `server/docs/persisted-artifacts.md` gains the registry chapter
+- [x] `docs/explorer-graph-api.md` gains the registry-backed server mode + 409 list
+- [x] `README.md` gains one Documentation line
 
 ## Notes
 

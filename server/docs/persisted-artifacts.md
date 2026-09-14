@@ -270,6 +270,58 @@ runtime. Anything else — the git state of a host's tooling, how the session wa
 built, what scope it covers — arrives through two seams: `:blocks`, merged into
 the manifest whole, and `:analysis-run`, merged into that block.
 
+## The artifact registry
+
+Everything above addresses **one** artifact set at a time. Hosts accumulate
+many — one per source repo of a rulebase composed from several, one per branch
+variant under review, one per captured session — and the questions worth asking
+span them: *who consumes the type this set produces*, *what does this branch do
+to the others*, *what does this set of sets look like as one rulebase*.
+
+Four namespaces answer that, all under
+`clara.server.tools.graph.artifacts.*`:
+
+- **`registry`** — discovers and reads N units under a root, as a value. A
+  directory is a **unit** iff it holds `rules-inspect-manifest.edn`, the one
+  artifact every complete set has; its `:repo` is its path relative to the
+  root. The one reserved segment is `branches`: its children become `:branch`
+  variants of the parent unit rather than units of their own.
+  `registry/compatibility-report` compares each unit's `:slim :dropped` key set
+  and names the units that do not share a shape — the question a merge answers
+  first.
+- **`rehydrate`** — the inverse of `slim`. Rebuilds the reverse directions a
+  persisted analysis drops because they are recomputable: fact-type
+  `:used-by-*` / `:inserted-by-rules` / `:retracted-by-rules` (with the two
+  hierarchy closures running in opposite directions), `:descendants`, the id
+  indexes, and `:dep-graph :downstream`. `:nodes`, `:lhs-form`, the condition
+  bookkeeping, and `:ns-deps` stay absent.
+- **`compose`** — merges a caller-named selection in two modes. `fold-layers`
+  folds every unit's layer stack into one `MergedAnnotations`, qualifying each
+  layer id as `<repo>[@<branch>]/<layer-id>`; `->composed-analysis` asserts the
+  units are components of ONE rulebase and returns one slim `RulebaseAnalysis`,
+  rules/queries merged by fq name (a name in two units is refused), fact types
+  merged per name with ancestors unioned, the dep-graph recomputed over the
+  merged set so cross-unit edges exist, and each production tagged `:unit`.
+- **`federate`** — the union mode. `->index` builds a queryable value over
+  units that share a fact-type vocabulary but are NOT claimed to compose: the
+  globally re-closed hierarchy (with `:conflicts` where units disagree),
+  per-type producers/consumers with polarity, cross-unit `:unit-edges`, entry
+  points, and orphans. `impact-of`, `producers-of`, `dependents-of`,
+  `paths-between`, and `unit-dependency-graph` answer over it; `->digest` +
+  `persist!` write `registry-index.edn` / `registry-digest.edn` to an explicit
+  `:dir`. `grade` checks the union against a composed reference (a captured
+  session or monolithic run).
+
+The library discovers and merges; it never decides *which* sets belong together
+or *what a set means* — every entry point takes the selection explicitly. The
+join key is the fact type name, and shape skew is refused, not bridged.
+
+The server serves a composed selection directly: `server/start!` accepts
+`{:registry {:root … :units […] :mode :compose}}`, and the analysis routes answer
+from the composed, rehydrated analysis with no live session (session routes
+return 409 `:no-session`). See
+[`../../docs/explorer-graph-api.md`](../../docs/explorer-graph-api.md).
+
 ## Related
 
 - [`rule-annotations.md`](rule-annotations.md) — the layer model, the fold, and
