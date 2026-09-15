@@ -4,8 +4,8 @@
 ;; runs from ~10KB to 20MB (a restored 18-ruleset session) — never `cat` them.
 ;;
 ;; This is the ANNOTATION-side tool: layers, callsites, resolution, curation,
-;; provenance. Five of the nine subcommands never open the analysis at all.
-;; `producers` and `consumers` close over the fact-type hierarchy in
+;; provenance. Five of the ten subcommands never open the analysis at all.
+;; `producers`, `consumers`, and `hierarchy` read the fact-type hierarchy in
 ;; fact-types.edn; `consumers` and `edges` read production-index.edn and
 ;; dep-graph.edn; `rule` reads production-index.edn for `:unit` attribution.
 ;; For anything structural the analysis does not hold — the Rete graph, :lhs-form,
@@ -41,6 +41,7 @@
 ;;   types                every resolved insert-type, with producer count
 ;;   producers <type>     rules inserting <type> or a descendant  (annotations + fact-types.edn)
 ;;   consumers <type>     rules with <type> or an ancestor on LHS  (production-index + fact-types.edn)
+;;   hierarchy <type>     that type's ancestors and descendants     (fact-types.edn)
 ;;   rule <fq-name>       one rule's full annotation        (annotations; :unit from production-index)
 ;;   edges <fq-name>      dep-graph upstream/downstream     (dep-graph; downstream inverted)
 ;;   curated              what the agent overlay changed vs the auto-gen baseline
@@ -51,11 +52,11 @@
 ;; auto (the generated layer), agent (the curated overlay alone), or merged (the
 ;; fold). Default is merged, except `gaps`, which defaults to auto.
 ;;
-;; <type> may be written :foo/bar or foo/bar. producers/consumers resolve it
-;; against the known fact-type names in fact-types.edn — exact first, then
-;; substring — then close over the hierarchy: producers reach descendants,
-;; consumers reach ancestors, the two opposite closures. <fq-name> likewise
-;; falls back to substring search.
+;; <type> may be written :foo/bar or foo/bar. producers/consumers/hierarchy
+;; resolve it against the known fact-type names in fact-types.edn — exact first,
+;; then substring. producers then reach descendants, consumers reach ancestors,
+;; the two opposite closures; hierarchy shows both. <fq-name> likewise falls
+;; back to substring search.
 ;;
 ;; Callsite :status and dimension :resolution share one vocabulary:
 ;; :full / :partial / :none.
@@ -426,6 +427,25 @@
       (println (format "  (%d exact, %d via ancestors)" n-exact n-via))
       (print-match-sections matches "ancestor"))))
 
+(defn- hierarchy
+  "One fact type's place in the hierarchy: its ancestors and its descendants,
+  read from fact-types.edn. Descendants are the transpose of the recorded
+  `:ancestors` — the same direction
+  `clara.server.tools.graph.artifacts.hierarchy/->descendants` gives."
+  [fact-types raw]
+  (when-let [resolved (resolve-type-names fact-types raw)]
+    (let [ancestors (->ancestors fact-types)
+          descendants (->descendants ancestors)]
+      (doseq [name (sort resolved)
+              :let [as (sort (get ancestors name #{}))
+                    ds (sort (get descendants name #{}))]]
+        (println name)
+        (println (str "  ancestors (" (count as) ")"))
+        (doseq [a as] (println (str "    " a)))
+        (println (str "  descendants (" (count ds) ")"))
+        (doseq [d ds] (println (str "    " d)))
+        (println)))))
+
 ;; ---------------------------------------------------------------------------
 ;; rule / edges
 ;; ---------------------------------------------------------------------------
@@ -560,7 +580,7 @@
       [target cmd arg] (remove #{"--file" which} args)]
   (when-not target
     (die (str "usage: bb annotations_report.bb <dir|file.edn> "
-              "[summary|gaps|types|producers <t>|consumers <t>|rule <n>|edges <n>|curated"
+              "[summary|gaps|types|producers <t>|consumers <t>|hierarchy <t>|rule <n>|edges <n>|curated"
               "|layers [<n>]] "
               "[--file auto|agent|merged]")))
   (let [cmd (or cmd "summary")
@@ -582,6 +602,7 @@
       "producers" (if arg (producers @anns @fact-types arg) (die "producers needs a fact type"))
       "consumers" (if arg (consumers @index @fact-types arg)
                       (die "consumers needs a fact type"))
+      "hierarchy" (if arg (hierarchy @fact-types arg) (die "hierarchy needs a fact type"))
       "rule" (if arg (rule @anns @index arg) (die "rule needs a rule name"))
       "edges" (if arg (edges (analysis-part :dep-graph) arg) (die "edges needs a rule name"))
       "curated" (curated @auto @agent)

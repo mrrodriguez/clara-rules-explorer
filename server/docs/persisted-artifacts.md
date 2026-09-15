@@ -189,19 +189,30 @@ D="/path/to/artifacts/<repo>"       # a branch run is $D/branches/<label>
 bb "$S" "$D"                              # summary + resolution tallies
 bb "$S" "$D" gaps                         # rules whose :resolution is not :full
 bb "$S" "$D" types                        # every resolved insert-type + producer count
-bb "$S" "$D" producers :loan/applicant   # who inserts it            (annotations)
-bb "$S" "$D" consumers :loan/applicant   # who matches it            (production-index)
-bb "$S" "$D" rule some.ns/some-rule       # one rule's whole annotation
+bb "$S" "$D" producers :loan/applicant    # who inserts it or a descendant   (annotations + fact-types)
+bb "$S" "$D" consumers :loan/applicant    # who matches it or an ancestor    (production-index + fact-types)
+bb "$S" "$D" hierarchy :loan/applicant    # that type's ancestors + descendants  (fact-types)
+bb "$S" "$D" rule some.ns/some-rule       # one rule's whole annotation (+ :unit)
 bb "$S" "$D" edges some.ns/some-rule      # up/downstream             (dep-graph)
 bb "$S" "$D" curated                      # what the overlay changed vs the baseline
 bb "$S" "$D" layers                       # the fold + per-key provenance
 ```
 
-Two of the nine subcommands touch the analysis at all — `consumers` reads
-`production-index.edn`, `edges` reads `dep-graph.edn` and inverts `:upstream` for
-the downstream side. The rest read the annotation layers. Fact types may be
-written `:foo/bar` or `foo/bar`, and both types and rule names fall back to
-substring matching.
+Five of the ten subcommands never open the analysis at all — `summary`, `gaps`,
+`types`, `curated`, and `layers` read only the annotation layers. `producers`,
+`consumers`, and `hierarchy` read `fact-types.edn`: `producers` closes over a
+type's descendants, `consumers` over its ancestors — the two opposite closures —
+and both print the split between exact matches and ones reached through the
+hierarchy; `hierarchy` shows a type's ancestors and descendants directly.
+`consumers` reads `production-index.edn`; `edges` reads `dep-graph.edn` and
+inverts `:upstream` for the downstream side; `rule` reads `production-index.edn`
+for `:unit` attribution on a composed set.
+
+`producers`, `consumers`, and `hierarchy` resolve a fact type against the names
+in `fact-types.edn` — exact first, then substring. A substring that lands on one
+name prints what it resolved to; one that lands on several lists the options and
+closes over all of them. Fact types may be written `:foo/bar` or `foo/bar`, and
+rule names fall back to substring matching the same way.
 
 `--file auto|agent|merged` picks which annotations the annotation-reading
 subcommands use. Default is `merged`, except `gaps`, which defaults to `auto`

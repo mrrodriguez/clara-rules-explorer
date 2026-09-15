@@ -19,6 +19,7 @@ Status of [`offline-report-hierarchy-plan.md`](offline-report-hierarchy-plan.md)
 - §3: `rule` reads `production-index.edn` for `:unit` (annotations do not carry `:unit`); `consumers` already reads that part.
 - Resolution against `fact-types.edn` means the first test's synthetic `analysis` needed a `:fact-types` section (it previously had none), and its keyword-fact strings were re-spelled with the leading colon (`":a/one"` etc.) to match the real on-disk convention.
 - Follow-up: `find-key-name` now prints `Resolved <input> -> <fq-key>` when an unqualified rule name resolves to a single candidate (exact matches stay silent; ambiguous names already list their fully-qualified options). The same now applies to fact types: `resolve-type-names` prints `Resolved <input> -> <name>` for a unique substring match, while exact (and colon-normalized) spellings stay silent and ambiguous substrings list their options.
+- Follow-up: added a `hierarchy <type>` subcommand — shows one fact type's ancestors and descendants from `fact-types.edn` (descendants are the transpose of `:ancestors`).
 
 ## Verification
 

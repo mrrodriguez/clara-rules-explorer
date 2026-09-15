@@ -207,6 +207,13 @@
             (is (str/includes? out p)))
           (is (str/includes? out "unit: loan-disposition-ruleset"))))
 
+      (testing "hierarchy shows a type's ancestors and descendants"
+        (let [out (run "hierarchy" ":loan-app/application-outcome")]
+          (is (str/includes? out ":loan-app/application-outcome"))
+          (is (str/includes? out "ancestors (0)"))
+          (is (str/includes? out "descendants (1)"))
+          (is (str/includes? out "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"))))
+
       (testing "producers agrees with edges on the cross-type link — the regression guard"
         (let [index (store/read-analysis-part :index opts)
               dep-graph (store/read-analysis-part :dep-graph opts)]
