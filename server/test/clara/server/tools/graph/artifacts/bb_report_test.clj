@@ -97,6 +97,11 @@
           (is (str/includes? out "a.ns/full-rule"))
           (is (not (str/includes? out "a.ns/gap-rule")))))
 
+      (testing "`producers` prints what a unique substring type resolved to"
+        (let [out (run-report "producers" "one")]
+          (is (str/includes? out "Resolved one -> :a/one"))
+          (is (str/includes? out "a.ns/full-rule"))))
+
       (testing "`edges` reads dep-graph.edn and inverts :upstream for the
                 :downstream side, which is no longer on disk"
         (let [out (run-report "edges" "a.ns/full-rule")]

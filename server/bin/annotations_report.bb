@@ -242,9 +242,8 @@
   "The known fact-type names `raw` means, as a set of canonical strings, resolved
   against `fact-types` (the fact-types.edn map). Exact first, then the
   colon-preceded spelling — a keyword fact written `foo/bar` for its `:foo/bar`
-  key — then substring. When a substring lands on several names the caller closes
-  over all of them; they are printed here so the reader sees what the argument
-  expanded to. nil only when nothing matches."
+  key — then substring. A substring that lands on one name prints what it
+  resolved to; several are closed over and listed. nil only when nothing matches."
   [fact-types raw]
   (let [want (norm-type raw)
         as-colon (str ":" want)]
@@ -255,11 +254,12 @@
       (let [cands (into #{} (filter #(str/includes? % want)) (keys fact-types))]
         (cond
           (empty? cands) (do (println "No known fact type matches" want) nil)
-          (> (count cands) 1)
-          (do (println (str "Resolved " want " to " (count cands) " fact types:"))
-              (doseq [c (sort cands)] (println " " c))
-              cands)
-          :else cands)))))
+          (= 1 (count cands)) (let [c (first cands)]
+                                (println "Resolved" raw "->" c)
+                                #{c})
+          :else (do (println (str "Resolved " want " to " (count cands) " fact types:"))
+                    (doseq [c (sort cands)] (println " " c))
+                    cands))))))
 
 (defn- rule-match
   "One rule's matched types, split `{:exact {type #{action}} :via {type #{action}}}`,
