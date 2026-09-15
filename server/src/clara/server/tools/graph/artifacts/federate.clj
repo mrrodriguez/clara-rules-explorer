@@ -24,6 +24,7 @@
   (:require
    [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
    [clara.server.tools.graph.artifacts.registry :as registry]
+   [clara.server.tools.graph.artifacts.selection :as selection]
    [clara.server.tools.graph.artifacts.store :as store]
    [clara.server.tools.graph.edn-io :as edn-io]
    [clojure.java.io :as io]
@@ -33,22 +34,6 @@
 (set! *warn-on-reflection* true)
 
 (defn- unit-key [unit] (registry/unit-key unit))
-
-;; ===========================================================================
-;; reading the selection
-;; ===========================================================================
-
-(defn- read-analysis-or-throw
-  [registry unit]
-  (or (registry/read-analysis registry unit)
-      (throw (ex-info (format "Unit %s has no merged-rulebase-analysis" (unit-key unit))
-                      {:unit unit}))))
-
-(defn- ->analyses-by-unit
-  [registry selection]
-  (into {}
-        (map (fn [unit] [(unit-key unit) (read-analysis-or-throw registry unit)]))
-        selection))
 
 ;; ===========================================================================
 ;; aggregate overlap refusal
@@ -103,38 +88,6 @@
                        :source-units (->> selection
                                           (remove #(registry/aggregate-unit? registry %))
                                           (mapv unit-key))})))))
-
-(defn- narrow-analyses-by-unit
-  "The per-unit analyses narrowed to each unit's `:namespaces` filter (a no-op
-  for unfiltered units). Runs after coverage and unknown-namespace reporting,
-  which read the *un*-narrowed analyses."
-  [analyses-by-unit selection]
-  (into {}
-        (map (fn [unit]
-               (let [uk (unit-key unit)]
-                 [uk (registry/narrow-analysis (get analyses-by-unit uk) unit)])))
-        selection))
-
-;; ===========================================================================
-;; hierarchy union + re-closure
-;; ===========================================================================
-
-(defn- ->ancestor-conflicts
-  "The fact types whose ancestor sets differ between units: `{ft {unit #{ft}}}`.
-  A single set (or units that agree) is no conflict and is not recorded."
-  [analyses-by-unit]
-  (let [per-ft (reduce (fn [acc [uk analysis]]
-                         (reduce-kv (fn [acc ft {:keys [ancestors]}]
-                                      (assoc-in acc [ft uk] (set ancestors)))
-                                    acc
-                                    (:fact-types analysis)))
-                       {}
-                       analyses-by-unit)]
-    (into (sorted-map)
-          (keep (fn [[ft unit-sets]]
-                  (when (> (count (into #{} (vals unit-sets))) 1)
-                    [ft unit-sets])))
-          per-ft)))
 
 ;; ===========================================================================
 ;; polarity over the persisted LHS
@@ -218,13 +171,6 @@
   [{:keys [insert-types]}]
   (set insert-types))
 
-(defn- ->satisfies
-  "`base-types` plus their closure under `hierarchy` — ancestors when
-  `hierarchy` is the ancestor map, descendants when it is the descendant map.
-  A consumer matching any of these is satisfied by the holder of `base-types`."
-  [hierarchy base-types]
-  (reduce (fn [acc t] (into acc (cons t (get hierarchy t #{})))) #{} base-types))
-
 ;; ===========================================================================
 ;; fact-type entries
 ;; ===========================================================================
@@ -253,7 +199,7 @@
   `:entry-points` and `:orphans`."
   [analyses-by-unit ancestors ft]
   (let [produces? (fn [[_ rule]]
-                    (contains? (->satisfies ancestors (production-produced-types rule)) ft))]
+                    (contains? (hierarchy/ancestor-closure ancestors (production-produced-types rule)) ft))]
     (into #{}
           (keep (fn [[uk analysis]]
                   (when (some produces? (:rules analysis)) uk)))
@@ -325,7 +271,7 @@
                        (map (fn [[uk {:keys [rules]}]]
                               [uk (into #{} (mapcat :lhs-types) (vals rules))]))
                        analyses-by-unit)
-        satisfies (fn [uk] (->satisfies ancestors (get coupled uk #{})))
+        satisfies (fn [uk] (hierarchy/ancestor-closure ancestors (get coupled uk #{})))
         edges (volatile! (sorted-map))]
     (doseq [[p-uk _] analyses-by-unit
             [c-uk _] analyses-by-unit
@@ -345,7 +291,7 @@
   (or produces an ancestor of)."
   [analyses-by-unit ancestors]
   (let [produced (into #{} (mapcat ->produced-types) (vals analyses-by-unit))
-        all-satisfies (->satisfies ancestors produced)]
+        all-satisfies (hierarchy/ancestor-closure ancestors produced)]
     (into {}
           (keep (fn [[uk analysis]]
                   (let [entry (set/difference (->consumed-types analysis) all-satisfies)]
@@ -358,7 +304,7 @@
   [analyses-by-unit descendants]
   (let [consumed (->> (vals analyses-by-unit)
                       (into #{} (mapcat ->consumed-types))
-                      (->satisfies descendants))]
+                      (hierarchy/descendant-closure descendants))]
     (into {}
           (keep (fn [[uk analysis]]
                   (let [orphan (set/difference (->produced-types analysis) consumed)]
@@ -368,57 +314,6 @@
 ;; ===========================================================================
 ;; the index
 ;; ===========================================================================
-
-(defn- ->covered-namespaces
-  "The namespaces a unit's rules and queries live in."
-  [{:keys [rules queries]}]
-  (into #{} (comp cat (keep :ns)) [(vals rules) (vals queries)]))
-
-(defn- ->covered-namespaces-by-unit
-  "`{unit-key #{ns}}` — the full namespace coverage of each unit, before any
-  per-unit `:namespaces` filter narrows it."
-  [analyses-by-unit]
-  (into {}
-        (map (fn [[uk analysis]] [uk (->covered-namespaces analysis)]))
-        analyses-by-unit))
-
-(defn- ->requested-namespaces
-  "A unit's `:namespaces` filter as a set of strings, or nil when unfiltered."
-  [unit]
-  (when-let [nses (:namespaces unit)]
-    (into #{} (map str) nses)))
-
-(defn- ->scoped-namespaces
-  "`covered` narrowed to `requested` — or `covered` when the unit is unfiltered —
-  as a sorted vector."
-  [covered requested]
-  (vec (sort (if requested (set/intersection covered requested) covered))))
-
-(defn- ->namespaces
-  "`{unit-key [ns …]}` — the namespaces each unit covers, narrowed to the
-  caller's per-unit `:namespaces` filter when one is given. A namespace the
-  caller names but no unit covers is reported under `:coverage
-  :unknown-namespaces`, not here."
-  [covered-by-unit selection]
-  (into {}
-        (map (fn [unit]
-               (let [uk (unit-key unit)]
-                 [uk (->scoped-namespaces
-                      (get covered-by-unit uk #{})
-                      (->requested-namespaces unit))])))
-        selection))
-
-(defn- ->unknown-namespaces
-  "Requested namespaces (the union of per-unit `:namespaces` filters) that no
-  selected unit covers. Computed from the *full* coverage — before any
-  narrowing — so a namespace one unit covers but another's filter excludes is
-  not misreported as unknown."
-  [covered-by-unit selection]
-  (let [requested (into #{} (mapcat #(map str (:namespaces %))) selection)
-        covered (into #{} (mapcat val) covered-by-unit)]
-    (->> (set/difference requested covered)
-         sort
-         vec)))
 
 (defn- ->provenance
   [registry selection]
@@ -449,31 +344,22 @@
   ([registry selection] (->index registry selection {}))
   ([registry selection {:keys [label]}]
    (assert-no-aggregate-overlap! registry selection)
-   (registry/assert-compatible! registry selection)
-   (let [analyses-by-unit (->analyses-by-unit registry selection)
-         covered-by-unit (->covered-namespaces-by-unit analyses-by-unit)
-         unknown-namespaces (->unknown-namespaces covered-by-unit selection)
-         analyses-by-unit (narrow-analyses-by-unit analyses-by-unit selection)
-         ancestors (->> (vals analyses-by-unit)
-                        (map :fact-types)
-                        hierarchy/union-ancestors
-                        hierarchy/closed-ancestors)
-         descendants (hierarchy/->descendants ancestors)
-         maps (->production-maps analyses-by-unit descendants)
-         namespaces (->namespaces covered-by-unit selection)]
+   (let [{:keys [analyses ancestors descendants hierarchy-conflicts coverage]}
+         (selection/->selection registry selection)
+         maps (->production-maps analyses descendants)]
      {:scope (cond-> {:units (mapv #(select-keys % [:repo :branch :namespaces]) selection)
-                      :namespaces namespaces}
+                      :namespaces (:namespaces coverage)}
                (some? label) (assoc :label label))
       :provenance (->provenance registry selection)
-      :coverage {:units (mapv unit-key selection)
-                 :unknown-namespaces unknown-namespaces}
+      :coverage {:units (:units coverage)
+                 :unknown-namespaces (:unknown-namespaces coverage)}
       :hierarchy {:ancestors ancestors
                   :descendants descendants
-                  :conflicts (->ancestor-conflicts analyses-by-unit)}
-      :fact-types (->fact-types-index analyses-by-unit ancestors descendants maps)
-      :unit-edges (->unit-edges analyses-by-unit ancestors)
-      :entry-points (->entry-points analyses-by-unit ancestors)
-      :orphans (->orphans analyses-by-unit descendants)})))
+                  :conflicts hierarchy-conflicts}
+      :fact-types (->fact-types-index analyses ancestors descendants maps)
+      :unit-edges (->unit-edges analyses ancestors)
+      :entry-points (->entry-points analyses ancestors)
+      :orphans (->orphans analyses descendants)})))
 
 ;; ===========================================================================
 ;; query fns over the value

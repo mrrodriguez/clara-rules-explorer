@@ -26,6 +26,7 @@
    [clara.server.tools.graph.annotations.merge :as ann.merge]
    [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
    [clara.server.tools.graph.artifacts.registry :as registry]
+   [clara.server.tools.graph.artifacts.selection :as selection]
    [clara.server.tools.graph.artifacts.store :as store]
    [clojure.set :as set]
    [clojure.walk :as walk]))
@@ -56,6 +57,16 @@
       (assoc :id (qualified-layer-id unit (:id layer)))
       (registry/narrow-annotations unit)))
 
+(defn- ->unit-layer-pairs
+  "One unit's file-backed layers, each as `[raw narrowed]` — `raw` keeps the
+  standard role id, `narrowed` is qualified + `:namespaces`-filtered. Read once
+  per unit and shared by `fold-layers` (which folds the narrowed halves in
+  selection order) and `->standard-role-layers` (which selects a role by the raw
+  id before it is qualified away)."
+  [registry unit]
+  (map (fn [layer] [layer (->narrowed-layer unit layer)])
+       (store/get-layer-stack (->opts registry unit))))
+
 (defn- ->narrowed-namespaces
   "The per-unit `:namespaces` filters of `selection`, as `{unit-key [ns …]}`,
   for the units that carry one. Empty when no unit is narrowed — the persisted
@@ -74,9 +85,7 @@
   `:namespaces` filter first; within one unit nothing else changes."
   [registry selection]
   (ann.merge/merge-layers
-   (mapcat (fn [unit]
-             (map #(->narrowed-layer unit %)
-                  (store/get-layer-stack (->opts registry unit))))
+   (mapcat (fn [unit] (map second (->unit-layer-pairs registry unit)))
            selection)))
 
 (defn- strip-derived-callsite-provenance
@@ -116,9 +125,9 @@
     (into (array-map)
           (keep (fn [[role role-id]]
                   (let [layers (mapcat (fn [unit]
-                                         (keep #(when (= role-id (:id %))
-                                                  (->narrowed-layer unit %))
-                                               (store/get-layer-stack (->opts registry unit))))
+                                         (keep (fn [[raw layer]]
+                                                 (when (= role-id (:id raw)) layer))
+                                               (->unit-layer-pairs registry unit)))
                                        selection)]
                     (when (seq layers)
                       (let [folded (ann.merge/merge-layers layers)]
@@ -134,13 +143,6 @@
 ;; ===========================================================================
 ;; composed analysis
 ;; ===========================================================================
-
-(defn- read-analysis-or-throw
-  [registry unit]
-  (or (registry/read-analysis registry unit)
-      (throw (ex-info (format "Unit %s has no merged-rulebase-analysis to compose"
-                              (registry/unit-key unit))
-                      {:unit unit}))))
 
 (defn- merge-production-map
   "Merge `kind` (`:rules` or `:queries`) across units by fq name. A name claimed
@@ -162,6 +164,21 @@
                           (assoc-in [:units p-name] uk))))))
     (:productions @acc)))
 
+(defn- ->fact-type-map
+  "The composed `:fact-types` map from `ancestors` (the already-closed unioned
+  hierarchy) and the units' raw fact-type maps: per type name, `:ns` from the
+  first unit that declares it, `:ancestors` ordered deepest-first via
+  `clara.server.tools.graph.artifacts.hierarchy/hierarchy-order`."
+  [fact-type-maps ancestors]
+  (into (sorted-map)
+        (map (fn [name]
+               [name {:name name
+                      :ns (:ns (some #(get % name) fact-type-maps))
+                      :ancestors (hierarchy/hierarchy-order
+                                  ancestors
+                                  (get ancestors name #{}))}]))
+        (keys ancestors)))
+
 (defn union-fact-types
   "Merge slim fact-type maps from multiple units. Per name, `:ancestors` is the
   union of every unit's ancestor edge set, re-closed transitively and ordered
@@ -169,17 +186,10 @@
   `clara.server.tools.graph.artifacts.hierarchy`. `:ns` comes from the first
   unit that has the name."
   [fact-type-maps]
-  (let [fact-type-maps (into [] (remove nil?) fact-type-maps)
-        ancestors (hierarchy/closed-ancestors
-                   (hierarchy/union-ancestors fact-type-maps))]
-    (into (sorted-map)
-          (map (fn [name]
-                 [name {:name name
-                        :ns (:ns (some #(get % name) fact-type-maps))
-                        :ancestors (hierarchy/hierarchy-order
-                                    ancestors
-                                    (get ancestors name #{}))}]))
-          (keys ancestors))))
+  (let [fact-type-maps (into [] (remove nil?) fact-type-maps)]
+    (->fact-type-map fact-type-maps
+                     (hierarchy/closed-ancestors
+                      (hierarchy/union-ancestors fact-type-maps)))))
 
 ;; ===========================================================================
 ;; dep-graph recomputation over the merged production set
@@ -209,16 +219,20 @@
 (defn- ->dep-graph
   "The composed dep-graph over the merged productions, in slim form (`:upstream`
   only, a source node's entry empty). Cross-unit edges exist because the graph
-  is recomputed over the unioned fact-type hierarchy rather than unioned."
-  [rules queries fact-types]
+  is recomputed over the unioned fact-type hierarchy rather than unioned.
+  `ancestors` is the closed, unioned ancestor map — the one hierarchy every
+  merge mode shares — so the producer→consumer closure direction lives in
+  `clara.server.tools.graph.artifacts.hierarchy/ancestor-closure` rather than
+  inline here."
+  [rules queries ancestors]
   (let [type-analysis (->type-analysis-map rules queries)
-        ancestors-of (fn [t] (get-in fact-types [t :ancestors] []))
         consumers-by-type (->consumers-by-type type-analysis)
         upstreams (volatile! {})]
     (doseq [[producer-name {:keys [produced-types]}] type-analysis
             pt produced-types
-            :let [consumers (reduce into #{} (keep consumers-by-type
-                                                   (cons pt (ancestors-of pt))))]
+            :let [consumers (reduce into #{}
+                                    (keep consumers-by-type
+                                          (hierarchy/ancestor-closure ancestors #{pt})))]
             consumer-name consumers
             :when (not= producer-name consumer-name)]
       (vswap! upstreams update consumer-name (fnil conj #{}) producer-name))
@@ -252,15 +266,12 @@
   merged set, and each production gains `:unit`. Rehydrate the result to rebuild
   the inverses over the whole composition."
   [registry selection]
-  (registry/assert-compatible! registry selection)
-  (let [analyses (mapv (fn [unit]
-                         (-> (read-analysis-or-throw registry unit)
-                             (registry/narrow-analysis unit)))
-                       selection)
+  (let [sel (selection/->selection registry selection)
+        analyses (mapv #(get (:analyses sel) (registry/unit-key %)) selection)
         rules (merge-production-map analyses selection :rules)
         queries (merge-production-map analyses selection :queries)
-        fact-types (union-fact-types (map :fact-types analyses))
-        dep-graph (->dep-graph rules queries fact-types)]
+        fact-types (->fact-type-map (map :fact-types analyses) (:ancestors sel))
+        dep-graph (->dep-graph rules queries (:ancestors sel))]
     {:rules rules
      :queries queries
      :fact-types fact-types
