@@ -129,15 +129,14 @@ Other useful checks:
 
 ## Testing
 
-Tests live in `editor/emacs/test/clara-explorer-test.el` (see
-`docs/planning/explorer-server-emacs-testing.md` for the `ERT` vs
-`Buttercup`/`Eldev` rationale). Three tiers, fastest first:
+Tests live in `editor/emacs/test/clara-explorer-test.el`. Three tiers, fastest
+first:
 
 | Tier                      | Command                                               | Deps                                                                                                        | What it proves                                                                                                                                                                                                                                                                                                                    |
 | ------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1 — stubbed unit          | `make test-unit` (no Eldev)                           | stubbed `cider`/`parseedn`/`clojure-mode` via `test/test-helper.el` + `with-clara-buffer` minimal syntax    | structural nav, EDN `substring-no-properties` stripping, vector-target coercion — `35+ passed, 0 unexpected` in `<1s`, no network/JVM                                                                                                                                                                                            |
 | 2 — real-deps unit        | `eldev test` (or `make test-unit` with Eldev on PATH) | real `cider "1.12"` / `parseedn "1.2"` / `clojure-mode "5.18"` from `Eldev`; `test-helper.el` becomes no-op | Tier 1 + round-trip `clara-explorer--edn-map` → `parseedn-read-str` hash-table, `clara-explorer--eval-edn`+`nrepl-dict` wiring against real `parseedn`, `cider-symbol-at-point` keyword handling and real `clojure-mode` `syntax-ppss` — extra `skip-unless` tests run only here |
-| 3 — live nREPL (deferred) | `make test-integration` (future)                      | running `clara.server.graph` JVM + `cider-connect-clj`                                                      | full `client/navigate` payload against `loan-app-rules`/`analyze-test-rules` (ctor, `:via :retract`, global `{:production nil}`) — deferred; tracked in `docs/planning/explorer-server-emacs-testing.md` |
+| 3 — live nREPL (deferred) | `make test-integration` (future)                      | running `clara.server.graph` JVM + `cider-connect-clj`                                                      | full `client/navigate` payload against `loan-app-rules`/`analyze-test-rules` (ctor, `:via :retract`, global `{:production nil}`) — deferred |
 
 ```bash
 cd editor/emacs && make test-unit   # Tier 1 (stubbed) or Tier 2 if eldev present

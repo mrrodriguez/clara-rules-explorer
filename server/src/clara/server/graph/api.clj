@@ -4,10 +4,11 @@
    HTTP is read-only — mutation happens through the in-memory
    `swap-session!` / `reload-annotations!` API in `clara.server.graph.server`.
 
-   The router and handlers take a single `state-atom` (an atom of
-   `clara.server.graph.server/ServerState`) plus a `cache` cell.  Each handler
-   derefs once per request and passes coherent state values down to the analysis
-   engine."
+   The router derefs the single `state-atom` (an atom of
+   `clara.server.graph.server/ServerState`) once per request and passes the
+   pure state value to each handler, together with a `cache` cell.  Handlers
+   therefore have no access to the atom and cannot mutate server state; each
+   request sees one coherent snapshot."
   (:require [reitit.ring :as ring]
             [reitit.ring.middleware.muuntaja :as muuntaja]
             [muuntaja.core :as m]
@@ -339,42 +340,38 @@
                  status-409? {:status (s/eq 409) :body no-working-memory-body}))
 
 ;; ---------------------------------------------------------------------------
-;; Handlers — each derefs state-atom once per request
+;; Handlers — pure functions of the per-request server-state value
 ;; ---------------------------------------------------------------------------
 
 (s/defn handle-get-rulebase-summary :- {:status (s/eq 200) :body RulebaseSummary}
-  [state-atom cache working-memory-enabled? _req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom
-        working-memory-available (boolean
+  [state cache working-memory-enabled? _req]
+  (let [working-memory-available (boolean
                                   (and working-memory-enabled?
-                                       (core/working-memory-available? session)))]
+                                       (core/working-memory-available? (:session state))))]
     {:status 200
      :body (-> cache
-               (cache/get-rulebase-analysis session annotations memory-analysis)
+               (cache/get-rulebase-analysis state)
                core/get-rulebase-counts
                (assoc :working-memory-available working-memory-available))}))
 
 (defn- handle-get-rulebase-analysis
-  [state-atom cache _req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom]
-    {:status 200
-     :body (-> cache
-               (cache/get-rulebase-analysis session annotations memory-analysis)
-               core/get-rulebase-analysis-external-view)}))
+  [state cache _req]
+  {:status 200
+   :body (-> cache
+             (cache/get-rulebase-analysis state)
+             core/get-rulebase-analysis-external-view)})
 
 (s/defn handle-get-rules :- {:status (s/eq 200) :body {:rules [RuleListItem]}}
-  [state-atom cache _req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom]
-    {:status 200
-     :body {:rules (-> cache
-                       (cache/get-rulebase-analysis session annotations memory-analysis)
-                       core/get-rules-list)}}))
+  [state cache _req]
+  {:status 200
+   :body {:rules (-> cache
+                     (cache/get-rulebase-analysis state)
+                     core/get-rules-list)}})
 
 (s/defn handle-get-rule :- GetRuleResponse
-  [state-atom cache req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom
-        id (get-in req [:path-params :id])
-        analysis (cache/get-rulebase-analysis cache session annotations memory-analysis)
+  [state cache req]
+  (let [id (get-in req [:path-params :id])
+        analysis (cache/get-rulebase-analysis cache state)
         name (get (:production-id-index analysis) id)
         rule (get-in analysis [:rules name])]
     (if rule
@@ -382,18 +379,16 @@
       {:status 404 :body {:error "Rule not found"}})))
 
 (s/defn handle-get-queries :- {:status (s/eq 200) :body {:queries [QueryListItem]}}
-  [state-atom cache _req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom]
-    {:status 200
-     :body {:queries (-> cache
-                         (cache/get-rulebase-analysis session annotations memory-analysis)
-                         core/get-queries-list)}}))
+  [state cache _req]
+  {:status 200
+   :body {:queries (-> cache
+                       (cache/get-rulebase-analysis state)
+                       core/get-queries-list)}})
 
 (s/defn handle-get-query :- GetQueryResponse
-  [state-atom cache req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom
-        id (get-in req [:path-params :id])
-        analysis (cache/get-rulebase-analysis cache session annotations memory-analysis)
+  [state cache req]
+  (let [id (get-in req [:path-params :id])
+        analysis (cache/get-rulebase-analysis cache state)
         name (get (:production-id-index analysis) id)
         query (get-in analysis [:queries name])]
     (if query
@@ -401,18 +396,16 @@
       {:status 404 :body {:error "Query not found"}})))
 
 (s/defn handle-get-fact-types :- {:status (s/eq 200) :body {:fact-types [FactTypeListItem]}}
-  [state-atom cache _req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom]
-    {:status 200
-     :body {:fact-types (-> cache
-                            (cache/get-rulebase-analysis session annotations memory-analysis)
-                            ft/get-fact-types-list)}}))
+  [state cache _req]
+  {:status 200
+   :body {:fact-types (-> cache
+                          (cache/get-rulebase-analysis state)
+                          ft/get-fact-types-list)}})
 
 (s/defn handle-get-fact-type :- GetFactTypeResponse
-  [state-atom cache req]
-  (let [{:keys [session annotations memory-analysis]} @state-atom
-        id (get-in req [:path-params :id])
-        analysis (cache/get-rulebase-analysis cache session annotations memory-analysis)
+  [state cache req]
+  (let [id (get-in req [:path-params :id])
+        analysis (cache/get-rulebase-analysis cache state)
         name (get (:fact-type-id-index analysis) id)
         fact-type (get-in analysis [:fact-types name])]
     (if fact-type
@@ -421,41 +414,41 @@
 
 (defn- no-working-memory-response
   "Returns a 409 with a machine-readable `:reason` key.
-   `cause` is :rulebase-input or :disabled-by-config."
+   `cause` is :rulebase-input, :disabled-by-config, or :no-session."
   [cause]
   (let [messages {:rulebase-input "No working memory: the server was started with a rulebase, not a session"
-                  :disabled-by-config "No working memory: disabled by configuration (:working-memory-enabled false)"}]
+                  :disabled-by-config "No working memory: disabled by configuration (:working-memory-enabled false)"
+                  :no-session "No working memory: the server is serving a registry selection, not a session"}]
     {:status 409
      :body {:error (get messages cause "No working memory")
             :reason cause}}))
 
 (defn- with-memory-analysis
-  "Invokes `f` with the memory-analysis, or returns 409 :rulebase-input
-   when the session is a rulebase (no working memory).  Session capability
-   is checked per request because the session atom can be hot-swapped at
-   runtime; the static `:working-memory-enabled` config flag is resolved
-   once at router construction instead (see `router`)."
-  [state-atom cache f]
-  (let [state @state-atom]
-    (if-let [memory-analysis (cache/get-memory-analysis cache
-                                                        (:session state)
-                                                        (:annotations state)
-                                                        (:memory-analysis state))]
+  "Invokes `f` with the memory-analysis, or returns 409 when working memory is
+  unavailable.  Registry mode (`:rulebase-analysis` present) is 409
+  `:no-session`; a session that is a bare rulebase is 409 `:rulebase-input`.
+  Session capability is checked per request because the server state can be
+  hot-swapped at runtime; the static `:working-memory-enabled` config flag is
+  resolved once at router construction instead (see `router`)."
+  [state cache f]
+  (if (:rulebase-analysis state)
+    (no-working-memory-response :no-session)
+    (if-let [memory-analysis (cache/get-memory-analysis cache state)]
       (f memory-analysis)
       (no-working-memory-response :rulebase-input))))
 
 (s/defn handle-get-session-fact-types
   :- GetSessionFactTypesResponse
-  [state-atom cache _req]
-  (with-memory-analysis state-atom cache
+  [state cache _req]
+  (with-memory-analysis state cache
     (fn [memory-analysis]
       {:status 200
        :body (ft/get-session-fact-types-summary memory-analysis)})))
 
 (s/defn handle-get-session-fact-type
   :- GetSessionFactTypeResponse
-  [state-atom cache req]
-  (with-memory-analysis state-atom cache
+  [state cache req]
+  (with-memory-analysis state cache
     (fn [memory-analysis]
       (let [id (get-in req [:path-params :id])
             name (get (:fact-type-id-index memory-analysis) id)
@@ -466,8 +459,8 @@
 
 (s/defn handle-get-session-fact
   :- GetSessionFactResponse
-  [state-atom cache req]
-  (with-memory-analysis state-atom cache
+  [state cache req]
+  (with-memory-analysis state cache
     (fn [memory-analysis]
       (let [id (Integer/parseInt (get-in req [:path-params :id]))
             fact (get-in memory-analysis [:facts id])]
@@ -477,8 +470,8 @@
 
 (s/defn handle-get-session-rule
   :- GetSessionRuleResponse
-  [state-atom cache req]
-  (with-memory-analysis state-atom cache
+  [state cache req]
+  (with-memory-analysis state cache
     (fn [memory-analysis]
       (let [id (get-in req [:path-params :id])
             name (get (:rule-id-index memory-analysis) id)
@@ -489,8 +482,8 @@
 
 (s/defn handle-get-session-query
   :- GetSessionQueryResponse
-  [state-atom cache req]
-  (with-memory-analysis state-atom cache
+  [state cache req]
+  (with-memory-analysis state cache
     (fn [memory-analysis]
       (let [id (get-in req [:path-params :id])
             name (get (:query-id-index memory-analysis) id)
@@ -500,65 +493,78 @@
           {:status 404 :body {:error "Query matches not found"}})))))
 
 (defn- handle-get-memory-analysis
-  [state-atom cache _req]
-  (with-memory-analysis state-atom cache
+  [state cache _req]
+  (with-memory-analysis state cache
     (fn [memory-analysis]
       {:status 200
        :body (dissoc memory-analysis :fact-raw-types)})))
 
 (s/defn handle-get-annotations :- {:status (s/eq 200) :body AnnotationsMap}
-  [state-atom _req]
+  [state _req]
   {:status 200
-   :body (:annotations @state-atom)})
+   :body (:annotations state)})
+
+(defn- deref-state
+  "Wraps `handler` so each request derefs `state-atom` once and passes the
+   pure state value as the handler's first argument, followed by `args` and
+   then the request.  The wrapped handler holds no reference to the atom and
+   therefore cannot mutate server state."
+  [state-atom handler & args]
+  (fn [req]
+    (apply handler @state-atom (concat args [req]))))
 
 (defn router
   [state-atom cache working-memory-enabled?]
-  (let [wm-disabled-handler (when-not working-memory-enabled?
+  (let [route (fn [handler & args]
+                (apply deref-state state-atom handler args))
+        wm-disabled-handler (when-not working-memory-enabled?
                               (fn [_req] (no-working-memory-response :disabled-by-config)))
-        wm-route (fn [handler] (or wm-disabled-handler handler))]
+        wm-route (fn [handler & args]
+                   (or wm-disabled-handler
+                       (apply route handler args)))]
     (ring/router
      ["/v1"
       ["/rulebase-summary"
-       {:get (partial handle-get-rulebase-summary state-atom cache working-memory-enabled?)}]
+       {:get (route handle-get-rulebase-summary cache working-memory-enabled?)}]
 
       ["/rulebase-analysis"
-       {:get (partial handle-get-rulebase-analysis state-atom cache)}]
+       {:get (route handle-get-rulebase-analysis cache)}]
 
       ["/rules"
        [""
-        {:get (partial handle-get-rules state-atom cache)}]
+        {:get (route handle-get-rules cache)}]
        ["/:id"
-        {:get (partial handle-get-rule state-atom cache)}]]
+        {:get (route handle-get-rule cache)}]]
 
       ["/queries"
        [""
-        {:get (partial handle-get-queries state-atom cache)}]
+        {:get (route handle-get-queries cache)}]
        ["/:id"
-        {:get (partial handle-get-query state-atom cache)}]]
+        {:get (route handle-get-query cache)}]]
 
       ["/fact-types"
        [""
-        {:get (partial handle-get-fact-types state-atom cache)}]
+        {:get (route handle-get-fact-types cache)}]
        ["/:id"
-        {:get (partial handle-get-fact-type state-atom cache)}]]
+        {:get (route handle-get-fact-type cache)}]]
 
       ["/session"
        ["/fact-types"
-        ["" {:get (wm-route (partial handle-get-session-fact-types state-atom cache))}]
-        ["/:id" {:get (wm-route (partial handle-get-session-fact-type state-atom cache))}]]
+        ["" {:get (wm-route handle-get-session-fact-types cache)}]
+        ["/:id" {:get (wm-route handle-get-session-fact-type cache)}]]
        ["/facts/:id"
-        {:get (wm-route (partial handle-get-session-fact state-atom cache))}]
+        {:get (wm-route handle-get-session-fact cache)}]
        ["/rules/:id"
-        {:get (wm-route (partial handle-get-session-rule state-atom cache))}]
+        {:get (wm-route handle-get-session-rule cache)}]
        ["/queries/:id"
-        {:get (wm-route (partial handle-get-session-query state-atom cache))}]]
+        {:get (wm-route handle-get-session-query cache)}]]
 
       ["/memory-analysis"
-       {:get (wm-route (partial handle-get-memory-analysis state-atom cache))}]
+       {:get (wm-route handle-get-memory-analysis cache)}]
 
       ["/annotations"
        [""
-        {:get (partial handle-get-annotations state-atom)}]]]
+        {:get (route handle-get-annotations)}]]]
 
      {:data {:muuntaja (m/create
                         (assoc-in m/default-options

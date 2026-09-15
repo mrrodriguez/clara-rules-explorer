@@ -1,0 +1,10 @@
+{:id :memory,
+ :annotations {"clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail" {:clara-rules/insert-types [clara.server.tools.graph.rules.loan_doc_rules.AuditTrail],
+   :clara-rules/dynamic-insert-types-detected {:fact-instance-derived-types [clara.server.tools.graph.rules.loan_doc_rules.AuditTrail]}},
+  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata" {:clara-rules/insert-types [:compliance-review-result],
+   :clara-rules/dynamic-insert-types-detected {:fact-instance-derived-types [:compliance-review-result]}},
+  "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review" {:clara-rules/insert-types [clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview],
+   :clara-rules/dynamic-insert-types-detected {:fact-instance-derived-types [clara.server.tools.graph.rules.loan_doc_rules.ComplianceReview]}},
+  "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule" {:clara-rules/insert-types [:extract-doc-meta],
+   :clara-rules/dynamic-insert-types-detected {:fact-instance-derived-types [:extract-doc-meta]}}},
+ :source {:composed-of ["loan-app-ruleset" "loan-disposition-ruleset"], :role :memory}}

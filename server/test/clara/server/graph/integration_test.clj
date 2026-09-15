@@ -1,16 +1,19 @@
 (ns clara.server.graph.integration-test
-  "HTTP integration tests for the explorer server over both canonical
+  "HTTP integration tests for the explorer server over the canonical
    mk-session combinations:
 
    - the loan-doc-rules + loan-app-rules session (the session the demo data
-     mirrors), and
+     mirrors),
+   - that same session with the downstream loan-outcome-notices ruleset wired
+     on, and
    - the loan-hierarchy-rules session (keyword derive hierarchy + vector-tuple
      fact types).
 
-   `with-server` / `start-server!` start a server over either session — flip
-   with `{:session-fn run-loan-hierarchy-rules :layers []}`.  Tests are named
-   after the session they exercise.  This is not the demo itself: the demo
-   data is built from the non-hierarchy loan session only."
+   `with-server` / `start-server!` start a server over any of them — flip
+   with `{:session-fn run-loan-hierarchy-rules :layers []}` (or
+   `run-loan-outcome-notices`).  Tests are named after the session they
+   exercise.  This is not the demo itself: the demo data is built from the
+   non-hierarchy loan session only."
   (:require [clara.rules :as r]
             [clara.rules.durability :as d]
             [clara.rules.durability.fressian :as df]
@@ -30,13 +33,14 @@
             [clara.server.tools.graph.rules.loan-doc-queries]
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
+            [clara.server.tools.graph.rules.loan-outcome-notices :as notices]
             [clojure.java.io :as io]
             [schema.test :as st]))
 
 (use-fixtures :once st/validate-schemas)
 
 ;; ---------------------------------------------------------------------------
-;; Session builders — the two canonical mk-session combinations
+;; Session builders — the canonical mk-session combinations
 ;; ---------------------------------------------------------------------------
 
 ;; Default port — 9001 matches the UI dev server's vite proxy
@@ -65,6 +69,21 @@
                   {:type :doc-check-count-min}))
       (r/fire-rules)))
 
+(defn run-app-outcome-denied
+  "Denied-app working memory (a missing required document makes the document
+   check fail, so loan-app-rules produces a denied ApplicationOutcome for the
+   downstream notices ruleset)."
+  [session]
+  (-> session
+      (r/insert (laf/map->Application {:app-id "app-2"})
+                (laf/map->RequiredDocument {:app-id "app-2" :doc-type :id-card})
+                (laf/map->GivenDocument {:app-id "app-2" :doc-type :paycheck})
+                (laf/map->IdentityCheck {:app-id "app-2" :status :pass})
+                (laf/map->FraudCheck {:app-id "app-2" :status :pass})
+                (with-meta {:value 1}
+                  {:type :doc-check-count-min}))
+      (r/fire-rules)))
+
 (defn run-loan-app-rules
   "The loan-doc-rules + loan-app-rules session with approved-app working
    memory — the session the demo data mirrors.  Pass `{:with-facts? false}`
@@ -76,6 +95,20 @@
      with-facts? run-app-outcome-approved))
   ([]
    (run-loan-app-rules {})))
+
+(defn run-loan-outcome-notices
+  "The loan-doc/app session with the downstream loan-outcome-notices ruleset
+   wired on, and approved-app working memory — proving the downstream rules
+   react to the upstream ApplicationOutcome facts.  Pass
+   `{:with-facts? false}` for a bare session."
+  ([{:keys [with-facts?] :or {with-facts? true}}]
+   (cond-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                         'clara.server.tools.graph.rules.loan-app-rules
+                         'clara.server.tools.graph.rules.loan-doc-queries
+                         'clara.server.tools.graph.rules.loan-outcome-notices)
+     with-facts? run-app-outcome-approved))
+  ([]
+   (run-loan-outcome-notices {})))
 
 (defn run-loan-hierarchy-rules
   "The loan-hierarchy-rules session (keyword derive hierarchy, vector-tuple
@@ -360,6 +393,34 @@
         ;; HTTP endpoint reflects the reload
         (let [annotations-after (get-annotations)]
           (is (some? annotations-after)))))))
+
+;; ---------------------------------------------------------------------------
+;; Tests — loan-doc/app + loan-outcome-notices session
+;; ---------------------------------------------------------------------------
+
+(deftest test-loan-outcome-notices-wired-onto-loan-app-rules
+  (testing "Approved outcomes produce an approval notice downstream"
+    (let [session (run-loan-outcome-notices)]
+      (is (= [{:?notice (notices/map->ApprovalNotice {:app-id "app-1"
+                                                      :message "Loan approved"
+                                                      :notice-id "approval-app-1"})
+               :?app-id "app-1"}]
+             (r/query session notices/find-approval-notices :?app-id "app-1")))
+      (is (= [] (r/query session notices/find-denial-notices :?app-id "app-1")))))
+
+  (testing "Denied outcomes produce a denial notice downstream"
+    (let [session (-> (r/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
+                                    'clara.server.tools.graph.rules.loan-app-rules
+                                    'clara.server.tools.graph.rules.loan-doc-queries
+                                    'clara.server.tools.graph.rules.loan-outcome-notices)
+                      run-app-outcome-denied)]
+      (is (= [{:?notice (notices/map->DenialNotice {:app-id "app-2"
+                                                    :message "Loan denied"
+                                                    :reasons [:document]
+                                                    :notice-id "denial-app-2"})
+               :?app-id "app-2"}]
+             (r/query session notices/find-denial-notices :?app-id "app-2")))
+      (is (= [] (r/query session notices/find-approval-notices :?app-id "app-2"))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Tests — loan-hierarchy-rules session

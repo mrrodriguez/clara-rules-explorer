@@ -1,0 +1,11 @@
+{:summary {:rule-count 18, :query-count 3, :fact-type-count 36},
+ :counts {:node-count 79, :dep-edge-count 26, :unresolved-count 0},
+ :namespaces {"clara.server.tools.graph.rules.loan-app-rules" {:rules 4, :queries 1},
+  "clara.server.tools.graph.rules.loan-doc-queries" {:rules 0, :queries 1},
+  "clara.server.tools.graph.rules.loan-doc-rules" {:rules 14, :queries 1}},
+ :flag-counts {:no-output-types 2, :sink-rule 7, :source-rule 4, :unlinked-rule 0},
+ :unlinked-rules #{},
+ :no-output-rules #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
+  "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs"},
+ :unresolved [],
+ :more "merged-rulebase-analysis/ is a DIRECTORY split by what a reader opens: production-index.edn (:name :ns :lhs-types :insert-types :retract-types + flags — the scan projection, and the one most questions need), production-conditions.edn (:lhs), production-details.edn (:rhs-form :doc :props), fact-types.edn, dep-graph.edn (:upstream), meta.edn (:slim :unresolved). Open the one part your question lives in — never cat the directory. Everything is keyed by and cross-referenced by :name; ids and expanded reference records are not on disk. Neither is any reverse direction — :downstream, :descendants, :used-by-*, :inserted-by-rules and :retracted-by-rules are each the inverse of a key that IS kept. :slim :recover in meta.edn names the reconstruction for every one of them; GET /v1/fact-types/:fq-name serves them ready-made. merged-annotations.edn is stored by REFERENCE to the layer files beside it — a rule one layer accounts for whole is named, not restated — so read it with clara.server.tools.graph.artifacts.store/read-merged-annotations, which expands it. :nodes, :lhs-form and anything needing working memory are answered only by serving the analysis over a live session: GET /v1/rules/:fq-name | /v1/fact-types/:fq-name | /v1/rulebase-analysis | /v1/session/*."}

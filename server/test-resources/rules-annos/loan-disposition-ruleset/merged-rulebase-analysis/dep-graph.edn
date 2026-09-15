@@ -1,0 +1,4 @@
+{"clara.server.tools.graph.rules.loan-outcome-notices/find-approval-notices" {:upstream #{"clara.server.tools.graph.rules.loan-outcome-notices/notice-approved-app"}},
+ "clara.server.tools.graph.rules.loan-outcome-notices/find-denial-notices" {:upstream #{"clara.server.tools.graph.rules.loan-outcome-notices/notice-denied-app"}},
+ "clara.server.tools.graph.rules.loan-outcome-notices/notice-approved-app" {},
+ "clara.server.tools.graph.rules.loan-outcome-notices/notice-denied-app" {}}

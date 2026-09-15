@@ -59,6 +59,9 @@ The normalization layer lives in `server/src/clara/server/tools/graph/annotation
 3. The internal kondo analysis pipeline (`build-graph`, `transitive-reachability`,
    `productions-by-name`) uses symbols — conversion happens at the boundaries only.
 
+Writing annotations to disk, and everything about the artifact set around them,
+is [`server/docs/persisted-artifacts.md`](server/docs/persisted-artifacts.md).
+
 ---
 
 ## UI (`ui/`)

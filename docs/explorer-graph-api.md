@@ -43,6 +43,14 @@ The session and merged annotations are held in atoms so the host application can
                         :port                      9999
                         :annotations               ["/etc/clara/curated-annotations.edn"]
                         :working-memory-enabled    false}))
+
+;; Registry-backed serving (no live session): compose a selection of artifact
+;; units into one analysis.  Analysis routes answer from the composed,
+;; rehydrated analysis; session routes return 409 :no-session.
+(def s4 (server/start! {:registry {:root  "/path/to/artifacts"
+                                   :units [{:repo "loan-app-ruleset"}
+                                           {:repo "loan-disposition-ruleset"}]}
+                        :port    9999}))
 (server/stop!)  ;; when done
 ```
 
@@ -50,7 +58,8 @@ The session and merged annotations are held in atoms so the host application can
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `:session` | session or rulebase | _required_ | Clara session (working memory enabled) or raw Rete rulebase (working memory disabled; session routes return 409 `:rulebase-input`) |
+| `:session` | session or rulebase | _required unless `:registry` is given_ | Clara session (working memory enabled) or raw Rete rulebase (working memory disabled; session routes return 409 `:rulebase-input`) |
+| `:registry` | map | _none_ | Registry-backed serving: `{:root … :units […]}` composes a selection of artifact units into one rehydrated analysis and serves it with no live session. Session routes return 409 `:no-session`. Exactly one of `:session` / `:registry` is present. See [Persisted artifacts](../server/docs/persisted-artifacts.md). |
 | `:port` | int | `9999` | HTTP listen port |
 | `:annotations` | annotations spec or legacy form | `nil` | Annotation source + enrichment (an `AnnotationsSpec` map, or a legacy vector-of-layers / path string / bare map / `MergedAnnotations`) |
 | `:working-memory-enabled` | boolean | `true` | When `false`, all `/v1/session/*` and `/v1/memory-analysis` routes return 409 `:disabled-by-config` regardless of session type |
@@ -566,6 +575,10 @@ callsite `:resolved-types` are raw type tokens (strings), not `TypeReference`
 objects (that serialization happens on the analysis endpoints).  Layer
 membership and `:provenance` are library-internal and not exposed over HTTP.
 
+The server is given the layer *files* and folds them itself; it never reads a
+persisted merge. See
+[Persisted artifacts](../server/docs/persisted-artifacts.md).
+
 **Response** `200`:
 ```json
 {
@@ -621,6 +634,7 @@ Every session endpoint may return a **409 Conflict** when working memory is unav
 |-----------|-------|
 | `"rulebase-input"` | The server was started with a raw Rete rulebase instead of a session. Detected per request (the session atom can be hot-swapped at runtime). |
 | `"disabled-by-config"` | `:working-memory-enabled false` was set at startup. Resolved once at router construction — all seven working-memory routes return this fixed 409 without per-request branching. |
+| `"no-session"` | The server is serving a registry selection (`:registry` config) — a composed, rehydrated analysis with no live session. Detected per request. |
 
 Clients should check `:working-memory-available` on `/v1/rulebase-summary` to decide whether to attempt session navigation, rather than probing endpoints and handling 409s.
 

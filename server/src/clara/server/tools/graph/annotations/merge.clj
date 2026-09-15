@@ -13,10 +13,10 @@
             [clojure.java.io :as io]
             [clojure.pprint :as pp]
             [schema.core :as s]
-            [clara.rules.engine :as eng]
             [clara.server.tools.graph.annotations :as ann]
             [clara.server.tools.graph.annotations.callsite :as ann.callsite]
-            [clara.server.tools.graph.serialize :as serialize]))
+            [clara.server.tools.graph.serialize :as serialize]
+            [clara.server.tools.graph.utils :as utils]))
 
 (def ^:private RuleName s/Str)
 
@@ -158,9 +158,7 @@
    fold is the caller's choice — first (the convention) makes source-authored
    types the base that generated and curated layers add to."
   [session-or-rulebase]
-  (let [rulebase (if (:productions session-or-rulebase)
-                   session-or-rulebase
-                   (-> session-or-rulebase eng/components :rulebase))
+  (let [rulebase (utils/get-rulebase session-or-rulebase)
         anns (into {}
                    (keep (fn [p]
                            (when (seq (:props p))

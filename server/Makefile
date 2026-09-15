@@ -1,4 +1,4 @@
-.PHONY: test lint clean reflection-check format format-check regen-fixture demo-setup demo-run hierarchy-run repl
+.PHONY: test lint clean reflection-check format format-check regen-fixture regen-artifacts demo-setup demo-run hierarchy-run repl
 
 SHELL := /bin/bash
 
@@ -29,6 +29,10 @@ hierarchy-run:
 # annotation layer fixture used by core/api/smoke/source-sink tests).
 regen-fixture:
 	clojure -M:test -i dev/regen_fixture.clj -e nil
+
+# Regenerate test-resources/rules-annos/ (the checked-in persistence example).
+regen-artifacts:
+	clojure -M:test -i dev/regen_artifacts.clj -e "(regen-artifacts/-main)"
 
 lint:
 	clojure -M:lint --lint src test dev

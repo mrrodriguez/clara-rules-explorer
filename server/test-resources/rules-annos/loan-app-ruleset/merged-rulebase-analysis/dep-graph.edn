@@ -1,0 +1,29 @@
+{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo" {:upstream #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+   "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+   "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
+ "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+ "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?" {:upstream #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+   "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"
+   "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
+ "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?" {:upstream #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+   "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+   "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+ "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome" {:upstream #{"clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+   "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+   "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"}},
+ "clara.server.tools.graph.rules.loan-doc-queries/find-document-checks" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+ "clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"}},
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-all-missing-required-docs" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input"}},
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-app-doc-check-input" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs"
+   "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs"}},
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-app-given-docs" {},
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-app-req-docs" {},
+ "clara.server.tools.graph.rules.loan-doc-rules/collect-doc-meta" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule"}},
+ "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+ "clara.server.tools.graph.rules.loan-doc-rules/doc-check-count-satisfies-min" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/doc-check-count"}},
+ "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-audit-trail" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+ "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-metadata" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+ "clara.server.tools.graph.rules.loan-doc-rules/dynamic-insert-compliance-review" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+ "clara.server.tools.graph.rules.loan-doc-rules/dynamic-retract-stale-notice" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}},
+ "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule" {},
+ "clara.server.tools.graph.rules.loan-doc-rules/find-document-check" {:upstream #{"clara.server.tools.graph.rules.loan-doc-rules/app-has-all-required-docs"}}}
