@@ -18,6 +18,7 @@ Status of [`offline-report-hierarchy-plan.md`](offline-report-hierarchy-plan.md)
 - Annotation types are canonicalized for matching via a new `type->name` (keyword keeps its leading colon) because `fact-types.edn` / `production-index.edn` key keyword fact types as `":foo/bar"`, whereas the existing `type->str` strips the colon for display. `type->str` stays for `types` / `curated`.
 - §3: `rule` reads `production-index.edn` for `:unit` (annotations do not carry `:unit`); `consumers` already reads that part.
 - Resolution against `fact-types.edn` means the first test's synthetic `analysis` needed a `:fact-types` section (it previously had none), and its keyword-fact strings were re-spelled with the leading colon (`":a/one"` etc.) to match the real on-disk convention.
+- Follow-up: `find-key-name` now prints `Resolved <input> -> <fq-key>` when an unqualified rule name resolves to a single candidate (exact matches stay silent; ambiguous names already list their fully-qualified options).
 
 ## Verification
 

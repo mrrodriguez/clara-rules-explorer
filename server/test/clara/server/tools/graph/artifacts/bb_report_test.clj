@@ -103,6 +103,16 @@
           (is (str/includes? out "downstream ( 1 )"))
           (is (str/includes? out "a.ns/gap-rule"))))
 
+      (testing "`edges` prints the fully-qualified name a unique substring
+                resolves to, and lists options when ambiguous"
+        (let [out (run-report "edges" "full-rule")]
+          (is (str/includes? out "Resolved full-rule -> a.ns/full-rule"))
+          (is (str/includes? out "a.ns/gap-rule")))
+        (let [out (run-report "edges" "rule")]
+          (is (str/includes? out "Ambiguous — 2 matches:"))
+          (is (str/includes? out "a.ns/full-rule"))
+          (is (str/includes? out "a.ns/gap-rule"))))
+
       (testing "`layers` goes through the whole merged-annotations decode, so its
                 per-key origin tally must match what the JVM reader rebuilds from
                 the same files"

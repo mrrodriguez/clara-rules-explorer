@@ -432,13 +432,17 @@
 
 (defn- find-key-name
   "The key of `m` the caller meant: an exact hit, else the one key containing
-  `name*` as a substring. nil when there is no unique answer, having said why."
+  `name*` as a substring. nil when there is no unique answer, having said why.
+  A unique substring match prints the fully-qualified key it resolved to, so an
+  unqualified name is never answered from an invisible choice."
   [m name*]
   (if (contains? m name*)
     name*
     (let [cands (filter #(str/includes? % name*) (keys m))]
       (cond
-        (= 1 (count cands)) (first cands)
+        (= 1 (count cands)) (let [k (first cands)]
+                              (println "Resolved" name* "->" k)
+                              k)
         (seq cands) (do (println "Ambiguous —" (count cands) "matches:")
                         (doseq [c (sort cands)] (println " " c))
                         nil)
