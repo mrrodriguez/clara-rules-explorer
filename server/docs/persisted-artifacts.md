@@ -272,13 +272,18 @@ the manifest whole, and `:analysis-run`, merged into that block.
 
 ## The artifact registry
 
+The architecture of the registry — the merge modes, the shared selection pass,
+and why there are three modes — is
+[`registry-architecture.md`](registry-architecture.md); this chapter is the
+on-disk view of it.
+
 Everything above addresses **one** artifact set at a time. Hosts accumulate
 many — one per source repo of a rulebase composed from several, one per branch
 variant under review, one per captured session — and the questions worth asking
 span them: *who consumes the type this set produces*, *what does this branch do
 to the others*, *what does this set of sets look like as one rulebase*.
 
-Four namespaces answer that, all under
+Five namespaces answer that, all under
 `clara.server.tools.graph.artifacts.*`:
 
 - **`registry`** — discovers and reads N units under a root, as a value. A
@@ -332,6 +337,10 @@ Four namespaces answer that, all under
   source units (an aggregate describes the same productions as the units it
   overlaps, so both would silently double-count), and always refuses an
   aggregate whose `:composed-from` names another selected unit.
+- **`selection`** — the shared preamble both merge modes consume: read each
+  unit's analysis (refusing shape skew and absent analysis), narrow it to its
+  `:namespaces` filter, and union the hierarchy plus coverage in one pass
+  (`selection/->selection`).
 
 The library discovers and merges; it never decides *which* sets belong together
 or *what a set means* — every entry point takes the selection explicitly. The
