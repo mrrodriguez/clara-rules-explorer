@@ -47,16 +47,35 @@
   (cond-> {:root (:root registry) :repo (:repo unit)}
     (some? (:branch unit)) (assoc :branch (:branch unit))))
 
+(defn- ->narrowed-layer
+  "Qualify `layer`'s id with `unit` and narrow its annotations to the unit's
+  `:namespaces` filter (a no-op for unfiltered units), so a scoped fold folds
+  only the scope's contribution."
+  [unit layer]
+  (-> layer
+      (assoc :id (qualified-layer-id unit (:id layer)))
+      (registry/narrow-annotations unit)))
+
+(defn- ->narrowed-namespaces
+  "The per-unit `:namespaces` filters of `selection`, as `{unit-key [ns …]}`,
+  for the units that carry one. Empty when no unit is narrowed — the persisted
+  role layer's `:source` says so."
+  [selection]
+  (into (sorted-map)
+        (keep (fn [unit]
+                (when-let [nses (seq (:namespaces unit))]
+                  [(registry/unit-key unit) (mapv str nses)])))
+        selection))
+
 (defn fold-layers
   "Fold the file-backed layer stack of every unit in `selection` — caller order,
   lowest precedence first — into one `MergedAnnotations`. Each layer's `:id` is
-  qualified with its unit (see `qualified-layer-id`); within one unit nothing
-  changes."
+  qualified with its unit (see `qualified-layer-id`) and narrowed to the unit's
+  `:namespaces` filter first; within one unit nothing else changes."
   [registry selection]
   (ann.merge/merge-layers
    (mapcat (fn [unit]
-             (map (fn [layer]
-                    (assoc layer :id (qualified-layer-id unit (:id layer))))
+             (map #(->narrowed-layer unit %)
                   (store/get-layer-stack (->opts registry unit))))
            selection)))
 
@@ -81,31 +100,36 @@
    artifact role (`:auto`, `:memory`, `:agent`).
 
    Each unit's layer for a role is re-id'd with `qualified-layer-id` so the
-   per-role fold can attribute origins correctly; the resulting layer then
-   carries the standard role `:id` so it can be written as a normal single-unit
-   layer file. Unit-level provenance is deliberately left out of the returned
-   layers — it belongs in the manifest / federated sidecar — so the on-disk
-   shape is indistinguishable from any other unit's.
+   per-role fold can attribute origins correctly, and narrowed to the unit's
+   `:namespaces` filter first; the resulting layer then carries the standard
+   role `:id` so it can be written as a normal single-unit layer file.
+   Unit-level provenance is deliberately left out of the returned layers — it
+   belongs in the manifest / federated sidecar — so the on-disk shape is
+   indistinguishable from any other unit's. A narrowed fold records the
+   per-unit filter under `:source :namespaces`, so a reader of the persisted
+   layer can tell a scoped set from a whole one.
 
    Returns an ordered `{role Layer}` map, omitting roles no selected unit
    contributed."
   [registry selection]
-  (into (array-map)
-        (keep (fn [[role role-id]]
-                (let [layers (mapcat (fn [unit]
-                                       (keep #(when (= role-id (:id %))
-                                                (assoc % :id (qualified-layer-id unit role-id)))
-                                             (store/get-layer-stack (->opts registry unit))))
-                                     selection)]
-                  (when (seq layers)
-                    (let [folded (ann.merge/merge-layers layers)]
-                      [role (ann.merge/->layer
-                             {:id role-id
-                              :annotations (strip-derived-callsite-provenance
-                                            (ann.merge/annotations folded))
-                              :source {:composed-of (mapv registry/unit-key selection)
-                                       :role role}})]))))
-              store/layer-artifacts)))
+  (let [narrowed (->narrowed-namespaces selection)]
+    (into (array-map)
+          (keep (fn [[role role-id]]
+                  (let [layers (mapcat (fn [unit]
+                                         (keep #(when (= role-id (:id %))
+                                                  (->narrowed-layer unit %))
+                                               (store/get-layer-stack (->opts registry unit))))
+                                       selection)]
+                    (when (seq layers)
+                      (let [folded (ann.merge/merge-layers layers)]
+                        [role (ann.merge/->layer
+                               {:id role-id
+                                :annotations (strip-derived-callsite-provenance
+                                              (ann.merge/annotations folded))
+                                :source (cond-> {:composed-of (mapv registry/unit-key selection)
+                                                 :role role}
+                                          (seq narrowed) (assoc :namespaces narrowed))})]))))
+                store/layer-artifacts))))
 
 ;; ===========================================================================
 ;; composed analysis

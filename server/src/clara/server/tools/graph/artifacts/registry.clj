@@ -20,6 +20,7 @@
   same line `store/get-out-dir` holds for `:root`: mechanism here, policy at the
   caller."
   (:require
+   [clara.server.tools.graph.annotations :as ann]
    [clara.server.tools.graph.artifacts.layout :as layout]
    [clara.server.tools.graph.artifacts.parts :as parts]
    [clara.server.tools.graph.artifacts.schema :as schema]
@@ -287,6 +288,43 @@
         (contains? analysis :rules) (update :rules narrow)
         (contains? analysis :queries) (update :queries narrow)))
     analysis))
+
+(defn- ->namespace-set
+  "A unit's `:namespaces` filter as a set of strings, or nil when unfiltered."
+  [unit]
+  (when-let [nses (:namespaces unit)]
+    (into #{} (map str) nses)))
+
+(defn- keep-annotation-key?
+  "True when a rule-name key stays under `nses`: a key with no namespace part
+  is not a production name — it has no namespace to test — so it stays; a key
+  whose namespace the filter names stays; everything else goes."
+  [nses k]
+  (if-let [ns (ann/fq-name->namespace k)]
+    (contains? nses (str ns))
+    true))
+
+(defn narrow-annotations
+  "Narrow `annotations` — a `Layer` or `MergedAnnotations` value — to `unit`'s
+  `:namespaces` filter, when present: `:annotations` and `:provenance` (when the
+  value carries them) keep only the keys whose namespace is named. A key with no
+  namespace part is not a production name, so it stays. Without a filter the
+  value is returned unchanged.
+
+  Applied per unit *before* folding in
+  `clara.server.tools.graph.artifacts.compose`, so a layer's contribution to a
+  scoped merge is the scope's contribution and per-callsite `:from-layer`
+  provenance stays truthful."
+  [annotations unit]
+  (if-let [nses (->namespace-set unit)]
+    (let [narrow (fn [m]
+                   (into (sorted-map)
+                         (filter (fn [[k _]] (keep-annotation-key? nses k)))
+                         m))]
+      (cond-> annotations
+        (contains? annotations :annotations) (update :annotations narrow)
+        (contains? annotations :provenance) (update :provenance narrow)))
+    annotations))
 
 (defn units-with-analysis
   "The units of `registry` that have a `merged-rulebase-analysis/` directory,

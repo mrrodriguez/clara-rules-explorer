@@ -441,33 +441,39 @@
   A selection that mixes aggregate and source units is refused — an aggregate
   unit describes the same productions as the units it overlaps, so federating
   both silently double-counts. An aggregate whose `:composed-from` names
-  another selected unit is refused outright."
-  [registry selection]
-  (assert-no-aggregate-overlap! registry selection)
-  (registry/assert-compatible! registry selection)
-  (let [analyses-by-unit (->analyses-by-unit registry selection)
-        covered-by-unit (->covered-namespaces-by-unit analyses-by-unit)
-        unknown-namespaces (->unknown-namespaces covered-by-unit selection)
-        analyses-by-unit (narrow-analyses-by-unit analyses-by-unit selection)
-        ancestors (->> (vals analyses-by-unit)
-                       (map :fact-types)
-                       hierarchy/union-ancestors
-                       hierarchy/closed-ancestors)
-        descendants (hierarchy/->descendants ancestors)
-        maps (->production-maps analyses-by-unit descendants)
-        namespaces (->namespaces covered-by-unit selection)]
-    {:scope {:units (mapv #(select-keys % [:repo :branch :namespaces]) selection)
-             :namespaces namespaces}
-     :provenance (->provenance registry selection)
-     :coverage {:units (mapv unit-key selection)
-                :unknown-namespaces unknown-namespaces}
-     :hierarchy {:ancestors ancestors
-                 :descendants descendants
-                 :conflicts (->ancestor-conflicts analyses-by-unit)}
-     :fact-types (->fact-types-index analyses-by-unit ancestors descendants maps)
-     :unit-edges (->unit-edges analyses-by-unit ancestors)
-     :entry-points (->entry-points analyses-by-unit ancestors)
-     :orphans (->orphans analyses-by-unit descendants)}))
+  another selected unit is refused outright.
+
+  `opts` may carry `:label` (or `:question`), recorded into the index's
+  `:scope` so a persisted index names which cross-unit question it answers
+  without depending on its directory name."
+  ([registry selection] (->index registry selection {}))
+  ([registry selection {:keys [label]}]
+   (assert-no-aggregate-overlap! registry selection)
+   (registry/assert-compatible! registry selection)
+   (let [analyses-by-unit (->analyses-by-unit registry selection)
+         covered-by-unit (->covered-namespaces-by-unit analyses-by-unit)
+         unknown-namespaces (->unknown-namespaces covered-by-unit selection)
+         analyses-by-unit (narrow-analyses-by-unit analyses-by-unit selection)
+         ancestors (->> (vals analyses-by-unit)
+                        (map :fact-types)
+                        hierarchy/union-ancestors
+                        hierarchy/closed-ancestors)
+         descendants (hierarchy/->descendants ancestors)
+         maps (->production-maps analyses-by-unit descendants)
+         namespaces (->namespaces covered-by-unit selection)]
+     {:scope (cond-> {:units (mapv #(select-keys % [:repo :branch :namespaces]) selection)
+                      :namespaces namespaces}
+               (some? label) (assoc :label label))
+      :provenance (->provenance registry selection)
+      :coverage {:units (mapv unit-key selection)
+                 :unknown-namespaces unknown-namespaces}
+      :hierarchy {:ancestors ancestors
+                  :descendants descendants
+                  :conflicts (->ancestor-conflicts analyses-by-unit)}
+      :fact-types (->fact-types-index analyses-by-unit ancestors descendants maps)
+      :unit-edges (->unit-edges analyses-by-unit ancestors)
+      :entry-points (->entry-points analyses-by-unit ancestors)
+      :orphans (->orphans analyses-by-unit descendants)})))
 
 ;; ===========================================================================
 ;; query fns over the value
@@ -550,6 +556,138 @@
   the index is built, by `registry/assert-compatible!`."
   [index]
   (:coverage index))
+
+;; ===========================================================================
+;; diff — branch-vs-mainline over two indexes
+;; ===========================================================================
+
+(defn- diff-set
+  "The elements of `after` not in `before`, as a sorted vector."
+  [before after]
+  (vec (sort (set/difference (set after) (set before)))))
+
+(defn- ->rebased-units
+  "The units present in both indexes under the same `:repo` but a different
+  `:branch` (or set of branch labels), as `{:repo … :from [unit-key …] :to
+  [unit-key …]}`. A repo selected once on each side is the normal case; the
+  vectors keep the shape total when a selection names more than one branch."
+  [before-units after-units]
+  (let [by-repo (fn [units]
+                  (into (sorted-map)
+                        (map (fn [[repo us]] [repo (sort (map unit-key us))]))
+                        (group-by :repo units)))
+        before (by-repo before-units)
+        after (by-repo after-units)]
+    (into []
+          (keep (fn [repo]
+                  (when (and (contains? before repo) (contains? after repo)
+                             (not= (get before repo) (get after repo)))
+                    {:repo repo
+                     :from (get before repo)
+                     :to (get after repo)})))
+          (sort (set/union (set (keys before)) (set (keys after)))))))
+
+(defn- ->units-diff
+  [before after]
+  (let [before-units (get-in before [:scope :units] [])
+        after-units (get-in after [:scope :units] [])
+        before-keys (into #{} (map unit-key) before-units)
+        after-keys (into #{} (map unit-key) after-units)]
+    {:added (diff-set before-keys after-keys)
+     :removed (diff-set after-keys before-keys)
+     :rebased (->rebased-units before-units after-units)}))
+
+(defn- ->unit-edges-diff
+  [before-edges after-edges]
+  (let [before-keys (set (keys before-edges))
+        after-keys (set (keys after-edges))
+        changed (into (sorted-map)
+                      (keep (fn [k]
+                              (let [b-via (set (get-in before-edges [k :via]))
+                                    a-via (set (get-in after-edges [k :via]))]
+                                (when (not= b-via a-via)
+                                  [k {:added (set/difference a-via b-via)
+                                      :removed (set/difference b-via a-via)}]))))
+                      (set/intersection before-keys after-keys))]
+    {:added (diff-set before-keys after-keys)
+     :removed (diff-set after-keys before-keys)
+     :changed changed}))
+
+(defn- ->fact-type-entry-diff
+  [b-ft a-ft]
+  (let [b-producers (set (:producers b-ft))
+        a-producers (set (:producers a-ft))
+        b-consumers (set (:consumers b-ft))
+        a-consumers (set (:consumers a-ft))]
+    (cond-> {}
+      (not= b-producers a-producers)
+      (assoc :producers {:added (set/difference a-producers b-producers)
+                         :removed (set/difference b-producers a-producers)})
+
+      (not= b-consumers a-consumers)
+      (assoc :consumers {:added (set/difference a-consumers b-consumers)
+                         :removed (set/difference b-consumers a-consumers)}))))
+
+(defn- ->fact-types-diff
+  [before after]
+  (let [fts (set/union (set (keys (:fact-types before)))
+                       (set (keys (:fact-types after))))]
+    (into (sorted-map)
+          (keep (fn [ft]
+                  (let [d (->fact-type-entry-diff (get-in before [:fact-types ft])
+                                                  (get-in after [:fact-types ft]))]
+                    (when (seq d) [ft d]))))
+          fts)))
+
+(defn- ->per-unit-set-diff
+  "Diff `{unit-key #{ft}}` maps (entry points, orphans): `:added` is what each
+  unit gained, `:resolved` is what it lost. Units with no change are omitted."
+  [before after]
+  (let [units (set/union (set (keys before)) (set (keys after)))
+        added (into (sorted-map)
+                    (keep (fn [uk]
+                            (let [d (set/difference (set (get after uk))
+                                                    (set (get before uk)))]
+                              (when (seq d) [uk d]))))
+                    units)
+        resolved (into (sorted-map)
+                       (keep (fn [uk]
+                               (let [d (set/difference (set (get before uk))
+                                                       (set (get after uk)))]
+                                 (when (seq d) [uk d]))))
+                       units)]
+    {:added added :resolved resolved}))
+
+(defn- ->hierarchy-diff
+  [before after]
+  (let [b-conflicts (set (keys (get-in before [:hierarchy :conflicts])))
+        a-conflicts (set (keys (get-in after [:hierarchy :conflicts])))]
+    {:conflicts-added (diff-set b-conflicts a-conflicts)
+     :conflicts-resolved (diff-set a-conflicts b-conflicts)}))
+
+(defn diff
+  "Diff two indexes over overlapping unit sets — the branch-vs-mainline
+  question: build the index twice over the same units, once mainline and once
+  with a branch variant selected, and compare. A pure function of the two
+  values.
+
+  Reports, per key:
+
+    :units        selection differences, incl. branch swaps (`:rebased`)
+    :unit-edges   edges added/removed, and `:via` sets that grew or shrank
+    :fact-types   per-type producer/consumer unit changes
+    :entry-points types each unit newly cannot satisfy / now can
+    :orphans      types each unit newly produces unused / now has a consumer for
+    :hierarchy    hierarchy conflicts that appeared / disappeared
+
+  A diff of an index against itself is empty in every key."
+  [before after]
+  {:units (->units-diff before after)
+   :unit-edges (->unit-edges-diff (:unit-edges before) (:unit-edges after))
+   :fact-types (->fact-types-diff before after)
+   :entry-points (->per-unit-set-diff (:entry-points before) (:entry-points after))
+   :orphans (->per-unit-set-diff (:orphans before) (:orphans after))
+   :hierarchy (->hierarchy-diff before after)})
 
 ;; ===========================================================================
 ;; grading against a composed reference
@@ -662,18 +800,20 @@
 ;; ===========================================================================
 
 (defn ->digest
-  "An agent-readable reduction of the index: counts, the unit edge list, entry
+  "An agent-readable reduction of the index: the scope it is of (units,
+  namespaces, and the caller's `:label`), counts, the unit edge list, entry
   points, orphans, hierarchy conflicts, coverage gaps, and per-unit provenance.
   A function on the index, so an answer never depends on the persistence step.
   `:more` names what it omits, for a reader without the classpath."
   [index]
-  (let [{:keys [fact-types unit-edges entry-points orphans hierarchy coverage provenance]} index]
+  (let [{:keys [scope fact-types unit-edges entry-points orphans hierarchy coverage provenance]} index]
     {:summary {:unit-count (count (:units coverage))
                :fact-type-count (count fact-types)
                :unit-edge-count (count unit-edges)
                :entry-point-count (count entry-points)
                :orphan-count (count orphans)
                :hierarchy-conflict-count (count (:conflicts hierarchy))}
+     :scope scope
      :unit-edges unit-edges
      :entry-points entry-points
      :orphans orphans
@@ -689,14 +829,32 @@
   "Write `registry-index.edn` and `registry-digest.edn` to an explicit `:dir`.
   Takes no root and derives no directory name: how a host names the answer to
   one cross-unit question is the host's, and the same registry answers many.
-  Returns `{:index path :digest path}`."
-  [index {:keys [dir]}]
+  An optional `:label` is recorded into the index's `:scope` before writing (a
+  label the index already carries is kept unless overridden), so the written
+  files name which question they answer without depending on the directory
+  name. Returns `{:index path :digest path}`."
+  [index {:keys [dir label]}]
   (when (str/blank? dir)
     (throw (ex-info "federate/persist! requires an explicit :dir" {})))
-  (let [index-file (store/get-artifact-file :registry-index {:dir dir})
+  (let [index (cond-> index
+                (some? label) (assoc-in [:scope :label] label))
+        index-file (store/get-artifact-file :registry-index {:dir dir})
         digest-file (store/get-artifact-file :registry-digest {:dir dir})]
     (io/make-parents index-file)
     (edn-io/write-edn-file! index-file index)
     (edn-io/write-edn-file! digest-file (->digest index))
     {:index (str index-file)
      :digest (str digest-file)}))
+
+(defn read-index
+  "Read the `registry-index.edn` `persist!` wrote under `:dir` back into the
+  index value — a plain map every query fn already works on. Nil when the file
+  is absent, matching every other reader here."
+  [{:keys [dir]}]
+  (edn-io/read-edn-file (store/get-artifact-file :registry-index {:dir dir})))
+
+(defn read-digest
+  "Read the `registry-digest.edn` `persist!` wrote under `:dir` back into the
+  digest value, or nil when absent."
+  [{:keys [dir]}]
+  (edn-io/read-edn-file (store/get-artifact-file :registry-digest {:dir dir})))

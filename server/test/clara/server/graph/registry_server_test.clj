@@ -85,3 +85,25 @@
 
       (finally
         (server/stop! system)))))
+
+(deftest registry-narrowed-annotations-agree-with-rules-test
+  (let [config {:root (registry-root)
+                :units [{:repo "loan-app-ruleset"
+                         :namespaces ["clara.server.tools.graph.rules.loan-app-rules"]}
+                        {:repo "loan-disposition-ruleset"}]}
+        system (server/start-system! {:registry config :port 0})
+        handler (:handler system)]
+    (try
+      (let [rules-body (parse-json (:body (handler (mock/request :get "/v1/rules"))))
+            anns-body (parse-json (:body (handler (mock/request :get "/v1/annotations"))))
+            rule-names (set (map :name (:rules rules-body)))
+            ann-names (set (map #(str (symbol %)) (keys (:annotations anns-body))))]
+        (testing "the narrowed scope serves the same rules and annotations"
+          (is (seq rule-names))
+          (is (= rule-names ann-names)))
+        (testing "the filtered-out namespace is absent from both routes"
+          (is (contains? rule-names "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"))
+          (is (not (contains? rule-names "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule")))
+          (is (not (contains? ann-names "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule")))))
+      (finally
+        (server/stop! system)))))

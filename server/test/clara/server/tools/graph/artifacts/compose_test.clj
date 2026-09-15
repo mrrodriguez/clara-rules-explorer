@@ -6,6 +6,7 @@
   — the same wiring `clara.server.graph.integration-test` proves live. The merge
   is where the cross-unit edge materializes: each unit alone cannot contain it."
   (:require
+   [clara.server.tools.graph.annotations.merge :as ann.merge]
    [clara.server.tools.graph.artifacts.compose :as compose]
    [clara.server.tools.graph.artifacts.registry :as registry]
    [clara.server.tools.graph.artifacts.rehydrate :as rehydrate]
@@ -133,6 +134,40 @@
                           #"claimed by both"
                           (compose/->composed-analysis reg [(unit "loan-app-ruleset")
                                                             (unit "loan-app-ruleset")])))))
+
+(deftest fold-layers-narrow-annotations-to-the-namespace-filter-test
+  (let [reg (->registry)
+        selection [{:repo "loan-app-ruleset"
+                    :namespaces ["clara.server.tools.graph.rules.loan-app-rules"]}
+                   {:repo "loan-disposition-ruleset"
+                    :namespaces ["clara.server.tools.graph.rules.loan-app-rules"]}]
+        composed (compose/->composed-analysis reg selection)
+        folded (compose/fold-layers reg selection)]
+    (testing "the narrowed fold has exactly the composed rules"
+      (is (= (set (keys (:rules composed)))
+             (set (keys (ann.merge/annotations folded))))))
+    (testing "an unnarrowed fold still carries every unit's annotations"
+      (is (> (count (ann.merge/annotations (compose/fold-layers reg (registry/source-units reg))))
+             (count (ann.merge/annotations folded)))))))
+
+(deftest standard-role-layers-narrow-and-record-the-filter-test
+  (let [reg (->registry)
+        selection [{:repo "loan-app-ruleset"
+                    :namespaces ["clara.server.tools.graph.rules.loan-app-rules"]}
+                   {:repo "loan-disposition-ruleset"}]
+        layers (compose/->standard-role-layers reg selection)]
+    (testing "the auto layer folds only the narrowed unit's in-scope rules"
+      (let [names (set (keys (get-in layers [:auto :annotations])))]
+        (is (contains? names app-approved))
+        (is (not (contains? names "clara.server.tools.graph.rules.loan-doc-rules/extract-doc-meta-rule")))))
+    (testing "the persisted layer source records the per-unit filter"
+      (is (= {"loan-app-ruleset" ["clara.server.tools.graph.rules.loan-app-rules"]}
+             (get-in layers [:auto :source :namespaces]))))
+    (testing "an unnarrowed selection records no filter"
+      (is (not (contains? (get-in (compose/->standard-role-layers reg [(unit "loan-app-ruleset")
+                                                                       (unit "loan-disposition-ruleset")])
+                                  [:auto :source])
+                          :namespaces))))))
 
 (deftest union-fact-types-recloses-and-orders-ancestors-test
   (testing "a hierarchy split across units is re-closed transitively"

@@ -70,9 +70,19 @@
         (is (str/includes? (get-in meta [:slim :references]) "Composed analysis"))))
 
     (testing "the manifest records the composition"
-      (let [manifest (edn-io/read-edn-file (store/get-artifact-file :manifest opts))]
+      (let [manifest (edn-io/read-edn-file (store/get-artifact-file :manifest opts))
+            units (get-in manifest [:analysis-run :units])]
         (is (= "composed/demo" (:repo manifest)))
         (is (= :compose (get-in manifest [:analysis-run :mode])))
-        (is (= [{:repo "loan-app-ruleset"}
-                {:repo "loan-disposition-ruleset"}]
-               (get-in manifest [:analysis-run :units])))))))
+        (is (= ["loan-app-ruleset" "loan-disposition-ruleset"]
+               (mapv :repo units)))
+        (testing "each source entry carries the state that was composed"
+          (is (every? #(and (:sha %) (:created %)) units))
+          (is (not-any? :branch units)))
+        (testing "staleness is stated in composition terms"
+          (is (= "review-when-any-source-sha-drifts"
+                 (get-in manifest [:staleness :policy])))
+          (is (= #{"loan-app-ruleset" "loan-disposition-ruleset"}
+                 (set (keys (get-in manifest [:staleness :sources])))))
+          (is (= (get-in units [0 :sha])
+                 (get-in manifest [:staleness :sources "loan-app-ruleset" :sha]))))))))

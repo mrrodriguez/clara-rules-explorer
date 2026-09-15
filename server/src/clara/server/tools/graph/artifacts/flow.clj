@@ -358,6 +358,32 @@
     (merge-persisted! (assoc opts :rulebase-analysis-in-hand annotation-data))
     dir))
 
+(defn- ->composed-unit-provenance
+  "One `:analysis-run :units` entry for a composed manifest: the source unit's
+  ref plus its manifest head (`:sha`, `:created`) — the state of the source that
+  was actually composed. No new read: `registry/unit-info` already holds the
+  head, and `unit-ref` drops the provenance keys when a reader reconstructs the
+  `:composed-from` selection."
+  [reg unit]
+  (let [head (:manifest-head (registry/unit-info reg unit))]
+    (cond-> {:repo (:repo unit)
+             :sha (:sha head)
+             :created (:created head)}
+      (:branch unit) (assoc :branch (:branch unit)))))
+
+(defn- ->source-staleness
+  "`{unit-key {:sha … :created …}}` — the per-source shas a composed unit's
+  staleness is judged against. Derived from the enriched `:analysis-run :units`
+  entries so the two blocks cannot disagree."
+  [composed-units]
+  (into (sorted-map)
+        (map (fn [{:keys [repo branch sha created]}]
+               [(registry/unit-key (cond-> {:repo repo}
+                                     branch (assoc :branch branch)))
+                (cond-> {:sha sha :created created}
+                  branch (assoc :branch branch))]))
+        composed-units))
+
 (s/defn compose-persist! :- schema/ComposePersistResult
   "Compose a registry selection into one unit-shaped artifact directory the
    caller names, so the offline bb report (and any single-unit reader) can
@@ -370,6 +396,14 @@
    `compose/->standard-role-layers`, then folded and compacted exactly as a
    single-unit `merge-persisted!` would.
 
+   The manifest records the composition in its own terms: each
+   `:analysis-run :units` entry carries the source's `:sha` / `:created` (the
+   state that was composed), and `:staleness` names the
+   `review-when-any-source-sha-drifts` policy with the per-source shas, so a
+   reader holding only the directory can answer \"is this current?\" — a
+   composed unit is stale as soon as any of its N independently-moving sources
+   has moved.
+
    Output placement follows `ArtifactOpts`: `:dir` when given, else
    `<:root>/<:repo>`. `:root` is the source registry root (and default output
    root); `:repo` is the composed unit's registry-relative identity and default
@@ -379,7 +413,8 @@
   (let [reg (registry/->registry {:root root :units units})
         analysis (compose/->composed-analysis reg units)
         role-layers (compose/->standard-role-layers reg units)
-        standard-layers (mapv (fn [[_ layer]] layer) role-layers)]
+        standard-layers (mapv (fn [[_ layer]] layer) role-layers)
+        composed-units (mapv #(->composed-unit-provenance reg %) units)]
     (doseq [[role layer] role-layers]
       (store/write-layer! role opts layer))
     (let [merged (store/fold-layers standard-layers)
@@ -395,8 +430,11 @@
       (let [manifest-file (manifest/write-manifest!
                            (assoc opts
                                   :analysis-run (merge {:mode :compose
-                                                        :units units}
-                                                       analysis-run)))]
+                                                        :units composed-units}
+                                                       analysis-run)
+                                  :blocks {:staleness
+                                           {:policy "review-when-any-source-sha-drifts"
+                                            :sources (->source-staleness composed-units)}}))]
         {:dir (store/get-out-dir opts)
          :layers (mapv :id (:layers merged))
          :rule-count (count (:annotations merged))

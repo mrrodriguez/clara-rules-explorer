@@ -91,7 +91,22 @@
   #{:created :updated :history :source})
 
 (defn- normalize-manifest [m]
-  (apply dissoc m manifest-volatile-keys))
+  (let [m (apply dissoc m manifest-volatile-keys)
+        strip-source-state (fn [unit] (dissoc unit :sha :created))]
+    (cond-> m
+      (contains? m :analysis-run)
+      (update :analysis-run
+              (fn [analysis-run]
+                (if-let [units (:units analysis-run)]
+                  (assoc analysis-run :units (mapv strip-source-state units))
+                  analysis-run)))
+
+      (contains? m :staleness)
+      (update :staleness
+              (fn [staleness]
+                (if-let [sources (:sources staleness)]
+                  (assoc staleness :sources (update-vals sources strip-source-state))
+                  staleness))))))
 
 (defn- read-manifest [dir]
   (edn/read-string (slurp (io/file dir "rules-inspect-manifest.edn"))))

@@ -307,6 +307,10 @@ Four namespaces answer that, all under
   rules/queries merged by fq name (a name in two units is refused), fact types
   merged per name with ancestors unioned, the dep-graph recomputed over the
   merged set so cross-unit edges exist, and each production tagged `:unit`.
+  Both fold paths narrow each unit's layers to the unit's `:namespaces` filter
+  before folding (via `registry/narrow-annotations`), so a scoped merge serves
+  and persists only the scope's annotations; `->standard-role-layers` records
+  the per-unit filter under the layer's `:source :namespaces`.
 - **`federate`** — the union mode. `->index` builds a queryable value over
   units that share a fact-type vocabulary but are NOT claimed to compose: the
   globally re-closed hierarchy (with `:conflicts` where units disagree),
@@ -316,9 +320,15 @@ Four namespaces answer that, all under
   reported under `:coverage :unknown-namespaces`. `impact-of`,
   `producers-of`, `dependents-of`, `paths-between`, and
   `unit-dependency-graph` answer over it; `->digest` + `persist!` write
-  `registry-index.edn` / `registry-digest.edn` to an explicit `:dir`. `grade`
-  checks the union against a composed reference (a captured session or
-  monolithic run). `->index` refuses a selection that mixes aggregate and
+  `registry-index.edn` / `registry-digest.edn` to an explicit `:dir`, and
+  `read-index` / `read-digest` read them back. `->index` and `persist!` accept
+  a caller `:label` recorded into the index's `:scope`, so a persisted index
+  names its question without depending on its directory. `diff` compares two
+  indexes over overlapping unit sets — the branch-vs-mainline question —
+  reporting selection, edge, fact-type, entry-point, orphan, and hierarchy
+  differences. `grade` checks the union against a composed reference (a
+  captured session or monolithic run). `->index` refuses a selection that
+  mixes aggregate and
   source units (an aggregate describes the same productions as the units it
   overlaps, so both would silently double-count), and always refuses an
   aggregate whose `:composed-from` names another selected unit.
@@ -356,7 +366,12 @@ the same shape `bin/annotations_report.bb` already reads. Per-unit provenance
 lives in the manifest's `:analysis-run` block rather than in the flattened
 layer files; the manifest's `:analysis-run :mode :compose` and `:units` are
 exactly the aggregate marker `registry/unit-info` reads back, so a composed
-unit is not mistaken for a source unit when discovered again.
+unit is not mistaken for a source unit when discovered again. Each `:units`
+entry also carries its source's `:sha` and `:created` (and `:branch` when
+present), and `:staleness` names the `review-when-any-source-sha-drifts` policy
+with those per-source shas — so a reader holding only the directory can answer
+"is this current?" for a composition that is stale as soon as any of its N
+independently-moving sources has moved.
 
 ## Related
 

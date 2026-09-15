@@ -281,6 +281,93 @@
             (is (= (federate/->digest (->index)) (edn-io/read-edn-file (io/file written-digest)))))
           (finally (delete-tree dir)))))))
 
+(deftest read-index-read-digest-and-label-test
+  (let [label "what does loan-disposition consume?"
+        index (federate/->index (registry/discover {:root (registry-root)})
+                                [{:repo "loan-app-ruleset"}
+                                 {:repo "loan-disposition-ruleset"}]
+                                {:label label})]
+    (testing "->index records the label in :scope"
+      (is (= label (get-in index [:scope :label]))))
+    (testing "->digest surfaces the same scope"
+      (is (= label (get-in (federate/->digest index) [:scope :label]))))
+    (let [dir (temp-dir)]
+      (try
+        (federate/persist! index {:dir dir})
+        (testing "read-index returns the persisted index value"
+          (is (= index (federate/read-index {:dir dir})))
+          (is (= label (get-in (federate/read-index {:dir dir}) [:scope :label]))))
+        (testing "read-digest returns the digest with the scope label"
+          (is (= label (get-in (federate/read-digest {:dir dir}) [:scope :label]))))
+        (testing "persist! can label an unlabelled index at write time"
+          (let [unlabelled (federate/->index (registry/discover {:root (registry-root)})
+                                             [{:repo "loan-app-ruleset"}
+                                              {:repo "loan-disposition-ruleset"}])]
+            (federate/persist! unlabelled {:dir dir :label "late label"})
+            (is (= "late label"
+                   (get-in (federate/read-index {:dir dir}) [:scope :label])))))
+        (finally (delete-tree dir))))))
+
+(deftest diff-of-an-index-against-itself-is-empty-test
+  (let [index (->index)]
+    (is (= {:units {:added [] :removed [] :rebased []}
+            :unit-edges {:added [] :removed [] :changed {}}
+            :fact-types {}
+            :entry-points {:added {} :resolved {}}
+            :orphans {:added {} :resolved {}}
+            :hierarchy {:conflicts-added [] :conflicts-resolved []}}
+           (federate/diff index index)))))
+
+(deftest diff-branch-variant-reports-only-touched-edges-and-types-test
+  (let [dir (temp-dir)]
+    (try
+      (let [src-a (io/file dir "src-a")
+            src-a-branch (io/file dir "src-a" "branches" "feature-x")
+            src-b (io/file dir "src-b")]
+        (write-manifest! src-a "src-a")
+        (write-analysis! src-a
+                         {"a.ns/insert-t" {:ns "a.ns" :name "a.ns/insert-t"
+                                           :lhs-types [] :insert-types ["T"] :retract-types []}}
+                         {"T" {:name "T" :ns nil :ancestors []}})
+        (write-manifest! src-a-branch "src-a")
+        (write-analysis! src-a-branch
+                         {"a.ns/insert-t2" {:ns "a.ns" :name "a.ns/insert-t2"
+                                            :lhs-types [] :insert-types ["T2"] :retract-types []}}
+                         {"T2" {:name "T2" :ns nil :ancestors []}})
+        (write-manifest! src-b "src-b")
+        (write-analysis! src-b
+                         {"b.ns/consume-t" {:ns "b.ns" :name "b.ns/consume-t"
+                                            :lhs-types ["T"] :insert-types [] :retract-types []}}
+                         {"T" {:name "T" :ns nil :ancestors []}})
+
+        (let [reg (registry/discover {:root dir})
+              before (federate/->index reg [{:repo "src-a"} {:repo "src-b"}])
+              after (federate/->index reg [{:repo "src-a" :branch "feature-x"}
+                                           {:repo "src-b"}])
+              d (federate/diff before after)]
+          (testing "the selection reports the branch swap alongside the raw add/remove"
+            (is (= [{:repo "src-a" :from ["src-a"] :to ["src-a@feature-x"]}]
+                   (get-in d [:units :rebased])))
+            (is (= ["src-a@feature-x"] (get-in d [:units :added])))
+            (is (= ["src-a"] (get-in d [:units :removed]))))
+          (testing "only the touched edge disappears"
+            (is (= [["src-a" "src-b"]] (get-in d [:unit-edges :removed])))
+            (is (= [] (get-in d [:unit-edges :added])))
+            (is (= {} (get-in d [:unit-edges :changed]))))
+          (testing "the touched fact types record the producer/consumer change"
+            (is (= {"T" {:producers {:added #{} :removed #{"src-a"}}}
+                    "T2" {:producers {:added #{"src-a@feature-x"} :removed #{}}}}
+                   (:fact-types d))))
+          (testing "the downstream entry point appears and the orphan moves"
+            (is (= {"src-b" #{"T"}} (get-in d [:entry-points :added])))
+            (is (= {} (get-in d [:entry-points :resolved])))
+            (is (= {"src-a@feature-x" #{"T2"}} (get-in d [:orphans :added])))
+            (is (= {} (get-in d [:orphans :resolved]))))
+          (testing "hierarchy conflicts did not change"
+            (is (= {:conflicts-added [] :conflicts-resolved []}
+                   (:hierarchy d))))))
+      (finally (delete-tree dir)))))
+
 (deftest namespace-filter-narrows-scope-and-reports-unknowns-test
   (let [index (federate/->index (registry/discover {:root (registry-root)})
                                 [{:repo "loan-app-ruleset" :namespaces ["no.such.ns"]}
