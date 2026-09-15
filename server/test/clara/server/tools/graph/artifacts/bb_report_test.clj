@@ -51,13 +51,16 @@
 
 (def ^:private analysis
   "Enough of a `RulebaseAnalysis` for `consumers` and `edges` to have something
-  to find in `production-index.edn` and `dep-graph.edn`."
+  to find in `production-index.edn` and `dep-graph.edn`, plus `:fact-types` for
+  the hierarchy closure `producers` and `consumers` now resolve against."
   {:rules {"a.ns/full-rule" {:name "a.ns/full-rule" :ns "a.ns"
                              :lhs [{:type "a/one" :constraints "[]"}]
-                             :lhs-types ["a/one"] :insert-types ["a/two"]
+                             :lhs-types [":a/one"] :insert-types [":a/two"]
                              :rhs-form "(insert! x)\n"}
            "a.ns/gap-rule" {:name "a.ns/gap-rule" :ns "a.ns"
-                            :lhs-types ["a/two"] :insert-types []}}
+                            :lhs-types [":a/two"] :insert-types []}}
+   :fact-types {":a/one" {:name ":a/one" :ns nil :ancestors []}
+                ":a/two" {:name ":a/two" :ns nil :ancestors []}}
    :dep-graph {"a.ns/full-rule" {:upstream #{}}
                "a.ns/gap-rule" {:upstream #{"a.ns/full-rule"}}}
    :unresolved []})
@@ -85,6 +88,12 @@
       (testing "`consumers` reads production-index.edn — the scan column file —
                 and finds the rule whose :lhs-types hold the type"
         (let [out (run-report "consumers" ":a/one")]
+          (is (str/includes? out "a.ns/full-rule"))
+          (is (not (str/includes? out "a.ns/gap-rule")))))
+
+      (testing "`producers` reads annotations + fact-types.edn and closes over
+                the hierarchy (here: only exact matches, no descendants)"
+        (let [out (run-report "producers" ":a/one")]
           (is (str/includes? out "a.ns/full-rule"))
           (is (not (str/includes? out "a.ns/gap-rule")))))
 
@@ -161,4 +170,46 @@
       (testing "layers reports the flattened standard layers"
         (let [out (run "layers")]
           (is (str/includes? out ":clara.tools.graph.analyze/generated"))
-          (is (str/includes? out ":memory")))))))
+          (is (str/includes? out ":memory"))))
+
+      (testing "producers closes over descendants and labels them via-descendant"
+        (let [out (run "producers" ":loan-app/application-outcome")]
+          (is (str/includes? out "3 producer rule(s)"))
+          (is (str/includes? out "(0 exact, 3 via descendants)"))
+          (is (str/includes? out "via descendant clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"))
+          (doseq [p [app-approved
+                     "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"
+                     "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"]]
+            (is (str/includes? out p)))))
+
+      (testing "consumers closes over ancestors, labels via-ancestor, and prints :unit"
+        (let [out (run "consumers" "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome")]
+          (is (str/includes? out "5 consumer rule(s)"))
+          (is (str/includes? out "(3 exact, 2 via ancestors)"))
+          (is (str/includes? out "via ancestor :loan-app/application-outcome"))
+          (doseq [p [notice-approved
+                     "clara.server.tools.graph.rules.loan-outcome-notices/notice-denied-app"]]
+            (is (str/includes? out p)))
+          (is (str/includes? out "unit: loan-disposition-ruleset"))))
+
+      (testing "producers agrees with edges on the cross-type link — the regression guard"
+        (let [index (store/read-analysis-part :index opts)
+              dep-graph (store/read-analysis-part :dep-graph opts)]
+          (doseq [notice [notice-approved
+                          "clara.server.tools.graph.rules.loan-outcome-notices/notice-denied-app"]
+                  :let [lhs-type (first (:lhs-types (get-in index [:rules notice])))
+                        upstream (get-in dep-graph [notice :upstream])
+                        out (run "producers" lhs-type)]]
+            (is (= ":loan-app/application-outcome" lhs-type))
+            (doseq [u upstream]
+              (is (str/includes? out u)
+                  (str "producers " lhs-type " omits upstream rule " u))))))
+
+      (testing "single source unit: the closure adds rather than rewrites"
+        (let [dir (str (io/file (registry-root) "loan-app-ruleset"))
+              {:keys [exit out err]}
+              (shell/sh "bb" (str report-script) dir
+                        "producers" ":loan-app/application-outcome")]
+          (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
+          (is (str/includes? out "3 producer rule(s)"))
+          (is (str/includes? out "(0 exact, 3 via descendants)")))))))
