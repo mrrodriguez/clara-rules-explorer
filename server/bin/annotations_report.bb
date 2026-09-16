@@ -4,7 +4,10 @@
 ;; runs from ~10KB to 20MB (a restored 18-ruleset session) — never `cat` them.
 ;;
 ;; This is the ANNOTATION-side tool: layers, callsites, resolution, curation,
-;; provenance. Seven of the nine subcommands never open the analysis at all.
+;; provenance. Five of the ten subcommands never open the analysis at all.
+;; `producers`, `consumers`, and `hierarchy` read the fact-type hierarchy in
+;; fact-types.edn; `consumers` and `edges` read production-index.edn and
+;; dep-graph.edn; `rule` reads production-index.edn for `:unit` attribution.
 ;; For anything structural the analysis does not hold — the Rete graph, :lhs-form,
 ;; working memory — start the explorer server and query /v1.
 ;;
@@ -36,9 +39,10 @@
 ;;                        unresolved callsites to go read. Reads the AUTO layer —
 ;;                        the deterministic baseline is the real work list
 ;;   types                every resolved insert-type, with producer count
-;;   producers <type>     rules inserting <type>            (annotations)
-;;   consumers <type>     rules with <type> on their LHS    (production-index)
-;;   rule <fq-name>       one rule's full annotation        (annotations)
+;;   producers <type>     rules inserting <type> or a descendant  (annotations + fact-types.edn)
+;;   consumers <type>     rules with <type> or an ancestor on LHS  (production-index + fact-types.edn)
+;;   hierarchy <type>     that type's ancestors and descendants     (fact-types.edn)
+;;   rule <fq-name>       one rule's full annotation        (annotations; :unit from production-index)
 ;;   edges <fq-name>      dep-graph upstream/downstream     (dep-graph; downstream inverted)
 ;;   curated              what the agent overlay changed vs the auto-gen baseline
 ;;   layers               the fold: which layers contributed, and per-key
@@ -48,8 +52,11 @@
 ;; auto (the generated layer), agent (the curated overlay alone), or merged (the
 ;; fold). Default is merged, except `gaps`, which defaults to auto.
 ;;
-;; <type> may be written :foo/bar or foo/bar; substring matching kicks in when
-;; there is no exact hit. <fq-name> likewise falls back to substring search.
+;; <type> may be written :foo/bar or foo/bar. producers/consumers/hierarchy
+;; resolve it against the known fact-type names in fact-types.edn — exact first,
+;; then substring. producers then reach descendants, consumers reach ancestors,
+;; the two opposite closures; hierarchy shows both. <fq-name> likewise falls
+;; back to substring search.
 ;;
 ;; Callsite :status and dimension :resolution share one vocabulary:
 ;; :full / :partial / :none.
@@ -187,6 +194,123 @@
         (vector? t) (pr-str t)
         :else (str t)))
 
+(defn- type->name
+  "A type as its canonical name — the string fact-types.edn and
+  production-index.edn key it by. A keyword keeps its leading colon (the files
+  store `:foo/bar` as `\":foo/bar\"`), a symbol prints bare, a string is already a
+  name, a vector is a tuple type. `type->str` is the display form; this is the
+  matching form, so a keyword fact and its file key are one string."
+  [t]
+  (if (vector? t) (pr-str t) (str t)))
+
+;; ---------------------------------------------------------------------------
+;; the fact-type hierarchy, read from fact-types.edn
+;; ---------------------------------------------------------------------------
+
+(defn- ->ancestors
+  "fact-types.edn as `{type-name #{ancestor-name}}`. The file's `:ancestors` are
+  already transitively closed — they are what Clojure's `ancestors` returned when
+  it was written, and compose re-closes across units — so the transpose below is
+  complete without re-closing here."
+  [fact-types]
+  (into {}
+        (map (fn [[name entry]]
+               [name (into #{} (map str) (:ancestors entry))]))
+        fact-types))
+
+(defn- ->descendants
+  "Transpose of a closed ancestor map: `{ancestor-name #{descendant-name}}` —
+  the same shape and meaning as
+  `clara.server.tools.graph.artifacts.hierarchy/->descendants`."
+  [ancestors]
+  (let [desc (volatile! {})]
+    (doseq [[ft as] ancestors
+            a as]
+      (vswap! desc update a (fnil conj #{}) ft))
+    @desc))
+
+(defn- with-hierarchy
+  "`base-names` plus every name reached through `edge-map` (`{name #{name}}`),
+  transitively. One `get` per name is the whole closure because the map passed IS
+  the direction and is already closed: `ancestors` runs the opposite way from
+  `descendants`, and passing the wrong one is a wrong answer no exception flags —
+  the same warning
+  `clara.server.tools.graph.artifacts.hierarchy/->closure` gives."
+  [edge-map base-names]
+  (reduce (fn [acc t] (into acc (cons t (get edge-map t #{})))) #{} base-names))
+
+(defn- resolve-type-names
+  "The known fact-type names `raw` means, as a set of canonical strings, resolved
+  against `fact-types` (the fact-types.edn map). Exact first, then the
+  colon-preceded spelling — a keyword fact written `foo/bar` for its `:foo/bar`
+  key — then substring. A substring that lands on one name prints what it
+  resolved to; several are closed over and listed. nil only when nothing matches."
+  [fact-types raw]
+  (let [want (norm-type raw)
+        as-colon (str ":" want)]
+    (cond
+      (contains? fact-types want) #{want}
+      (contains? fact-types as-colon) #{as-colon}
+      :else
+      (let [cands (into #{} (filter #(str/includes? % want)) (keys fact-types))]
+        (cond
+          (empty? cands) (do (println "No known fact type matches" want) nil)
+          (= 1 (count cands)) (let [c (first cands)]
+                                (println "Resolved" raw "->" c)
+                                #{c})
+          :else (do (println (str "Resolved " want " to " (count cands) " fact types:"))
+                    (doseq [c (sort cands)] (println " " c))
+                    cands))))))
+
+(defn- rule-match
+  "One rule's matched types, split `{:exact {type #{action}} :via {type #{action}}}`,
+  over `by-action` (`{action [type …]}`). Types are canonicalized with
+  `type->name`; `resolved` is the exact set and `closure` is that plus the
+  hierarchy reach. A type is `:via` when it is reached through the hierarchy, not
+  by naming."
+  [resolved closure by-action]
+  (reduce-kv
+   (fn [m action types]
+     (reduce (fn [m t]
+               (let [t (type->name t)]
+                 (cond
+                   (resolved t) (update-in m [:exact t] (fnil conj #{}) action)
+                   (closure t) (update-in m [:via t] (fnil conj #{}) action)
+                   :else m)))
+             m types))
+   {:exact {} :via {}}
+   by-action))
+
+(defn- print-type-actions
+  "`{type-name #{action-keyword}}`, one action per line, for a rule already
+  printed above it: `    inserts: a, b`."
+  [types]
+  (doseq [action [:inserts :retracts :lhs-types]
+          :let [ts (sort (keep (fn [[t as]] (when (contains? as action) t)) types))]
+          :when (seq ts)]
+    (println (str "    " (name action) ": " (str/join ", " ts)))))
+
+(defn- print-match-sections
+  "The body `producers` and `consumers` share: an `exact` section, then one
+  section per via type, `via-word` naming the direction (`descendant` /
+  `ancestor`). `matches` is `[[rule {:exact … :via … :unit …}] …]`."
+  [matches via-word]
+  (let [exact-matches (filterv #(seq (:exact (second %))) matches)
+        via-matches (filterv #(seq (:via (second %))) matches)]
+    (when (seq exact-matches)
+      (println "\nexact")
+      (doseq [[rule m] exact-matches]
+        (println (str "  " rule))
+        (when-let [u (:unit m)] (println (str "    unit: " u)))
+        (print-type-actions (:exact m))))
+    (doseq [via-type (sort (into #{} (mapcat (comp keys :via second) via-matches)))]
+      (println (str "\nvia " via-word " " via-type))
+      (doseq [[rule m] via-matches
+              :when (contains? (:via m) via-type)]
+        (println (str "  " rule))
+        (when-let [u (:unit m)] (println (str "    unit: " u)))
+        (print-type-actions (select-keys (:via m) [via-type]))))))
+
 ;; ---------------------------------------------------------------------------
 ;; summary
 ;; ---------------------------------------------------------------------------
@@ -256,36 +380,71 @@
     (doseq [[t n] (sort-by (comp type->str key) freqs)]
       (printf "%4d  %s%n" n (type->str t)))))
 
-(defn- producers [anns raw]
-  (let [want (norm-type raw)
-        match? (fn [t] (let [s (type->str t)]
-                         (or (= s want) (str/includes? s want))))
-        hits (for [[rule a] (sort anns)
-                   :let [ins (filter match? (:clara-rules/insert-types a))
-                         ret (filter match? (:clara-rules/retract-types a))]
-                   :when (or (seq ins) (seq ret))]
-               [rule ins ret])]
-    (println (str (count hits) " producer rule(s) for " want "\n"))
-    (doseq [[rule ins ret] hits]
-      (println rule)
-      (when (seq ins) (println "  inserts: " (str/join ", " (map type->str ins))))
-      (when (seq ret) (println "  retracts:" (str/join ", " (map type->str ret)))))))
+(defn- producers
+  "Rules inserting (or retracting) `raw` or any descendant of it. Reads
+  fact-types.edn for the hierarchy; the exact/via split keeps the literal answer
+  visible without hiding the closure —
+  `clara.server.tools.graph.artifacts.slim`'s `:inserted-by-rules` runs the same
+  closure over `:insert-types`."
+  [anns fact-types raw]
+  (when-let [resolved (resolve-type-names fact-types raw)]
+    (let [descendants (->descendants (->ancestors fact-types))
+          closure (with-hierarchy descendants resolved)
+          matches (into []
+                        (keep (fn [[rule a]]
+                                (let [m (rule-match resolved closure
+                                                    {:inserts (:clara-rules/insert-types a)
+                                                     :retracts (:clara-rules/retract-types a)})]
+                                  (when (or (seq (:exact m)) (seq (:via m)))
+                                    [rule m]))))
+                        (sort anns))
+          n-exact (count (filter #(seq (:exact (second %))) matches))
+          n-via (count (filter #(seq (:via (second %))) matches))]
+      (println (str (count matches) " producer rule(s) for " raw))
+      (println (format "  (%d exact, %d via descendants)" n-exact n-via))
+      (print-match-sections matches "descendant"))))
 
 (defn- consumers
-  "Rules with `raw` on their LHS. Reads production-index.edn — `:lhs-types` is a
-  scan column, so this never opens the condition trees or the RHS."
-  [index raw]
-  (let [want (norm-type raw)
-        hits (for [[rule r] (sort (:rules index))
-                   :let [ts (filter #(or (= (str %) want)
-                                         (str/includes? (str %) want))
-                                    (:lhs-types r))]
-                   :when (seq ts)]
-               [rule ts])]
-    (println (str (count hits) " consumer rule(s) with " want " on the LHS\n"))
-    (doseq [[rule ts] hits]
-      (println rule)
-      (println "  lhs-types:" (str/join ", " ts)))))
+  "Rules whose `:lhs-types` hold `raw` or any ancestor of it. Reads
+  production-index.edn and fact-types.edn; the exact/via split keeps the literal
+  answer visible without hiding the closure —
+  `clara.server.tools.graph.artifacts.slim`'s `:used-by-rules` runs the same
+  closure over `:lhs-types`, and it runs the OPPOSITE way from `producers`."
+  [index fact-types raw]
+  (when-let [resolved (resolve-type-names fact-types raw)]
+    (let [ancestors (->ancestors fact-types)
+          closure (with-hierarchy ancestors resolved)
+          matches (into []
+                        (keep (fn [[rule r]]
+                                (let [m (rule-match resolved closure
+                                                    {:lhs-types (:lhs-types r)})]
+                                  (when (or (seq (:exact m)) (seq (:via m)))
+                                    [rule (assoc m :unit (:unit r))]))))
+                        (sort (:rules index)))
+          n-exact (count (filter #(seq (:exact (second %))) matches))
+          n-via (count (filter #(seq (:via (second %))) matches))]
+      (println (str (count matches) " consumer rule(s) with " raw " on the LHS"))
+      (println (format "  (%d exact, %d via ancestors)" n-exact n-via))
+      (print-match-sections matches "ancestor"))))
+
+(defn- hierarchy
+  "One fact type's place in the hierarchy: its ancestors and its descendants,
+  read from fact-types.edn. Descendants are the transpose of the recorded
+  `:ancestors` — the same direction
+  `clara.server.tools.graph.artifacts.hierarchy/->descendants` gives."
+  [fact-types raw]
+  (when-let [resolved (resolve-type-names fact-types raw)]
+    (let [ancestors (->ancestors fact-types)
+          descendants (->descendants ancestors)]
+      (doseq [name (sort resolved)
+              :let [as (sort (get ancestors name #{}))
+                    ds (sort (get descendants name #{}))]]
+        (println name)
+        (println (str "  ancestors (" (count as) ")"))
+        (doseq [a as] (println (str "    " a)))
+        (println (str "  descendants (" (count ds) ")"))
+        (doseq [d ds] (println (str "    " d)))
+        (println)))))
 
 ;; ---------------------------------------------------------------------------
 ;; rule / edges
@@ -293,13 +452,17 @@
 
 (defn- find-key-name
   "The key of `m` the caller meant: an exact hit, else the one key containing
-  `name*` as a substring. nil when there is no unique answer, having said why."
+  `name*` as a substring. nil when there is no unique answer, having said why.
+  A unique substring match prints the fully-qualified key it resolved to, so an
+  unqualified name is never answered from an invisible choice."
   [m name*]
   (if (contains? m name*)
     name*
     (let [cands (filter #(str/includes? % name*) (keys m))]
       (cond
-        (= 1 (count cands)) (first cands)
+        (= 1 (count cands)) (let [k (first cands)]
+                              (println "Resolved" name* "->" k)
+                              k)
         (seq cands) (do (println "Ambiguous —" (count cands) "matches:")
                         (doseq [c (sort cands)] (println " " c))
                         nil)
@@ -311,9 +474,12 @@
 (defn- rule
   "One rule's whole annotation. Callsites arrive complete whichever file this
   read — a layer holds them outright, and the merge resolves to the layer that
-  does."
-  [anns name*]
+  does. `:unit` — which component a composed rule came from — lives on the
+  production, so it is read from production-index.edn when present."
+  [anns index name*]
   (when-let [k (find-key-name anns name*)]
+    (when-let [u (get-in index [:rules k :unit])]
+      (println "unit:" u))
     (pprint/pprint (get anns k))))
 
 (defn- edges
@@ -414,7 +580,7 @@
       [target cmd arg] (remove #{"--file" which} args)]
   (when-not target
     (die (str "usage: bb annotations_report.bb <dir|file.edn> "
-              "[summary|gaps|types|producers <t>|consumers <t>|rule <n>|edges <n>|curated"
+              "[summary|gaps|types|producers <t>|consumers <t>|hierarchy <t>|rule <n>|edges <n>|curated"
               "|layers [<n>]] "
               "[--file auto|agent|merged]")))
   (let [cmd (or cmd "summary")
@@ -426,15 +592,18 @@
         auto (delay (read-annotations (:auto paths) (artifact-files "auto") dir))
         agent (delay (read-annotations (:agent paths) (artifact-files "agent") dir))
         merged (delay (read-merged paths))
-        analysis-part (->analysis-part dir)]
+        analysis-part (->analysis-part dir)
+        index (delay (analysis-part :index))
+        fact-types (delay (analysis-part :fact-types))]
     (case cmd
       "summary" (summary @anns)
       "gaps" (gaps @anns)
       "types" (types @anns)
-      "producers" (if arg (producers @anns arg) (die "producers needs a fact type"))
-      "consumers" (if arg (consumers (analysis-part :index) arg)
+      "producers" (if arg (producers @anns @fact-types arg) (die "producers needs a fact type"))
+      "consumers" (if arg (consumers @index @fact-types arg)
                       (die "consumers needs a fact type"))
-      "rule" (if arg (rule @anns arg) (die "rule needs a rule name"))
+      "hierarchy" (if arg (hierarchy @fact-types arg) (die "hierarchy needs a fact type"))
+      "rule" (if arg (rule @anns @index arg) (die "rule needs a rule name"))
       "edges" (if arg (edges (analysis-part :dep-graph) arg) (die "edges needs a rule name"))
       "curated" (curated @auto @agent)
       "layers" (layers @merged arg)
