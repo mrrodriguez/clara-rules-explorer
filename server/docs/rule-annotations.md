@@ -234,6 +234,62 @@ When the rule base analyzer detects call sites to `insert!`, `retract!`, or thei
 > resolution chains, heuristic fallbacks — is documented in
 > [`server/docs/analyze-pipeline-concepts.md`](analyze-pipeline-concepts.md).
 
+### What "simple enough" looks like
+
+If your rule RHS inserts plain Java classes or Clojure record constructors,
+it just works — no extra configuration. A tiny custom builder function (like
+`(->fact :my-type data)`) needs one `:fact-constructors` spec telling the
+analyzer which function is the constructor and where the type lives in its
+args (usually `(second arg-form)`); after that, the same simple shapes below
+resolve. LHS is omitted for brevity (`...`).
+
+1. **Boundary fn calls the constructor directly.** The easiest case:
+
+   ```clojure
+   (defrule my-rule
+     ...
+     =>
+     (insert! (->fact :my-type data)))
+   ;; also automatic, no resolver needed:
+   ;; (insert! (->MyRecord data))
+   ;; (insert! (MyFact. data))
+   ```
+
+2. **Boundary fn calls a helper that reaches the constructor.** The `insert!`
+is still in the RHS, but the constructor lives one or more helpers down:
+
+   ```clojure
+   (defn ->my-fact [data]
+     (->fact :my-type data))
+
+   (defrule my-rule
+     ...
+     =>
+     (insert! (->my-fact data)))
+   ```
+
+3. **The boundary fn itself lives in a helper.** The RHS never calls
+   `insert!` directly; it calls a helper that does:
+
+   ```clojure
+   (defn do-insert! [data]
+     (insert! (->fact :my-type data)))
+
+   (defrule my-rule
+     ...
+     =>
+     (do-insert! data))
+   ```
+
+   Two small variations of the above also resolve: a constructor bound to a
+   local (`(let [f (->fact :my-type m)] (insert! f))`) and bulk inserts
+   (`(insert-all! (mapv #(->fact :my-type %) xs))`).
+
+   Anything more indirect — a constructor that is built but never inserted,
+or reached only through opaque indirection like `(apply f args)` — stays
+unresolved (or needs an explicit `:clara-rules/insert-types`). Details on
+how each shape is proven are below.
+
 ### The resolution chain
 
 For each callsite argument form (see `clara.server.tools.graph.analyze.callsite`):
