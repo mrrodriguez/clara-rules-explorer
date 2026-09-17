@@ -68,7 +68,7 @@ carries the correct extension even when the source string was synthesized by
 ### 2. Source attribution in analysis output
 
 Every var-usage, namespace-definition, and finding in clj-kondo's output
-carries `:filename`. Downstream code in `analyze.clj` / `analyze.rhs` uses
+carries `:filename`. Downstream code in `analyze.clj` / `analyze.callsite` uses
 this to map back from analysis results to the original source:
 
 - Callsite extraction uses `(:filename usage)` (plus `:row`/`:end-row`) as a
@@ -76,7 +76,7 @@ this to map back from analysis results to the original source:
   callsites.
 - `build-source-loader` checks the synthesized `::combined-sources` by
   namespace symbol first, then falls back to the classpath resource.
-- **Locals tracing** (`analyze.rhs/find-local-binding`) joins
+- **Locals tracing** (`analyze.callsite/find-local-binding`) joins
   `:local-usages` to `:locals` bindings by `:id` *and* `:filename` — kondo's
   local `:id` counters restart per analyzed namespace, so the id alone is not
   unique in a merged analysis.
@@ -140,13 +140,22 @@ that never leak into output.
 
 ### Locals for callsite resolution
 
-`:locals true :local-usages true` are enabled so that `analyze.rhs` can trace
-a local symbol argument at an `insert!`/`retract!` callsite (e.g. a macro
-gensym) to its binding's init form: the `:local-usages` entry at the arg's
-position shares an `:id` with the `:locals` binding in the same file, and the
-init form is read from the source text immediately after the binding symbol.
-The chain then restarts on the traced form (constructor checks, then the
-caller's `:callsite-resolver-fn`).
+`:locals true :local-usages true` are enabled so that `analyze.callsite` can
+trace a local symbol argument at an `insert!`/`retract!` callsite (e.g. a
+macro gensym) to its binding's init form: the `:local-usages` entry at the
+arg's position shares an `:id` with the `:locals` binding in the same file,
+and the init form is read from the source text immediately after the binding
+symbol.  Tracing is multi-hop — each further hop resolves the next local
+within the previous binding's init span (`analyze.callsite/trace-local-form`
+threads the current span), and the chain restarts on the deepest traced form
+(constructor checks, then the caller's `:callsite-resolver-fn`).
+
+The constructor-of-interest pass goes further with an ephemeral *span-set
+expansion* (`analyze.callsite/expanded-regions`): from a boundary argument it
+follows the same `:id` linkage transitively, collecting the source spans of
+every reached binding init, so a constructor reached through a helper in a
+`let` init or a `concat`/`for` closure is still attributed to that argument.
+All linkage stays position-identity based.
 
 Kondo's local `:id` values are **not deterministic across runs** — they are
 per-run counters. They are only ever used for linkage *within* a single
@@ -174,5 +183,5 @@ text.
 | No backing file needed | `:filename` is just an identifier string |
 | Session rules as source of truth | `synthesize-ns-source` + `:ns-source-map` |
 | Hook output vs rule structure | prune-and-replace (source region vs snippet region) |
-| Macro gensym / local args at callsites | `:locals` + `:local-usages` tracing (`analyze.rhs`) |
+| Macro gensym / local args at callsites | `:locals` + `:local-usages` tracing (`analyze.callsite`) |
 | Source-less (eval'd) namespaces | reconstructed `ns` form + synthesized snippets |
