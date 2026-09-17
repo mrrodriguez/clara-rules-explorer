@@ -59,17 +59,27 @@
 ;; Step 3: locals tracing
 ;; ---------------------------------------------------------------------------
 
-(defn- find-local-binding
-  "Finds the kondo `:locals` binding for a local symbol used as a boundary-call
-   argument: the `:local-usages` entry matching the arg symbol within the
-   boundary usage's position span, linked to its binding via kondo's per-ns-run
-   `:id`.  Both lookups are constrained to the boundary usage's `:filename`
-   because ids restart per analyzed namespace and collide in the merged analysis.
+(defn- usage->span
+  "The `{:filename … :start [row col] :end [row col]}` source span of a kondo
+   usage (`:end` exclusive)."
+  [{:keys [filename row col end-row end-col]}]
+  {:filename filename
+   :start [row col]
+   :end [end-row end-col]})
 
-   Uses the precomputed `:local-usages-by-name` / `:locals-by-id` indexes
-   (see `index/AnalysisIndex`) — never scans the full analysis vectors."
-  [{:keys [local-usages-by-name locals-by-id]} usage arg-sym]
-  (let [{:keys [row col end-row end-col filename]} usage
+(defn- find-local-binding
+  "Finds the kondo `:locals` binding for a local symbol used at a known source
+   span: the `:local-usages` entry matching the symbol within `span`, linked to
+   its binding via kondo's per-ns-run `:id`.  Lookups are constrained to the
+   span's `:filename` because ids restart per analyzed namespace and collide in
+   the merged analysis.
+
+   Uses the precomputed `:local-usages-by-name` / `:locals-by-id` indexes (see
+   `index/AnalysisIndex`) — never scans the
+   full analysis vectors."
+  [{:keys [local-usages-by-name locals-by-id]} {:keys [filename start end]} arg-sym]
+  (let [[row col] start
+        [end-row end-col] end
         within-span? (fn [u]
                        (and (= filename (:filename u))
                             (<= row (:row u) end-row)
@@ -82,14 +92,20 @@
       (get locals-by-id [filename id]))))
 
 (defn- trace-local-form
-  "Follows local-symbol arguments to their binding init forms.  Depth-capped.
+  "Follows local-symbol arguments to their binding init forms, depth-capped.
+   `span` is the source span to resolve the current local usage in — the
+   boundary-call span on the first hop, then each traced binding's init span.
    Returns the deepest form reached: the init form of the innermost traced
    local, or `arg-form` itself when it is not a traceable local."
-  [arg-form {:keys [get-lines usage] :as ctx} depth]
+  [arg-form {:keys [get-lines] :as ctx}
+   ns-sym span depth]
   (if (and (symbol? arg-form) (< depth max-resolution-depth))
-    (if-let [binding (find-local-binding ctx usage arg-form)]
-      (if-let [init-form (kondo/read-init-form get-lines (:from usage) binding)]
-        (recur init-form ctx (inc depth))
+    (if-let [binding (find-local-binding ctx span arg-form)]
+      (if-let [init-form (kondo/read-init-form get-lines ns-sym binding)]
+        (if-let [init-span (and (symbol? init-form)
+                                (kondo/init-form-span get-lines ns-sym binding))]
+          (recur init-form ctx ns-sym init-span (inc depth))
+          init-form)
         arg-form)
       arg-form)
     arg-form))
@@ -178,11 +194,10 @@
                         (let [alias-ctx (when alias-context-for
                                           (alias-context-for usage))]
                           (map (fn [arg]
-                                 (let [ctx' (assoc ctx :usage usage :alias-context alias-ctx)]
-                                   {:usage usage
-                                    :arg arg
-                                    :alias-context alias-ctx
-                                    :traced (trace-local-form arg ctx' 0)}))
+                                 {:usage usage
+                                  :arg arg
+                                  :alias-context alias-ctx
+                                  :traced (trace-local-form arg ctx (:from usage) (usage->span usage) 0)})
                                (or (kondo/read-boundary-args usage get-lines) '())))))
               (map-indexed (fn [i ta] (assoc ta :idx i))))
         usages))
@@ -531,9 +546,7 @@
    {:keys [var-usages-by-filename local-usages-by-filename locals-by-id get-lines] :as _ctx}]
   (let [filename (:filename usage)
         ns-sym (:from usage)
-        seed {:filename filename
-              :start [(:row usage) (:col usage)]
-              :end [(:end-row usage) (:end-col usage)]}]
+        seed (usage->span usage)]
     (if (or (nil? filename) (nil? (:row usage)) (nil? (:col usage)))
       {:regions [seed] :var-syms #{}}
       (let [final-regions

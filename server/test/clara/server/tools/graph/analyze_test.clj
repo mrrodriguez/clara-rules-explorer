@@ -299,6 +299,13 @@
             "the callsite arg is the local symbol; resolution traces the binding's init form")
         (is (= [`DocumentCheck] (:clara-rules/insert-types a)))))
 
+    (testing "multi-hop local chain → traced through intermediate locals to the ctor init"
+      (let [a (ann/get-annotation ann `atr/rule-local-multi-hop-ctor)]
+        (is (match? (resolved-detection ns-sym filename "outer" `DocumentCheck)
+                    (:clara-rules/dynamic-insert-types-detected a))
+            "each hop's local is resolved within the previous binding's init span")
+        (is (= [`DocumentCheck] (:clara-rules/insert-types a)))))
+
     (testing "Helper call args are NOT automatically resolved (caller's business)"
       (is (match? (unresolved-detection ns-sym filename "(make-java-document-check-nested ?app-id)")
                   (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `atr/rule-nested-java-helper-call))))

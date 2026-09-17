@@ -237,6 +237,17 @@
   (let [dc (DocumentCheck. ?app-id :pass "let-bound" nil nil)]
     (r/insert! dc)))
 
+(r/defrule rule-local-multi-hop-ctor
+  "Rule J3: RHS let-binds a Java constructor result, rebinds it through two
+   intermediate locals, then inserts the outermost — the boundary chain traces
+   the whole local chain back to the constructor init form."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [dc (DocumentCheck. ?app-id :pass "multi-hop" nil nil)
+        mid dc
+        outer mid]
+    (r/insert! outer)))
+
 (r/defrule rule-insert-mixed-varargs
   "Rule J2: varargs insert where only some args are automatically resolvable —
    yields a :partial aggregate resolution"

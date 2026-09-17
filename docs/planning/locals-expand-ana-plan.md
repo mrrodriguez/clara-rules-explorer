@@ -69,17 +69,23 @@ All linkage stays position-identity based; nothing is persisted
    special-form walker: binder definitions have no usage entries, and
    inner bindings only expand if actually linked. The per-ctor path
    check keeps attribution honest.
-4. **Generalize ownership** (`arg-reaches-ctor?`, same `defn-`,
-   widened predicates):
-   - R1′: ctor usage start-pos ∈ expanded region (subsumes R1 and R3;
-     preserves usage-identity — two identical `->fact` forms never
-     cross-attribute, same guarantee the
-     `rule-ctor-identical-forms` test pins).
-   - R2′: any global var-usage in region whose fq-sym ∈
-     `intermediates` (covers shape 1: `look-up-facts-1` enters the
-     region via its init span; covers
-     `(insert-all! (mapv make-fact xs))` as today).
-   - Per-boundary-arg granularity preserved: expansion is per
+4. **Generalize ownership** (`arg-reaches-ctor?`, same `defn-`) — the
+   span set becomes the *single* ownership mechanism, **replacing** the
+   three legacy routes rather than adding to them:
+   - R1′ (ctor written in the span set) subsumes legacy R1 (inline
+     ctor) and R3 (local bound directly to a ctor): the seed region is
+     the boundary span, and a directly-bound ctor's init span enters the
+     set via one linkage hop. Position identity is preserved — two
+     identical `->fact` forms never cross-attribute, the guarantee the
+     `rule-ctor-identical-forms` test pins.
+   - R2′ (a span-set var-usage names a link on `intermediates`) subsumes
+     legacy R2 (intermediate call inside the boundary span): the seed
+     region contributes the boundary span's own var-usages, and reached
+     init spans contribute `(insert-all! (mapv make-fact xs))` /
+     `(insert-all! looked-up-facts-1)` intermediates.
+   - Legacy R1/R2/R3 predicates, `usage-encloses?`, the `sibling-usages`
+     plumbing, and the now-dead `TracedArg :traced-binding` field are all
+     deleted. Per-boundary-arg granularity preserved: expansion is per
      `TracedArg`, so shape 1's two `insert-all!` calls attribute
      independently (facts-1 chain ≠ facts-2 chain).
 5. **Boundary-chain upgrade** (same pass, small):
@@ -91,6 +97,17 @@ All linkage stays position-identity based; nothing is persisted
    `test-constructor-only-counts-on-an-insert-path` semantics
    unchanged); nested-ctor over-promotion policy unchanged;
    alias-chain callsites still bypass auto-resolution.
+7. **Unify the boundary pass's local tracing** (same span-identity
+   mechanism, discovered during review): the generic chain
+   `trace-local-form` previously resolved a bare local only one hop —
+   `find-local-binding` searched the *boundary* span, so an intermediate
+   local's usage (which sits in the previous binding's init, outside that
+   span) was never found. Fix: `find-local-binding` takes an explicit
+   span and `trace-local-form` threads the current span — the boundary
+   span first, then each traced binding's init span from
+   `init-form-span`. This makes `(let [a (->X) b a c b] (insert! c))`
+   resolve in the generic (non-`:fact-constructors`) chain, and shares
+   `usage->span` with `expanded-regions`.
 
 ## 4. Tests
 
@@ -106,8 +123,16 @@ existing `rule-ctor-bound-to-local` /
 Negative cases:
 
 - Same-named local in a non-flowing branch must not attribute
-  (position-identity).
-- Uninserted `->fact` in an expanded-but-unreached init stays dropped.
+  (position-identity) — `rule-ctor-locals-shadowed-local`.
+- Uninserted `->fact` in an expanded-but-unreached init stays dropped —
+  `rule-ctor-locals-unreached-stays-dropped`.
+
+Generic-boundary multi-hop case (step 7):
+
+- `rule-local-multi-hop-ctor` — a Java ctor bound, rebinding through two
+  intermediate locals, then inserted; the boundary chain traces the whole
+  chain to the ctor init (`DocumentCheck`), asserted in
+  `test-dynamic-insert-types-detected`.
 
 ## 5. Verification
 
@@ -120,6 +145,7 @@ make test lint reflection-check format-check
 
 ## 6. Sequencing
 
-First slice: steps 1–4 for the `:fact-constructors` path only (both
-shapes with `->fact`), leaving step 5 (record/Java boundary-chain
-upgrade) as a follow-up.
+Done: steps 1–4 (with ownership collapsed to the span set as the single
+mechanism) for the `:fact-constructors` path, plus step 7 (multi-hop
+generic boundary chain). Remaining follow-up: step 5 (record/Java
+boundary-chain upgrade for the constructor-of-interest pass).
