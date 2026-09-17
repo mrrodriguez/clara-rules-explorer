@@ -106,7 +106,7 @@
 ;; Call graph + reachability
 ;; ---------------------------------------------------------------------------
 
-(defn- build-graph
+(defn- ->graph
   "Builds the var call graph {caller -> #{callee …}} from kondo `:var-usages`.
    :from-var is a symbol for usages inside a def, or nil/absent for top-level
    forms (clj-kondo never produces the *symbol* `nil`)."
@@ -199,7 +199,7 @@
                  :col (:col usage)})
           nil))))
 
-(defn- build-inserter-type-map
+(defn- ->inserter-type-map
   "Bottom-up: for every var that directly calls a boundary fn, find record
    constructors (`map->X`, `->X`) resolvable to fact types within its
    reachable subtree.  Returns
@@ -253,8 +253,8 @@
                    [v types])))
           direct-callers)))
 
-(defn- build-constructor-callsite-map
-  "Like `build-inserter-type-map`, but for caller-supplied constructors of
+(defn- ->constructor-callsite-map
+  "Like `->inserter-type-map`, but for caller-supplied constructors of
    interest (`fact-constructors` — a vector of {:match-fn :type-resolver-fn}
    specs).  Each usage whose callee matches is paired with the *first*
    matching spec; vector order is precedence.
@@ -284,7 +284,7 @@
 ;; The index
 ;; ---------------------------------------------------------------------------
 
-(defn build-analysis-index
+(defn ->analysis-index
   "Derives the `AnalysisIndex` from a merged clj-kondo `analysis` map.
 
    `fact-constructors` (optional, [{:match-fn :type-resolver-fn} …]) enables
@@ -299,7 +299,7 @@
   [{:keys [analysis get-source productions-by-name fact-constructors
            fallback-type-filter fallback-mode]}]
   (let [usages (:var-usages analysis)
-        graph (build-graph usages)
+        graph (->graph usages)
         usages-by-caller (group-by u/var-usage-caller usages)
         usages-by-callee (group-by u/var-usage-callee usages)
         local-usages-by-name (group-by (juxt :filename :name) (:local-usages analysis))
@@ -312,7 +312,7 @@
         direct-inserters (direct-callers graph insert-fns)
         direct-retractors (direct-callers graph retract-fns)
         resolve-record-type (memoize ctor/resolve-record-type)
-        inserter-type-map (build-inserter-type-map
+        inserter-type-map (->inserter-type-map
                            {:direct-callers direct-inserters
                             :usages-by-caller usages-by-caller
                             :reachable-set reachable-set
@@ -320,7 +320,7 @@
                             :type-filter fallback-type-filter
                             :boundary :insert
                             :mode fallback-mode})
-        retractor-type-map (build-inserter-type-map
+        retractor-type-map (->inserter-type-map
                             {:direct-callers direct-retractors
                              :usages-by-caller usages-by-caller
                              :reachable-set reachable-set
@@ -329,7 +329,7 @@
                              :boundary :retract
                              :mode fallback-mode})
         constructor-callsite-map (when (seq fact-constructors)
-                                   (build-constructor-callsite-map
+                                   (->constructor-callsite-map
                                     (direct-callers graph boundary-fns)
                                     usages-by-caller reachable-set fact-constructors))
         all-boundary-fns (into insert-fns retract-fns)

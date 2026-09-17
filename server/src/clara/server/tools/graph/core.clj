@@ -23,7 +23,7 @@
   "Returns the rulebase's ancestors-fn: the wrapped fn from `:get-alphas-fn`
    metadata when present (Clara's own, which filters internal system facts),
    else `clojure.core/ancestors`.  The fallback matches
-   `clara.server.tools.graph.analyze/build-fallback-type-filter`; only a hand-built rulebase lacks the
+   `clara.server.tools.graph.analyze/->fallback-type-filter`; only a hand-built rulebase lacks the
    meta."
   [session-or-rulebase]
   (or (-> session-or-rulebase utils/get-rulebase :get-alphas-fn meta :ancestors-fn)

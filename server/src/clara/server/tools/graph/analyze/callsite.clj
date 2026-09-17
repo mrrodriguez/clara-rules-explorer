@@ -127,7 +127,7 @@
 ;; Step 5: caller-supplied resolution
 ;; ---------------------------------------------------------------------------
 
-(defn- build-callsite-resolver-context
+(defn- ->callsite-resolver-context
   "Builds the context map handed to `:callsite-resolver-fn` (see
   `clara.server.tools.graph.analyze/->annotations-from-rule-source-analysis`). Alias context keys
   (`:fact-type`/`:fact-type-spec`) are present only for callsites discovered through a var-alias
@@ -172,7 +172,7 @@
            (ctor/resolve-ctor-form (:resolve-record-type ctx) live-ns-sym traced))
          ;; everything else defers to the caller's escape hatch (receives the
          ;; traced form): helper calls, with-meta, var-as-fact, literals.
-         (invoke-callsite-resolver callsite-resolver-fn (build-callsite-resolver-context ctx traced))
+         (invoke-callsite-resolver callsite-resolver-fn (->callsite-resolver-context ctx traced))
          '())]
     (into #{}
           (map normalize-token)
@@ -254,7 +254,7 @@
        (when-let [path (shortest-call-path graph rule-var boundary-in-var)]
          (mapv (fn [v] {:var-name-sym v}) path))))))
 
-(defn- build-boundary-via
+(defn- ->boundary-via
   "The boundary-side `:via` keys shared by both resolution passes: the boundary
    fn and the var the boundary call is written in, plus `:rule-to-boundary-path` when that
    var is not the rule itself (see `memoized-rule-to-boundary-path`)."
@@ -451,9 +451,9 @@
                                                 :ns-name-sym (:from usage)
                                                 :filename (:filename usage)
                                                 :status (if (empty? tokens) :none :full)
-                                                :via (build-boundary-via (u/var-usage-callee usage)
-                                                                         (u/var-usage-caller usage)
-                                                                         (:rule-to-boundary-path-for ctx))}
+                                                :via (->boundary-via (u/var-usage-callee usage)
+                                                                     (u/var-usage-caller usage)
+                                                                     (:rule-to-boundary-path-for ctx))}
                                          (seq tokens)
                                          (assoc :resolved-types (vec (sort-by str tokens)))
 
@@ -603,7 +603,7 @@
   (let [boundary-fn-sym (u/fq-sym (:to boundary-usage) (:name boundary-usage))
         ctor-sym (u/fq-sym (:to ctor-usage) (:name ctor-usage))
         via (when (seq call-path)
-              (assoc (build-boundary-via boundary-fn-sym (first call-path) rule-to-boundary-path-for)
+              (assoc (->boundary-via boundary-fn-sym (first call-path) rule-to-boundary-path-for)
                      :boundary-to-constructor-path (conj (mapv (fn [v] {:var-name-sym v}) call-path)
                                                          {:var-name-sym ctor-sym})))
         arg-form ctor-form
@@ -783,7 +783,7 @@
                   [idx (:provenance (first ds))])))
         (group-by :idx dropped)))
 
-(defn- build-ctor-pass-resolution
+(defn- ->ctor-pass-resolution
   "Shapes the constructor pass's per-match `results` into its
    `CallsiteResolution`: owned results become callsite entries
    (`:callsites`, `:owned-arg-idxs`, `:resolved-types`); dropped results
@@ -805,7 +805,7 @@
 
    `traced-args` — entries from `trace-boundary-args` for this rule var.
    `constructor-ctr-map` — an `index/CtorCallsiteMap`
-     ({inserter-var -> [CtorUsageMatch …]} from `index/build-analysis-index`),
+     ({inserter-var -> [CtorUsageMatch …]} from `index/->analysis-index`),
      scoped to this rule var.
    `ctx` — a `ConstructorCallsiteCtx`.
 
@@ -846,5 +846,5 @@
                                         :inserter-var inserter-var
                                         :ctor-matches ctor-matches))))
                       constructor-ctr-map)]
-    (build-ctor-pass-resolution results)))
+    (->ctor-pass-resolution results)))
 

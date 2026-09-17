@@ -3,7 +3,7 @@
 This document captures the mechanics of how `clara.server.tools.graph.analyze`
 interacts with clj-kondo, why it uses `with-in-str` + `:lint ["-"]` +
 `:filename`, and how the session-based analysis pipeline
-(`analyze-session-rules`) synthesizes sources and prunes hook output.
+(`->rule-source-analysis`) synthesizes sources and prunes hook output.
 
 ## The core pattern
 
@@ -63,7 +63,7 @@ The extension matters:
 
 The resource path (e.g. `clara/server/tools/graph/rules/loan_doc_rules.clj`)
 carries the correct extension even when the source string was synthesized by
-`analyze-session-rules` rather than slurped from a classpath resource.
+`->rule-source-analysis` rather than slurped from a classpath resource.
 
 ### 2. Source attribution in analysis output
 
@@ -74,7 +74,7 @@ this to map back from analysis results to the original source:
 - Callsite extraction uses `(:filename usage)` (plus `:row`/`:end-row`) as a
   key into the source loader to read the text of dynamic constructor
   callsites.
-- `build-source-loader` checks the synthesized `::combined-sources` by
+- `->source-loader` checks the synthesized `::combined-sources` by
   namespace symbol first, then falls back to the classpath resource.
 - **Locals tracing** (`analyze.callsite/find-local-binding`) joins
   `:local-usages` to `:locals` bindings by `:id` *and* `:filename` — kondo's
@@ -99,7 +99,7 @@ The filename is the join key between the analysis output and the source text.
 
 ## The session-based pipeline
 
-`analyze-session-rules` builds the analysis for a Clara session's rules. The
+`->rule-source-analysis` builds the analysis for a Clara session's rules. The
 session rulebase is the source of truth for which rules exist (so macro-emitted
 rules are included); clj-kondo does all Clojure syntax analysis.
 
@@ -114,11 +114,11 @@ imports, etc. reflected) followed by one synthetic snippet per production:
 (defn __clara_explorer_rule_0__ [] <the production's :rhs form>)
 ```
 
-`build-analysis-from-namespaces` accepts `:ns-source-map` — a
+`->rule-source-analysis-from-namespaces` accepts `:ns-source-map` — a
 `{ns-symbol source-string}` map — and analyzes those strings via the same
 stdin pattern (`ns->resource-base` + `.clj` as filename). The synthesized
 sources ride along on the merged analysis under `::combined-sources` so that
-`generate-annotations-from-analysis`'s source loader reads them (not the raw
+`->annotations-from-rule-source-analysis`'s source loader reads them (not the raw
 classpath source) when extracting callsite text.
 
 ### Prune-and-replace
@@ -163,10 +163,10 @@ analysis map, never persisted or compared across runs.
 
 ## Source lookup for dynamic callsite extraction
 
-`build-source-loader` creates a `(fn [ns-sym filename] -> source-str)` that:
+`->source-loader` creates a `(fn [ns-sym filename] -> source-str)` that:
 
 1. Checks the analysis map's `::combined-sources` by namespace symbol
-   (synthesized sources from `analyze-session-rules`).
+   (synthesized sources from `->rule-source-analysis`).
 2. Falls back to `find-ns-resource` (classpath) by namespace symbol.
 
 This layered lookup is why `:filename` is set to the resource path: it gives

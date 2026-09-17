@@ -412,7 +412,7 @@ in the same body — so it is deliberately subordinate:
   `:source-str` and the inserter's boundary fn as `:boundary-var-name-sym`
   when known), so consumers can filter or down-weight them.
 * **Scoped by `:dynamic-type-fallback-resolution`** (option to
-  `generate-annotations-from-analysis`):
+  `->annotations-from-rule-source-analysis`):
   * `:rulebase-fact-types-only` (**default**) — a scanned type is credited
     only when it, **or any of its ancestors via the session's
     `:ancestors-fn`**, appears on the LHS of some rule/query production in
@@ -442,7 +442,7 @@ boundary chain already resolves them precisely at the callsite.
 
 ### `:callsite-resolver-fn`
 
-`generate-annotations-from-analysis` accepts `:callsite-resolver-fn` — an escape hatch invoked once per argument form the automatic chain cannot resolve. It receives:
+`->annotations-from-rule-source-analysis` accepts `:callsite-resolver-fn` — an escape hatch invoked once per argument form the automatic chain cannot resolve. It receives:
 
 | Key | Description |
 |-----|-------------|
@@ -468,7 +468,7 @@ Example — resolving the var-as-fact pattern (`(insert! (var my-fact-fn))`):
       (when-let [t (:type (meta v))]
         {:resolved-types [t]}))))
 
-(analyze/generate-annotations-from-analysis
+(analyze/->annotations-from-rule-source-analysis
  {:analysis analysis
   :session-or-rulebase my-session
   :callsite-resolver-fn var-fact-resolver})
@@ -505,7 +505,7 @@ mapping via `:fact-type-spec-fn`:
    context — and are never automatically resolved. The resolver decides.
 
 ```clojure
-(analyze/generate-annotations-from-analysis
+(analyze/->annotations-from-rule-source-analysis
  {:analysis analysis
   :session-or-rulebase my-session
   :fact-type-spec-fn (fn [t]
@@ -542,7 +542,7 @@ as a **vector of specs**:
 
 When several specs could match the same callee, the **first matching spec in
 vector order wins** — vector order is precedence. Each spec must have both
-keys; `generate-annotations-from-analysis` validates its options map against
+keys; `->annotations-from-rule-source-analysis` validates its options map against
 `GenerateAnnotationsOptions` (`s/validate`) at entry, so a malformed spec
 fails fast.
 
@@ -613,7 +613,7 @@ Used transitively through a helper:
 The analyzer is told about `->fact`:
 
 ```clojure
-(analyze/generate-annotations-from-analysis
+(analyze/->annotations-from-rule-source-analysis
  {:analysis analysis
   :session-or-rulebase my-session
   :fact-constructors
@@ -704,7 +704,7 @@ claims them either.
 
 ### `:ns-var-defs-fn` — helper bodies for source-less rule namespaces
 
-When a rule-owning namespace has no classpath source, `analyze-session-rules`
+When a rule-owning namespace has no classpath source, `->rule-source-analysis`
 reconstructs an `(ns …)` form from the live namespace and emits a
 `(declare …)` for every non-production intern. A `declare` has no body, so the
 analysis sees a helper var the rules call but nothing it calls in turn — a rule
@@ -715,7 +715,7 @@ indistinguishable from one with no output, and is annotated
 The analyzer cannot reconstruct those bodies itself: `ns-interns` yields
 compiled `Var`s, with no source text to read. Only the host that interned the
 vars (a rulebase loader, an authoring system, a generated namespace) still holds
-their definition forms, so `analyze-session-rules` takes them as an input:
+their definition forms, so `->rule-source-analysis` takes them as an input:
 
 ```clojure
 :ns-var-defs-fn
@@ -752,13 +752,13 @@ boundary argument forms out of the synthesized source. `:fact-constructors` and
 `:via` `:boundary-to-constructor-path` through the helper chain.
 
 ```clojure
-(let [analysis (analyze/analyze-session-rules
+(let [analysis (analyze/->rule-source-analysis
                 {:session-or-rulebase session
                  :ns-var-defs-fn (fn [ns-sym]
                                    (when-let [defs (captured-defs ns-sym)]
                                      (mapv (fn [[sym form]] {:name sym :form form})
                                            defs)))})
-      annotations (analyze/generate-annotations-from-analysis
+      annotations (analyze/->annotations-from-rule-source-analysis
                     {:analysis analysis
                      :session-or-rulebase session})]
   …)
@@ -797,16 +797,16 @@ Auto-discover namespaces from the session and generate annotations:
 ```clojure
 (require '[clara.server.tools.graph.analyze :as analyze])
 
-(let [analysis    (analyze/analyze-session-rules
+(let [analysis    (analyze/->rule-source-analysis
                    {:session-or-rulebase my-session
                     :include-ns-prefixes ["my.project.rules"]})
-      annotations (analyze/generate-annotations-from-analysis
+      annotations (analyze/->annotations-from-rule-source-analysis
                    {:analysis analysis
                     :session-or-rulebase my-session})]
   (clojure.pprint/pprint annotations))
 ```
 
-Rules defined by `eval` in namespaces with no classpath source are handled automatically: `analyze-session-rules` reconstructs an `ns` form from the live namespace and synthesizes source from the session's productions.
+Rules defined by `eval` in namespaces with no classpath source are handled automatically: `->rule-source-analysis` reconstructs an `ns` form from the live namespace and synthesizes source from the session's productions.
 
 #### 3. Generate full static analysis from a live session
 
@@ -817,9 +817,9 @@ To get the same output as `--generate-analysis` (annotations + full rulebase ana
          '[clara.server.tools.graph.core :as core]
          '[clojure.pprint :as pprint])
 
-(let [analysis    (analyze/analyze-session-rules
+(let [analysis    (analyze/->rule-source-analysis
                    {:session-or-rulebase my-session})
-      annotations (analyze/generate-annotations-from-analysis
+      annotations (analyze/->annotations-from-rule-source-analysis
                    {:analysis analysis
                     :session-or-rulebase my-session})
       full        (core/rulebase-analysis my-session annotations)]

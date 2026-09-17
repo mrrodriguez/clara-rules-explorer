@@ -54,7 +54,7 @@ All linkage stays position-identity based; nothing is persisted
    per clojure-engineering skill (class-prefixed interop, hints on
    `let` LHS).
 2. **Position indexes** (extend
-   `clara.server.tools.graph.analyze.index/build-analysis-index`):
+   `clara.server.tools.graph.analyze.index/->analysis-index`):
    `var-usages-by-position` (`{[filename row col] → usage}`) plus a
    file-sorted usage list for range queries. `locals-by-id` /
    `local-usages-by-name` already exist.

@@ -23,12 +23,12 @@ generation:
 
 | Entry point | When used | Source of Clojure text |
 |---|---|---|
-| `build-analysis-from-namespaces` | Static / batch analysis of classpath sources | Real `.clj`/`.cljc` files resolved from the classpath |
-| `analyze-session-rules` | Session-based analysis where the rulebase is the source of truth | **Synthesized** source: real classpath source (or reconstructed `ns` form) + one synthetic `(def __clara_explorer_rule_N__ (fn [] …))` snippet per rule RHS |
+| `->rule-source-analysis-from-namespaces` | Static / batch analysis of classpath sources | Real `.clj`/`.cljc` files resolved from the classpath |
+| `->rule-source-analysis` | Session-based analysis where the rulebase is the source of truth | **Synthesized** source: real classpath source (or reconstructed `ns` form) + one synthetic `(def __clara_explorer_rule_N__ (fn [] …))` snippet per rule RHS |
 
 Both converge on a single merged **clj-kondo analysis map** (the same map
 shape that `clj-kondo.core/run!` returns), which is then passed to
-`generate-annotations-from-analysis`.
+`->annotations-from-rule-source-analysis`.
 
 ### Why synthesize sources for session rules?
 
@@ -161,7 +161,7 @@ Built from clj-kondo's `:var-usages` vector — a flat list of every
 ;;  my.rules/helper   #{clara.rules/insert! ...}}
 ```
 
-**The graph is built once** in `index/build-analysis-index` and shared across
+**The graph is built once** in `index/->analysis-index` and shared across
 every per-rule pass.
 
 ### 2.5 Reachable Set
@@ -339,7 +339,7 @@ call chain, and any boundary callsites found through that chain carry
 
 ## 3. The Three Phases
 
-### Phase 0: Preparation (`generate-annotations-from-analysis`)
+### Phase 0: Preparation (`->annotations-from-rule-source-analysis`)
 
 ```
 Input: merged kondo analysis + options
@@ -352,7 +352,7 @@ Input: merged kondo analysis + options
   └─→ Phase 1
 ```
 
-### Phase 1: Index Build (`index/build-analysis-index`)
+### Phase 1: Index Build (`index/->analysis-index`)
 
 Builds **every precomputed view** over the merged analysis exactly once.
 Nothing here is rule-specific.
@@ -361,7 +361,7 @@ Nothing here is rule-specific.
 Merged kondo analysis
   │
   ├─ :var-usages
-  │   ├─ build-graph          → {caller #{callee …}}
+  │   ├─ ->graph          → {caller #{callee …}}
   │   ├─ group-by caller       → usages-by-caller
   │   ├─ group-by callee       → usages-by-callee
   │   └─ group-by filename, sort [row col] → var-usages-by-filename
@@ -378,11 +378,11 @@ Merged kondo analysis
   │   ├─ direct-callers(insert-fns) → direct-inserters
   │   ├─ direct-callers(retract-fns)→ direct-retractors
   │   │
-  │   ├─ build-inserter-type-map   → {direct-inserter → {Type {:usage ...}}}
-  │   ├─ build-inserter-type-map   → {direct-retractor → {Type {:usage ...}}}
+  │   ├─ ->inserter-type-map   → {direct-inserter → {Type {:usage ...}}}
+  │   ├─ ->inserter-type-map   → {direct-retractor → {Type {:usage ...}}}
   │   │   (retractor-type-map)
   │   │
-  │   └─ build-constructor-callsite-map → {inserter-var → [CtorUsageMatch …]}
+  │   └─ ->constructor-callsite-map → {inserter-var → [CtorUsageMatch …]}
   │       (only when :fact-constructors supplied)
   │
   └─ Utility fns (memoized per run):
@@ -454,9 +454,9 @@ Per-rule annotations
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                        ENTRY POINTS                                       │
 │                                                                          │
-│  build-analysis-from-namespaces          analyze-session-rules           │
+│  ->rule-source-analysis-from-namespaces  ->rule-source-analysis          │
 │  ┌──────────────────────────┐            ┌───────────────────────────┐   │
-│  │ Resolve classpath deps   │            │ session-rules-by-ns        │   │
+│  │ Resolve classpath deps   │            │ rulebase-rules-by-ns       │   │
 │  │ Run kondo on each .clj   │            │ synthesize-ns-source per ns│   │
 │  │ Merge analyses           │            │  → real source + snippets   │   │
 │  └──────────┬───────────────┘            │ analyze via kondo stdin     │   │
@@ -470,10 +470,10 @@ Per-rule annotations
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                     generate-annotations-from-analysis                    │
+│                 ->annotations-from-rule-source-analysis                  │
 │                                                                          │
 │  Phase 0 ──── Preparation                                                │
-│  Phase 1 ──── build-analysis-index → AnalysisIndex                       │
+│  Phase 1 ──── ->analysis-index → AnalysisIndex                       │
 │  Phase 2 ──── for each rule: infer-annotation-for-var                     │
 │  Phase 3 ──── normalize-annotations                                      │
 │                                                                          │
@@ -561,8 +561,8 @@ emitted.  Every Priority 2 entry also gains a boundary-side `:via`
 
 | Concept | File |
 |---|---|
-| Entry points, prune-and-replace, `extract-insert-types`, `infer-annotation-for-var`, `generate-annotations-from-analysis` | `analyze.clj` |
-| Call graph, reachability, direct-inserters, inserter-type-map, constructor-callsite-map, `build-analysis-index` | `analyze/index.clj` |
+| Entry points, prune-and-replace, `extract-insert-types`, `infer-annotation-for-var`, `->annotations-from-rule-source-analysis` | `analyze.clj` |
+| Call graph, reachability, direct-inserters, inserter-type-map, constructor-callsite-map, `->analysis-index` | `analyze/index.clj` |
 | Boundary-call argument tracing, locals resolution, `resolve-boundary-callsites`, `resolve-constructor-callsites` | `analyze/callsite.clj` |
 | Record/Java constructor recognition, `resolve-record-type` | `analyze/ctor.clj` |
 | Source synthesis (`synthesize-ns-source`), namespace reconstruction | `analyze/synth.clj` |
