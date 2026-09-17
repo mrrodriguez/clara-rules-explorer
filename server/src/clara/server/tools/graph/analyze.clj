@@ -219,7 +219,7 @@
         ;; each boundary-holding var once per rule (callsites cluster in a few).
         ctx (assoc ctx
                    :rule-var var-name
-                   :rule-to-boundary-path-for (callsite/rule-to-boundary-path-for-memo graph var-name))
+                   :rule-to-boundary-path-for (callsite/memoized-rule-to-boundary-path graph var-name))
         boundary-usages
         (into []
               (comp (mapcat #(get boundary-usages-by-caller %))
@@ -542,7 +542,7 @@
                 ;; Resource not found on classpath, skip
                 (recur remaining (conj processed ns-sym) merged-analysis)))))))))
 
-(defn- build-source-loader
+(defn- ->source-loader
   "Returns a `(fn [ns-sym filename] -> source-str)` that caches source lookups.
    `combined-sources` maps `ns-sym` -> synthesized source (real source + rule
    snippets, see `synth/synthesize-ns-source`) and takes precedence over
@@ -566,7 +566,7 @@
             (swap! cache assoc k source)
             source))))))
 
-(defn- build-lines-loader
+(defn- ->lines-loader
   "Returns a (fn [ns-sym filename] -> lines-vec) that caches str/split-lines
    by the same key as get-source.  Source strings are fetched via get-source
    (already memoized by ns-sym)."
@@ -580,16 +580,16 @@
                 (swap! cache assoc k ls)
                 ls)))))))
 
-(defn- build-infer-ctx
+(defn- ->infer-ctx
   "Builds the context map passed to `infer-annotation-for-var`: the shared
    `index/AnalysisIndex` plus the caller-supplied resolution hooks, the
    var-alias linkage, the heuristic-fallback mode, and source-reading helpers.
 
-   `build-lines-loader` creates a memoized `get-lines` from `get-source`;
+   `->lines-loader` creates a memoized `get-lines` from `get-source`;
    `read-ctor-form` is a closure over `get-lines` for reading constructor
    forms by kondo usage position."
   [{:keys [index callsite-resolver-fn alias-by-rule fallback-mode get-source]}]
-  (let [get-lines (build-lines-loader get-source)
+  (let [get-lines (->lines-loader get-source)
         read-ctor-form (fn [ctor-usage] (kondo/read-ctor-form ctor-usage get-lines))]
     (assoc index
            :get-lines get-lines
@@ -647,7 +647,7 @@
     (.getName ^Class t)
     (str t)))
 
-(defn- build-fallback-type-filter
+(defn- ->fallback-type-filter
   "Builds the (fn [{:keys [type]}] -> bool) for `:rulebase-fact-types-only`
    mode: a scanned record-ctor type is admitted when it — or any of its
    ancestors via the session's `:ancestors-fn` — appears as a fact type on
@@ -770,7 +770,7 @@
         ;; arrives before being threaded down: no caller can forget to, and
         ;; everything below keeps its "a `:match-fn` is a fn" invariant.
         fact-constructors (normalize-fact-constructor-specs (:fact-constructors options))
-        get-source (build-source-loader (::combined-sources rule-source-analysis))
+        get-source (->source-loader (::combined-sources rule-source-analysis))
         rulebase (graph-utils/get-rulebase session-or-rulebase)
         productions (mapv #(update % :lhs conditions/normalize-lhs)
                           (:productions rulebase))
@@ -778,7 +778,7 @@
                         (vals (:query-nodes rulebase)))
         fallback-mode (or dynamic-type-fallback-resolution :rulebase-fact-types-only)
         fallback-type-filter (when (= :rulebase-fact-types-only fallback-mode)
-                               (build-fallback-type-filter rulebase productions query-lhs))
+                               (->fallback-type-filter rulebase productions query-lhs))
         productions-by-name (into {}
                                   (map (fn [p] [(normalize-fq-name-key (:name p)) p]))
                                   productions)
@@ -795,7 +795,7 @@
         rule-source-analysis (cond-> rule-source-analysis
                                (seq alias-by-rule)
                                (update :var-usages into (mapcat :usages) (vals alias-by-rule)))
-        index (index/build-analysis-index
+        index (index/->analysis-index
                {:analysis rule-source-analysis
                 :get-source get-source
                 :productions-by-name productions-by-name
@@ -804,7 +804,7 @@
                 :fallback-mode fallback-mode})
         project-vars (keys (:graph index))
         var-seq (or effective-filter project-vars)
-        infer-ctx (build-infer-ctx
+        infer-ctx (->infer-ctx
                    {:index index
                     :callsite-resolver-fn callsite-resolver-fn
                     :alias-by-rule alias-by-rule

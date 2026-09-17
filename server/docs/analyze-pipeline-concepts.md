@@ -23,12 +23,12 @@ generation:
 
 | Entry point | When used | Source of Clojure text |
 |---|---|---|
-| `build-analysis-from-namespaces` | Static / batch analysis of classpath sources | Real `.clj`/`.cljc` files resolved from the classpath |
-| `analyze-session-rules` | Session-based analysis where the rulebase is the source of truth | **Synthesized** source: real classpath source (or reconstructed `ns` form) + one synthetic `(def __clara_explorer_rule_N__ (fn [] …))` snippet per rule RHS |
+| `->rule-source-analysis-from-namespaces` | Static / batch analysis of classpath sources | Real `.clj`/`.cljc` files resolved from the classpath |
+| `->rule-source-analysis` | Session-based analysis where the rulebase is the source of truth | **Synthesized** source: real classpath source (or reconstructed `ns` form) + one synthetic `(def __clara_explorer_rule_N__ (fn [] …))` snippet per rule RHS |
 
 Both converge on a single merged **clj-kondo analysis map** (the same map
 shape that `clj-kondo.core/run!` returns), which is then passed to
-`generate-annotations-from-analysis`.
+`->annotations-from-rule-source-analysis`.
 
 ### Why synthesize sources for session rules?
 
@@ -161,7 +161,7 @@ Built from clj-kondo's `:var-usages` vector — a flat list of every
 ;;  my.rules/helper   #{clara.rules/insert! ...}}
 ```
 
-**The graph is built once** in `index/build-analysis-index` and shared across
+**The graph is built once** in `index/->analysis-index` and shared across
 every per-rule pass.
 
 ### 2.5 Reachable Set
@@ -188,13 +188,15 @@ A **callsite** is one argument form at a boundary call — a single `(insert!
 locals-traced if the argument is a local symbol, and run through the
 resolution chain to determine what fact type(s) it produces.
 
-A callsite ends up in one of three statuses:
+A callsite ends up in one of two statuses (the analyzer emits only these):
 
 | Status | Meaning |
 |---|---|
-| `:resolved` | Exactly one fact type was determined |
-| `:resolved-multi` | Multiple fact types (e.g. a cond branch producing different types) |
-| `:unresolved` | The chain could not determine the type → handed to `:callsite-resolver-fn` |
+| `:full` | The argument resolved to fact-type token(s) |
+| `:none` | The chain could not determine a type → handed to `:callsite-resolver-fn` (or left unresolved) |
+
+The detection map's aggregate `:resolution` is `:full` (all callsites `:full`),
+`:none` (all `:none`), `:partial` (a mix), or absent (no callsites).
 
 Each callsite carries provenance:
 
@@ -203,7 +205,7 @@ Each callsite carries provenance:
 {:source-str "(insert! (->MyFact x))"
  :ns-name-sym my.rules
  :filename "my/rules.clj"
- :status :resolved
+ :status :full
  :resolved-types [my_rules.MyFact]       ;; fq class-name symbols
  :constructor-sym my.rules/->MyFact
  :via {:boundary-var-name-sym clara.rules/insert!
@@ -228,8 +230,9 @@ Before any resolution pass, boundary-call argument forms are **traced**:
 1. **Read** the argument form from source at kondo's position span
    (`analyze.kondo/read-boundary-args`).
 2. If the argument is a **local symbol**, follow kondo's `:local-usages` →
-   `:locals` linkage to find its binding's init form, then restart the chain
-   on that form (depth-capped at 8).
+   `:locals` linkage to its binding's init form; each further hop resolves the
+   next local within the previous binding's init span (multi-hop,
+   depth-capped at 8).  The deepest form is what the chain restarts on.
 
 ```clojure
 ;; Example: local tracing
@@ -254,7 +257,7 @@ Argument form
   ├─ Record ctor?  (->X …) or (map->X …)   → resolve in live ns → fq class name
   ├─ Java ctor?    (X. …) (new X …) (X/new) → resolve class → fq class name
   ├─ Local symbol?                          → trace to init form → restart chain
-  └─ Otherwise                              → caller's :callsite-resolver-fn → :unresolved
+  └─ Otherwise                              → caller's :callsite-resolver-fn → :none
 ```
 
 This chain is implemented in `analyze.callsite` and `analyze.ctor`.  It only
@@ -336,7 +339,7 @@ call chain, and any boundary callsites found through that chain carry
 
 ## 3. The Three Phases
 
-### Phase 0: Preparation (`generate-annotations-from-analysis`)
+### Phase 0: Preparation (`->annotations-from-rule-source-analysis`)
 
 ```
 Input: merged kondo analysis + options
@@ -349,7 +352,7 @@ Input: merged kondo analysis + options
   └─→ Phase 1
 ```
 
-### Phase 1: Index Build (`index/build-analysis-index`)
+### Phase 1: Index Build (`index/->analysis-index`)
 
 Builds **every precomputed view** over the merged analysis exactly once.
 Nothing here is rule-specific.
@@ -358,12 +361,14 @@ Nothing here is rule-specific.
 Merged kondo analysis
   │
   ├─ :var-usages
-  │   ├─ build-graph          → {caller #{callee …}}
+  │   ├─ ->graph          → {caller #{callee …}}
   │   ├─ group-by caller       → usages-by-caller
-  │   └─ group-by callee       → usages-by-callee
+  │   ├─ group-by callee       → usages-by-callee
+  │   └─ group-by filename, sort [row col] → var-usages-by-filename
   │
   ├─ :local-usages
-  │   └─ group-by [filename name] → local-usages-by-name
+  │   ├─ group-by [filename name] → local-usages-by-name
+  │   └─ group-by filename, sort [row col] → local-usages-by-filename
   │
   ├─ :locals
   │   └─ index by [filename id]   → locals-by-id
@@ -373,11 +378,11 @@ Merged kondo analysis
   │   ├─ direct-callers(insert-fns) → direct-inserters
   │   ├─ direct-callers(retract-fns)→ direct-retractors
   │   │
-  │   ├─ build-inserter-type-map   → {direct-inserter → {Type {:usage ...}}}
-  │   ├─ build-inserter-type-map   → {direct-retractor → {Type {:usage ...}}}
+  │   ├─ ->inserter-type-map   → {direct-inserter → {Type {:usage ...}}}
+  │   ├─ ->inserter-type-map   → {direct-retractor → {Type {:usage ...}}}
   │   │   (retractor-type-map)
   │   │
-  │   └─ build-constructor-callsite-map → {inserter-var → [CtorUsageMatch …]}
+  │   └─ ->constructor-callsite-map → {inserter-var → [CtorUsageMatch …]}
   │       (only when :fact-constructors supplied)
   │
   └─ Utility fns (memoized per run):
@@ -449,9 +454,9 @@ Per-rule annotations
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                        ENTRY POINTS                                       │
 │                                                                          │
-│  build-analysis-from-namespaces          analyze-session-rules           │
+│  ->rule-source-analysis-from-namespaces  ->rule-source-analysis          │
 │  ┌──────────────────────────┐            ┌───────────────────────────┐   │
-│  │ Resolve classpath deps   │            │ session-rules-by-ns        │   │
+│  │ Resolve classpath deps   │            │ rulebase-rules-by-ns       │   │
 │  │ Run kondo on each .clj   │            │ synthesize-ns-source per ns│   │
 │  │ Merge analyses           │            │  → real source + snippets   │   │
 │  └──────────┬───────────────┘            │ analyze via kondo stdin     │   │
@@ -465,10 +470,10 @@ Per-rule annotations
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                     generate-annotations-from-analysis                    │
+│                 ->annotations-from-rule-source-analysis                  │
 │                                                                          │
 │  Phase 0 ──── Preparation                                                │
-│  Phase 1 ──── build-analysis-index → AnalysisIndex                       │
+│  Phase 1 ──── ->analysis-index → AnalysisIndex                       │
 │  Phase 2 ──── for each rule: infer-annotation-for-var                     │
 │  Phase 3 ──── normalize-annotations                                      │
 │                                                                          │
@@ -485,10 +490,10 @@ a single vector across all analyzed namespaces.
 
 | Kondo key | Shape | What we build from it |
 |---|---|---|
-| `:var-usages` | `[{:from ns, :from-var sym, :to ns, :name sym, :row n, …}]` | Call graph, usages-by-caller index, usages-by-callee index |
+| `:var-usages` | `[{:from ns, :from-var sym, :to ns, :name sym, :row n, …}]` | Call graph, usages-by-caller / usages-by-callee indexes, var-usages-by-filename (positional, sorted by `[row col]`) |
 | `:var-definitions` | `[{:ns ns, :name sym, :row n, …}]` | (Used by prune-and-replace) |
 | `:locals` | `[{:id n, :name sym, :row n, :end-col n, :filename s, …}]` | locals-by-id index `{[filename id] → binding}` |
-| `:local-usages` | `[{:id n, :name sym, :row n, :filename s, …}]` | local-usages-by-name index `{[filename name] → [usage …]}` |
+| `:local-usages` | `[{:id n, :name sym, :row n, :filename s, …}]` | local-usages-by-name `{[filename name] → [usage …]}` + local-usages-by-filename (positional, sorted by `[row col]`) |
 
 **Why we can't scan `:var-usages` per rule:**  At real-world scale (thousands
 of rules × tens of thousands of usages), scanning the full vector per rule is
@@ -500,6 +505,11 @@ local `:id` counters restart per analyzed namespace and are not deterministic
 across runs.  The `filename` disambiguates collisions in the merged analysis.
 The id values are only used for linkage *within* a single analysis map, never
 persisted or compared across runs.
+
+**Why `*-by-filename` positional indexes exist:** span-set expansion
+(`analyze.callsite/arg-span-set`) asks "which var/local usages start inside
+this source span", so each file's usages are sorted by `[row col]` for binary-
+search + contiguous range queries — never a scan of the merged vector.
 
 ---
 
@@ -551,8 +561,8 @@ emitted.  Every Priority 2 entry also gains a boundary-side `:via`
 
 | Concept | File |
 |---|---|
-| Entry points, prune-and-replace, `extract-insert-types`, `infer-annotation-for-var`, `generate-annotations-from-analysis` | `analyze.clj` |
-| Call graph, reachability, direct-inserters, inserter-type-map, constructor-callsite-map, `build-analysis-index` | `analyze/index.clj` |
+| Entry points, prune-and-replace, `extract-insert-types`, `infer-annotation-for-var`, `->annotations-from-rule-source-analysis` | `analyze.clj` |
+| Call graph, reachability, direct-inserters, inserter-type-map, constructor-callsite-map, `->analysis-index` | `analyze/index.clj` |
 | Boundary-call argument tracing, locals resolution, `resolve-boundary-callsites`, `resolve-constructor-callsites` | `analyze/callsite.clj` |
 | Record/Java constructor recognition, `resolve-record-type` | `analyze/ctor.clj` |
 | Source synthesis (`synthesize-ns-source`), namespace reconstruction | `analyze/synth.clj` |

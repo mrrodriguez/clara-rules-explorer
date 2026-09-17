@@ -93,6 +93,86 @@
     (catch Throwable _
       nil)))
 
+(defn- read-one-form-char-count
+  "Reads a single form from the head of string `s`, returning the number of
+   chars consumed (trailing whitespace/comments excluded). Nil when no
+   complete form reads."
+  [^String s]
+  (try
+    (let [consumed (atom 0)
+          rdr (proxy [java.io.PushbackReader] [(java.io.StringReader. s)]
+                (read
+                  ([]
+                   (let [c (proxy-super read)]
+                     (when-not (= -1 c)
+                       (swap! consumed inc))
+                     c))
+                  ([cbuf]
+                   (let [^chars buf cbuf
+                         n (proxy-super read buf)]
+                     (when (pos? n)
+                       (swap! consumed + n))
+                     n))
+                  ([cbuf off len]
+                   (let [^chars buf cbuf
+                         o (int off)
+                         l (int len)
+                         n (proxy-super read buf o l)]
+                     (when (pos? n)
+                       (swap! consumed + n))
+                     n)))
+                (unread
+                  ([c-or-buf]
+                   (if (number? c-or-buf)
+                     (do (proxy-super unread (int c-or-buf))
+                         (swap! consumed dec))
+                     (let [^chars buf c-or-buf]
+                       (proxy-super unread buf)
+                       (swap! consumed - (alength buf))))
+                   nil)
+                  ([cbuf off len]
+                   (let [^chars buf cbuf
+                         o (int off)
+                         l (int len)]
+                     (proxy-super unread buf o l)
+                     (swap! consumed - l)
+                     nil))))]
+      (clojure.lang.LispReader/read rdr nil)
+      @consumed)
+    (catch Throwable
+           _
+      nil)))
+
+(defn- advance-pos-by-count
+  "Advances a 1-indexed `[row col]` forward by `n` chars of string `s`."
+  [[row col] ^String s n]
+  (loop [r row c col i 0]
+    (if (or (>= i n) (>= i (.length s)))
+      [r c]
+      (if (= \newline (.charAt s (int i)))
+        (recur (inc r) 1 (inc i))
+        (recur r (inc c) (inc i))))))
+
+(defn init-form-span
+  "The `{:filename … :start [row col] :end [row col]}` span (1-indexed,
+   `:end` exclusive) of the init form following a `:locals` binding symbol.
+   Nil when the span cannot be determined."
+  [get-lines ns-sym {:keys [row end-col filename] :as _binding}]
+  (when-let [start (init-form-start get-lines ns-sym {:row row :end-col end-col})]
+    (try
+      (when-let [lines (get-lines ns-sym nil)]
+        (let [[sr sc] start
+              line (nth lines (dec sr) nil)
+              tail (when line
+                     (str/join "\n" (cons (subs line (dec sc)) (drop sr lines))))]
+          (when-let [n (and tail (read-one-form-char-count tail))]
+            {:filename filename
+             :start start
+             :end (advance-pos-by-count start tail n)})))
+      (catch Throwable
+             _
+        nil))))
+
 (defn read-ctor-form
   "The constructor call form as written, read from source at the usage's span."
   [ctor-usage get-lines]

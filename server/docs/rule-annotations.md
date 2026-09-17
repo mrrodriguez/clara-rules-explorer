@@ -281,12 +281,68 @@ is still in the RHS, but the constructor lives one or more helpers down:
      (do-insert! data))
    ```
 
-   Two small variations of the above also resolve: a constructor bound to a
-   local (`(let [f (->fact :my-type m)] (insert! f))`) and bulk inserts
-   (`(insert-all! (mapv #(->fact :my-type %) xs))`).
+Locals are followed through their *transitive* closure, so the shallow
+variations above — a constructor bound to a local
+(`(let [f (->fact :my-type m)] (insert! f))`) and bulk inserts
+(`(insert-all! (mapv #(->fact :my-type %) xs))`) — generalize:
 
-   Anything more indirect — a constructor that is built but never inserted,
-or reached only through opaque indirection like `(apply f args)` — stays
+4. **A chain of locals.** Each hop resolves within the previous binding's
+   init span, all the way back to the constructor (the same chain also
+   resolves a plain record/Java ctor with no configuration):
+
+   ```clojure
+   (defrule my-rule
+     ...
+     =>
+     (let [f (->fact :my-type m)
+           g f
+           h g]
+       (insert! h)))
+   ```
+
+5. **A helper call in a `let` init.** The insert arg is a local whose init
+   is a helper call; the constructor lives inside that helper:
+
+   ```clojure
+   (defn look-up-facts [m]
+     [(->fact :my-type m)])
+
+   (defrule my-rule
+     ...
+     =>
+     (let [facts (look-up-facts m)]
+       (insert-all! facts)))
+   ```
+
+6. **Seq combinators close over the constructor.** `concat`/`for` bodies
+   holding the constructor all count as reached from the one insert:
+
+   ```clojure
+   (defrule my-rule
+     ...
+     =>
+     (let [as (for [x xs] (->fact :my-type {:id x}))
+           bs (for [y ys] (->fact :my-type {:id y}))]
+       (insert-all! (concat as bs))))
+   ```
+
+   All of these are decided by *position identity*, never by the text of a
+   form — so a same-named local in a branch that never flows into the insert
+   still does **not** attribute:
+
+   ```clojure
+   (defrule my-rule
+     ...
+     =>
+     (let [f (look-up-facts m)]          ; reaches ->fact :my-type
+       (insert-all! f)
+       (let [f (->fact :other-type m)]   ; shadowed, never inserted
+         (println f))))
+   ;; :my-type resolves; :other-type stays dropped
+   ```
+
+Anything more indirect — a constructor that is built but never inserted, or
+reached only through opaque indirection like `(apply f args)` — stays
 unresolved (or needs an explicit `:clara-rules/insert-types`). Details on
 how each shape is proven are below.
 
@@ -356,7 +412,7 @@ in the same body — so it is deliberately subordinate:
   `:source-str` and the inserter's boundary fn as `:boundary-var-name-sym`
   when known), so consumers can filter or down-weight them.
 * **Scoped by `:dynamic-type-fallback-resolution`** (option to
-  `generate-annotations-from-analysis`):
+  `->annotations-from-rule-source-analysis`):
   * `:rulebase-fact-types-only` (**default**) — a scanned type is credited
     only when it, **or any of its ancestors via the session's
     `:ancestors-fn`**, appears on the LHS of some rule/query production in
@@ -386,7 +442,7 @@ boundary chain already resolves them precisely at the callsite.
 
 ### `:callsite-resolver-fn`
 
-`generate-annotations-from-analysis` accepts `:callsite-resolver-fn` — an escape hatch invoked once per argument form the automatic chain cannot resolve. It receives:
+`->annotations-from-rule-source-analysis` accepts `:callsite-resolver-fn` — an escape hatch invoked once per argument form the automatic chain cannot resolve. It receives:
 
 | Key | Description |
 |-----|-------------|
@@ -412,7 +468,7 @@ Example — resolving the var-as-fact pattern (`(insert! (var my-fact-fn))`):
       (when-let [t (:type (meta v))]
         {:resolved-types [t]}))))
 
-(analyze/generate-annotations-from-analysis
+(analyze/->annotations-from-rule-source-analysis
  {:analysis analysis
   :session-or-rulebase my-session
   :callsite-resolver-fn var-fact-resolver})
@@ -449,7 +505,7 @@ mapping via `:fact-type-spec-fn`:
    context — and are never automatically resolved. The resolver decides.
 
 ```clojure
-(analyze/generate-annotations-from-analysis
+(analyze/->annotations-from-rule-source-analysis
  {:analysis analysis
   :session-or-rulebase my-session
   :fact-type-spec-fn (fn [t]
@@ -486,7 +542,7 @@ as a **vector of specs**:
 
 When several specs could match the same callee, the **first matching spec in
 vector order wins** — vector order is precedence. Each spec must have both
-keys; `generate-annotations-from-analysis` validates its options map against
+keys; `->annotations-from-rule-source-analysis` validates its options map against
 `GenerateAnnotationsOptions` (`s/validate`) at entry, so a malformed spec
 fails fast.
 
@@ -557,7 +613,7 @@ Used transitively through a helper:
 The analyzer is told about `->fact`:
 
 ```clojure
-(analyze/generate-annotations-from-analysis
+(analyze/->annotations-from-rule-source-analysis
  {:analysis analysis
   :session-or-rulebase my-session
   :fact-constructors
@@ -648,7 +704,7 @@ claims them either.
 
 ### `:ns-var-defs-fn` — helper bodies for source-less rule namespaces
 
-When a rule-owning namespace has no classpath source, `analyze-session-rules`
+When a rule-owning namespace has no classpath source, `->rule-source-analysis`
 reconstructs an `(ns …)` form from the live namespace and emits a
 `(declare …)` for every non-production intern. A `declare` has no body, so the
 analysis sees a helper var the rules call but nothing it calls in turn — a rule
@@ -659,7 +715,7 @@ indistinguishable from one with no output, and is annotated
 The analyzer cannot reconstruct those bodies itself: `ns-interns` yields
 compiled `Var`s, with no source text to read. Only the host that interned the
 vars (a rulebase loader, an authoring system, a generated namespace) still holds
-their definition forms, so `analyze-session-rules` takes them as an input:
+their definition forms, so `->rule-source-analysis` takes them as an input:
 
 ```clojure
 :ns-var-defs-fn
@@ -696,13 +752,13 @@ boundary argument forms out of the synthesized source. `:fact-constructors` and
 `:via` `:boundary-to-constructor-path` through the helper chain.
 
 ```clojure
-(let [analysis (analyze/analyze-session-rules
+(let [analysis (analyze/->rule-source-analysis
                 {:session-or-rulebase session
                  :ns-var-defs-fn (fn [ns-sym]
                                    (when-let [defs (captured-defs ns-sym)]
                                      (mapv (fn [[sym form]] {:name sym :form form})
                                            defs)))})
-      annotations (analyze/generate-annotations-from-analysis
+      annotations (analyze/->annotations-from-rule-source-analysis
                     {:analysis analysis
                      :session-or-rulebase session})]
   …)
@@ -741,16 +797,16 @@ Auto-discover namespaces from the session and generate annotations:
 ```clojure
 (require '[clara.server.tools.graph.analyze :as analyze])
 
-(let [analysis    (analyze/analyze-session-rules
+(let [analysis    (analyze/->rule-source-analysis
                    {:session-or-rulebase my-session
                     :include-ns-prefixes ["my.project.rules"]})
-      annotations (analyze/generate-annotations-from-analysis
+      annotations (analyze/->annotations-from-rule-source-analysis
                    {:analysis analysis
                     :session-or-rulebase my-session})]
   (clojure.pprint/pprint annotations))
 ```
 
-Rules defined by `eval` in namespaces with no classpath source are handled automatically: `analyze-session-rules` reconstructs an `ns` form from the live namespace and synthesizes source from the session's productions.
+Rules defined by `eval` in namespaces with no classpath source are handled automatically: `->rule-source-analysis` reconstructs an `ns` form from the live namespace and synthesizes source from the session's productions.
 
 #### 3. Generate full static analysis from a live session
 
@@ -761,9 +817,9 @@ To get the same output as `--generate-analysis` (annotations + full rulebase ana
          '[clara.server.tools.graph.core :as core]
          '[clojure.pprint :as pprint])
 
-(let [analysis    (analyze/analyze-session-rules
+(let [analysis    (analyze/->rule-source-analysis
                    {:session-or-rulebase my-session})
-      annotations (analyze/generate-annotations-from-analysis
+      annotations (analyze/->annotations-from-rule-source-analysis
                    {:analysis analysis
                     :session-or-rulebase my-session})
       full        (core/rulebase-analysis my-session annotations)]

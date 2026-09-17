@@ -87,6 +87,11 @@
    ;; [filename id] -> :locals binding (open kondo map; keys of interest:
    ;; :id :row :end-col :filename)
    :locals-by-id          {[s/Any] s/Any}
+   ;; filename -> var-usages sorted by [row col], for span-region range
+   ;; queries (see `clara.server.tools.graph.analyze.callsite/arg-span-set`)
+   :var-usages-by-filename   {s/Str [u/KondoVarUsage]}
+   ;; filename -> :local-usages entries sorted by [row col]
+   :local-usages-by-filename {s/Str [u/KondoLocalUsage]}
    :reachable-set         (s/=> #{s/Symbol} s/Symbol)
    :direct-inserters      #{s/Symbol}
    :direct-retractors     #{s/Symbol}
@@ -101,7 +106,7 @@
 ;; Call graph + reachability
 ;; ---------------------------------------------------------------------------
 
-(defn- build-graph
+(defn- ->graph
   "Builds the var call graph {caller -> #{callee …}} from kondo `:var-usages`.
    :from-var is a symbol for usages inside a def, or nil/absent for top-level
    forms (clj-kondo never produces the *symbol* `nil`)."
@@ -128,6 +133,18 @@
             next-vars (set (mapcat graph traversable))
             unvisited (set/difference next-vars seen)]
         (recur seen unvisited)))))
+
+(defn- usages-by-filename
+  "Groups kondo usages by `:filename`, each group sorted by `[row col]`.
+   Entries missing a position sort first; entries missing a filename are
+   dropped (span queries key on filename and could never reach them)."
+  [usages]
+  (->> usages
+       (remove #(nil? (:filename %)))
+       (group-by :filename)
+       (map (fn [[f us]]
+              [f (sort-by (juxt #(or (:row %) 0) #(or (:col %) 0)) us)]))
+       (into {})))
 
 (defn- memoized-reachability
   "Returns a (fn [var-sym] -> reachable-set) memoized per index build — every
@@ -182,7 +199,7 @@
                  :col (:col usage)})
           nil))))
 
-(defn- build-inserter-type-map
+(defn- ->inserter-type-map
   "Bottom-up: for every var that directly calls a boundary fn, find record
    constructors (`map->X`, `->X`) resolvable to fact types within its
    reachable subtree.  Returns
@@ -236,8 +253,8 @@
                    [v types])))
           direct-callers)))
 
-(defn- build-constructor-callsite-map
-  "Like `build-inserter-type-map`, but for caller-supplied constructors of
+(defn- ->constructor-callsite-map
+  "Like `->inserter-type-map`, but for caller-supplied constructors of
    interest (`fact-constructors` — a vector of {:match-fn :type-resolver-fn}
    specs).  Each usage whose callee matches is paired with the *first*
    matching spec; vector order is precedence.
@@ -267,7 +284,7 @@
 ;; The index
 ;; ---------------------------------------------------------------------------
 
-(defn build-analysis-index
+(defn ->analysis-index
   "Derives the `AnalysisIndex` from a merged clj-kondo `analysis` map.
 
    `fact-constructors` (optional, [{:match-fn :type-resolver-fn} …]) enables
@@ -282,18 +299,20 @@
   [{:keys [analysis get-source productions-by-name fact-constructors
            fallback-type-filter fallback-mode]}]
   (let [usages (:var-usages analysis)
-        graph (build-graph usages)
+        graph (->graph usages)
         usages-by-caller (group-by u/var-usage-caller usages)
         usages-by-callee (group-by u/var-usage-callee usages)
         local-usages-by-name (group-by (juxt :filename :name) (:local-usages analysis))
         locals-by-id (into {}
                            (map (juxt (juxt :filename :id) identity))
                            (:locals analysis))
+        var-usages-by-filename (usages-by-filename (:var-usages analysis))
+        local-usages-by-filename (usages-by-filename (:local-usages analysis))
         reachable-set (memoized-reachability graph)
         direct-inserters (direct-callers graph insert-fns)
         direct-retractors (direct-callers graph retract-fns)
         resolve-record-type (memoize ctor/resolve-record-type)
-        inserter-type-map (build-inserter-type-map
+        inserter-type-map (->inserter-type-map
                            {:direct-callers direct-inserters
                             :usages-by-caller usages-by-caller
                             :reachable-set reachable-set
@@ -301,7 +320,7 @@
                             :type-filter fallback-type-filter
                             :boundary :insert
                             :mode fallback-mode})
-        retractor-type-map (build-inserter-type-map
+        retractor-type-map (->inserter-type-map
                             {:direct-callers direct-retractors
                              :usages-by-caller usages-by-caller
                              :reachable-set reachable-set
@@ -310,7 +329,7 @@
                              :boundary :retract
                              :mode fallback-mode})
         constructor-callsite-map (when (seq fact-constructors)
-                                   (build-constructor-callsite-map
+                                   (->constructor-callsite-map
                                     (direct-callers graph boundary-fns)
                                     usages-by-caller reachable-set fact-constructors))
         all-boundary-fns (into insert-fns retract-fns)
@@ -329,6 +348,8 @@
      :boundary-usages-by-caller boundary-usages-by-caller
      :local-usages-by-name local-usages-by-name
      :locals-by-id locals-by-id
+     :var-usages-by-filename var-usages-by-filename
+     :local-usages-by-filename local-usages-by-filename
      :reachable-set reachable-set
      :direct-inserters direct-inserters
      :direct-retractors direct-retractors

@@ -59,17 +59,27 @@
 ;; Step 3: locals tracing
 ;; ---------------------------------------------------------------------------
 
-(defn- find-local-binding
-  "Finds the kondo `:locals` binding for a local symbol used as a boundary-call
-   argument: the `:local-usages` entry matching the arg symbol within the
-   boundary usage's position span, linked to its binding via kondo's per-ns-run
-   `:id`.  Both lookups are constrained to the boundary usage's `:filename`
-   because ids restart per analyzed namespace and collide in the merged analysis.
+(defn- usage->span
+  "The `{:filename … :start [row col] :end [row col]}` source span of a kondo
+   usage (`:end` exclusive)."
+  [{:keys [filename row col end-row end-col]}]
+  {:filename filename
+   :start [row col]
+   :end [end-row end-col]})
 
-   Uses the precomputed `:local-usages-by-name` / `:locals-by-id` indexes
-   (see `index/AnalysisIndex`) — never scans the full analysis vectors."
-  [{:keys [local-usages-by-name locals-by-id]} usage arg-sym]
-  (let [{:keys [row col end-row end-col filename]} usage
+(defn- find-local-binding
+  "Finds the kondo `:locals` binding for a local symbol used at a known source
+   span: the `:local-usages` entry matching the symbol within `span`, linked to
+   its binding via kondo's per-ns-run `:id`.  Lookups are constrained to the
+   span's `:filename` because ids restart per analyzed namespace and collide in
+   the merged analysis.
+
+   Uses the precomputed `:local-usages-by-name` / `:locals-by-id` indexes (see
+   `index/AnalysisIndex`) — never scans the
+   full analysis vectors."
+  [{:keys [local-usages-by-name locals-by-id]} {:keys [filename start end]} arg-sym]
+  (let [[row col] start
+        [end-row end-col] end
         within-span? (fn [u]
                        (and (= filename (:filename u))
                             (<= row (:row u) end-row)
@@ -82,27 +92,23 @@
       (get locals-by-id [filename id]))))
 
 (defn- trace-local-form
-  "Follows local-symbol arguments to their binding init forms.  Depth-capped.
-
-   Returns `{:form … :binding …}` — :form is the deepest form reached (the
-   init form of the innermost traced local, or arg-form itself when it is
-   not a traceable local); :binding is the kondo `:locals` entry whose init
-   form IS :form, or nil when no local was traced.  The binding is the
-   *identity link* constructor-ownership rule 3 matches on (see
-   `arg-reaches-ctor?`): it ties the traced form to one exact source
-   position, so two textually-identical forms at different positions can
-   never be confused."
-  [arg-form {:keys [get-lines usage] :as ctx} depth]
+  "Follows local-symbol arguments to their binding init forms, depth-capped.
+   `span` is the source span to resolve the current local usage in — the
+   boundary-call span on the first hop, then each traced binding's init span.
+   Returns the deepest form reached: the init form of the innermost traced
+   local, or `arg-form` itself when it is not a traceable local."
+  [arg-form {:keys [get-lines] :as ctx}
+   ns-sym span depth]
   (if (and (symbol? arg-form) (< depth max-resolution-depth))
-    (if-let [binding (find-local-binding ctx usage arg-form)]
-      (if-let [init-form (kondo/read-init-form get-lines (:from usage) binding)]
-        (let [deeper (trace-local-form init-form ctx (inc depth))]
-          (if (:binding deeper)
-            deeper
-            {:form (:form deeper) :binding binding}))
-        {:form arg-form :binding nil})
-      {:form arg-form :binding nil})
-    {:form arg-form :binding nil}))
+    (if-let [binding (find-local-binding ctx span arg-form)]
+      (if-let [init-form (kondo/read-init-form get-lines ns-sym binding)]
+        (if-let [init-span (and (symbol? init-form)
+                                (kondo/init-form-span get-lines ns-sym binding))]
+          (recur init-form ctx ns-sym init-span (inc depth))
+          init-form)
+        arg-form)
+      arg-form)
+    arg-form))
 
 ;; ---------------------------------------------------------------------------
 ;; Token normalization
@@ -121,7 +127,7 @@
 ;; Step 5: caller-supplied resolution
 ;; ---------------------------------------------------------------------------
 
-(defn- resolver-context
+(defn- ->callsite-resolver-context
   "Builds the context map handed to `:callsite-resolver-fn` (see
   `clara.server.tools.graph.analyze/->annotations-from-rule-source-analysis`). Alias context keys
   (`:fact-type`/`:fact-type-spec`) are present only for callsites discovered through a var-alias
@@ -136,7 +142,7 @@
            :filename (:filename usage)}
     alias-context (merge (select-keys alias-context [:fact-type :fact-type-spec]))))
 
-(defn- apply-resolver
+(defn- invoke-callsite-resolver
   "Invokes the caller's `:callsite-resolver-fn`; exceptions are contained
    (logged, treated as unresolved).  Returns the resolver's `:resolved-types`
    sequence, or nil."
@@ -166,7 +172,7 @@
            (ctor/resolve-ctor-form (:resolve-record-type ctx) live-ns-sym traced))
          ;; everything else defers to the caller's escape hatch (receives the
          ;; traced form): helper calls, with-meta, var-as-fact, literals.
-         (apply-resolver callsite-resolver-fn (resolver-context ctx traced))
+         (invoke-callsite-resolver callsite-resolver-fn (->callsite-resolver-context ctx traced))
          '())]
     (into #{}
           (map normalize-token)
@@ -188,13 +194,10 @@
                         (let [alias-ctx (when alias-context-for
                                           (alias-context-for usage))]
                           (map (fn [arg]
-                                 (let [ctx' (assoc ctx :usage usage :alias-context alias-ctx)
-                                       {:keys [form binding]} (trace-local-form arg ctx' 0)]
-                                   {:usage usage
-                                    :arg arg
-                                    :alias-context alias-ctx
-                                    :traced form
-                                    :traced-binding binding}))
+                                 {:usage usage
+                                  :arg arg
+                                  :alias-context alias-ctx
+                                  :traced (trace-local-form arg ctx (:from usage) (usage->span usage) 0)})
                                (or (kondo/read-boundary-args usage get-lines) '())))))
               (map-indexed (fn [i ta] (assoc ta :idx i))))
         usages))
@@ -217,7 +220,7 @@
    Returns [start … end] or nil when unreachable.
    Neighbors are sorted by str for deterministic traversal.
 
-   Shared by the constructor pass (for `:boundary-to-constructor-path`) and by `rule-to-boundary-path-for-memo`
+   Shared by the constructor pass (for `:boundary-to-constructor-path`) and by `memoized-rule-to-boundary-path`
    (for the rule-side `:rule-to-boundary-path`); in both cases the result is a *shortest*
    path through a var-level call graph, not the observed runtime path."
   [graph start end]
@@ -234,7 +237,7 @@
             (recur (into (pop queue) (map #(conj path %) neighbors))
                    (into visited neighbors))))))))
 
-(defn rule-to-boundary-path-for-memo
+(defn memoized-rule-to-boundary-path
   "Returns a memoized fn from `boundary-in-var` to a vector of `ViaEntry`
    entries (or nil), computing the shortest call-graph path from `rule-var` to
    `boundary-in-var`, both ends inclusive, as `{:var-name-sym …}` entries.  nil
@@ -251,10 +254,10 @@
        (when-let [path (shortest-call-path graph rule-var boundary-in-var)]
          (mapv (fn [v] {:var-name-sym v}) path))))))
 
-(defn- via-base
+(defn- ->boundary-via
   "The boundary-side `:via` keys shared by both resolution passes: the boundary
    fn and the var the boundary call is written in, plus `:rule-to-boundary-path` when that
-   var is not the rule itself (see `rule-to-boundary-path-for-memo`)."
+   var is not the rule itself (see `memoized-rule-to-boundary-path`)."
   [boundary-fn-sym boundary-in-var rule-to-boundary-path-for]
   (let [rule-to-boundary-path (when rule-to-boundary-path-for (rule-to-boundary-path-for boundary-in-var))]
     (cond-> {:boundary-var-name-sym boundary-fn-sym
@@ -274,9 +277,6 @@
    :usage u/KondoVarUsage
    :arg s/Any
    :traced s/Any
-   ;; the kondo :locals entry whose init form is :traced (open kondo map;
-   ;; keys of interest: :row :end-col) — nil when :traced is :arg itself
-   :traced-binding (s/maybe s/Any)
    ;; :fact-type is s/Any: keywords, fq class-name symbols, strings are all
    ;; legitimate fact types; :fact-type-spec is an open caller-defined map
    :alias-context (s/maybe {(s/optional-key :fact-type) s/Any
@@ -451,9 +451,9 @@
                                                 :ns-name-sym (:from usage)
                                                 :filename (:filename usage)
                                                 :status (if (empty? tokens) :none :full)
-                                                :via (via-base (u/var-usage-callee usage)
-                                                               (u/var-usage-caller usage)
-                                                               (:rule-to-boundary-path-for ctx))}
+                                                :via (->boundary-via (u/var-usage-callee usage)
+                                                                     (u/var-usage-caller usage)
+                                                                     (:rule-to-boundary-path-for ctx))}
                                          (seq tokens)
                                          (assoc :resolved-types (vec (sort-by str tokens)))
 
@@ -482,26 +482,107 @@
 ;; Fact-constructor callsite resolution
 ;; ---------------------------------------------------------------------------
 
-(defn- pos<=
+(defn- position<=
   "Source-position ordering: `[row col]` before-or-equal `[row col]`."
   [r1 c1 r2 c2]
   (or (< r1 r2) (and (= r1 r2) (<= c1 c2))))
 
-(defn- usage-encloses?
-  "Does the source span of usage `outer` lexically enclose the start of usage
-   `inner`?  Both must be in the same file.
+(defn- span-contains-pos?
+  "True when 1-indexed `[row col]` lies in `span` (`{:filename … :start
+   [row col] :end [row col]}`, `:end` exclusive)."
+  [{:keys [filename start end]} ufilename row col]
+  (boolean
+   (and (= filename ufilename)
+        start end row col
+        (position<= (first start) (second start) row col)
+        (let [[er ec] end]
+          (or (< row er) (and (= row er) (< col ec)))))))
 
-   This is how a constructor callsite is attributed to the specific
-   `insert!`/`retract!` call it was written inside — `(insert! (->fact …))` —
-   as opposed to merely living somewhere in the same rule var."
-  [outer inner]
-  (let [{r1 :row c1 :col er1 :end-row ec1 :end-col f1 :filename} outer
-        {r2 :row c2 :col f2 :filename} inner]
-    (boolean
-     (and f1 f2 (= f1 f2)
-          r1 c1 er1 ec1 r2 c2
-          (pos<= r1 c1 r2 c2)
-          (pos<= r2 c2 er1 ec1)))))
+(defn- first-usage-index-at-or-after
+  "Binary search: first index in `[row col]`-sorted `sorted-usages` at or
+   after `[srow scol]`."
+  [sorted-usages srow scol]
+  (loop [lo 0 hi (count sorted-usages)]
+    (if (>= lo hi)
+      lo
+      (let [mid (quot (+ lo hi) 2)
+            u (nth sorted-usages mid)
+            r (or (:row u) 0)
+            c (or (:col u) 0)]
+        (if (or (> r srow) (and (= r srow) (>= c scol)))
+          (recur lo mid)
+          (recur (inc mid) hi))))))
+
+(defn- usages-in-span
+  "Entries of `[row col]`-sorted `sorted-usages` (one file) whose start
+   position lies in `span`. Nil-safe on malformed spans."
+  [sorted-usages {:keys [start end] :as _span}]
+  (if (or (nil? start) (nil? end))
+    []
+    (let [[sr sc] start
+          [er ec] end
+          starts-before-end? (fn [u]
+                               (let [r (or (:row u) 0)
+                                     c (or (:col u) 0)]
+                                 (or (< r er) (and (= r er) (< c ec)))))]
+      (->> sorted-usages
+           (drop (first-usage-index-at-or-after sorted-usages sr sc))
+           (take-while starts-before-end?)
+           (into [])))))
+
+(defn- arg-span-set
+  "The ephemeral span set for one boundary-call argument: the boundary usage
+   span plus the init spans of every local transitively reachable from usages
+   inside it (see docs/planning/locals-expand-ana-plan.md).
+
+   Returns `{:spans […] :var-syms #{…}}`: spans are
+   `{:filename … :start [row col] :end [row col]}` (`:end` exclusive);
+   `:var-syms` are the fq callee symbols of var-usages starting in any span.
+   Kondo usage→binding linkage drives the fixpoint, so shadowing and inner
+   binders resolve without a special-form walker; `max-resolution-depth`
+   bounds cycles. Nothing here is persisted — `:source-str` keeps the
+   original arg."
+  [{:keys [usage] :as _traced-arg}
+   {:keys [var-usages-by-filename local-usages-by-filename locals-by-id get-lines] :as _ctx}]
+  (let [filename (:filename usage)
+        ns-sym (:from usage)
+        seed (usage->span usage)]
+    (if (or (nil? filename) (nil? (:row usage)) (nil? (:col usage)))
+      {:spans [seed] :var-syms #{}}
+      (let [final-spans
+            (loop [spans [seed] scanned 0 seen-ids #{} depth 0]
+              (if (or (>= depth max-resolution-depth) (>= scanned (count spans)))
+                spans
+                (let [fresh-keys
+                      (into []
+                            (comp (mapcat (fn [span]
+                                            (usages-in-span (get local-usages-by-filename
+                                                                 (:filename span) [])
+                                                            span)))
+                                  (map (juxt :filename :id))
+                                  (remove (fn [[f id]] (or (nil? f) (nil? id))))
+                                  (remove seen-ids))
+                            (subvec spans scanned))
+                      seen-ids (into seen-ids fresh-keys)
+                      new-spans (into []
+                                      (comp (map (fn [[f id]] (get locals-by-id [f id])))
+                                            (remove nil?)
+                                            (map (fn [binding]
+                                                   (kondo/init-form-span get-lines ns-sym binding)))
+                                            (remove nil?))
+                                      fresh-keys)]
+                  (recur (into spans new-spans)
+                         (count spans)
+                         seen-ids
+                         (inc depth)))))]
+        {:spans final-spans
+         :var-syms (into #{}
+                         (comp (mapcat (fn [span]
+                                         (usages-in-span (get var-usages-by-filename
+                                                              (:filename span) [])
+                                                         span)))
+                               (map (fn [u] (u/fq-sym (:to u) (:name u)))))
+                         final-spans)}))))
 
 (defn- resolve-ctor-callsite
   "Resolves a single constructor-of-interest callsite.
@@ -522,7 +603,7 @@
   (let [boundary-fn-sym (u/fq-sym (:to boundary-usage) (:name boundary-usage))
         ctor-sym (u/fq-sym (:to ctor-usage) (:name ctor-usage))
         via (when (seq call-path)
-              (assoc (via-base boundary-fn-sym (first call-path) rule-to-boundary-path-for)
+              (assoc (->boundary-via boundary-fn-sym (first call-path) rule-to-boundary-path-for)
                      :boundary-to-constructor-path (conj (mapv (fn [v] {:var-name-sym v}) call-path)
                                                          {:var-name-sym ctor-sym})))
         arg-form ctor-form
@@ -560,65 +641,69 @@
       [ctor-caller]
       (shortest-call-path graph inserter-var ctor-caller))))
 
+(defn- ctor-call-in-span-set?
+  "The constructor call is written inside the argument's span set (see
+   `arg-span-set`): inline — `(insert! (->fact :t m))` — reached through a
+   local binding — `(let [f (->fact :t m)] (insert! f))` — or in a
+   transitively-reached init. Position identity, never form value: two
+   identical forms at different positions never cross-attribute."
+  [spans ctor-usage]
+  (boolean
+   (and (seq spans)
+        (some #(span-contains-pos? % (:filename ctor-usage)
+                                   (:row ctor-usage) (:col ctor-usage))
+              spans))))
+
+(defn- intermediate-call-in-span-set?
+  "A var-usage inside the argument's span set names a link on `intermediates`
+   — the call-graph path from the inserter to the constructor's containing
+   var: `(insert! (my-middle-fn args))`, including a helper called in a
+   reached local init."
+  [intermediates var-syms]
+  (boolean (some intermediates var-syms)))
+
 (defn- arg-reaches-ctor?
   "True when a traced boundary argument demonstrably reaches the given
-   constructor usage — see `owning-arg` for the three ownership routes.
-
-   Rule 3 matches by *position identity*, not form value: the traced form's
-   originating binding (`:traced-binding`) must have its init form starting
-   at exactly the constructor usage's call-form position.  Two
-   textually-identical constructor forms in one rule can therefore never
-   cross-attribute."
-  [{:keys [traced-arg ctor-usage intermediates sibling-usages get-lines]}]
-  (let [{:keys [usage traced-binding alias-context]} traced-arg]
+   constructor usage: the constructor call sits inside the argument's span
+   set (position identity), or a var-usage inside that span set names a link
+   on `intermediates`."
+  [{:keys [traced-arg ctor-usage intermediates span-set]}]
+  (let [{:keys [alias-context]} traced-arg
+        {:keys [spans var-syms]} span-set]
     (and (not alias-context)       ; alias callsites are never auto-resolved
-         (or (usage-encloses? usage ctor-usage)
-             (and traced-binding
-                  (= (:filename usage) (:filename ctor-usage))
-                  (= (kondo/init-form-start get-lines (:from usage)
-                                            traced-binding)
-                     [(:row ctor-usage) (:col ctor-usage)]))
-             (some (fn [u]
-                     (and (usage-encloses? usage u)
-                          (contains? intermediates (u/fq-sym (:to u) (:name u)))))
-                   sibling-usages)))))
+         (or (ctor-call-in-span-set? spans ctor-usage)
+             (intermediate-call-in-span-set? intermediates var-syms)))))
 
-(defn- owning-arg
+(defn- find-owning-boundary-arg
   "The boundary argument a constructor call was reached *through*, or nil.
 
-   Three ways an argument reaches a constructor — one per way the argument can
-   be written, each decided from data clj-kondo already gives us:
+   Two ways an argument reaches a constructor, both decided from the
+   argument's ephemeral span set (`arg-span-set`):
 
-     1. **It is the constructor call.** The constructor's source span sits
-        inside the boundary call's: `(insert! (->fact :t m))`, including nested
-        forms such as `(insert-all! (mapv #(->fact :t %) xs))`.
-     2. **It is a call that leads there.** Some call written inside the boundary
-        call names a link on `intermediates` — the call-graph path from the
-        inserter to the constructor's containing var:
-        `(insert! (my-middle-fn args))`. Works at any depth.
-     3. **It is a local bound to it.** The argument's locals-traced form is the
-        constructor call: `(let [f (->fact :t m)] (insert! f))`.  A bare local
-        names nothing, so the match is by *position identity*: the traced
-        form's binding init position must equal the constructor usage's
-        call-form position (see `arg-reaches-ctor?`).  Two identical forms
-        at different positions never cross-attribute.
+     1. **The constructor is written inside the span set.** Position identity,
+        not form value: `(insert! (->fact :t m))`,
+        `(let [f (->fact :t m)] (insert! f))`, or a ctor in a
+        transitively-reached local init.
+     2. **A call inside the span set names a link on `intermediates`** — the
+        call-graph path from the inserter to the constructor's containing var.
 
    `intermediates` deliberately excludes the constructor symbol itself — only
-   rule 1 may match the constructor, and by *usage identity*, not by name.
+   route 1 may match the constructor, and by *usage identity*, not by name.
    Otherwise a rule with two separate `->fact` calls would attribute both to
    whichever boundary call happened to contain one of them.
 
-   `sibling-usages` are the var-usages written in the same var as the boundary
-   calls — the candidates for \"a call written inside this boundary call\".
+   Takes a map: `:ctor-usage`, `:intermediates`, `:traced-args`,
+   `:span-set-by-idx` (see `arg-span-set`).
 
    nil means no boundary argument demonstrably reaches this constructor: the
    constructor call is not on an insert path out of this rule."
-  [ctor-usage intermediates traced-args sibling-usages get-lines]
+  [{:keys [ctor-usage intermediates traced-args span-set-by-idx]}]
   (some #(when (arg-reaches-ctor? {:traced-arg %
                                    :ctor-usage ctor-usage
                                    :intermediates intermediates
-                                   :sibling-usages sibling-usages
-                                   :get-lines get-lines})
+                                   :span-set (get span-set-by-idx
+                                                  (:idx %)
+                                                  {:spans [] :var-syms #{}})})
            %)
         traced-args))
 
@@ -636,45 +721,54 @@
    `:provenance` is the `:constructor-sym` + `:via :boundary-to-constructor-path` of the dropped
    constructor entry, so the boundary pass can emit the provenance it would
    otherwise throw away."
-  [{:keys [ctor-match inserter-var graph get-lines read-ctor-form cfg-base candidates siblings]}]
+  [{:keys [ctor-match inserter-var graph read-ctor-form
+           cfg-base candidates span-set-by-idx]}]
   (let [{:keys [usage type-resolver-fn]} ctor-match
         ctor-usage usage
         path (ctor-call-path graph inserter-var ctor-usage)
         ctor-form (read-ctor-form ctor-usage)
-        owner (owning-arg ctor-usage (set (rest path))
-                          candidates siblings get-lines)]
+        owner (find-owning-boundary-arg {:ctor-usage ctor-usage
+                                         :intermediates (set (rest path))
+                                         :traced-args candidates
+                                         :span-set-by-idx span-set-by-idx})
+        {:keys [status constructor-sym] :as entry}
+        (when owner
+          (resolve-ctor-callsite
+           (assoc cfg-base
+                  :ctor-usage ctor-usage
+                  :ctor-form ctor-form
+                  :call-path path
+                  :resolver-fn type-resolver-fn
+                  :boundary-usage (:usage owner))))
+        ctor-path (:boundary-to-constructor-path (:via entry))]
     (when owner
-      (let [entry (resolve-ctor-callsite
-                   (assoc cfg-base
-                          :ctor-usage ctor-usage
-                          :ctor-form ctor-form
-                          :call-path path
-                          :resolver-fn type-resolver-fn
-                          :boundary-usage (:usage owner)))]
-        (if (not= :none (:status entry))
-          {:owned {:idx (:idx owner) :entry entry}}
-          {:dropped {:idx (:idx owner)
-                     :provenance (cond-> {:constructor-sym (:constructor-sym entry)}
-                                   (:boundary-to-constructor-path (:via entry))
-                                   (assoc :boundary-to-constructor-path (:boundary-to-constructor-path (:via entry))))}})))))
+      (if (not= :none status)
+        {:owned {:idx (:idx owner) :entry entry}}
+        {:dropped {:idx (:idx owner)
+                   :provenance (cond-> {:constructor-sym constructor-sym}
+                                 ctor-path
+                                 (assoc :boundary-to-constructor-path ctor-path))}}))))
 
 (defn- resolve-ctor-matches-for-inserter
   "Resolves every constructor-of-interest match for one inserter var against
    the boundary arguments written in that var.  Returns the per-match results
    (see `resolve-ctor-usage-for-inserter` for the outcome shapes).
 
-   `env` — the shared resolution context (`:args-by-caller`,
-   `:usages-by-caller`, `:graph`, `:get-lines`, `:read-ctor-form`,
-   `:cfg-base`) plus `:inserter-var` and `:ctor-matches`."
+   `env` — the shared resolution context (`:args-by-caller`, `:graph`,
+   `:get-lines`, `:read-ctor-form`, `:cfg-base`, plus the
+   `:var-usages-by-filename`, `:local-usages-by-filename` and `:locals-by-id`
+   expansion indexes) plus `:inserter-var` and `:ctor-matches`."
   [{:keys [inserter-var ctor-matches] :as env}]
-  (let [candidates (sort-by (juxt #(:row (:usage %)) #(:col (:usage %)))
-                            (get (:args-by-caller env) inserter-var))
-        siblings (get (:usages-by-caller env) inserter-var)]
+  (let [candidates (->> (get (:args-by-caller env) inserter-var)
+                        (sort-by (juxt #(:row (:usage %)) #(:col (:usage %)))))
+        span-set-by-idx (into {}
+                              (map (juxt :idx #(arg-span-set % env)))
+                              candidates)]
     (keep #(resolve-ctor-usage-for-inserter
             (assoc env
                    :ctor-match %
                    :candidates candidates
-                   :siblings siblings))
+                   :span-set-by-idx span-set-by-idx))
           ctor-matches)))
 
 (defn- unambiguous-dropped-ctor-provenance
@@ -689,7 +783,7 @@
                   [idx (:provenance (first ds))])))
         (group-by :idx dropped)))
 
-(defn- build-ctor-pass-resolution
+(defn- ->ctor-pass-resolution
   "Shapes the constructor pass's per-match `results` into its
    `CallsiteResolution`: owned results become callsite entries
    (`:callsites`, `:owned-arg-idxs`, `:resolved-types`); dropped results
@@ -711,12 +805,12 @@
 
    `traced-args` — entries from `trace-boundary-args` for this rule var.
    `constructor-ctr-map` — an `index/CtorCallsiteMap`
-     ({inserter-var -> [CtorUsageMatch …]} from `index/build-analysis-index`),
+     ({inserter-var -> [CtorUsageMatch …]} from `index/->analysis-index`),
      scoped to this rule var.
    `ctx` — a `ConstructorCallsiteCtx`.
 
    A constructor is emitted only when some boundary argument is shown to reach
-   it (see `owning-arg`) *and* the resolver returns a type.  A constructor call
+   it (see `find-owning-boundary-arg`) *and* the resolver returns a type.  A constructor call
    that no insert flows through is not an insert — dropping it is what keeps a
    `(let [f (->fact :x)] (insert! (other)))` from claiming `:x`.  A constructor
    the resolver cannot type is left to the boundary path rather than reported
@@ -730,17 +824,21 @@
   [traced-args :- [TracedArg]
    constructor-ctr-map :- index/CtorCallsiteMap
    {:keys [get-lines read-ctor-form graph direction rule
-           usages-by-caller rule-to-boundary-path-for]} :- ConstructorCallsiteCtx]
+           rule-to-boundary-path-for
+           var-usages-by-filename local-usages-by-filename
+           locals-by-id]} :- ConstructorCallsiteCtx]
   (let [args-by-caller (group-by #(u/var-usage-caller (:usage %)) traced-args)
         cfg-base {:direction direction
                   :rule rule
                   :rule-to-boundary-path-for rule-to-boundary-path-for}
         resolver-env {:args-by-caller args-by-caller
-                      :usages-by-caller usages-by-caller
                       :graph graph
                       :get-lines get-lines
                       :read-ctor-form read-ctor-form
-                      :cfg-base cfg-base}
+                      :cfg-base cfg-base
+                      :var-usages-by-filename var-usages-by-filename
+                      :local-usages-by-filename local-usages-by-filename
+                      :locals-by-id locals-by-id}
         results (into []
                       (mapcat (fn [[inserter-var ctor-matches]]
                                 (resolve-ctor-matches-for-inserter
@@ -748,5 +846,5 @@
                                         :inserter-var inserter-var
                                         :ctor-matches ctor-matches))))
                       constructor-ctr-map)]
-    (build-ctor-pass-resolution results)))
+    (->ctor-pass-resolution results)))
 
