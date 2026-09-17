@@ -1516,6 +1516,59 @@
       (is (= :full (:resolution dyn))
           "nothing falls through to the boundary path unresolved"))))
 
+(deftest test-constructor-locals-expansion
+  (testing "let-bound locals reaching ctors through helpers and seq combinators"
+    (let [seen (atom [])
+          generic (fn [{:keys [arg-form]}]
+                    (swap! seen conj arg-form)
+                    nil)
+          ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis edge-case-analysis
+                :session-or-rulebase edge-case-session
+                :callsite-resolver-fn generic
+                :rules-filter [`atr/rule-ctor-locals-via-helpers
+                               `atr/rule-ctor-locals-concat-for
+                               `atr/rule-ctor-locals-unreached-stays-dropped]
+                :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})]
+      (testing "intermediate helper calls in binding inits (one callsite per insert)"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-locals-via-helpers)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              callsites (:callsites dyn)
+              by-type (into {} (map (juxt #(first (:resolved-types %)) identity)) callsites)]
+          (is (= #{:demo/looked-up-1 :demo/looked-up-2}
+                 (set (:clara-rules/insert-types a))))
+          (is (= 2 (count callsites))
+              "one callsite per insert-all! — no duplicates, no cross-attribution")
+          (is (= :full (:resolution dyn)))
+          (is (every? :constructor-sym callsites)
+              "both inserts are owned by the constructor path")
+          (is (= [`atr/rule-ctor-locals-via-helpers `atr/look-up-facts-1 ->fact-sym]
+                 (mapv :var-name-sym (:boundary-to-constructor-path (:via (by-type :demo/looked-up-1))))))
+          (is (= [`atr/rule-ctor-locals-via-helpers `atr/look-up-facts-2 ->fact-sym]
+                 (mapv :var-name-sym (:boundary-to-constructor-path (:via (by-type :demo/looked-up-2))))))))
+      (testing "concat/for closure over constructor calls (both types, one insert)"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-locals-concat-for)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              callsites (:callsites dyn)]
+          (is (= #{:demo/seq-a :demo/seq-b}
+                 (set (:clara-rules/insert-types a))))
+          (is (= 2 (count callsites))
+              "both for-body constructors own the single insert")
+          (is (= :full (:resolution dyn)))
+          (is (every? :constructor-sym callsites))))
+      (testing "a constructor that never flows into the insert stays dropped"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-locals-unreached-stays-dropped)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              callsites (:callsites dyn)]
+          (is (= [:demo/looked-up-1] (:clara-rules/insert-types a)))
+          (is (= 1 (count callsites)))
+          (is (= :full (:resolution dyn)))
+          (is (not-any? #(= [:demo/never-flowed] (:resolved-types %)) callsites)
+              ":demo/never-flowed is bound but never inserted — not promoted")))
+      (is (empty? @seen)
+          ":callsite-resolver-fn sees nothing — every arg is constructor-owned"))))
+
 (deftest test-constructor-options-validation
   (testing "a :fact-constructors spec missing :type-resolver-fn fails schema validation"
     (is (thrown? Exception

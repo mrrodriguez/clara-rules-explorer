@@ -38,3 +38,15 @@
    (s/optional-key :end-row) (s/maybe s/Int)
    (s/optional-key :end-col) (s/maybe s/Int)
    s/Keyword s/Any})
+
+(s/defschema KondoLocalUsage
+  "A clj-kondo `:local-usages` entry. Open map, same convention as
+   `KondoVarUsage`: the keys we rely on are declared."
+  {:filename s/Str
+   (s/optional-key :name) s/Symbol
+   (s/optional-key :id) s/Int
+   (s/optional-key :row) (s/maybe s/Int)
+   (s/optional-key :col) (s/maybe s/Int)
+   (s/optional-key :end-row) (s/maybe s/Int)
+   (s/optional-key :end-col) (s/maybe s/Int)
+   s/Keyword s/Any})

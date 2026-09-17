@@ -561,3 +561,52 @@
 (r/defquery find-query-only-record
   [:?id]
   [QueryOnlyRecord (= ?id id)])
+
+;; ---------------------------------------------------------------------------
+;; Locals-expand fixtures (span-set expansion — see
+;; docs/planning/locals-expand-ana-plan.md)
+
+(defn look-up-facts-1
+  "Helper returning facts built by the ->fact constructor."
+  [x]
+  [(->fact :demo/looked-up-1 {:id x})])
+
+(defn look-up-facts-2
+  "Helper returning facts built by the ->fact constructor."
+  [y]
+  [(->fact :demo/looked-up-2 {:id y})])
+
+(r/defrule rule-ctor-locals-via-helpers
+  "Rule L9: two let-bound locals, each inserted by its own insert-all!, each
+   bound to a helper call that transitively reaches the ->fact constructor.
+   The intermediate calls live in the binding inits (outside both boundary
+   spans), so only span-set expansion attributes them — one callsite per
+   insert, no cross-attribution."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [facts-1 (look-up-facts-1 ?app-id)
+        facts-2 (look-up-facts-2 ?app-id)]
+    (r/insert-all! facts-1)
+    (r/insert-all! facts-2)))
+
+(r/defrule rule-ctor-locals-concat-for
+  "Rule L10: one insert-all! over a local bound to (concat a b), where a and
+   b are locals bound to `for` bodies holding ->fact calls. Expansion walks
+   the local closure (concat init, then both for bodies); both constructor
+   usages land in-region and both types promote from the single insert."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [fact-seq-a (for [id [?app-id]] (->fact :demo/seq-a {:id id}))
+        fact-seq-b (for [id [?app-id]] (->fact :demo/seq-b {:id id}))
+        fact-seq-all (concat fact-seq-a fact-seq-b)]
+    (r/insert-all! fact-seq-all)))
+
+(r/defrule rule-ctor-locals-unreached-stays-dropped
+  "Rule L11: a ->fact call bound to a local that never flows into the insert
+   must stay dropped even though expansion runs — regions only grow through
+   kondo usage→binding linkage from the boundary arg."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [used (look-up-facts-1 ?app-id)
+        _unused [(->fact :demo/never-flowed {:id ?app-id})]]
+    (r/insert-all! used)))
