@@ -281,12 +281,68 @@ is still in the RHS, but the constructor lives one or more helpers down:
      (do-insert! data))
    ```
 
-   Two small variations of the above also resolve: a constructor bound to a
-   local (`(let [f (->fact :my-type m)] (insert! f))`) and bulk inserts
-   (`(insert-all! (mapv #(->fact :my-type %) xs))`).
+Locals are followed through their *transitive* closure, so the shallow
+variations above — a constructor bound to a local
+(`(let [f (->fact :my-type m)] (insert! f))`) and bulk inserts
+(`(insert-all! (mapv #(->fact :my-type %) xs))`) — generalize:
 
-   Anything more indirect — a constructor that is built but never inserted,
-or reached only through opaque indirection like `(apply f args)` — stays
+4. **A chain of locals.** Each hop resolves within the previous binding's
+   init span, all the way back to the constructor (the same chain also
+   resolves a plain record/Java ctor with no configuration):
+
+   ```clojure
+   (defrule my-rule
+     ...
+     =>
+     (let [f (->fact :my-type m)
+           g f
+           h g]
+       (insert! h)))
+   ```
+
+5. **A helper call in a `let` init.** The insert arg is a local whose init
+   is a helper call; the constructor lives inside that helper:
+
+   ```clojure
+   (defn look-up-facts [m]
+     [(->fact :my-type m)])
+
+   (defrule my-rule
+     ...
+     =>
+     (let [facts (look-up-facts m)]
+       (insert-all! facts)))
+   ```
+
+6. **Seq combinators close over the constructor.** `concat`/`for` bodies
+   holding the constructor all count as reached from the one insert:
+
+   ```clojure
+   (defrule my-rule
+     ...
+     =>
+     (let [as (for [x xs] (->fact :my-type {:id x}))
+           bs (for [y ys] (->fact :my-type {:id y}))]
+       (insert-all! (concat as bs))))
+   ```
+
+   All of these are decided by *position identity*, never by the text of a
+   form — so a same-named local in a branch that never flows into the insert
+   still does **not** attribute:
+
+   ```clojure
+   (defrule my-rule
+     ...
+     =>
+     (let [f (look-up-facts m)]          ; reaches ->fact :my-type
+       (insert-all! f)
+       (let [f (->fact :other-type m)]   ; shadowed, never inserted
+         (println f))))
+   ;; :my-type resolves; :other-type stays dropped
+   ```
+
+Anything more indirect — a constructor that is built but never inserted, or
+reached only through opaque indirection like `(apply f args)` — stays
 unresolved (or needs an explicit `:clara-rules/insert-types`). Details on
 how each shape is proven are below.
 
