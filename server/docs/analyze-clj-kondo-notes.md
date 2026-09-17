@@ -151,7 +151,7 @@ threads the current span), and the chain restarts on the deepest traced form
 (constructor checks, then the caller's `:callsite-resolver-fn`).
 
 The constructor-of-interest pass goes further with an ephemeral *span-set
-expansion* (`analyze.callsite/expanded-regions`): from a boundary argument it
+expansion* (`analyze.callsite/arg-span-set`): from a boundary argument it
 follows the same `:id` linkage transitively, collecting the source spans of
 every reached binding init, so a constructor reached through a helper in a
 `let` init or a `concat`/`for` closure is still attributed to that argument.

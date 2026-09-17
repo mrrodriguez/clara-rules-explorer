@@ -107,7 +107,7 @@ All linkage stays position-identity based; nothing is persisted
    span first, then each traced binding's init span from
    `init-form-span`. This makes `(let [a (->X) b a c b] (insert! c))`
    resolve in the generic (non-`:fact-constructors`) chain, and shares
-   `usage->span` with `expanded-regions`.
+   `usage->span` with `arg-span-set`.
 
 ## 4. Tests
 

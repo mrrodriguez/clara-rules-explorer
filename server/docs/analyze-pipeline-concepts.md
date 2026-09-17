@@ -507,7 +507,7 @@ The id values are only used for linkage *within* a single analysis map, never
 persisted or compared across runs.
 
 **Why `*-by-filename` positional indexes exist:** span-set expansion
-(`analyze.callsite/expanded-regions`) asks "which var/local usages start inside
+(`analyze.callsite/arg-span-set`) asks "which var/local usages start inside
 this source span", so each file's usages are sorted by `[row col]` for binary-
 search + contiguous range queries — never a scan of the merged vector.
 

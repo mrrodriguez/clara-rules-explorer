@@ -88,7 +88,7 @@
    ;; :id :row :end-col :filename)
    :locals-by-id          {[s/Any] s/Any}
    ;; filename -> var-usages sorted by [row col], for span-region range
-   ;; queries (see `clara.server.tools.graph.analyze.callsite/expanded-regions`)
+   ;; queries (see `clara.server.tools.graph.analyze.callsite/arg-span-set`)
    :var-usages-by-filename   {s/Str [u/KondoVarUsage]}
    ;; filename -> :local-usages entries sorted by [row col]
    :local-usages-by-filename {s/Str [u/KondoLocalUsage]}

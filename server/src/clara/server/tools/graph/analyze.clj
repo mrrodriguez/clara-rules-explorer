@@ -219,7 +219,7 @@
         ;; each boundary-holding var once per rule (callsites cluster in a few).
         ctx (assoc ctx
                    :rule-var var-name
-                   :rule-to-boundary-path-for (callsite/rule-to-boundary-path-for-memo graph var-name))
+                   :rule-to-boundary-path-for (callsite/memoized-rule-to-boundary-path graph var-name))
         boundary-usages
         (into []
               (comp (mapcat #(get boundary-usages-by-caller %))

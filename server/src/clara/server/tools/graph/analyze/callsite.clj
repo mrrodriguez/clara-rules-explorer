@@ -127,7 +127,7 @@
 ;; Step 5: caller-supplied resolution
 ;; ---------------------------------------------------------------------------
 
-(defn- resolver-context
+(defn- build-callsite-resolver-context
   "Builds the context map handed to `:callsite-resolver-fn` (see
   `clara.server.tools.graph.analyze/->annotations-from-rule-source-analysis`). Alias context keys
   (`:fact-type`/`:fact-type-spec`) are present only for callsites discovered through a var-alias
@@ -142,7 +142,7 @@
            :filename (:filename usage)}
     alias-context (merge (select-keys alias-context [:fact-type :fact-type-spec]))))
 
-(defn- apply-resolver
+(defn- invoke-callsite-resolver
   "Invokes the caller's `:callsite-resolver-fn`; exceptions are contained
    (logged, treated as unresolved).  Returns the resolver's `:resolved-types`
    sequence, or nil."
@@ -172,7 +172,7 @@
            (ctor/resolve-ctor-form (:resolve-record-type ctx) live-ns-sym traced))
          ;; everything else defers to the caller's escape hatch (receives the
          ;; traced form): helper calls, with-meta, var-as-fact, literals.
-         (apply-resolver callsite-resolver-fn (resolver-context ctx traced))
+         (invoke-callsite-resolver callsite-resolver-fn (build-callsite-resolver-context ctx traced))
          '())]
     (into #{}
           (map normalize-token)
@@ -220,7 +220,7 @@
    Returns [start … end] or nil when unreachable.
    Neighbors are sorted by str for deterministic traversal.
 
-   Shared by the constructor pass (for `:boundary-to-constructor-path`) and by `rule-to-boundary-path-for-memo`
+   Shared by the constructor pass (for `:boundary-to-constructor-path`) and by `memoized-rule-to-boundary-path`
    (for the rule-side `:rule-to-boundary-path`); in both cases the result is a *shortest*
    path through a var-level call graph, not the observed runtime path."
   [graph start end]
@@ -237,7 +237,7 @@
             (recur (into (pop queue) (map #(conj path %) neighbors))
                    (into visited neighbors))))))))
 
-(defn rule-to-boundary-path-for-memo
+(defn memoized-rule-to-boundary-path
   "Returns a memoized fn from `boundary-in-var` to a vector of `ViaEntry`
    entries (or nil), computing the shortest call-graph path from `rule-var` to
    `boundary-in-var`, both ends inclusive, as `{:var-name-sym …}` entries.  nil
@@ -254,10 +254,10 @@
        (when-let [path (shortest-call-path graph rule-var boundary-in-var)]
          (mapv (fn [v] {:var-name-sym v}) path))))))
 
-(defn- via-base
+(defn- build-boundary-via
   "The boundary-side `:via` keys shared by both resolution passes: the boundary
    fn and the var the boundary call is written in, plus `:rule-to-boundary-path` when that
-   var is not the rule itself (see `rule-to-boundary-path-for-memo`)."
+   var is not the rule itself (see `memoized-rule-to-boundary-path`)."
   [boundary-fn-sym boundary-in-var rule-to-boundary-path-for]
   (let [rule-to-boundary-path (when rule-to-boundary-path-for (rule-to-boundary-path-for boundary-in-var))]
     (cond-> {:boundary-var-name-sym boundary-fn-sym
@@ -451,9 +451,9 @@
                                                 :ns-name-sym (:from usage)
                                                 :filename (:filename usage)
                                                 :status (if (empty? tokens) :none :full)
-                                                :via (via-base (u/var-usage-callee usage)
-                                                               (u/var-usage-caller usage)
-                                                               (:rule-to-boundary-path-for ctx))}
+                                                :via (build-boundary-via (u/var-usage-callee usage)
+                                                                         (u/var-usage-caller usage)
+                                                                         (:rule-to-boundary-path-for ctx))}
                                          (seq tokens)
                                          (assoc :resolved-types (vec (sort-by str tokens)))
 
@@ -482,23 +482,23 @@
 ;; Fact-constructor callsite resolution
 ;; ---------------------------------------------------------------------------
 
-(defn- pos<=
+(defn- position<=
   "Source-position ordering: `[row col]` before-or-equal `[row col]`."
   [r1 c1 r2 c2]
   (or (< r1 r2) (and (= r1 r2) (<= c1 c2))))
 
-(defn- region-contains-pos?
-  "True when 1-indexed `[row col]` lies in `region` (`{:filename … :start
+(defn- span-contains-pos?
+  "True when 1-indexed `[row col]` lies in `span` (`{:filename … :start
    [row col] :end [row col]}`, `:end` exclusive)."
   [{:keys [filename start end]} ufilename row col]
   (boolean
    (and (= filename ufilename)
         start end row col
-        (pos<= (first start) (second start) row col)
+        (position<= (first start) (second start) row col)
         (let [[er ec] end]
           (or (< row er) (and (= row er) (< col ec)))))))
 
-(defn- span-start-index
+(defn- first-usage-index-at-or-after
   "Binary search: first index in `[row col]`-sorted `sorted-usages` at or
    after `[srow scol]`."
   [sorted-usages srow scol]
@@ -526,20 +526,20 @@
                                      c (or (:col u) 0)]
                                  (or (< r er) (and (= r er) (< c ec)))))]
       (->> sorted-usages
-           (drop (span-start-index sorted-usages sr sc))
+           (drop (first-usage-index-at-or-after sorted-usages sr sc))
            (take-while starts-before-end?)
            (into [])))))
 
-(defn- expanded-regions
+(defn- arg-span-set
   "The ephemeral span set for one boundary-call argument: the boundary usage
    span plus the init spans of every local transitively reachable from usages
    inside it (see docs/planning/locals-expand-ana-plan.md).
 
-   Returns `{:regions […] :var-syms #{…}}`: regions are
+   Returns `{:spans […] :var-syms #{…}}`: spans are
    `{:filename … :start [row col] :end [row col]}` (`:end` exclusive);
-   `:var-syms` are the fq callee symbols of var-usages starting in any
-   region. Kondo usage→binding linkage drives the fixpoint, so shadowing and
-   inner binders resolve without a special-form walker; `max-resolution-depth`
+   `:var-syms` are the fq callee symbols of var-usages starting in any span.
+   Kondo usage→binding linkage drives the fixpoint, so shadowing and inner
+   binders resolve without a special-form walker; `max-resolution-depth`
    bounds cycles. Nothing here is persisted — `:source-str` keeps the
    original arg."
   [{:keys [usage] :as _traced-arg}
@@ -548,21 +548,21 @@
         ns-sym (:from usage)
         seed (usage->span usage)]
     (if (or (nil? filename) (nil? (:row usage)) (nil? (:col usage)))
-      {:regions [seed] :var-syms #{}}
-      (let [final-regions
-            (loop [regions [seed] scanned 0 seen-ids #{} depth 0]
-              (if (or (>= depth max-resolution-depth) (>= scanned (count regions)))
-                regions
+      {:spans [seed] :var-syms #{}}
+      (let [final-spans
+            (loop [spans [seed] scanned 0 seen-ids #{} depth 0]
+              (if (or (>= depth max-resolution-depth) (>= scanned (count spans)))
+                spans
                 (let [fresh-keys
                       (into []
-                            (comp (mapcat (fn [region]
+                            (comp (mapcat (fn [span]
                                             (usages-in-span (get local-usages-by-filename
-                                                                 (:filename region) [])
-                                                            region)))
+                                                                 (:filename span) [])
+                                                            span)))
                                   (map (juxt :filename :id))
                                   (remove (fn [[f id]] (or (nil? f) (nil? id))))
                                   (remove seen-ids))
-                            (subvec regions scanned))
+                            (subvec spans scanned))
                       seen-ids (into seen-ids fresh-keys)
                       new-spans (into []
                                       (comp (map (fn [[f id]] (get locals-by-id [f id])))
@@ -571,18 +571,18 @@
                                                    (kondo/init-form-span get-lines ns-sym binding)))
                                             (remove nil?))
                                       fresh-keys)]
-                  (recur (into regions new-spans)
-                         (count regions)
+                  (recur (into spans new-spans)
+                         (count spans)
                          seen-ids
                          (inc depth)))))]
-        {:regions final-regions
+        {:spans final-spans
          :var-syms (into #{}
-                         (comp (mapcat (fn [region]
+                         (comp (mapcat (fn [span]
                                          (usages-in-span (get var-usages-by-filename
-                                                              (:filename region) [])
-                                                         region)))
+                                                              (:filename span) [])
+                                                         span)))
                                (map (fn [u] (u/fq-sym (:to u) (:name u)))))
-                         final-regions)}))))
+                         final-spans)}))))
 
 (defn- resolve-ctor-callsite
   "Resolves a single constructor-of-interest callsite.
@@ -603,7 +603,7 @@
   (let [boundary-fn-sym (u/fq-sym (:to boundary-usage) (:name boundary-usage))
         ctor-sym (u/fq-sym (:to ctor-usage) (:name ctor-usage))
         via (when (seq call-path)
-              (assoc (via-base boundary-fn-sym (first call-path) rule-to-boundary-path-for)
+              (assoc (build-boundary-via boundary-fn-sym (first call-path) rule-to-boundary-path-for)
                      :boundary-to-constructor-path (conj (mapv (fn [v] {:var-name-sym v}) call-path)
                                                          {:var-name-sym ctor-sym})))
         arg-form ctor-form
@@ -641,20 +641,20 @@
       [ctor-caller]
       (shortest-call-path graph inserter-var ctor-caller))))
 
-(defn- ctor-call-in-regions?
+(defn- ctor-call-in-span-set?
   "The constructor call is written inside the argument's span set (see
-   `expanded-regions`): inline — `(insert! (->fact :t m))` — reached through a
+   `arg-span-set`): inline — `(insert! (->fact :t m))` — reached through a
    local binding — `(let [f (->fact :t m)] (insert! f))` — or in a
    transitively-reached init. Position identity, never form value: two
    identical forms at different positions never cross-attribute."
-  [regions ctor-usage]
+  [spans ctor-usage]
   (boolean
-   (and (seq regions)
-        (some #(region-contains-pos? % (:filename ctor-usage)
-                                     (:row ctor-usage) (:col ctor-usage))
-              regions))))
+   (and (seq spans)
+        (some #(span-contains-pos? % (:filename ctor-usage)
+                                   (:row ctor-usage) (:col ctor-usage))
+              spans))))
 
-(defn- intermediate-call-in-regions?
+(defn- intermediate-call-in-span-set?
   "A var-usage inside the argument's span set names a link on `intermediates`
    — the call-graph path from the inserter to the constructor's containing
    var: `(insert! (my-middle-fn args))`, including a helper called in a
@@ -667,18 +667,18 @@
    constructor usage: the constructor call sits inside the argument's span
    set (position identity), or a var-usage inside that span set names a link
    on `intermediates`."
-  [{:keys [traced-arg ctor-usage intermediates expanded]}]
+  [{:keys [traced-arg ctor-usage intermediates span-set]}]
   (let [{:keys [alias-context]} traced-arg
-        {:keys [regions var-syms]} expanded]
+        {:keys [spans var-syms]} span-set]
     (and (not alias-context)       ; alias callsites are never auto-resolved
-         (or (ctor-call-in-regions? regions ctor-usage)
-             (intermediate-call-in-regions? intermediates var-syms)))))
+         (or (ctor-call-in-span-set? spans ctor-usage)
+             (intermediate-call-in-span-set? intermediates var-syms)))))
 
 (defn- find-owning-boundary-arg
   "The boundary argument a constructor call was reached *through*, or nil.
 
    Two ways an argument reaches a constructor, both decided from the
-   argument's ephemeral span set (`expanded-regions`):
+   argument's ephemeral span set (`arg-span-set`):
 
      1. **The constructor is written inside the span set.** Position identity,
         not form value: `(insert! (->fact :t m))`,
@@ -693,17 +693,17 @@
    whichever boundary call happened to contain one of them.
 
    Takes a map: `:ctor-usage`, `:intermediates`, `:traced-args`,
-   `:expanded-by-idx` (see `expanded-regions`).
+   `:span-set-by-idx` (see `arg-span-set`).
 
    nil means no boundary argument demonstrably reaches this constructor: the
    constructor call is not on an insert path out of this rule."
-  [{:keys [ctor-usage intermediates traced-args expanded-by-idx]}]
+  [{:keys [ctor-usage intermediates traced-args span-set-by-idx]}]
   (some #(when (arg-reaches-ctor? {:traced-arg %
                                    :ctor-usage ctor-usage
                                    :intermediates intermediates
-                                   :expanded (get expanded-by-idx
+                                   :span-set (get span-set-by-idx
                                                   (:idx %)
-                                                  {:regions [] :var-syms #{}})})
+                                                  {:spans [] :var-syms #{}})})
            %)
         traced-args))
 
@@ -722,7 +722,7 @@
    constructor entry, so the boundary pass can emit the provenance it would
    otherwise throw away."
   [{:keys [ctor-match inserter-var graph read-ctor-form
-           cfg-base candidates expanded-by-idx]}]
+           cfg-base candidates span-set-by-idx]}]
   (let [{:keys [usage type-resolver-fn]} ctor-match
         ctor-usage usage
         path (ctor-call-path graph inserter-var ctor-usage)
@@ -730,7 +730,7 @@
         owner (find-owning-boundary-arg {:ctor-usage ctor-usage
                                          :intermediates (set (rest path))
                                          :traced-args candidates
-                                         :expanded-by-idx expanded-by-idx})
+                                         :span-set-by-idx span-set-by-idx})
         {:keys [status constructor-sym] :as entry}
         (when owner
           (resolve-ctor-callsite
@@ -761,14 +761,14 @@
   [{:keys [inserter-var ctor-matches] :as env}]
   (let [candidates (->> (get (:args-by-caller env) inserter-var)
                         (sort-by (juxt #(:row (:usage %)) #(:col (:usage %)))))
-        expanded-by-idx (into {}
-                              (map (juxt :idx #(expanded-regions % env)))
+        span-set-by-idx (into {}
+                              (map (juxt :idx #(arg-span-set % env)))
                               candidates)]
     (keep #(resolve-ctor-usage-for-inserter
             (assoc env
                    :ctor-match %
                    :candidates candidates
-                   :expanded-by-idx expanded-by-idx))
+                   :span-set-by-idx span-set-by-idx))
           ctor-matches)))
 
 (defn- unambiguous-dropped-ctor-provenance
