@@ -610,3 +610,15 @@
   (let [used (look-up-facts-1 ?app-id)
         _unused [(->fact :demo/never-flowed {:id ?app-id})]]
     (r/insert-all! used)))
+
+(r/defrule rule-ctor-locals-shadowed-local
+  "Rule L12: two same-named locals — the outer one flows into insert-all!; a
+   shadowed inner one (same symbol, different kondo :id) holds a ->fact that
+   never flows. Expansion follows kondo usage→binding linkage, so the
+   non-flowing constructor must stay dropped despite the name collision."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [f (look-up-facts-1 ?app-id)]
+    (r/insert-all! f)
+    (let [f (->fact :demo/shadowed {:id ?app-id})]
+      (count f))))

@@ -1528,7 +1528,8 @@
                 :callsite-resolver-fn generic
                 :rules-filter [`atr/rule-ctor-locals-via-helpers
                                `atr/rule-ctor-locals-concat-for
-                               `atr/rule-ctor-locals-unreached-stays-dropped]
+                               `atr/rule-ctor-locals-unreached-stays-dropped
+                               `atr/rule-ctor-locals-shadowed-local]
                 :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
                                      :type-resolver-fn ->fact-type-resolver}]})]
       (testing "intermediate helper calls in binding inits (one callsite per insert)"
@@ -1566,6 +1567,15 @@
           (is (= :full (:resolution dyn)))
           (is (not-any? #(= [:demo/never-flowed] (:resolved-types %)) callsites)
               ":demo/never-flowed is bound but never inserted — not promoted")))
+      (testing "a same-named shadowed local in a non-flowing branch stays dropped"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-locals-shadowed-local)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              callsites (:callsites dyn)]
+          (is (= [:demo/looked-up-1] (:clara-rules/insert-types a)))
+          (is (= 1 (count callsites)))
+          (is (= :full (:resolution dyn)))
+          (is (not-any? #(= [:demo/shadowed] (:resolved-types %)) callsites)
+              ":demo/shadowed is bound to a shadowed local but never inserted")))
       (is (empty? @seen)
           ":callsite-resolver-fn sees nothing — every arg is constructor-owned"))))
 
