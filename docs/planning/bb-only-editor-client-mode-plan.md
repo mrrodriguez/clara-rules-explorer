@@ -39,6 +39,9 @@ Lua over the same contract — nothing in the client changes for it.
 - **slim analysis** — what is on disk: the analysis with recomputable directions
   dropped. Its inverse is `rehydrate/rehydrate-analysis`.
 - **navigate** — `clara.server.graph.client/navigate`, the editor-facing query.
+- **shared namespace** — a dep-free namespace under
+  `clara.server.tools.graph.shared.*` that both the JVM and bb `require`. See
+  "Reuse between JVM and bb".
 
 ## Why the current client cannot run under bb
 
@@ -48,8 +51,8 @@ Lua over the same contract — nothing in the client changes for it.
 | --- | --- | --- |
 | `clara.server.graph.cache` | `clara.server.tools.graph.core` → `clara.rules.engine`; `memory` → working-memory inspection | no — analysis comes from disk |
 | `clara.server.graph.server` | ring.adapter.jetty, reitit, muuntaja, jsonista | no |
-| `clara.server.tools.graph.analyze.ctor` | live `ns-resolve` / class-loading record resolution | no — see "Token resolution" below |
-| `schema.core` | Plumatic Schema | no — validation is optional at this boundary |
+| `clara.server.tools.graph.analyze.ctor` | live `ns-resolve` / class-loading record resolution | only for bare/aliased symbol tokens — see below |
+| `schema.core` | Plumatic Schema | optional at this boundary |
 | `clojure.tools.logging` | slf4j | replaceable |
 
 The one thing the client *does* need is the rehydrated `rulebase-analysis` map
@@ -62,278 +65,329 @@ disk** — and `server/bin/annotations_report.bb` already proves the latter.
 
 The question is not "can bb read the artifacts" — `annotations_report.bb`
 already does. The question is whether the *specific* inputs `navigate` consumes
-survive to disk or are derivable there. The answer is yes, with three
-documented degradations.
+survive to disk or are derivable there. The answer is yes.
 
 ### What `navigate` needs, and where it lives offline
 
 | `navigate` input | JVM source | offline source | fidelity |
 | --- | --- | --- | --- |
-| global producers of a type | `:fact-types :inserted-by-rules` / `:retracted-by-rules` (rehydrated) | recompute closure over `:insert-types`/`:retract-types` (production-index.edn) **closed over ancestors** (fact-types.edn) | exact — this is the same closure `rehydrate/->usage-maps` runs, and `annotations_report.bb producers` already does |
-| global consumers of a type | `:fact-types :used-by-rules` / `:used-by-queries` | recompute closure over `:lhs-types` **closed over descendants** | exact — `annotations_report.bb consumers` |
+| global producers of a type | `:fact-types :inserted-by-rules` / `:retracted-by-rules` (rehydrated) | recompute closure over `:insert-types`/`:retract-types` (production-index.edn) **closed over ancestors** (fact-types.edn) | exact |
+| global consumers of a type | `:fact-types :used-by-rules` / `:used-by-queries` | recompute closure over `:lhs-types` **closed over descendants** | exact |
 | type hierarchy (ancestors/descendants) | `:fact-types :ancestors` / `:descendants` | `fact-types.edn` `:ancestors` is already closed; transpose for descendants | exact |
-| scoped upstream/downstream targets | production `:upstream`/`:downstream` deps **filtered by `:match`** | `dep-graph.edn` `:upstream` (names only); **`:match` is not persisted** | **degraded** — see below |
-| RHS constructor-token resolution | `resolve-token` + `ctor/resolve-record-type` + `:dynamic-*-detected` callsites | annotation layers carry `:constructor-sym` / `:fact-type` / `:resolved-types` (readable in bb); live `ns-resolve`/class-loading is not | **degraded** — see below |
-| production source locations | var metadata via `ns-resolve` | none (no rule namespaces loaded in bb) | **degraded** — `:var? false`, editor regex/kondo fallback |
+| scoped upstream/downstream targets | production `:upstream`/`:downstream` deps **filtered by `:match`** | `dep-graph.edn` `:upstream` (names only); **`:match` is not persisted** | equivalent — see below |
+| RHS constructor-token resolution | `resolve-token` + `ctor/resolve-record-type` + `:dynamic-*-detected` callsites | annotation layers carry `:constructor-sym` / `:fact-type` / `:resolved-types` (readable in bb); live `ns-resolve`/class-loading is not | equivalent for fq tokens — see below |
+| production source locations | var metadata via `ns-resolve` | none (no rule namespaces loaded in bb) | `:var? false` — editor regex/kondo fallback |
 
-### Degradation 1 — scoped `:match` type-bridge precision
+### `:match` is not needed for navigation
 
-`navigate`'s scoped path (`lhs-navigate` / `rhs-navigate`) prefers
-`deps->targets` over `:upstream`/`:downstream`, which keeps only deps whose
-`:match` pair names the token's type. `:match` is computed by
-`core/matching-type-pairs` from the live `type-analysis-map` (raw
-produced/consumed/retract types) and is dropped by `slim` — it is **not** in
+`:match` is the per-edge type-bridge list attached to a production's
+`:upstream`/`:downstream` deps by `core/matching-type-pairs` (each entry is a
+`{producer-type, consumer-type, :via?}` pair; `:via :retract` marks retraction
+coupling). It is computed from the live `type-analysis-map` (raw
+produced/consumed/retract types) and dropped by `slim` — it is not in
 `dep-graph.edn`, and `rehydrate/rehydrate-production` states it "is not
-rebuilt — it needs raw types the persisted analysis does not carry."
+rebuilt."
 
-This is a smaller loss than it looks, because the client already has the
-fallback for exactly this case: when `deps->targets` returns nothing, both
-`lhs-navigate` and `rhs-navigate` call `global-producer-targets` /
-`global-consumer-targets` — the type-closure sets, which **are** derivable
-offline. So the bb path can run the global closure unconditionally and produce
-the same answer set the JVM client already produces as its scoped fallback.
-The only thing lost is the per-edge `:match` attribution on the *narrowed*
-subset (when a production has several type-bridge edges, bb returns the type's
-full producer/consumer set rather than only the edges matching the cursor
-token).
+The client uses `:match` in exactly one place — `deps->targets`, which filters
+the scoped `:upstream` (LHS) / `:downstream` (RHS) deps to those linked through
+the cursor token's type. But that filtered set is **the same set the global
+closure already yields**, because the dep-graph edge itself is built from the
+same closure:
 
-### Degradation 2 — live token resolution
+- LHS on type `T`: an upstream producer `R` is linked to `P` by a `:match` pair
+  whose `:consumer-type` is `T` exactly when `R` inserts/retracts `T` or a
+  descendant of `T` — which is precisely
+  `global-producer-targets T` (`:inserted-by-rules` ∪ `:retracted-by-rules`,
+  the ancestors closure). Same set.
+- RHS on type `T`: a downstream consumer `C` is linked by a `:match` pair whose
+  `:producer-type` is `T` exactly when `C`'s declared LHS type is `T` or an
+  ancestor of `T` — which is precisely `global-consumer-targets T`
+  (`:used-by-*`, the descendants closure). Same set.
 
-`resolve-token` / `resolve-symbol-type` / `token->fq-sym` resolve symbol and
-constructor tokens against the live caller namespace (`ns-resolve`,
-`ctor/resolve-record-type` with hyphen→underscore class-load checks). bb has
-none of that.
+The retract distinction survives too: `global-producer-targets` reads
+`:inserted-by-rules` and `:retracted-by-rules` separately and tags each dep
+`:insert`/`:retract` — the same information `:match`'s `:via :retract` encodes.
 
-The parts that survive:
+The client *already* takes this path whenever `:match` is absent or non-matching
+(both `lhs-navigate` and `rhs-navigate` fall through to the global closure when
+`deps->targets` returns empty, and the hierarchy-reached `:else` branch goes
+straight to the global closure). So the bb path can use the global closure
+unconditionally and produce the identical target set — with **no change to the
+navigation functions themselves**. `:match` remains useful only to the HTTP
+API's edge-list display (`GET /v1/rules/:fq-name`), which the editors do not
+consume for navigation.
 
-- keyword tokens → the literal `":ns/name"` string (already pure),
-- string tokens → `pr-str` (already pure),
-- the `:dynamic-insert-types-detected` / `:dynamic-retract-types-detected`
-  callsite linkage — `callsite-matches-token?` matches `:constructor-sym` /
-  `:fact-type` / `:fact-type-spec` names against the token string. That linkage
-  is authored annotation data, persisted in the annotation layers, and readable
-  in bb (it is exactly what `annotations_report.bb gaps`/`types` already read).
+### Token resolution: the live part is only for *unqualified* symbols
 
-The parts that do not survive: resolving a bare record/Java constructor symbol
-(`->X`, `map->X`, `X.`, `new X`) to a class name **without** a prior callsite
-linkage entry. In bb these tokens fall back to a string match against the
-callsite data and, failing that, the unresolved-symbol sentinel — which is the
-same "no fact type found under cursor" outcome the JVM path gives for an
-unresolvable token.
+`resolve-token` has three cases:
 
-Net: LHS navigation (which resolves the fact-type keyword/symbol written in the
-condition) and global navigation over keyword/string tokens are unaffected.
-RHS navigation over a *constructor call* depends on the annotation callsite
-linkage, which is present whenever the analysis pass resolved it — i.e. the
-common case.
+1. **keyword / string tokens** — already pure (`(str form)` / `(pr-str form)`).
+   No resolution at all. Unaffected by the lack of a JVM.
+2. **the `:dynamic-*-detected` callsite linkage** — `callsite-matches-token?`
+   compares the token against `:constructor-sym` / `:fact-type :name` /
+   `:fact-type-spec`. That linkage is authored annotation data, persisted in the
+   annotation layers, and readable in bb (`annotations_report.bb gaps`/`types`
+   already read these exact fields). Unaffected.
+3. **`ns-resolve` / `ctor/resolve-record-type`** — the only JVM-dependent part.
 
-### Degradation 3 — source locations
+Case 3 exists for one reason: to turn a **bare or aliased** symbol into its
+fully-qualified name, and to *verify* a `->X`/`map->X` form is a record
+constructor rather than a helper fn like `->fact`. Concretely:
 
-`get-production-source` returns var metadata (`:file`/`:line`/`:column`) from
-`ns-resolve`. bb loads no rule namespaces, so this is always `:var? false`.
-Both editors already handle that: the elisp
+- alias/import resolution — `Loan` (imported `com.example.Loan`) → fq name;
+- record-ctor normalization — `->loan` → `my.ns.Loan` (strip prefix,
+  hyphen→underscore, fq);
+- class-load check — reject a constructor-named helper fn whose derived class
+  does not exist.
+
+If the token is **already fully qualified** (`com.example.Loan`, `my.ns/->Loan`),
+none of that is needed: the fq name is literally in the token, and the syntactic
+normalization (strip `->`/`map->`, `X.`/`new X` handling, hyphen→underscore) is
+pure — doable in bb. The class-load check is the only genuinely JVM-dependent
+step, and it is a heuristic the annotation callsite data **supersedes**: the
+analysis only records a `:constructor-sym`/`:fact-type` for constructors that
+actually resolved to fact types during analysis, so matching the token string
+against those recorded fq names is *more* reliable than re-deriving and
+load-checking at navigation time.
+
+Net: bb token resolution is a strict subset — pure syntactic normalization plus
+string matching against the persisted names. It degrades only for a bare/aliased
+symbol that (a) names a Java class or record ctor and (b) has no callsite
+linkage entry to match against. Everything keyword/string/fq-symbol resolves
+identically.
+
+### Source locations are `:var? false`, and both editors already handle it
+
+`get-production-source` returns var metadata from `ns-resolve`; bb loads no rule
+namespaces, so this is always `:var? false`. The elisp
 `clara-explorer--goto` calls `cider-find-var` only when `:var?` is true, else
 `clara-explorer--goto-fallback` (regex search in the ns file); the Lua `jump`
-module has the same fallback. No editor logic changes for this — the bb client
-just always emits the `:var? false` shape.
+module has the same fallback. No editor logic changes — the bb client emits the
+`:var? false` shape and the existing fallback takes over.
 
 ### Verdict
 
 **Feasible.** The navigation questions the editor asks — "who produces/consumes
 the type under the cursor, and where do I jump" — are answerable from the
-persisted artifact set with the three degradations above. The two closures
-(ancestors for producers/retractors, descendants for consumers) are the only
-part that is easy to get wrong, and `annotations_report.bb` already implements
-both directions correctly; `rehydrate`'s `->usage-maps` is the JVM reference
-for the same computation.
+persisted artifact set with no JVM, no live session, and no loss of the answer
+sets. The only hard-to-get-right part is the two closures (ancestors for
+producers/retractors, descendants for consumers), and the reuse mechanism below
+is precisely how we keep that from drifting.
+
+## Reuse between JVM and bb: `shared.` namespaces + `bootstrap.bb`
+
+Rather than reimplement navigation in a bb script and keep it in sync by hand,
+we share real namespaces. Two mechanisms, in order of preference:
+
+### 1. `shared.` namespaces — the primary reuse mechanism
+
+A dep-free namespace under `clara.server.tools.graph.shared.*` is the home for
+logic both the JVM and bb `require`. Convention: **`clara.server.tools.graph.shared.<name>`
+holds logic extracted from `clara.server.tools.graph.<…>.<name>`** — one segment
+`shared.` lower, so the extracted piece and its home are visually paired.
+
+The discipline that makes it safe: **a `shared.` namespace must not `:require`
+anything JVM-only.** This is self-enforcing — bb `require` of a namespace that
+transitively requires `clara.rules.engine` fails with "Could not locate
+clara/rules/engine… on classpath" — and it is pinned by a bb smoke test that
+`require`s every `shared.` namespace with no classpath beyond `src`.
+
+`clara.server.tools.graph.artifacts.layout` is the precedent: a dep-free file
+whose docstring says "no dependencies is its whole reason to exist," loaded by
+both sides. The convention generalizes that from one file to a namespace tree.
+
+Candidate extractions (final naming to implementation):
+
+| shared namespace | extracted from | holds |
+| --- | --- | --- |
+| `…graph.shared.hierarchy` | `annotations_report.bb` (`->descendants`, `with-hierarchy`) + `rehydrate` + `artifacts.hierarchy` | the transpose and the two closure directions — the one part that is easy to get wrong |
+| `…graph.shared.rehydrate` | `rehydrate`'s `->usage-maps` / `->downstream` | the four usage closures + `:downstream` transpose, over slim-shaped maps |
+| `…graph.shared.navigate` | `client/navigate` + its private fns | pure navigation over a rehydrated analysis map |
+| `…graph.shared.tokens` | `client`'s `resolve-token` fns | keyword/string/ctor-form syntactic normalization + callsite string matching |
+
+### 2. Reader conditionals — only for the genuinely-different boundary
+
+Where the JVM and bb behavior *must* differ (the live `ns-resolve`/class-load
+step in token resolution, the client shell's system/var-metadata access), use a
+`.cljc` with the **`:bb` branch first**:
+
+```clojure
+#?(:bb  (require '[clojure.edn :as edn] '[clojure.set :as set] '[clojure.string :as str])
+   :clj (require '[clara.rules.engine :as eng] '[schema.core :as s] '[clojure.tools.logging :as log]))
+```
+
+Empirically (bb v1.13.224), bb satisfies **both** `:clj` and `:bb`; the JVM
+satisfies only `:clj`. So only a conditional with `:bb` **first** distinguishes
+them — `#?(:clj …)` alone would still ship the JVM into bb. This also holds under
+`require` via `babashka.classpath/add-classpath` (verified), not just
+`load-file`.
+
+This is the *exception*, not the norm: shared logic should be condition-free and
+live in `shared.` namespaces; reader conditionals are reserved for the boundary
+seams.
+
+### 3. `bootstrap.bb` — how bb `require`s the shared namespaces
+
+`server/bin/bootstrap.bb` puts `server/src` (and prismatic/schema, if a boundary
+wants `NavigateInput` validation parity) on a bb script's classpath:
+
+```clojure
+;; server/bin/bootstrap.bb
+(require '[babashka.classpath :as cp]
+         '[babashka.deps :as deps]
+         '[babashka.fs :as fs]
+         '[clojure.edn :as edn])
+
+(let [project-root (fs/parent (fs/parent (fs/canonicalize *file*)))
+      deps (:deps (edn/read-string (slurp (str (fs/path project-root "deps.edn")))))]
+  (deps/add-deps {:deps (select-keys deps '[prismatic/schema])})
+  (cp/add-classpath (str (fs/path project-root "src"))))
+```
+
+A bb script then does:
+
+```clojure
+(load-file (str (fs/path (fs/parent (fs/canonicalize *file*)) "bootstrap.bb")))
+(require '[clara.server.tools.graph.shared.navigate :as navigate])
+```
+
+`load-file`d (not `require`d) because bootstrap is what makes `require` work in
+the first place. The schema version is read from `deps.edn` so the JVM and bb
+cannot pin different ones; only the namespaces a script actually requires are
+loaded, which is what keeps this safe.
+
+Notes:
+
+- schema stays **out of `shared.` namespaces** — it is a bootstrap-provided
+  convenience for boundary validation, not a dependency of shared logic. Shared
+  namespaces operate on plain maps.
+- `bootstrap.bb` + `add-classpath` could eventually supersede the
+  `server/bin/layout.cljc` symlink that `annotations_report.bb` uses today
+  (`require` `clara.server.tools.graph.artifacts.layout` directly). Optional
+  cleanup; the symlink works and is already pinned.
 
 ## Design
 
-### 1. One reader-conditional mechanism: `:bb`, not `:clj`
+1. **Extract `shared.` namespaces** (§Reuse 1) — move the pure navigation body
+   and the rehydration closures out of `clara.server.graph.client` /
+   `clara.server.tools.graph.artifacts.rehydrate` into
+   `clara.server.tools.graph.shared.*`. Both the JVM side and bb `require` the
+   same code; the closures are defined once, so the drift risk disappears.
 
-The stated mechanism — ".cljc with `:clj` read conditionals" — is not quite
-right, and getting it wrong silently ships the JVM into bb. Empirically (bb
-v1.13.224):
+2. **Keep `clara.server.graph.client` as the JVM shell** — it keeps what is
+   JVM-only: system registration (`register!`, `get-current-system`),
+   `get-production-source` (var metadata), `swap-session!` /
+   `register-session-swap-opts-fn`, `schema.core` validation of `NavigateInput`.
+   It delegates navigation to `shared.navigate`, supplying (a) the rehydrated
+   in-memory analysis from `cache/get-rulebase-analysis` and (b) the live token
+   resolver (the `:clj` branch of `shared.tokens`). The existing nREPL contract
+   stays byte-for-byte identical for editors that still use it.
 
-```clojure
-;; in babashka, load-file of a .cljc:
-#?(:clj :yes-clj)   ;=> :yes-clj  (bb *also* satisfies :clj)
-#?(:bb :yes-bb)     ;=> :yes-bb  (bb satisfies :bb)
-#?(:clj :a :bb :b)  ;=> :a       (:clj wins — first matching feature)
-#?(:bb :a :clj :b)  ;=> :a in bb, :b on the JVM  ← the idiom to use
-```
+3. **A bb entry point with the same EDN contract** — `server/bin/editor_client.bb`
+   (beside `annotations_report.bb`) is the bb twin of `navigate`:
 
-bb satisfies **both** `:clj` and `:bb`; the JVM satisfies only `:clj`.
-Therefore the only conditional that distinguishes them is one where `:bb` comes
-**first**:
+   ```
+   bb server/bin/editor_client.bb <unit-dir> <navigate-input-edn>
+   ```
 
-```clojure
-#?(:bb  (require '[clojure.edn :as edn]
-                 '[clojure.set :as set]
-                 '[clojure.string :as str])
-   :clj (require '[clara.rules.engine :as eng]
-                 '[schema.core :as s]
-                 '[clojure.tools.logging :as log]))
-```
+   It `load-file`s `bootstrap.bb`, reads the unit's `production-index.edn`,
+   `fact-types.edn`, `meta.edn` (`:slim :unknown-fact-types`), and the annotation
+   layers (for the `:dynamic-*-detected` callsite linkage), rehydrates the four
+   directions via `shared.rehydrate`, and calls `shared.navigate/navigate` with
+   the bb token resolver. It prints the EDN `NavigateResponse` to stdout (the
+   shape the editors' parseedn/EDN decoders already consume); errors print
+   `{:error "…"}`.
 
-A `.cljc` written this way loads under bb with none of the JVM deps touched.
-(This applies to `load-file`/`require`, i.e. code. The EDN *data* files are
-read with `clojure.edn/read-string`, which has no reader conditionals — no
-interaction.)
+   First milestone operates on **one unit directory** (a repo's artifact dir, or
+   a unit already materialized by `flow/compose-persist!` — both are the exact
+   directory `annotations_report.bb` reads). This sidesteps registry composition:
+   the composed unit *is* the "configured rulebase analysis registry construct"
+   handed to the editor.
 
-### 2. Split the pure `navigate` out of `clara.server.graph.client`
+   Second milestone (optional) is a live registry selection: accept
+   `{:root … :units […]}` and run `selection/->selection` +
+   `compose/->composed-analysis` — moved to `shared.` form — on the fly. Only
+   needed if the editor must compose ad-hoc selections rather than point at a
+   persisted unit.
 
-Extract the navigation logic into a dependency-free `.cljc` namespace (proposed:
-`clara.server.graph.client.navigate`), parameterized over two things the JVM
-shell and the bb script supply differently:
-
-- the **analysis map** — on the JVM, the rehydrated in-memory analysis from
-  `cache/get-rulebase-analysis`; under bb, the slim analysis rehydrated in pure
-  Clojure (see §3). The pure code only needs the rehydrated shape:
-  `:rules`/`:queries` summaries with `:lhs-types`/`:insert-types`/
-  `:retract-types`/`:dynamic-*-detected`, and `:fact-types` with
-  `:used-by-*`/`:inserted-by-rules`/`:retracted-by-rules`.
-- a **token resolver** — under `#?(:clj …)` the live
-  `ns-resolve`/`ctor/resolve-record-type` path; under `#?(:bb …)` the
-  keyword/string-literal + callsite-string-match path.
-
-The navigation functions themselves (`lhs-navigate`, `rhs-navigate`,
-`navigate-global`, `deps->targets`, the global producer/consumer targets) are
-pure and condition-free. Because the bb analysis has no `:match` on its deps,
-`deps->targets` naturally returns nothing and the code falls through to the
-global closure — the existing fallback path becomes the bb primary path with
-**no code change to the navigation functions themselves**.
-
-`clara.server.graph.client` (the JVM `.clj` shell) keeps what is JVM-only:
-system registration (`register!`, `get-current-system`),
-`get-production-source` (var metadata), `swap-session!` /
-`register-session-swap-opts-fn`, and the `schema.core` validation of
-`NavigateInput`. It delegates the actual navigation to the shared `.cljc`.
-This keeps the existing nREPL contract byte-for-byte identical for editors that
-still use it.
-
-### 3. Pure-Clojure rehydration of the slim analysis
-
-`clara.server.tools.graph.artifacts.rehydrate` cannot be `require`d under bb
-(it pulls `ann.merge`, `conditions`, `serialize`, `schema`). But its *logic* is
-pure, and `annotations_report.bb` already reimplements the two hard parts. The
-bb backend needs a small, dep-free reimplementation of exactly:
-
-- transpose `:ancestors` → descendants (`annotations_report.bb ->descendants`),
-- the four usage closures over `production-index.edn` + `fact-types.edn` —
-  producers/retractors closed over **ancestors**, consumers closed over
-  **descendants** — which `annotations_report.bb` implements as `producers` /
-  `consumers`, and `rehydrate/->usage-maps` states as the reference,
-- `:dep-graph :downstream` = transpose of `:upstream` (for the `edges` shape,
-  not required by `navigate` itself).
-
-To keep this from drifting from the JVM definition, mirror the `layout.cljc`
-pattern: put the shared closure definitions in a `.cljc` file both
-`rehydrate.clj` and the bb backend load, or (smaller first step) reimplement
-them in the bb script and pin parity with a test that runs
-`annotations_report.bb`'s `producers`/`consumers` against
-`rehydrate`'s `->usage-maps` over the checked-in example registry.
-
-### 4. A bb entry point with the same EDN contract
-
-A new script (proposed `server/bin/editor_client.bb`, beside
-`annotations_report.bb`) that is the bb twin of `navigate`:
-
-```
-bb server/bin/editor_client.bb <unit-dir> <navigate-input-edn>
-```
-
-- reads `<navigate-input-edn>` (the same `NavigateInput` map the editors build
-  today: `:production :side :caller-ns :token`),
-- reads the unit's `production-index.edn`, `fact-types.edn`, `meta.edn`
-  (`:slim :unknown-fact-types`), and the annotation layers (for
-  `:dynamic-*-detected` callsite linkage) via `layout.cljc`,
-- rehydrates the four directions in pure Clojure (§3),
-- prints the EDN `NavigateResponse` to stdout (the same shape the editors'
-  parseedn/EDN decoders already consume); errors print `{:error "…"}`.
-
-First milestone operates on **one unit directory** (a repo's artifact dir, or a
-unit already materialized by `flow/compose-persist!` — both are the exact
-directory `annotations_report.bb` already reads). This sidesteps registry
-composition entirely: the composed unit *is* the "configured rulebase analysis
-registry construct" handed to the editor.
-
-Second milestone (optional) is a live registry selection: accept
-`{:root … :units […]}` and reimplement `selection/->selection` +
-`compose/->composed-analysis` in the dep-free `.cljc`, producing the same
-composed slim analysis on the fly. This is more work and only needed if the
-editor must compose ad-hoc selections rather than point at a persisted unit.
-
-### 5. Editor transport
-
-- **Emacs**: add a `clara-explorer--eval-bb` transport (shell out to
-  `bb server/bin/editor_client.bb`, parse stdout with `parseedn-read-str`)
-  selected by a defcustom (e.g. `clara-explorer-transport` = `nrepl` | `bb`),
-  and a defcustom for the unit dir / registry root. Reuse the existing
-  `clara-explorer--navigate-code` map builder unchanged — only the eval
-  function changes. `swap-session!`/`refresh` are nREPL-only and no-op (or
-  message) in bb mode.
-- **neovim**: the same change later, in `conjure.lua`'s `eval_edn` — an
-  alternate executor that shells out instead of `conjure.eval`. Nothing in the
-  client contract changes, which is why this is a later, independent step.
+4. **Editor transport** — Emacs: add a `clara-explorer--eval-bb` transport
+   (shell out to `bb server/bin/editor_client.bb`, parse stdout with
+   `parseedn-read-str`) behind a defcustom, plus a defcustom for the unit dir /
+   registry root; reuse the existing `clara-explorer--navigate-code` map builder
+   unchanged. `swap-session!`/`refresh` are nREPL-only and no-op in bb mode.
+   Neovim: the same change later in `conjure.lua`'s `eval_edn` — an alternate
+   executor that shells out instead of `conjure.eval`. Nothing in the client
+   contract changes.
 
 ## What changes where
 
 | file | change |
 | --- | --- |
-| `server/src/clara/server/graph/client/navigate.cljc` (new) | dep-free `navigate` + navigation fns + `#?(:bb/:clj)` token resolver |
-| `server/src/clara/server/graph/client.clj` | becomes the JVM shell: keeps `register!`, `get-production-source`, `swap-session!`, schema validation; delegates to the `.cljc` |
-| `server/bin/editor_client.bb` (new) | bb entry: read unit artifacts, rehydrate (§3), call the `.cljc` `navigate`, print EDN |
-| `server/src/clara/server/tools/graph/artifacts/layout.cljc` | unchanged — already the shared dep-free vocabulary both sides load |
-| `server/docs/persisted-artifacts.md` | note the new offline reader beside `annotations_report.bb` |
+| `server/src/clara/server/tools/graph/shared/hierarchy.cljc` (new) | transpose + the two closures, extracted from `annotations_report.bb` / `rehydrate` |
+| `server/src/clara/server/tools/graph/shared/rehydrate.cljc` (new) | four usage closures + `:downstream` transpose over slim-shaped maps |
+| `server/src/clara/server/tools/graph/shared/navigate.cljc` (new) | pure `navigate` + navigation fns over a rehydrated analysis map |
+| `server/src/clara/server/tools/graph/shared/tokens.cljc` (new) | token normalization + callsite string matching; `#?(:bb/:clj)` live-resolve seam |
+| `server/src/clara/server/graph/client.clj` | becomes the JVM shell: keeps `register!`, `get-production-source`, `swap-session!`, schema validation; delegates to `shared.*` |
+| `server/src/clara/server/tools/graph/artifacts/rehydrate.clj` | delegates its closure bodies to `shared.rehydrate` / `shared.hierarchy` |
+| `server/bin/bootstrap.bb` (new) | add `server/src` + prismatic/schema to the bb classpath (version from `deps.edn`) |
+| `server/bin/editor_client.bb` (new) | bb entry: bootstrap, read unit artifacts, rehydrate, call `shared.navigate`, print EDN |
+| `server/bin/annotations_report.bb` | optionally migrate to `bootstrap.bb` + `shared.hierarchy` (drop its inline closure reimpls and the `layout.cljc` symlink) |
+| `server/docs/persisted-artifacts.md` | note the new offline reader + the `shared.` convention |
 | `editor/emacs/clara-explorer.el` | add bb transport + config defcustoms |
 | `editor/neovim/lua/clara-explorer/*.lua` | later, same transport change |
 
 ## Phasing
 
-1. **Extract + parity (no bb yet).** Move navigation into the `.cljc`, have the
-   JVM `client.clj` delegate to it, and pin parity with the existing
-   `client`/`server` navigation tests. No behavior change; this de-risks the
-   split.
-2. **bb backend + entry script.** Implement §3–§4 for a single unit dir; verify
-   `editor_client.bb` against `annotations_report.bb`'s `producers`/`consumers`
-   and against `rehydrate` over the checked-in example registry
+1. **Extract + parity (no bb yet).** Move the navigation body and closures into
+   `shared.*`, have the JVM `client.clj` and `rehydrate.clj` delegate to them,
+   and pin parity with the existing `client`/`rehydrate`/`slim` tests. No
+   behavior change; de-risks the split.
+2. **`bootstrap.bb` + bb smoke test.** Add `bootstrap.bb` and a test that
+   `require`s every `shared.*` namespace under bb with no classpath beyond
+   `src`.
+3. **bb entry script.** Implement `editor_client.bb` for a single unit dir;
+   verify against `annotations_report.bb`'s `producers`/`consumers` and against
+   `rehydrate` over the checked-in example registry
    (`clara.server.tools.graph.artifacts.regen-example/example-out-dir`).
-3. **Emacs transport.** Wire the bb transport behind a defcustom; leave nREPL
+4. **Emacs transport.** Wire the bb transport behind a defcustom; leave nREPL
    as the default.
-4. **Registry selection (optional).** Add `{:root … :units […]}` composition in
-   bb if ad-hoc selection is wanted.
-5. **neovim.** Mirror step 3 in Lua.
+5. **Registry selection (optional).** Add `{:root … :units […]}` composition in
+   `shared.` form if ad-hoc selection is wanted.
+6. **neovim.** Mirror step 4 in Lua.
 
 ## Risks and mitigations
 
-- **Closure direction wrong in the bb reimplementation.** The ancestors/descendants
-  split is the known footgun (`slim`'s header and `registry-architecture.md`
-  both call it out). Mitigation: share the closure definitions via a `.cljc`
-  both `rehydrate` and bb load, or pin a parity test over the golden registry.
-- **`.cljc` accidentally loads a JVM dep in bb.** Enforced by the `#?(:bb …
-  :clj …)` ordering (§1); additionally a bb smoke test that
-  `require`s the `.cljc` under bb with no classpath and asserts it loads.
-- **Token resolution regressions.** The bb resolver is a strict subset; symbol
-  tokens that only the live classpath could resolve become "no fact type found"
-  instead of a wrong jump. Acceptable — the editor message is the same shape
-  the JVM path already produces for unresolvable tokens.
-- **`:match`-less scoped navigation returns a superset.** Documented in
-  Degradation 1; the popover already handles multiple targets, so a wider set
-  degrades to "pick which producer/consumer," not a wrong answer.
+- **Closure direction wrong in a reimplementation.** Eliminated, not mitigated:
+  the closures live in `shared.hierarchy` and are `require`d by both sides, so
+  there is one definition to get right. Parity is pinned by `slim-test`'s
+  dropped-directions-invert-back test on the JVM side and the bb smoke test.
+- **A `shared.` namespace accidentally requires a JVM-only dep.** bb `require`
+  fails loudly at load (verified), and the bb smoke test forces every `shared.`
+  namespace through that load.
+- **Reader-conditional ordering.** `#?(:clj … :bb …)` silently ships JVM code
+  into bb. Mitigation: the rule is `:bb` first, stated in `shared.` docstrings
+  and checked by the bb smoke test asserting the `:bb` branch is taken.
+- **Token resolution regressions.** bb resolution is a strict subset; a
+  bare/aliased symbol with no callsite linkage resolves to "no fact type found"
+  instead of a wrong jump — the same shape the JVM path already emits for
+  unresolvable tokens.
 - **`get-production-locations` / `swap-session!` / `refresh` have no bb twin.**
   They are nREPL-only by nature; the editors gate them on transport.
 
 ## Open questions
 
-1. Should the bb mode read **one unit dir** first (my recommendation), or go
-   straight to **registry selection** (`{:root … :units […]}`)?
+1. Should the bb mode read **one unit dir** first (recommended), or go straight
+   to **registry selection** (`{:root … :units […]}`)?
 2. Where does the editor get the unit dir / registry root from? A per-project
    config var, a `.dir-locals.el`/`.nvim.lua` value, or an env var — matching
    the "no hard-coded paths" rule both editors already follow.
-3. Keep `schema.core` validation of `NavigateInput` in the shared `.cljc`
-   (conditional), or drop validation in bb mode and rely on the editors'
-   well-formed maps?
+3. Does `shared.navigate` keep `NavigateInput` validation (bootstrap-provided
+   schema) in bb mode, or rely on the editors' well-formed maps? Recommended:
+   drop it in bb, keep it in the JVM shell.
+4. Do we migrate `annotations_report.bb` to `bootstrap.bb`/`shared.*` in the
+   same change, or leave it on the symlink until `editor_client.bb` proves the
+   bootstrap path? Recommended: leave it; migrate once `editor_client.bb` is
+   green.
 
 ## Related
 
