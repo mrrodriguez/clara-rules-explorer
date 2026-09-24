@@ -117,6 +117,19 @@ navigation functions themselves**. `:match` remains useful only to the HTTP
 API's edge-list display (`GET /v1/rules/:fq-name`), which the editors do not
 consume for navigation.
 
+**This is a simplification opportunity.** Since the scoped `:match` path and the
+global closure yield the same target set, the client can **drop the scoped path
+entirely** and always answer from `:fact-types` (`global-producer-targets` /
+`global-consumer-targets`). That removes `:upstream`/`:downstream`/`:match` from
+the navigation code path (they remain only for the HTTP API), collapses
+`navigate` to one code path the bb port reimplements exactly, and is a candidate
+for its own pre-bb cleanup change — pinned by a parity test that asserts
+scoped ≡ global over every fixture *before* the scoped path is deleted. The one
+thing to prove first: that a declared LHS/RHS type is always a key of
+`:fact-types`, so the global lookup never returns empty where the scoped
+`:match` lookup found targets (declared types are "known" by construction, but
+pin it rather than assume it).
+
 ### Token resolution: the live part is only for *unqualified* symbols
 
 `resolve-token` has three cases:
@@ -150,11 +163,36 @@ actually resolved to fact types during analysis, so matching the token string
 against those recorded fq names is *more* reliable than re-deriving and
 load-checking at navigation time.
 
-Net: bb token resolution is a strict subset — pure syntactic normalization plus
-string matching against the persisted names. It degrades only for a bare/aliased
-symbol that (a) names a Java class or record ctor and (b) has no callsite
-linkage entry to match against. Everything keyword/string/fq-symbol resolves
-identically.
+**Where the editor can help.** Today the emacs client does *not* resolve
+anything before sending: `clara-explorer--token-at-point` extracts the raw
+buffer text and `clara-explorer--navigate-code` ships it verbatim with
+`:caller-ns` (`cider-current-ns`); all alias/symbol resolution happens in
+`client.clj`'s `resolve-token` / `token->fq-sym` via `ns-resolve` /
+`ctor/resolve-record-type`. `client-test` pins this exactly:
+`test-global-consumers-callsite-linked-ctor` sends the *aliased*
+`laf/map->DocumentCheck` and expects it resolved against `:caller-ns`.
+
+Because the editor has a live repl (CIDER/Conjure), it can resolve an aliased
+symbol (`x/->loan` → `real.ns/->loan`) to fully-qualified form **before** calling
+`navigate` — a concern that lives with the repl, orthogonal to whether the
+navigation query runs on the JVM or bb. If that resolution moves into the
+editor, the client's token handling collapses to pure syntactic normalization
+(keyword → `":ns/name"`, string → `pr-str`, fq symbol/ctor-form → name),
+identical on both runtimes. `:caller-ns` stops being needed *for resolution*
+(it is used only for that today), but we keep passing it — harmless context the
+client may want later.
+
+Both editors already have the repl connection this needs: CIDER for Emacs
+(`cider-nrepl-sync-request:eval` over the buffer ns), and Conjure for neovim —
+`conjure.lua` gates every command on `conjure.connected()`, exposes
+`current_ns()` (`conjure.extract.context()`), and evals over
+`conjure.eval["eval-str"]`, so a symbol-resolution eval is available in both.
+
+The one caveat: alias resolution needs a live repl. If bb-only mode must work
+with **no repl at all**, aliased symbols cannot be resolved unless we start
+persisting namespace alias maps (today dropped as `:ns-deps`, deliberately).
+Recommendation: make alias resolution the editor's job over its repl, and treat
+"zero-repl" as an explicit non-goal for now.
 
 ### Source locations are `:var? false`, and both editors already handle it
 
@@ -268,6 +306,17 @@ Notes:
 
 ## Design
 
+Two simplifications from the feasibility section land here first, because they
+shrink the port to a single, pure code path:
+
+- **global-closure-only navigation** — drop the scoped `:match` path, and
+- **editor-side token resolution** — the editor resolves aliased symbols to fq
+  over its repl before calling `navigate`.
+
+With both, `shared.navigate` is pure over a rehydrated analysis map, and the
+only `#?(:bb/:clj)` seam left is the optional live-resolve escape hatch for the
+nREPL transport.
+
 1. **Extract `shared.` namespaces** (§Reuse 1) — move the pure navigation body
    and the rehydration closures out of `clara.server.graph.client` /
    `clara.server.tools.graph.artifacts.rehydrate` into
@@ -278,10 +327,11 @@ Notes:
    JVM-only: system registration (`register!`, `get-current-system`),
    `get-production-source` (var metadata), `swap-session!` /
    `register-session-swap-opts-fn`, `schema.core` validation of `NavigateInput`.
-   It delegates navigation to `shared.navigate`, supplying (a) the rehydrated
-   in-memory analysis from `cache/get-rulebase-analysis` and (b) the live token
-   resolver (the `:clj` branch of `shared.tokens`). The existing nREPL contract
-   stays byte-for-byte identical for editors that still use it.
+   It delegates navigation to `shared.navigate`, supplying the rehydrated
+   in-memory analysis from `cache/get-rulebase-analysis`. With editor-side token
+   resolution (§0b) the live `ns-resolve`/`ctor` resolver becomes an optional
+   back-compat escape hatch (the `:clj` branch of `shared.tokens`) for nREPL
+   callers that still send raw tokens, not a required part of the contract.
 
 3. **A bb entry point with the same EDN contract** — `server/bin/editor_client.bb`
    (beside `annotations_report.bb`) is the bb twin of `navigate`:
@@ -333,11 +383,18 @@ Notes:
 | `server/bin/editor_client.bb` (new) | bb entry: bootstrap, read unit artifacts, rehydrate, call `shared.navigate`, print EDN |
 | `server/bin/annotations_report.bb` | optionally migrate to `bootstrap.bb` + `shared.hierarchy` (drop its inline closure reimpls and the `layout.cljc` symlink) |
 | `server/docs/persisted-artifacts.md` | note the new offline reader + the `shared.` convention |
-| `editor/emacs/clara-explorer.el` | add bb transport + config defcustoms |
-| `editor/neovim/lua/clara-explorer/*.lua` | later, same transport change |
+| `editor/emacs/clara-explorer.el` | add bb transport + config defcustoms; pre-resolve aliased symbol tokens to fq via CIDER before sending |
+| `editor/neovim/lua/clara-explorer/*.lua` | later, same transport + pre-resolution change |
 
 ## Phasing
 
+0. **Two independent cleanups, done first — before any `shared.`/bb work.**
+   They touch only the current JVM client + editors and shrink everything after.
+   0a. Drop the scoped `:match` path to global-closure-only, pinned by a parity
+       test (scoped ≡ global over every fixture).
+   0b. Move aliased-symbol resolution into the editors (CIDER/Conjure resolve to
+       fq before calling `navigate`), so the client does no live resolution;
+       keep passing `:caller-ns` as context.
 1. **Extract + parity (no bb yet).** Move the navigation body and closures into
    `shared.*`, have the JVM `client.clj` and `rehydrate.clj` delegate to them,
    and pin parity with the existing `client`/`rehydrate`/`slim` tests. No
@@ -367,27 +424,40 @@ Notes:
 - **Reader-conditional ordering.** `#?(:clj … :bb …)` silently ships JVM code
   into bb. Mitigation: the rule is `:bb` first, stated in `shared.` docstrings
   and checked by the bb smoke test asserting the `:bb` branch is taken.
-- **Token resolution regressions.** bb resolution is a strict subset; a
-  bare/aliased symbol with no callsite linkage resolves to "no fact type found"
-  instead of a wrong jump — the same shape the JVM path already emits for
-  unresolvable tokens.
+- **Token resolution regressions.** Moot if editor-side token resolution is
+  adopted (the client never sees a bare/aliased symbol). Otherwise bb resolution
+  is a strict subset; a bare/aliased symbol with no callsite linkage resolves to
+  "no fact type found" instead of a wrong jump — the same shape the JVM path
+  already emits for unresolvable tokens.
 - **`get-production-locations` / `swap-session!` / `refresh` have no bb twin.**
   They are nREPL-only by nature; the editors gate them on transport.
 
 ## Open questions
 
-1. Should the bb mode read **one unit dir** first (recommended), or go straight
+1. **Editor-side token resolution** — adopt it? Recommended: yes (both editors
+   have the repl — CIDER and Conjure `eval-str` — so the client stays pure on
+   both runtimes). Confirmed: both editors currently send raw token +
+   `:caller-ns` and resolve on the Clojure side. Keep `:caller-ns` as context
+   regardless.
+2. **Drop the scoped `:match` path** — delete `deps->targets` /
+   `:upstream`/`:downstream` from the navigation code path and go
+   global-closure-only? Recommended: yes, after a parity test pins scoped ≡
+   global.
+3. Should the bb mode read **one unit dir** first (recommended), or go straight
    to **registry selection** (`{:root … :units […]}`)?
-2. Where does the editor get the unit dir / registry root from? A per-project
+4. Where does the editor get the unit dir / registry root from? A per-project
    config var, a `.dir-locals.el`/`.nvim.lua` value, or an env var — matching
    the "no hard-coded paths" rule both editors already follow.
-3. Does `shared.navigate` keep `NavigateInput` validation (bootstrap-provided
+5. Does `shared.navigate` keep `NavigateInput` validation (bootstrap-provided
    schema) in bb mode, or rely on the editors' well-formed maps? Recommended:
    drop it in bb, keep it in the JVM shell.
-4. Do we migrate `annotations_report.bb` to `bootstrap.bb`/`shared.*` in the
+6. Do we migrate `annotations_report.bb` to `bootstrap.bb`/`shared.*` in the
    same change, or leave it on the symlink until `editor_client.bb` proves the
    bootstrap path? Recommended: leave it; migrate once `editor_client.bb` is
    green.
+7. **Zero-repl bb mode** — is it a goal? If so, aliased symbols need persisted
+   namespace alias maps (currently dropped as `:ns-deps`). Recommended: not a
+   goal for now.
 
 ## Related
 
