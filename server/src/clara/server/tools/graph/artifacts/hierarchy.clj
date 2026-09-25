@@ -10,7 +10,8 @@
   are locally correct. The repair is the same in both: union every unit's edge
   set, re-close transitively, order deepest-first, and record disagreements
   rather than pick a winner. `compose/union-fact-types` and `federate/->index`
-  both call these.")
+  both call these."
+  (:require [clara.server.tools.graph.shared.hierarchy :as shared-hierarchy]))
 
 (set! *warn-on-reflection* true)
 
@@ -45,39 +46,19 @@
         (if (= m' m) m' (recur m'))))))
 
 (defn ->descendants
-  "Transpose of a closed ancestor map: `{ancestor-name #{descendant-name …}}`."
+  "Transpose of a closed ancestor map — delegates to `shared-hierarchy/->descendants`."
   [ancestors]
-  (let [index (volatile! {})]
-    (doseq [[ft as] ancestors
-            ancestor as]
-      (vswap! index update ancestor (fnil conj #{}) ft))
-    @index))
-
-(defn- ->closure
-  "`base-types` plus their transitive closure under `edge-map` (`{type-name
-  #{type-name}}`). The map passed IS the direction, so the two public wrappers
-  exist to put the direction in the name rather than make a caller remember
-  which map to pass — the closure over `:ancestors` runs the opposite way from
-  the closure over `:descendants`, and passing the wrong one is a wrong answer
-  that no exception will flag."
-  [edge-map base-types]
-  (reduce (fn [acc t] (into acc (cons t (get edge-map t #{})))) #{} base-types))
+  (shared-hierarchy/->descendants ancestors))
 
 (defn ancestor-closure
-  "`base-types` and everything they derive from, transitively: the set a holder
-  of `base-types` satisfies — a fact of type `T` *is a* each of `T`'s ancestors.
-  `ancestors` is a `{type-name #{ancestor-name}}` map, as `closed-ancestors`
-  returns."
+  "`base-types` and their ancestors — delegates to `shared-hierarchy/ancestor-closure`."
   [ancestors base-types]
-  (->closure ancestors base-types))
+  (shared-hierarchy/ancestor-closure ancestors base-types))
 
 (defn descendant-closure
-  "`base-types` and everything deriving from them, transitively: the set a
-  matcher of `base-types` is reached by — a rule matching `T` is matched by any
-  descendant of `T`. `descendants` is a `{ancestor-name #{descendant-name}}`
-  map, as `->descendants` returns."
+  "`base-types` and their descendants — delegates to `shared-hierarchy/descendant-closure`."
   [descendants base-types]
-  (->closure descendants base-types))
+  (shared-hierarchy/descendant-closure descendants base-types))
 
 (defn- pick-next
   "The next name to emit in deterministic deepest-first order: a node with no

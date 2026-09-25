@@ -226,6 +226,39 @@ replace that symlink with a copy**: a copy still parses long after it stops
 agreeing with what wrote the files. Run the script from a checkout, not from a
 detached copy of the file alone.
 
+## Navigating offline: `editor_client.bb`
+
+`bin/editor_client.bb` is the babashka twin of the editor navigation query
+(`clara.server.graph.client/navigate`): EDN-in, EDN-out over a registry
+selection, no JVM, no session, no Jetty.
+
+```bash
+S="$CLARA_RULES_EXPLORER_HOME/server/bin/editor_client.bb"
+bb "$S" '{:root "…" :units [{:repo "…"} {:repo "…"}]}' \
+        '{:production nil :side :lhs :token ":loan/applicant"}'
+```
+
+It composes the selected units on the fly — `shared.selection` →
+`shared.compose` → `shared.rehydrate` → `shared.navigate` — the same pure
+namespaces the JVM client delegates to, so the bb answer and the nREPL answer
+over the same selection agree. The editor resolves aliased/`::` tokens to fq
+over its repl first; source locations are always `:var? false` (bb loads no
+rule namespaces).
+
+### The `shared.` convention
+
+The navigation body, the four usage closures, the hierarchy transpose, the
+selection preamble, and the compose merge live under
+`src/clara/server/tools/graph/shared/*`, each marked
+`:clara-rules-explorer/bb-loaded true` on its ns form. They are plain `.clj`
+files that both the JVM and bb `require`; the one rule is that a `shared.`
+namespace must not `require` anything bb cannot load (self-enforcing — bb
+`require` fails loudly — and pinned by `make bb-smoke-test`). Where the JVM and
+bb genuinely differ, registry I/O is injected as a capabilities map
+(`:read-analysis` / `:assert-compatible!`), and the pure per-unit helpers
+(`unit-key`, `narrow-analysis`) live in `shared.selection` with
+`artifacts.registry` delegating to them.
+
 ## Writing your own reader
 
 Open the one part your question lives in. On the JVM:

@@ -1,11 +1,13 @@
---- Jump to a decoded navigate target (§6.2).  Var-backed targets reuse
--- Conjure's `def-str` (nREPL `info` op -> absolute `file:`/`jar:` path);
--- non-var targets eval `(clojure.java.io/resource …)` and fall back to a
--- namespace-file regex search.  Pushes the jump list for `C-o` first.
+--- Jump to a decoded navigate target.  Var-backed targets reuse Conjure's
+-- `def-str` (nREPL `info` op -> absolute `file:`/`jar:` path); non-var targets
+-- eval a source-location form (loaded var `:file` metadata, then a munged
+-- `clojure.java.io/resource` lookup) and fall back to a namespace-file regex
+-- search.  Pushes the jump list for `C-o` first.
 
 local M = {}
 
 local conjure = require("clara-explorer.conjure")
+local edn = require("clara-explorer.edn")
 
 local function def_str_module()
   local ok, action = pcall(require, "conjure.client.clojure.nrepl.action")
@@ -60,12 +62,12 @@ local function zipfile_url(url)
   return "zipfile:" .. zip .. "::" .. entry
 end
 
---- Open a resolved `file:`/`jar:` resource URL string, or false when the URL
--- cannot be opened by Neovim.
+--- Open a resolved `file:`/`jar:` resource URL or a plain absolute filesystem
+-- path (a loaded var's `:file` metadata), or false when it cannot be opened.
 local function open_resource(url)
   if not url or url == "" or url == "nil" then return false end
   if url:match("^file:") then
-    vim.cmd.edit(url:gsub("^file:", ""))
+    vim.cmd.edit((url:gsub("^file:", "")))
     return true
   end
   local zip = zipfile_url(url)
@@ -73,10 +75,17 @@ local function open_resource(url)
     vim.cmd.edit(zip)
     return true
   end
+  if url:match("^/") or url:match("^%a:[/\\]") then
+    vim.cmd.edit(url)
+    return true
+  end
   return false
 end
 
 --- Regex fallback: open the namespace file and search for `(defrule|defquery NAME`.
+-- The eval prefers the loaded var's `:file` metadata (which works for a
+-- buffer-eval'd namespace that is not on the classpath), then falls back to a
+-- munged `clojure.java.io/resource` lookup (`.clj`, then `.cljc`).
 function M.goto_fallback(target, eval_edn)
   local ns = target.ns
   local name = target.name
@@ -85,10 +94,19 @@ function M.goto_fallback(target, eval_edn)
     return
   end
   local unqualified = name:match("/([^/]+)$") or name
-  local resource_form = "(do (require 'clojure.string)\n     (some-> (clojure.java.io/resource (str (clojure.string/replace "
+  local resource_form = "(do (require 'clojure.string)\n"
+    .. "     (let [p (str (clojure.string/replace (munge "
     .. conjure.edn_string(ns)
-    .. ' "." "/") ".clj")) str))'
-  local function on_value(url)
+    .. ') "." "/"))]\n'
+    .. "       (or (try (some-> (resolve (symbol "
+    .. conjure.edn_string(name)
+    .. ")) meta :file)\n"
+    .. "               (catch Throwable _ nil))\n"
+    .. '           (some-> (clojure.java.io/resource (str p ".clj")) str)\n'
+    .. '           (some-> (clojure.java.io/resource (str p ".cljc")) str))))'
+  local function on_value(value)
+    local ok, url = pcall(edn.decode, value)
+    if not ok or type(url) ~= "string" then url = nil end
     if open_resource(url) then
       vim.cmd.normal({ "gg", bang = true })
       local found = vim.fn.search(M.fallback_regex(unqualified), "w")

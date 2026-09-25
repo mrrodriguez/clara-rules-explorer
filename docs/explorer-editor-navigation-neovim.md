@@ -16,6 +16,8 @@ The client is `editor/neovim/` (a clean Lua plugin).
 | `:ClaraExplorerNavigateConsumer`    | jump from an **RHS** fact type to the downstream productions (or the global consumers when outside a rule) |
 | `:ClaraExplorerRefresh`             | re-derive annotations and re-warm the analysis                        |
 | `:ClaraExplorerSwapSession`         | swap in a rebuilt session (`!` re-prompts)                            |
+| `:ClaraExplorerToggleTransport`     | toggle between the nREPL and babashka transports                      |
+| `:ClaraExplorerSelectUnit`          | re-prompt for the babashka transport's registry unit                  |
 
 Direct jump when exactly one candidate; `vim.ui.select` picker when more than
 one (delegates to Telescope/snacks/fzf-lua if you have a `ui-select`
@@ -32,6 +34,30 @@ integration configured).
 
 These are consumer-facing Neovim plugins, installed via lazy.nvim /
 AstroNvim — not mise/brew.
+
+## Babashka transport (offline)
+
+Navigation queries default to the nREPL transport (`client/navigate` over
+Conjure). Set `vim.g.clara_explorer_transport = "bb"` (or toggle it with
+`:ClaraExplorerToggleTransport`) to answer navigation from the persisted
+artifact set instead, shelling out to `bb editor_client.bb` — no Clara
+session is loaded and no Jetty server is started on the repl.
+
+- **`g:clara_explorer_transport`** — `"nrepl"` (default) or `"bb"`.
+- **`g:clara_explorer_registry_root`** — the registry root (the `rules-annos/`
+  tree). When unset, `CLARA_RULES_EXPLORER_REGISTRY` is read from the
+  environment.
+- **`g:clara_explorer_bb_script`** — path to `editor_client.bb`. When unset,
+  the `editor_client.bb` symlink shipped beside `conjure.lua` is used (the
+  plugin build step must materialize that repo-relative symlink into the
+  plugin-local directory before release).
+
+The bb transport still uses the connected Conjure repl for token resolution
+(aliased/`::` symbols are resolved to fully-qualified form over `eval-str`
+before the query), then shells out for the navigation itself.
+`:ClaraExplorerSelectUnit` prompts for the single-unit registry selection and
+caches it; `:ClaraExplorerRefresh` and `:ClaraExplorerSwapSession` are no-ops
+in bb mode (re-persist the artifacts to pick up changes).
 
 ## Development dependencies
 
@@ -51,14 +77,14 @@ just invokes `stylua`/`selene`. The selene `neovim` std is vendored as
 ## Install (lazy.nvim / AstroNvim)
 
 The plugin is loaded from a local checkout located via the
-`CLARA_HOME_EXPLORER` environment variable (the repo root). The spec derives
-the plugin directory as `$CLARA_HOME_EXPLORER/editor/neovim`. If the variable
+`CLARA_RULES_EXPLORER_HOME` environment variable (the repo root). The spec derives
+the plugin directory as `$CLARA_RULES_EXPLORER_HOME/editor/neovim`. If the variable
 is unset, the plugin is skipped and a warning is emitted — no hard failure.
 The variable is read once at Neovim startup; change it and restart.
 
 ```sh
 # per machine — the repo root of your clara-rules-explorer checkout
-export CLARA_HOME_EXPLORER="$HOME/Projects/clara-rules-explorer"
+export CLARA_RULES_EXPLORER_HOME="$HOME/Projects/clara-rules-explorer"
 ```
 
 ```lua
@@ -68,7 +94,7 @@ local plugins = {
   { "nvim-treesitter/nvim-treesitter", opts = { ensure_installed = { "clojure" } } },
 }
 
-local clara_root = vim.env.CLARA_HOME_EXPLORER
+local clara_root = vim.env.CLARA_RULES_EXPLORER_HOME
 if clara_root then
   plugins[#plugins + 1] = {
     dir = clara_root .. "/editor/neovim",
@@ -86,7 +112,7 @@ if clara_root then
     end
   }
 else
-  vim.notify("CLARA_HOME_EXPLORER is not set — clara-explorer not loaded", vim.log.levels.WARN)
+  vim.notify("CLARA_RULES_EXPLORER_HOME is not set — clara-explorer not loaded", vim.log.levels.WARN)
 end
 
 return plugins
@@ -95,7 +121,7 @@ return plugins
 AstroNvim users add the same spec to their `lua/plugins/` directory; the
 plugin loads automatically and registers the four user commands. The plugin
 does not hard-code any machine-specific paths, home directories, or ports —
-the checkout location comes from `CLARA_HOME_EXPLORER`.
+the checkout location comes from `CLARA_RULES_EXPLORER_HOME`.
 
 ## Architecture
 
@@ -105,7 +131,7 @@ lua/clara-explorer/
 ├── structural.lua (tree-sitter skeleton: enclosing defrule/defquery)
 ├── token.lua      (Clara token resolution — port of the elisp heuristics)
 ├── edn.lua        (EDN subset reader — the only module that knows the wire format)
-├── conjure.lua    (eval-str wrapper, error surfacing, async plumbing)
+├── conjure.lua    (eval-str wrapper, error surfacing, async plumbing, bb transport)
 ├── picker.lua     (vim.ui.select)
 └── jump.lua       (def-str / resource / regex fallback + jump-list push)
 ```

@@ -477,6 +477,8 @@ Tier-1 stub path fast."
                 ((symbol-function 'cider-current-ns) (lambda () "test"))
                 ((symbol-function 'cider-symbol-at-point)
                  (lambda (&optional _) "->LoanApplication"))
+                ((symbol-function 'clara-explorer--resolve-token)
+                 (lambda (_t _ns _c) nil))
                 ((symbol-function 'clara-explorer--eval-edn)
                  (lambda (code _conn)
                    (setq code-seen code)
@@ -758,12 +760,23 @@ Tier-1 stub path fast."
     (should-match "(defrule ^String my-rule [A] => 1)" "my-rule")
     (should-match "(defquery my-query [?x] [A])" "my-query")
     (should-match "(defquery ^:m my-query [?x] [A])" "my-query")
+    ;; rule names that end in a non-word Clojure symbol char (? ! * + < > -)
+    ;; must still be bounded correctly — `\b` would fail after `?`.
+    (should-match "(r/defrule app-outcome-approved? [A] => 1)" "app-outcome-approved?")
+    (should-match "(r/defrule retry! [A] => 1)" "retry!")
+    (should-match "(r/defrule key+ [A] => 1)" "key+")
     ;; negative: wrong head or wrong name
     (should-not-match "(def my-rule [A] => 1)" "my-rule")
     (should-not-match "(defrule other-rule [A] => 1)" "my-rule")
-    ;; ^{:map} contains space, so primary truncates - goto-fallback then uses \\b fallback
+    ;; a ?-suffixed name must not match its own longer siblings
+    (should-not-match "(defrule app-outcome-approved-args-demo [A] => 1)" "app-outcome-approved?")
+    ;; ^{:map} contains space, so primary truncates - goto-fallback then uses
+    ;; the whole-symbol fallback
     (should-not-match "(defrule ^{:doc \"hi\"} my-rule [A] => 1)" "my-rule")
-    (should (string-match-p "\\bmy-rule\\b" "(defrule ^{:doc \"hi\"} my-rule [A] => 1)"))))
+    (should (string-match-p (clara-explorer--whole-symbol-regexp "my-rule")
+                            "(defrule ^{:doc \"hi\"} my-rule [A] => 1)"))
+    (should-not (string-match-p (clara-explorer--whole-symbol-regexp "app-outcome-approved?")
+                                "app-outcome-approved-args-demo"))))
 
 
 ;; ---------------------------------------------------------------------------
@@ -874,6 +887,215 @@ Tier-1 stub path fast."
   (with-clara-buffer "(r/defrule foo [Application ,, (= ?x 1)] => 1)"
     (should (equal (test--search-token "Application") "Application"))))
 
+
+;; ---------------------------------------------------------------------------
+;; Editor-side token resolution (resolve-before-send)
+;; ---------------------------------------------------------------------------
+
+(ert-deftest resolve-form-embeds-caller-ns-and-token ()
+  (let ((code (clara-explorer--resolve-form "my.ns" "Doc.")))
+    (should (string-match-p (regexp-quote "(symbol \"my.ns\")") code))
+    (should (string-match-p (regexp-quote "(read-string token-text)") code))
+    (should-not (string-match-p "%s" code))))
+
+(ert-deftest resolve-form-escapes-token-text ()
+  (let ((code (clara-explorer--resolve-form "ns" "a\"b\\c")))
+    ;; still one string literal at the read site: nothing leaks out of it
+    (should (string-match-p "read-string" code))
+    (should-not (string-match-p "%s" code))))
+
+(ert-deftest resolve-form-matches-canonical-template ()
+  "Guard against drift from `shared.tokens/editor-token-resolve-form`: the
+   canonical template's shape markers must all be present."
+  (let ((code (clara-explorer--resolve-form "ns" "tok")))
+    (dolist (frag '("(find-ns ns-sym)"
+                    "(String/.startsWith token-text"
+                    "(String/.endsWith n"
+                    "(Class/.getName v)"
+                    "(ns-resolve the-ns target)"
+                    "(keyword? form) (str form)"
+                    "(nil? form) nil"))
+      (should (string-match-p (regexp-quote frag) code)))))
+
+;; `parseedn-read-str' is autoloaded (never stubbed by test-helper), so tests
+;; driving `--resolve-token' past the transport stub it with the same
+;; `read-from-string' semantics.  Values here are string/nil literals only.
+(defmacro test--with-stubbed-transport (eval-fn &rest body)
+  "Run BODY with the nREPL transport and scalar EDN parsing stubbed.
+EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'cider-nrepl-sync-request:eval) ,eval-fn)
+             ((symbol-function 'nrepl-dict-get)
+              (lambda (dict key) (cdr (assoc key dict))))
+             ((symbol-function 'parseedn-read-str)
+              (lambda (s) (car (read-from-string s)))))
+     ,@body))
+
+(ert-deftest resolve-token-returns-fq-on-value ()
+  (test--with-stubbed-transport
+      (lambda (_code _conn) '(("value" . "\"fq.Name\"")))
+    (should (equal (clara-explorer--resolve-token "Doc" "my.ns" 'conn) "fq.Name"))))
+
+(ert-deftest resolve-token-nil-falls-back ()
+  (test--with-stubbed-transport
+      (lambda (_code _conn) '(("value" . "nil")))
+    (should (null (clara-explorer--resolve-token "Doc" "my.ns" 'conn))))
+  (cl-letf (((symbol-function 'cider-nrepl-sync-request:eval)
+             (lambda (_code _conn) '(("ex" . "boom"))))
+            ((symbol-function 'nrepl-dict-get)
+             (lambda (dict key) (cdr (assoc key dict)))))
+    (should (null (clara-explorer--resolve-token "Doc" "my.ns" 'conn))))
+  (should (null (clara-explorer--resolve-token nil "my.ns" 'conn))))
+
+(ert-deftest navigate-sends-resolved-token ()
+  (let (captured)
+    (cl-letf (((symbol-function 'cider-connected-p) (lambda () t))
+              ((symbol-function 'cider-current-repl) (lambda (&rest _) 'conn))
+              ((symbol-function 'clara-explorer--context)
+               (lambda () (list :production "ns/rule" :kind 'rule :side :lhs
+                                :caller-ns "ns" :token "Doc")))
+              ((symbol-function 'clara-explorer--resolve-token)
+               (lambda (_t _ns _c) "fq.Doc"))
+              ((symbol-function 'clara-explorer--eval-edn)
+               (lambda (code _conn) (setq captured code) nil))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (clara-explorer--navigate :lhs)
+      (should (string-match-p (regexp-quote ":token \"fq.Doc\"") captured))
+      (should (string-match-p (regexp-quote ":caller-ns \"ns\"") captured)))))
+
+(ert-deftest navigate-falls-back-to-raw-token ()
+  (let (captured)
+    (cl-letf (((symbol-function 'cider-connected-p) (lambda () t))
+              ((symbol-function 'cider-current-repl) (lambda (&rest _) 'conn))
+              ((symbol-function 'clara-explorer--context)
+               (lambda () (list :production "ns/rule" :kind 'rule :side :lhs
+                                :caller-ns "ns" :token "Doc")))
+              ((symbol-function 'clara-explorer--resolve-token)
+               (lambda (_t _ns _c) nil))
+              ((symbol-function 'clara-explorer--eval-edn)
+               (lambda (code _conn) (setq captured code) nil))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (clara-explorer--navigate :lhs)
+      (should (string-match-p (regexp-quote ":token \"Doc\"") captured)))))
+
+;; ---------------------------------------------------------------------------
+;; babashka transport (Phase 4)
+;; ---------------------------------------------------------------------------
+
+(ert-deftest registry-root-reads-env-var ()
+  (let ((clara-explorer-registry-root nil))
+    (cl-letf (((symbol-function 'getenv)
+               (lambda (k) (when (equal k "CLARA_RULES_EXPLORER_REGISTRY") "/reg"))))
+      (should (equal (clara-explorer--registry-root) "/reg")))))
+
+(ert-deftest registry-root-defcustom-wins ()
+  (let ((clara-explorer-registry-root "/custom"))
+    (should (equal (clara-explorer--registry-root) "/custom"))))
+
+(ert-deftest bb-prompt-selection-builds-edn ()
+  (cl-letf (((symbol-function 'clara-explorer--registry-root) (lambda () "/reg"))
+            ((symbol-function 'file-directory-p) (lambda (_d) t))
+            ((symbol-function 'clara-explorer--bb-list-unit-repos)
+             (lambda (_root) '("loan-app-ruleset" "loan-disposition-ruleset")))
+            ((symbol-function 'completing-read)
+             (lambda (_prompt coll _req _match) (car coll))))
+    (should (equal (clara-explorer--bb-prompt-selection)
+                   "{:root \"/reg\" :units [{:repo \"loan-app-ruleset\"}]}"))))
+
+(ert-deftest bb-selection-caches ()
+  (let ((clara-explorer--bb-selection-cache nil))
+    (cl-letf (((symbol-function 'clara-explorer--bb-prompt-selection)
+               (lambda () "{cached}")))
+      (should (equal (clara-explorer--bb-selection) "{cached}"))
+      (cl-letf (((symbol-function 'clara-explorer--bb-prompt-selection)
+                 (lambda () (error "should not re-prompt"))))
+        (should (equal (clara-explorer--bb-selection) "{cached}"))))))
+
+(ert-deftest bb-eval-runs-and-parses ()
+  (cl-letf (((symbol-function 'clara-explorer--bb-script) (lambda () "/p/editor_client.bb"))
+            ((symbol-function 'file-readable-p) (lambda (_f) t))
+            ((symbol-function 'call-process)
+             (lambda (_prog _in _dest _disp script sel input)
+               (should (equal script "/p/editor_client.bb"))
+               (should (equal sel "{sel}"))
+               (should (equal input "{input}"))
+               (insert "{:direction :consumer}")
+               0))
+            ((symbol-function 'parseedn-read-str)
+             (lambda (s) (if (equal s "{:direction :consumer}") 'parsed 'bad))))
+    (should (eq (clara-explorer--bb-eval "{sel}" "{input}") 'parsed))))
+
+(ert-deftest bb-script-uses-captured-directory ()
+  "`clara-explorer--bb-script' must not depend on the navigation-time buffer."
+  (let ((clara-explorer-bb-script nil))
+    (should clara-explorer--directory)
+    (should (string-suffix-p "editor_client.bb" (clara-explorer--bb-script)))
+    (with-temp-buffer
+      (setq buffer-file-name "/elsewhere/loan_app_rules.clj")
+      (should (string-suffix-p "editor_client.bb" (clara-explorer--bb-script))))))
+
+(ert-deftest navigate-dispatches-to-bb ()
+  (let (captured-sel captured-input)
+    (cl-letf (((symbol-function 'cider-connected-p) (lambda () t))
+              ((symbol-function 'cider-current-repl) (lambda (&rest _) 'conn))
+              ((symbol-function 'clara-explorer--context)
+               (lambda () (list :production "ns/rule" :kind 'rule :side :lhs
+                                :caller-ns "ns" :token "Doc")))
+              ((symbol-function 'clara-explorer--resolve-token)
+               (lambda (_t _ns _c) "fq.Doc"))
+              ((symbol-function 'clara-explorer--bb-selection) (lambda () "{sel}"))
+              ((symbol-function 'clara-explorer--bb-eval)
+               (lambda (sel input)
+                 (setq captured-sel sel captured-input input)
+                 (let ((h (make-hash-table :test 'equal)))
+                   (puthash :error "done" h)
+                   h)))
+              ((symbol-function 'clara-explorer--eval-edn)
+               (lambda (_c _conn) (error "should not use nREPL")))
+              ((symbol-function 'message) (lambda (&rest _) nil))
+              (clara-explorer-transport 'bb))
+      (clara-explorer--navigate :lhs)
+      (should (equal captured-sel "{sel}"))
+      (should (string-match-p (regexp-quote ":token \"fq.Doc\"") captured-input))
+      (should (string-match-p (regexp-quote ":production \"ns/rule\"") captured-input)))))
+
+(ert-deftest refresh-noop-in-bb-mode ()
+  (let ((clara-explorer-transport 'bb) msg)
+    (cl-letf (((symbol-function 'message) (lambda (fmt &rest _) (setq msg fmt))))
+      (clara-explorer-refresh)
+      (should (string-match-p "no-op" msg)))))
+
+(ert-deftest swap-session-noop-in-bb-mode ()
+  (let ((clara-explorer-transport 'bb) msg)
+    (cl-letf (((symbol-function 'message) (lambda (fmt &rest _) (setq msg fmt))))
+      (clara-explorer-swap-session)
+      (should (string-match-p "no-op" msg)))))
+
+(ert-deftest toggle-transport-switches ()
+  (let ((clara-explorer-transport 'nrepl) msg)
+    (cl-letf (((symbol-function 'message) (lambda (fmt &rest args) (setq msg (apply #'format fmt args)))))
+      (clara-explorer-toggle-transport)
+      (should (eq clara-explorer-transport 'bb))
+      (should (string-match-p "bb" msg))
+      (clara-explorer-toggle-transport)
+      (should (eq clara-explorer-transport 'nrepl))
+      (should (string-match-p "nrepl" msg)))))
+
+(ert-deftest select-unit-warns-under-nrepl ()
+  (let ((clara-explorer-transport 'nrepl) msg)
+    (cl-letf (((symbol-function 'message) (lambda (fmt &rest args) (setq msg (apply #'format fmt args))))
+              ((symbol-function 'clara-explorer--bb-prompt-selection)
+               (lambda () (error "should not prompt"))))
+      (clara-explorer-select-unit)
+      (should (string-match-p "warning" msg)))))
+
+(ert-deftest select-unit-prompts-under-bb ()
+  (let ((clara-explorer-transport 'bb) (clara-explorer--bb-selection-cache nil) msg)
+    (cl-letf (((symbol-function 'clara-explorer--bb-prompt-selection) (lambda () "{unit}"))
+              ((symbol-function 'message) (lambda (fmt &rest args) (setq msg (apply #'format fmt args)))))
+      (clara-explorer-select-unit)
+      (should (equal clara-explorer--bb-selection-cache "{unit}"))
+      (should (string-match-p "bb unit set" msg)))))
 
 (provide 'clara-explorer-test)
 ;;; clara-explorer-test.el ends here

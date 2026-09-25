@@ -43,6 +43,35 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
   :type 'boolean
   :group 'clara-explorer)
 
+(defcustom clara-explorer-transport 'nrepl
+  "Transport for navigation queries.
+`nrepl' evals `client/navigate' over the CIDER session (default);
+`bb' shells out to `editor_client.bb' over the persisted artifacts."
+  :type '(choice (const :tag "nREPL (live session)" nrepl)
+                 (const :tag "babashka (offline artifacts)" bb))
+  :group 'clara-explorer)
+
+(defcustom clara-explorer-registry-root nil
+  "Registry root for the babashka transport.
+When nil, `CLARA_RULES_EXPLORER_REGISTRY' is read from the environment."
+  :type '(choice (const :tag "Read CLARA_RULES_EXPLORER_REGISTRY" nil)
+                 (directory))
+  :group 'clara-explorer)
+
+(defcustom clara-explorer-bb-script nil
+  "Path to `editor_client.bb' for the babashka transport.
+When nil, it is resolved beside `clara-explorer.el' (a symlink in the repo)."
+  :type '(choice (const :tag "Beside clara-explorer.el" nil)
+                 (file))
+  :group 'clara-explorer)
+
+(defconst clara-explorer--directory
+  (file-name-directory (or load-file-name buffer-file-name))
+  "Directory containing `clara-explorer.el', captured when it was loaded or eval'd.
+Navigation runs later from the user's source buffer, so paths beside this file
+must be resolved against this captured value — never recomputed from the
+navigation-time `buffer-file-name'.")
+
 (defun clara-explorer--log (fmt &rest args)
   "Log FMT/ARGS to *Messages* when `clara-explorer-debug' is non-nil."
   (when clara-explorer-debug
@@ -143,6 +172,76 @@ comment to end of line, repeatedly until point stops moving.  Uses
                       (format " — %s" summary)
                     "")))
      (t nil))))
+
+;; ---------------------------------------------------------------------------
+;; babashka transport (§Phase 4)
+;; ---------------------------------------------------------------------------
+
+(defun clara-explorer--bb-transport-p ()
+  "Non-nil when navigation uses the babashka transport."
+  (eq clara-explorer-transport 'bb))
+
+(defun clara-explorer--registry-root ()
+  "The registry root as an absolute path.
+Reads `CLARA_RULES_EXPLORER_REGISTRY' if `clara-explorer-registry-root' is nil."
+  (let ((root (or clara-explorer-registry-root
+                  (getenv "CLARA_RULES_EXPLORER_REGISTRY"))))
+    (when root (expand-file-name root))))
+
+(defun clara-explorer--bb-script ()
+  "Path to `editor_client.bb': `clara-explorer-bb-script', else beside this file."
+  (or clara-explorer-bb-script
+      (progn
+        (unless clara-explorer--directory
+          (user-error "clara-explorer: cannot locate editor_client.bb (eval'd from a non-file buffer?)"))
+        (file-truename (expand-file-name "editor_client.bb" clara-explorer--directory)))))
+
+(defvar clara-explorer--bb-selection-cache nil
+  "Cached registry-selection EDN for the babashka transport.")
+
+(defun clara-explorer--bb-list-unit-repos (root)
+  "Repo names (relative to ROOT) of every unit under ROOT, sorted."
+  (sort
+   (mapcar (lambda (f) (file-relative-name (directory-file-name (file-name-directory f)) root))
+           (directory-files-recursively root "\\`rules-inspect-manifest\\.edn\\'"))
+   #'string<))
+
+(defun clara-explorer--bb-prompt-selection ()
+  "Prompt for a single-unit registry selection under the registry root."
+  (let ((root (clara-explorer--registry-root)))
+    (unless (and root (file-directory-p root))
+      (user-error "clara-explorer: set CLARA_RULES_EXPLORER_REGISTRY (or clara-explorer-registry-root) to a registry root"))
+    (let ((repos (clara-explorer--bb-list-unit-repos root)))
+      (when (null repos)
+        (user-error "clara-explorer: no units (rules-inspect-manifest.edn) found under %s" root))
+      (let ((repo (completing-read (format "Unit repo (under %s): " root) repos nil t)))
+        (format "{:root %s :units [{:repo %s}]}"
+                (clara-explorer--edn-value root)
+                (clara-explorer--edn-value repo))))))
+
+(defun clara-explorer--bb-selection ()
+  "The cached bb registry-selection EDN, prompting once when unset."
+  (or clara-explorer--bb-selection-cache
+      (setq clara-explorer--bb-selection-cache (clara-explorer--bb-prompt-selection))))
+
+(defun clara-explorer--bb-eval (selection-edn input-edn)
+  "Run `bb editor_client.bb SELECTION-EDN INPUT-EDN' and parse the EDN result."
+  (let ((script (clara-explorer--bb-script)))
+    (unless (file-readable-p script)
+      (user-error "clara-explorer: editor_client.bb not found at %s" script))
+    (with-temp-buffer
+      (let ((status (condition-case err
+                        (apply #'call-process "bb" nil (current-buffer) nil
+                               (list script selection-edn input-edn))
+                      (file-error (user-error "clara-explorer: bb not found (%s)"
+                                              (error-message-string err))))))
+        (unless (eql status 0)
+          (user-error "clara-explorer: bb transport failed (exit %s): %s"
+                      status (string-trim (buffer-string))))
+        (condition-case err
+            (parseedn-read-str (buffer-string))
+          (error (user-error "clara-explorer: bb transport returned invalid EDN: %s"
+                             (error-message-string err))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Structural navigation (§9.2)
@@ -618,6 +717,46 @@ Used for RHS and global cases where LHS-structure is not applicable."
                  :caller-ns caller-ns
                  :token token))))
 
+(defun clara-explorer--resolve-template-file ()
+  "Absolute path of the canonical resolve-form template shipped beside this
+file (a symlink to the `shared.tokens` canonical text)."
+  (unless clara-explorer--directory
+    (error "clara-explorer: cannot locate resolve template (eval'd from a non-file buffer?)"))
+  (expand-file-name "editor-resolve-form.clj" clara-explorer--directory))
+
+(defun clara-explorer--load-resolve-template ()
+  "Read the canonical resolve-form template text."
+  (let ((file (clara-explorer--resolve-template-file)))
+    (unless (file-readable-p file)
+      (error "clara-explorer: resolve template not found at %s" file))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (buffer-string))))
+
+(defconst clara-explorer--resolve-form-template
+  (clara-explorer--load-resolve-template)
+  "Canonical resolve-form template. Same two `%s` slots: caller-ns, token.")
+
+(defun clara-explorer--resolve-form (caller-ns token)
+  "Build the self-contained resolve form for CALLER-NS and TOKEN."
+  (format clara-explorer--resolve-form-template
+          (clara-explorer--edn-value (or caller-ns ""))
+          (clara-explorer--edn-value token)))
+
+(defun clara-explorer--resolve-token (token caller-ns conn)
+  "Resolve TOKEN to fully-qualified form via a sync eval over CONN.
+   Returns the fq string, or nil when unresolvable/unreadable — the caller
+   falls back to the raw token."
+  (when token
+    (let* ((code (clara-explorer--resolve-form caller-ns token))
+           (resp (cider-nrepl-sync-request:eval code conn))
+           (val (and resp (nrepl-dict-get resp "value"))))
+      (when (stringp val)
+        (condition-case nil
+            (let ((parsed (parseedn-read-str val)))
+              (when (stringp parsed) parsed))
+          (error nil))))))
+
 (defun clara-explorer--direction-word (direction)
   "Human word for a NavigateResult direction keyword."
   (pcase direction
@@ -644,12 +783,27 @@ Used for RHS and global cases where LHS-structure is not applicable."
   (rx "(" (* (not (any " \t\n()"))) "def" (or "rule" "query"))
   "Rx for \"(alias/defrule\" prefix up to head, without rule name.")
 
+(defconst clara-explorer--symbol-chars
+  "A-Za-z0-9._:/!?*+<>-"
+  "Clojure symbol characters, matching `token.lua`'s SYMBOL_CHARS.")
+
+(defun clara-explorer--symbol-boundary-rx ()
+  "A shy group closing a Clojure symbol: non-symbol char or end of line."
+  (concat "\\(?:[^" clara-explorer--symbol-chars "]\\|$\\)"))
+
 (defun clara-explorer--fallback-regexp (rule-name)
-  "Regexp for fallback search: (defrule/defquery [^meta]* RULE-NAME\\b."
+  "Fallback search: (defrule/defquery … RULE-NAME, whole-symbol-bounded."
   (concat clara-explorer--fallback-head-rx
           (rx (* (seq (+ (any " \t\n")) "^" (+ (not (any " \t\n")))))
               (+ (any " \t\n")))
-          (regexp-quote rule-name) "\\b"))
+          (regexp-quote rule-name)
+          (clara-explorer--symbol-boundary-rx)))
+
+(defun clara-explorer--whole-symbol-regexp (rule-name)
+  "Regexp matching RULE-NAME as a whole Clojure symbol anywhere in a buffer."
+  (concat "\\(?:[^" clara-explorer--symbol-chars "]\\|^\\)"
+          (regexp-quote rule-name)
+          (clara-explorer--symbol-boundary-rx)))
 
 (defun clara-explorer--goto-fallback (target)
   "Last resort: open the ns file and search for the defrule/defquery form."
@@ -666,7 +820,7 @@ Used for RHS and global cases where LHS-structure is not applicable."
                         nil t)
                        ;; fallback for ^{:map} metadata or other forms
                        (re-search-forward
-                        (format "\\b%s\\b" (regexp-quote rule-name))
+                        (clara-explorer--whole-symbol-regexp rule-name)
                         nil t))))
         (clara-explorer--log "fallback: search %S -> %s at %d" rule-name (if found "found" "NOT-FOUND") (point))
         found))))
@@ -729,9 +883,19 @@ Used for RHS and global cases where LHS-structure is not applicable."
       (message "queries have no RHS"))
      (t
       (let* ((eff-side side)
-             (result (clara-explorer--eval-edn
-                      (clara-explorer--navigate-code production eff-side caller-ns token)
-                      conn)))
+             (resolved (clara-explorer--resolve-token token caller-ns conn))
+             (result (if (clara-explorer--bb-transport-p)
+                         (clara-explorer--bb-eval
+                          (clara-explorer--bb-selection)
+                          (clara-explorer--edn-map
+                           (list :production production
+                                 :side eff-side
+                                 :caller-ns caller-ns
+                                 :token (or resolved token))))
+                       (clara-explorer--eval-edn
+                        (clara-explorer--navigate-code production eff-side caller-ns
+                                                       (or resolved token))
+                        conn))))
         (if result
             (clara-explorer--handle-result result)
           (message "clara-explorer: no result from navigate")))))))
@@ -756,11 +920,13 @@ Used for RHS and global cases where LHS-structure is not applicable."
 (defun clara-explorer-refresh ()
   "Re-derive annotations and re-warm the explorer analysis."
   (interactive)
-  (unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))
-  (clara-explorer--eval-edn
-   "(do (require 'clara.server.graph.server)\n     (clara.server.graph.server/reload-annotations!))"
-   (cider-current-repl 'infer 'ensure))
-  (message "clara-explorer: analysis refreshed"))
+  (if (clara-explorer--bb-transport-p)
+      (message "clara-explorer: refresh is a no-op in bb mode (re-persist the artifacts to pick up changes)")
+    (unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))
+    (clara-explorer--eval-edn
+     "(do (require 'clara.server.graph.server)\n     (clara.server.graph.server/reload-annotations!))"
+     (cider-current-repl 'infer 'ensure))
+    (message "clara-explorer: analysis refreshed")))
 
 (defvar clara-explorer--swap-session-exprs (make-hash-table :test 'eq)
   "Map of CIDER connection -> last swap opts expression.
@@ -782,25 +948,49 @@ Prefix arg always prompts; otherwise reuse the last
 opts for the connection.  Empty input at the prompt
 means use the registered default (0-arity)."
   (interactive
-   (list (if (or current-prefix-arg
-                 (null (gethash (cider-current-repl 'infer 'ensure)
-                                clara-explorer--swap-session-exprs)))
-             (read-string "Swap opts (EDN map, empty for default): ")
-           nil)))
-  (unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))
-  (let* ((conn (cider-current-repl 'infer 'ensure))
-         (raw (or opts (gethash conn clara-explorer--swap-session-exprs)))
-         (trimmed (string-trim (or raw "")))
-         (use-default (string-empty-p trimmed)))
-    (unless use-default
-      (puthash conn trimmed clara-explorer--swap-session-exprs))
-    (clara-explorer--eval-edn
-     (if use-default
-         "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/swap-session!))"
-       (format "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/swap-session! %s))"
-               trimmed))
-     conn)
-    (message "clara-explorer: session swapped")))
+   (if (clara-explorer--bb-transport-p)
+       (list nil)
+     (list (if (or current-prefix-arg
+                   (null (gethash (cider-current-repl 'infer 'ensure)
+                                  clara-explorer--swap-session-exprs)))
+               (read-string "Swap opts (EDN map, empty for default): ")
+             nil))))
+  (if (clara-explorer--bb-transport-p)
+      (message "clara-explorer: swap-session is a no-op in bb mode")
+    (unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))
+    (let* ((conn (cider-current-repl 'infer 'ensure))
+           (raw (or opts (gethash conn clara-explorer--swap-session-exprs)))
+           (trimmed (string-trim (or raw "")))
+           (use-default (string-empty-p trimmed)))
+      (unless use-default
+        (puthash conn trimmed clara-explorer--swap-session-exprs))
+      (clara-explorer--eval-edn
+       (if use-default
+           "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/swap-session!))"
+         (format "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/swap-session! %s))"
+                 trimmed))
+       conn)
+      (message "clara-explorer: session swapped"))))
+
+;;;###autoload
+(defun clara-explorer-toggle-transport ()
+  "Toggle `clara-explorer-transport' between nREPL and bb."
+  (interactive)
+  (setq clara-explorer-transport
+        (if (clara-explorer--bb-transport-p) 'nrepl 'bb))
+  (message "clara-explorer: transport is now %s"
+           (if (clara-explorer--bb-transport-p) "bb" "nrepl")))
+
+;;;###autoload
+(defun clara-explorer-select-unit ()
+  "Re-prompt for the bb transport's registry unit.
+Has no effect on the nREPL transport."
+  (interactive)
+  (if (clara-explorer--bb-transport-p)
+      (progn
+        (setq clara-explorer--bb-selection-cache (clara-explorer--bb-prompt-selection))
+        (message "clara-explorer: bb unit set"))
+    (message "clara-explorer: warning — unit selection only affects the bb transport (currently nrepl)")))
 
 (provide 'clara-explorer)
 ;;; clara-explorer.el ends here
