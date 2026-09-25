@@ -1,18 +1,24 @@
 #!/usr/bin/env bb
-;; The babashka twin of `clara.server.graph.client/navigate`, single-unit first: read one persisted
-;; artifact unit, rehydrate its slim analysis, and answer an EDN navigate query.
+;; The babashka analogue of `clara.server.graph.client/navigate`: read a registry selection of
+;; persisted artifact units, rehydrate the slim analysis, and answer an EDN navigate query.
 ;;
-;;   bb bin/editor_client.bb <unit-dir> <navigate-input-edn>
+;;   bb bin/editor_client.bb '<selection-edn>' '<navigate-input-edn>'
 ;;
-;; <unit-dir> is a persisted artifact set (the directory holding `merged-rulebase-analysis/`);
-;; <navigate-input-edn> is a `clara.server.tools.graph.shared.schema/NavigateInput` map, e.g.
-;; `{:production "ns/rule" :side :lhs :token "com.example.Loan"}`
+;; <selection-edn> is a registry selection `{:root "…" :units [{:repo "…"}]}` (the same shape the
+;; server's `:registry` mode takes); the editor resolves the `CLARA_RULES_EXPLORER_REGISTRY` root
+;; itself and passes it explicitly. <navigate-input-edn> is a
+;; `clara.server.tools.graph.shared.schema/NavigateInput` map, e.g. `{:production "ns/rule" :side
+;; :lhs :token "com.example.Loan"}`.
+;;
+;; Single-unit selections are the current milestone; multi-unit composition (`shared.selection` /
+;; `shared.compose`) lands after the editor transport.
 ;;
 ;; The editor resolves aliased/:: tokens to fq over its repl before calling, so this script assumes
 ;; fq-in and does only pure normalization + callsite string matching. Source locations are always
 ;; `:var? false` — bb loads no rule namespaces.
 (require '[babashka.fs :as fs]
-         '[clojure.edn :as edn])
+         '[clojure.edn :as edn]
+         '[clojure.string :as str])
 
 (load-file (str (fs/file (fs/parent *file*) "bootstrap.bb")))
 
@@ -24,6 +30,15 @@
 (defn- die [& msg]
   (binding [*out* *err*] (apply println msg))
   (System/exit 1))
+
+(defn- unit-dir
+  "The persistence dir of one unit, mirroring `clara.server.tools.graph.artifacts.store/get-out-dir`:
+  `<:root>/<:repo>/`, with `:branch` nested under `<repo>/branches/<branch>/`."
+  [root {:keys [repo branch]}]
+  (let [base (fs/file root repo)]
+    (if (str/blank? branch)
+      base
+      (fs/file base "branches" branch))))
 
 (defn- read-part
   "One part of the unit's split `merged-rulebase-analysis/` directory."
@@ -65,26 +80,34 @@
    :token->fq-sym bb-token->fq-sym
    :production-source (fn [_fq-name] {:var? false :file nil :line nil :column nil})})
 
-(defn- run [unit-dir input]
-  (let [index (read-part unit-dir :index)
-        fact-types (read-part unit-dir :fact-types)
-        dep-graph (read-part unit-dir :dep-graph)
-        meta (read-part unit-dir :meta)
-        analysis {:rules (:rules index)
-                  :queries (:queries index)
-                  :fact-types fact-types
-                  :dep-graph dep-graph
-                  :slim (:slim meta)}
-        rehydrated (shared-rehydrate/rehydrate-analysis analysis)]
-    (shared-navigate/navigate rehydrated bb-runtime input)))
+(defn- run [selection input]
+  (let [{:keys [root units]} selection]
+    (when-not (and root (= 1 (count units)))
+      (throw (ex-info "editor_client.bb supports a single-unit selection for now"
+                      {:selection selection})))
+    (let [dir (unit-dir root (first units))
+          index (read-part dir :index)
+          fact-types (read-part dir :fact-types)
+          dep-graph (read-part dir :dep-graph)
+          meta (read-part dir :meta)
+          analysis {:rules (:rules index)
+                    :queries (:queries index)
+                    :fact-types fact-types
+                    :dep-graph dep-graph
+                    :slim (:slim meta)}
+          rehydrated (shared-rehydrate/rehydrate-analysis analysis)]
+      (shared-navigate/navigate rehydrated bb-runtime input))))
 
-(let [[unit-dir input-edn] *command-line-args*]
-  (when-not (and unit-dir input-edn)
-    (die "usage: bb editor_client.bb <unit-dir> <navigate-input-edn>"))
-  (let [input (try (edn/read-string input-edn)
+(let [[selection-edn input-edn] *command-line-args*]
+  (when-not (and selection-edn input-edn)
+    (die "usage: bb editor_client.bb '<selection-edn>' '<navigate-input-edn>'"))
+  (let [selection (try (edn/read-string selection-edn)
+                       (catch Throwable e
+                         (die "Could not read selection-edn:" (.getMessage e))))
+        input (try (edn/read-string input-edn)
                    (catch Throwable e
                      (die "Could not read navigate-input-edn:" (.getMessage e))))]
     (try
-      (println (pr-str (run unit-dir input)))
+      (println (pr-str (run selection input)))
       (catch Throwable e
         (println (pr-str {:error (or (.getMessage e) (str e))}))))))

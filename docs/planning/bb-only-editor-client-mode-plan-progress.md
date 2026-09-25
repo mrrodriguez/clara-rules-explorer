@@ -155,13 +155,13 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
 
 ## Phase 3 — `editor_client.bb`
 
-- [x] Single-unit `editor_client.bb` landed: `bb bin/editor_client.bb <unit-dir>
-      <navigate-input-edn>` reads the four parts (`production-index` /
-      `fact-types` / `dep-graph` / `meta`), rehydrates via `shared.rehydrate`,
-      and answers `shared.navigate` with a pure bb runtime (keyword / string /
-      record-ctor normalization; `:var? false` sources). Verified over the
-      checked-in `loan-app-ruleset` unit (LHS / RHS record-ctor / global /
-      error).
+- [x] Single-unit `editor_client.bb` landed: `bb bin/editor_client.bb
+      '<selection-edn>' '<navigate-input-edn>'` reads the four parts
+      (`production-index` / `fact-types` / `dep-graph` / `meta`), rehydrates
+      via `shared.rehydrate`, and answers `shared.navigate` with a pure bb
+      runtime (keyword / string / record-ctor normalization; `:var? false`
+      sources). Verified over the checked-in `loan-app-ruleset` unit
+      (LHS / RHS record-ctor / global / error).
 - [ ] Multi-unit via `shared.selection` / `shared.compose` (needs the injected
       registry capabilities noted in Phase 1).
 - [ ] Verify parity against `producers`/`consumers` subcommands + `rehydrate`
@@ -169,9 +169,12 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
 
 ## Phase 4 — Emacs transport / Phase 5 — neovim transport
 
-- [ ] `clara-explorer--eval-bb` behind a defcustom; registry-selection prompt
-      defaulting from `CLARA_RULES_EXPLORER_REGISTRY`; nREPL stays the default;
-      `swap-session!`/`refresh` no-op in bb mode.
+- [x] Emacs bb transport landed: `clara-explorer-transport` defcustom (nREPL
+      default), `clara-explorer--eval-bb` (shells out to `bb editor_client.bb`,
+      parses EDN), single-unit registry-selection prompt defaulting from
+      `CLARA_RULES_EXPLORER_REGISTRY`, and `refresh`/`swap-session!` no-op in bb
+      mode. `editor/emacs/editor_client.bb` symlinks to the script. Tier1 green
+      (92 tests, 0 unexpected), byte-compile clean.
 - [ ] Same in Lua (`conjure.lua` alternate executor).
 
 ## Notes / decisions while implementing
