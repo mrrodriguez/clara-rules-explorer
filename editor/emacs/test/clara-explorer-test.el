@@ -760,12 +760,23 @@ Tier-1 stub path fast."
     (should-match "(defrule ^String my-rule [A] => 1)" "my-rule")
     (should-match "(defquery my-query [?x] [A])" "my-query")
     (should-match "(defquery ^:m my-query [?x] [A])" "my-query")
+    ;; rule names that end in a non-word Clojure symbol char (? ! * + < > -)
+    ;; must still be bounded correctly — `\b` would fail after `?`.
+    (should-match "(r/defrule app-outcome-approved? [A] => 1)" "app-outcome-approved?")
+    (should-match "(r/defrule retry! [A] => 1)" "retry!")
+    (should-match "(r/defrule key+ [A] => 1)" "key+")
     ;; negative: wrong head or wrong name
     (should-not-match "(def my-rule [A] => 1)" "my-rule")
     (should-not-match "(defrule other-rule [A] => 1)" "my-rule")
-    ;; ^{:map} contains space, so primary truncates - goto-fallback then uses \\b fallback
+    ;; a ?-suffixed name must not match its own longer siblings
+    (should-not-match "(defrule app-outcome-approved-args-demo [A] => 1)" "app-outcome-approved?")
+    ;; ^{:map} contains space, so primary truncates - goto-fallback then uses
+    ;; the whole-symbol fallback
     (should-not-match "(defrule ^{:doc \"hi\"} my-rule [A] => 1)" "my-rule")
-    (should (string-match-p "\\bmy-rule\\b" "(defrule ^{:doc \"hi\"} my-rule [A] => 1)"))))
+    (should (string-match-p (clara-explorer--whole-symbol-regexp "my-rule")
+                            "(defrule ^{:doc \"hi\"} my-rule [A] => 1)"))
+    (should-not (string-match-p (clara-explorer--whole-symbol-regexp "app-outcome-approved?")
+                                "app-outcome-approved-args-demo"))))
 
 
 ;; ---------------------------------------------------------------------------
@@ -1010,6 +1021,15 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
             ((symbol-function 'parseedn-read-str)
              (lambda (s) (if (equal s "{:direction :consumer}") 'parsed 'bad))))
     (should (eq (clara-explorer--eval-bb "{sel}" "{input}") 'parsed))))
+
+(ert-deftest bb-script-uses-captured-directory ()
+  "`clara-explorer--bb-script' must not depend on the navigation-time buffer."
+  (let ((clara-explorer-bb-script nil))
+    (should clara-explorer--directory)
+    (should (string-suffix-p "editor_client.bb" (clara-explorer--bb-script)))
+    (with-temp-buffer
+      (setq buffer-file-name "/elsewhere/loan_app_rules.clj")
+      (should (string-suffix-p "editor_client.bb" (clara-explorer--bb-script))))))
 
 (ert-deftest navigate-dispatches-to-bb ()
   (let (captured-sel captured-input)

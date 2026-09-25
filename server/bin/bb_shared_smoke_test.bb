@@ -11,7 +11,7 @@
          '[clojure.string :as str]
          '[clojure.tools.reader :as reader])
 
-(load-file (str (fs/file (fs/parent *file*) "bootstrap.bb")))
+(load-file (str (fs/file (fs/parent (fs/canonicalize *file*)) "bootstrap.bb")))
 
 (def ^:private server-root (fs/parent (fs/parent (fs/canonicalize *file*))))
 

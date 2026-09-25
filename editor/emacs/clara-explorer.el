@@ -65,6 +65,13 @@ When nil, it is resolved beside `clara-explorer.el' (a symlink in the repo)."
                  (file))
   :group 'clara-explorer)
 
+(defconst clara-explorer--directory
+  (file-name-directory (or load-file-name buffer-file-name))
+  "Directory containing `clara-explorer.el', captured when it was loaded or eval'd.
+Navigation runs later from the user's source buffer, so paths beside this file
+must be resolved against this captured value — never recomputed from the
+navigation-time `buffer-file-name'.")
+
 (defun clara-explorer--log (fmt &rest args)
   "Log FMT/ARGS to *Messages* when `clara-explorer-debug' is non-nil."
   (when clara-explorer-debug
@@ -183,10 +190,10 @@ Reads `CLARA_RULES_EXPLORER_REGISTRY' when `clara-explorer-bb-root' is nil."
 (defun clara-explorer--bb-script ()
   "Path to `editor_client.bb': `clara-explorer-bb-script', else beside this file."
   (or clara-explorer-bb-script
-      (let ((base (or load-file-name (buffer-file-name))))
-        (unless base
-          (user-error "clara-explorer: cannot locate editor_client.bb (no load-file-name)"))
-        (expand-file-name "editor_client.bb" (file-name-directory base)))))
+      (progn
+        (unless clara-explorer--directory
+          (user-error "clara-explorer: cannot locate editor_client.bb (eval'd from a non-file buffer?)"))
+        (file-truename (expand-file-name "editor_client.bb" clara-explorer--directory)))))
 
 (defvar clara-explorer--bb-selection-cache nil
   "Cached registry-selection EDN for the babashka transport.")
@@ -704,11 +711,9 @@ Used for RHS and global cases where LHS-structure is not applicable."
 (defun clara-explorer--resolve-template-file ()
   "Absolute path of the canonical resolve-form template shipped beside this
 file (a symlink to the `shared.tokens` canonical text)."
-  (let ((base (or load-file-name (buffer-file-name))))
-    (unless base
-      (error "clara-explorer: cannot locate resolve template (no load-file-name)"))
-    (expand-file-name "editor-resolve-form.clj"
-                      (file-name-directory base))))
+  (unless clara-explorer--directory
+    (error "clara-explorer: cannot locate resolve template (eval'd from a non-file buffer?)"))
+  (expand-file-name "editor-resolve-form.clj" clara-explorer--directory))
 
 (defun clara-explorer--load-resolve-template ()
   "Read the canonical resolve-form template text."
@@ -769,12 +774,27 @@ file (a symlink to the `shared.tokens` canonical text)."
   (rx "(" (* (not (any " \t\n()"))) "def" (or "rule" "query"))
   "Rx for \"(alias/defrule\" prefix up to head, without rule name.")
 
+(defconst clara-explorer--symbol-chars
+  "A-Za-z0-9._:/!?*+<>-"
+  "Clojure symbol characters, matching `token.lua`'s SYMBOL_CHARS.")
+
+(defun clara-explorer--symbol-boundary-rx ()
+  "A shy group closing a Clojure symbol: non-symbol char or end of line."
+  (concat "\\(?:[^" clara-explorer--symbol-chars "]\\|$\\)"))
+
 (defun clara-explorer--fallback-regexp (rule-name)
-  "Regexp for fallback search: (defrule/defquery [^meta]* RULE-NAME\\b."
+  "Fallback search: (defrule/defquery … RULE-NAME, whole-symbol-bounded."
   (concat clara-explorer--fallback-head-rx
           (rx (* (seq (+ (any " \t\n")) "^" (+ (not (any " \t\n")))))
               (+ (any " \t\n")))
-          (regexp-quote rule-name) "\\b"))
+          (regexp-quote rule-name)
+          (clara-explorer--symbol-boundary-rx)))
+
+(defun clara-explorer--whole-symbol-regexp (rule-name)
+  "Regexp matching RULE-NAME as a whole Clojure symbol anywhere in a buffer."
+  (concat "\\(?:[^" clara-explorer--symbol-chars "]\\|^\\)"
+          (regexp-quote rule-name)
+          (clara-explorer--symbol-boundary-rx)))
 
 (defun clara-explorer--goto-fallback (target)
   "Last resort: open the ns file and search for the defrule/defquery form."
@@ -791,7 +811,7 @@ file (a symlink to the `shared.tokens` canonical text)."
                         nil t)
                        ;; fallback for ^{:map} metadata or other forms
                        (re-search-forward
-                        (format "\\b%s\\b" (regexp-quote rule-name))
+                        (clara-explorer--whole-symbol-regexp rule-name)
                         nil t))))
         (clara-explorer--log "fallback: search %S -> %s at %d" rule-name (if found "found" "NOT-FOUND") (point))
         found))))

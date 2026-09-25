@@ -20,7 +20,7 @@
          '[clojure.edn :as edn]
          '[clojure.string :as str])
 
-(load-file (str (fs/file (fs/parent *file*) "bootstrap.bb")))
+(load-file (str (fs/file (fs/parent (fs/canonicalize *file*)) "bootstrap.bb")))
 
 (require '[clara.server.tools.graph.artifacts.layout :as layout]
          '[clara.server.tools.graph.shared.navigate :as shared-navigate]
