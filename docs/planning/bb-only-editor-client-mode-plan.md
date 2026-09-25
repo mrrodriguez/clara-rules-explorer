@@ -483,7 +483,7 @@ needed.
    (`{:units [{:repo …}]}`, or a unit materialized by `flow/compose-persist!`)
    first, then generalize to multi-unit composition.
 
-4. **Editor transport** — Emacs: add a `clara-explorer--eval-bb` transport
+4. **Editor transport** — Emacs: add a `clara-explorer--bb-eval` transport
    (shell out to `bb server/bin/editor_client.bb`, parse stdout with
    `parseedn-read-str`) behind a defcustom, plus a prompt for the registry
    selection (`:root` + `:units`) defaulting from `CLARA_RULES_EXPLORER_REGISTRY` (Decision

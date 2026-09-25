@@ -51,7 +51,7 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
                  (const :tag "babashka (offline artifacts)" bb))
   :group 'clara-explorer)
 
-(defcustom clara-explorer-bb-root nil
+(defcustom clara-explorer-registry-root nil
   "Registry root for the babashka transport.
 When nil, `CLARA_RULES_EXPLORER_REGISTRY' is read from the environment."
   :type '(choice (const :tag "Read CLARA_RULES_EXPLORER_REGISTRY" nil)
@@ -181,11 +181,12 @@ comment to end of line, repeatedly until point stops moving.  Uses
   "Non-nil when navigation uses the babashka transport."
   (eq clara-explorer-transport 'bb))
 
-(defun clara-explorer--bb-root ()
-  "The bb registry root.
-Reads `CLARA_RULES_EXPLORER_REGISTRY' when `clara-explorer-bb-root' is nil."
-  (or clara-explorer-bb-root
-      (getenv "CLARA_RULES_EXPLORER_REGISTRY")))
+(defun clara-explorer--registry-root ()
+  "The registry root as an absolute path.
+Reads `CLARA_RULES_EXPLORER_REGISTRY' if `clara-explorer-registry-root' is nil."
+  (let ((root (or clara-explorer-registry-root
+                  (getenv "CLARA_RULES_EXPLORER_REGISTRY"))))
+    (when root (expand-file-name root))))
 
 (defun clara-explorer--bb-script ()
   "Path to `editor_client.bb': `clara-explorer-bb-script', else beside this file."
@@ -198,24 +199,32 @@ Reads `CLARA_RULES_EXPLORER_REGISTRY' when `clara-explorer-bb-root' is nil."
 (defvar clara-explorer--bb-selection-cache nil
   "Cached registry-selection EDN for the babashka transport.")
 
-(defun clara-explorer--prompt-bb-selection ()
-  "Prompt for a single-unit registry selection under the bb root."
-  (let ((root (clara-explorer--bb-root)))
+(defun clara-explorer--bb-list-unit-repos (root)
+  "Repo names (relative to ROOT) of every unit under ROOT, sorted."
+  (sort
+   (mapcar (lambda (f) (file-relative-name (directory-file-name (file-name-directory f)) root))
+           (directory-files-recursively root "\\`rules-inspect-manifest\\.edn\\'"))
+   #'string<))
+
+(defun clara-explorer--bb-prompt-selection ()
+  "Prompt for a single-unit registry selection under the registry root."
+  (let ((root (clara-explorer--registry-root)))
     (unless (and root (file-directory-p root))
-      (user-error "clara-explorer: set CLARA_RULES_EXPLORER_REGISTRY (or clara-explorer-bb-root) to a registry root"))
-    (let ((repo (read-string (format "Unit repo (under %s): " root))))
-      (when (string-empty-p repo)
-        (user-error "clara-explorer: unit repo is required"))
-      (format "{:root %s :units [{:repo %s}]}"
-              (clara-explorer--edn-value root)
-              (clara-explorer--edn-value repo)))))
+      (user-error "clara-explorer: set CLARA_RULES_EXPLORER_REGISTRY (or clara-explorer-registry-root) to a registry root"))
+    (let ((repos (clara-explorer--bb-list-unit-repos root)))
+      (when (null repos)
+        (user-error "clara-explorer: no units (rules-inspect-manifest.edn) found under %s" root))
+      (let ((repo (completing-read (format "Unit repo (under %s): " root) repos nil t)))
+        (format "{:root %s :units [{:repo %s}]}"
+                (clara-explorer--edn-value root)
+                (clara-explorer--edn-value repo))))))
 
 (defun clara-explorer--bb-selection ()
   "The cached bb registry-selection EDN, prompting once when unset."
   (or clara-explorer--bb-selection-cache
-      (setq clara-explorer--bb-selection-cache (clara-explorer--prompt-bb-selection))))
+      (setq clara-explorer--bb-selection-cache (clara-explorer--bb-prompt-selection))))
 
-(defun clara-explorer--eval-bb (selection-edn input-edn)
+(defun clara-explorer--bb-eval (selection-edn input-edn)
   "Run `bb editor_client.bb SELECTION-EDN INPUT-EDN' and parse the EDN result."
   (let ((script (clara-explorer--bb-script)))
     (unless (file-readable-p script)
@@ -876,7 +885,7 @@ file (a symlink to the `shared.tokens` canonical text)."
       (let* ((eff-side side)
              (resolved (clara-explorer--resolve-token token caller-ns conn))
              (result (if (clara-explorer--bb-transport-p)
-                         (clara-explorer--eval-bb
+                         (clara-explorer--bb-eval
                           (clara-explorer--bb-selection)
                           (clara-explorer--edn-map
                            (list :production production
@@ -964,10 +973,10 @@ means use the registered default (0-arity)."
       (message "clara-explorer: session swapped"))))
 
 ;;;###autoload
-(defun clara-explorer-select-bb-unit ()
+(defun clara-explorer-bb-select-unit ()
   "Re-prompt for the bb transport's registry unit."
   (interactive)
-  (setq clara-explorer--bb-selection-cache (clara-explorer--prompt-bb-selection))
+  (setq clara-explorer--bb-selection-cache (clara-explorer--bb-prompt-selection))
   (message "clara-explorer: bb unit set"))
 
 (provide 'clara-explorer)

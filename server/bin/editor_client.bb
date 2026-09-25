@@ -78,7 +78,7 @@
 (def ^:private bb-runtime
   {:resolve-token bb-resolve-token
    :token->fq-sym bb-token->fq-sym
-   :production-source (fn [_fq-name] {:var? false :file nil :line nil :column nil})})
+   :production-source (fn [_fq-name] {:var? false})})
 
 (defn- run [selection input]
   (let [{:keys [root units]} selection]

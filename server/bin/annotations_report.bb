@@ -71,7 +71,7 @@
 ;; beside this script. Do not replace it with a copy: a copy still parses long
 ;; after it stops agreeing with what wrote the files.
 (def ^:private layout-file
-  (fs/file (fs/parent *file*) "layout.cljc"))
+  (fs/file (fs/parent (fs/canonicalize *file*)) "layout.cljc"))
 
 (when-not (fs/exists? layout-file)
   (binding [*out* *err*]

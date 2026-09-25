@@ -170,7 +170,7 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
 ## Phase 4 — Emacs transport / Phase 5 — neovim transport
 
 - [x] Emacs bb transport landed: `clara-explorer-transport` defcustom (nREPL
-      default), `clara-explorer--eval-bb` (shells out to `bb editor_client.bb`,
+      default), `clara-explorer--bb-eval` (shells out to `bb editor_client.bb`,
       parses EDN), single-unit registry-selection prompt defaulting from
       `CLARA_RULES_EXPLORER_REGISTRY`, and `refresh`/`swap-session!` no-op in bb
       mode. `editor/emacs/editor_client.bb` symlinks to the script. Tier1 green
