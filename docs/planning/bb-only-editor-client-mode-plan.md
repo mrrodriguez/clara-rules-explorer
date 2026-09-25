@@ -19,8 +19,11 @@ toolchain, because `server.clj` does.
 
 This plan describes a **babashka-only editor client**: the same
 `clara.server.graph.client/navigate` EDN-in/EDN-out contract, answered over the
-persisted artifact registry constructs, running entirely under `bb`. No JVM, no
-Jetty, no nREPL, no clara-rules engine.
+persisted artifact registry constructs, running entirely under `bb`. The
+editor's repl (CIDER/Conjure) stays connected — it is still used to resolve
+aliased symbols to fq (step 0b) — but **no clara session is loaded and no
+Jetty server is started on it**; navigation reads the registry unit data with
+bb instead.
 
 The editor integrations are transport glue around one shared Clojure-side
 contract. Making the client bb-capable is a `server/`-side change; the Emacs
@@ -242,6 +245,8 @@ Candidate extractions (final naming to implementation):
 | `…graph.shared.rehydrate` | `rehydrate`'s `->usage-maps` / `->downstream` | the four usage closures + `:downstream` transpose, over slim-shaped maps |
 | `…graph.shared.navigate` | `client/navigate` + its private fns | pure navigation over a rehydrated analysis map |
 | `…graph.shared.tokens` | `client`'s `resolve-token` fns | keyword/string/ctor-form syntactic normalization + callsite string matching |
+| `…graph.shared.selection` | `selection/->selection` | the shared merge preamble: read + narrow + assert-compatible + unioned hierarchy + coverage |
+| `…graph.shared.compose` | `compose/->composed-analysis` | production merge by fq name, fact-type union, dep-graph recompute |
 
 ### 2. Reader conditionals — only for the genuinely-different boundary
 
@@ -304,6 +309,100 @@ Notes:
   (`require` `clara.server.tools.graph.artifacts.layout` directly). Optional
   cleanup; the symlink works and is already pinned.
 
+## Step 0b in detail — editor-side token resolution
+
+**Goal.** The editor resolves a symbol token to its fully-qualified form before
+calling `navigate`, so the client's live `ns-resolve`/class-loading becomes a
+back-compat escape hatch rather than the contract. The editor owns this because
+it has the repl; the client keeps only pure normalization.
+
+**CIDER due diligence.** There is no CIDER function that returns the fq name of
+an arbitrary symbol (var *or* class). What exists in `cider-resolve.el`:
+
+- `cider-resolve-alias` — ns alias → fq namespace. Covers the `x/` prefix of
+  `x/->loan`, but nothing else.
+- `cider-resolve-var` — var metadata, resolving the alias prefix and `refers`,
+  then falling back to `clojure.core`. Returns a metadata *dict*, not an fq
+  name string.
+
+Both read the track-state ns cache (`cider-repl-ns-cache`) and never contact
+the server; the cache holds `aliases`/`interns`/`refers` but **not `imports`**,
+so they resolve **vars, not Java classes** — `DocumentCheck` (an imported
+class) is invisible to them. `cider-symbol-at-point` explicitly does not expand
+`::`. `cider-var-info` queries the server but is var-only. Conclusion: use a
+nREPL eval, not these.
+
+**Conjure due diligence.** The Clojure client exposes only generic
+`eval-str` (plus `def-str`/`completions`/go-to-def over the `info`/`lookup`
+ops). `server.eval` sends `ns = opts.context`, so an eval runs in the buffer
+ns. There is no resolve-symbol helper; the `info` op returns `:ns`/`:name` for
+a *var* it can resolve, but there is no uniform var-or-class resolver.
+
+**Mechanism.** Both editors eval the *same* self-contained Clojure form over
+their repl (clojure.core only — no explorer dependency, so it
+also works when the editor's repl is the user's project repl without the
+explorer on its classpath):
+
+```clojure
+(let [ns-sym (symbol CALLER_NS)
+      form   (binding [*read-eval* false *ns* (find-ns ns-sym)]
+               (try (read-string TOKEN) (catch Exception _ nil)))]
+  (cond
+    (symbol? form)
+    (let [v (try (ns-resolve ns-sym form) (catch Exception _ nil))]
+      (cond
+        (class? v) (.getName ^Class v)                                   ; imported/aliased class -> fq
+        (var? v)   (str (symbol (str (ns-name (:ns (meta v)))) (name form))) ; var -> fq var symbol
+        :else      (str form)))                                          ; unresolvable -> pass through
+    (keyword? form) (str form)   ; ::auto-resolved under *ns* by read-string
+    :else TOKEN))                 ; string/vector — the client normalizes
+```
+
+`:caller-ns` is interpolated as `CALLER_NS`, the raw token as `TOKEN`. This
+form resolves plain symbols (and `::` keywords), but **not** the Java
+constructor syntaxes. Here is the concrete gap, using `DocumentCheck.` (the
+`test-consumer-java-ctor-tokens` case):
+
+`read-string` turns `"DocumentCheck."` into the symbol `DocumentCheck.` (`.` is
+a valid symbol character, so it stays part of the name). `ns-resolve` on
+`DocumentCheck.` finds nothing — no var or class is named that — so the
+`symbol?` branch hits `:else` and returns the token unchanged, still
+`"DocumentCheck."`.
+
+- JVM client: fine — `resolve-ctor-token` sees the trailing `.`, strips it to
+  `DocumentCheck`, and `ns-resolve`s the *imported class* to
+  `clara.server.tools.graph.rules.loan_app_facts.DocumentCheck`.
+- bb client: no live `ns-resolve`/imports — `DocumentCheck.` cannot be resolved,
+  so it degrades to "no fact type found".
+
+To close it, the form must *first* normalize the constructor syntax (strip the
+trailing `.`, and pull the class out of `new X` / `X/new`) **before**
+`ns-resolve` — exactly the prefix-stripping `resolve-ctor-token` does today.
+Those few extra lines are why the full form is a port of
+`client/resolve-token` (and why it then needs `clojure.string/replace` for the
+`-`→`_` record-name step), and why it lands in
+`clara.server.tools.graph.shared.tokens` so the editor form and the client
+cannot drift.
+
+**Editor changes.**
+
+- Emacs: add `clara-explorer--resolve-token` (eval the form over CIDER, return
+  the fq token or fall back to the raw token on `nil`/error) and call it in
+  `clara-explorer--navigate` after `clara-explorer--token-at-point`, before
+  building the navigate map. `:caller-ns` is still passed.
+- neovim: add the same eval in `conjure.lua` (a `resolve_token` helper over
+  `eval-str`), called from `init.lua`'s `M.navigate` before `navigate_code`.
+  Because Conjure eval is async, this makes the navigate flow one extra nested
+  eval (resolve → navigate), which `conjure.eval_edn`'s callback shape already
+  supports.
+
+**What stays in the client.** `resolve-token` remains as-is for back-compat
+(nREPL callers may still send raw tokens; the JVM branch resolves them). The bb
+client assumes fq-in and does only pure normalization + callsite string
+matching. The residual risk is a bare/aliased symbol that neither the editor
+resolved nor any callsite linkage covers — the same "no fact type found" shape
+the JVM path already emits.
+
 ## Design
 
 Two simplifications from the feasibility section land here first, because they
@@ -337,34 +436,26 @@ nREPL transport.
    (beside `annotations_report.bb`) is the bb twin of `navigate`:
 
    ```
-   bb server/bin/editor_client.bb <unit-dir> <navigate-input-edn>
+   bb server/bin/editor_client.bb '{:root "…" :units [{:repo "…"} …]}' <navigate-input-edn>
    ```
 
-   It `load-file`s `bootstrap.bb`, reads the unit's `production-index.edn`,
-   `fact-types.edn`, `meta.edn` (`:slim :unknown-fact-types`), and the annotation
-   layers (for the `:dynamic-*-detected` callsite linkage), rehydrates the four
-   directions via `shared.rehydrate`, and calls `shared.navigate/navigate` with
-   the bb token resolver. It prints the EDN `NavigateResponse` to stdout (the
-   shape the editors' parseedn/EDN decoders already consume); errors print
-   `{:error "…"}`.
-
-   First milestone operates on **one unit directory** (a repo's artifact dir, or
-   a unit already materialized by `flow/compose-persist!` — both are the exact
-   directory `annotations_report.bb` reads). This sidesteps registry composition:
-   the composed unit *is* the "configured rulebase analysis registry construct"
-   handed to the editor.
-
-   Second milestone (optional) is a live registry selection: accept
-   `{:root … :units […]}` and run `selection/->selection` +
-   `compose/->composed-analysis` — moved to `shared.` form — on the fly. Only
-   needed if the editor must compose ad-hoc selections rather than point at a
-   persisted unit.
+   It `load-file`s `bootstrap.bb`, composes the selected units on the fly —
+   `shared.selection` → `shared.compose` → `shared.rehydrate` (the pure forms
+   of `selection/->selection`, `compose/->composed-analysis`,
+   `rehydrate/rehydrate-analysis`) — then calls `shared.navigate/navigate` with
+   the bb token resolver and prints the EDN `NavigateResponse` to stdout; errors
+   print `{:error "…"}`. A fresh subprocess per query re-reads the selected
+   units every time, so reload-on-change is free (Decision 3). Incremental
+   starting point: implement against a single-unit selection
+   (`{:units [{:repo …}]}`, or a unit materialized by `flow/compose-persist!`)
+   first, then generalize to multi-unit composition.
 
 4. **Editor transport** — Emacs: add a `clara-explorer--eval-bb` transport
    (shell out to `bb server/bin/editor_client.bb`, parse stdout with
-   `parseedn-read-str`) behind a defcustom, plus a defcustom for the unit dir /
-   registry root; reuse the existing `clara-explorer--navigate-code` map builder
-   unchanged. `swap-session!`/`refresh` are nREPL-only and no-op in bb mode.
+   `parseedn-read-str`) behind a defcustom, plus a prompt for the registry
+   selection (`:root` + `:units`) defaulting from `CLARA_RULES_REGISTRY` (Decision
+   4); reuse the existing `clara-explorer--navigate-code` map builder unchanged.
+   `swap-session!`/`refresh` are nREPL-only and no-op in bb mode.
    Neovim: the same change later in `conjure.lua`'s `eval_edn` — an alternate
    executor that shells out instead of `conjure.eval`. Nothing in the client
    contract changes.
@@ -377,11 +468,13 @@ nREPL transport.
 | `server/src/clara/server/tools/graph/shared/rehydrate.cljc` (new) | four usage closures + `:downstream` transpose over slim-shaped maps |
 | `server/src/clara/server/tools/graph/shared/navigate.cljc` (new) | pure `navigate` + navigation fns over a rehydrated analysis map |
 | `server/src/clara/server/tools/graph/shared/tokens.cljc` (new) | token normalization + callsite string matching; `#?(:bb/:clj)` live-resolve seam |
+| `server/src/clara/server/tools/graph/shared/selection.cljc` (new) | the shared merge preamble (`selection/->selection`) |
+| `server/src/clara/server/tools/graph/shared/compose.cljc` (new) | production merge + fact-type union + dep-graph recompute (`compose/->composed-analysis`) |
 | `server/src/clara/server/graph/client.clj` | becomes the JVM shell: keeps `register!`, `get-production-source`, `swap-session!`, schema validation; delegates to `shared.*` |
 | `server/src/clara/server/tools/graph/artifacts/rehydrate.clj` | delegates its closure bodies to `shared.rehydrate` / `shared.hierarchy` |
 | `server/bin/bootstrap.bb` (new) | add `server/src` + prismatic/schema to the bb classpath (version from `deps.edn`) |
-| `server/bin/editor_client.bb` (new) | bb entry: bootstrap, read unit artifacts, rehydrate, call `shared.navigate`, print EDN |
-| `server/bin/annotations_report.bb` | optionally migrate to `bootstrap.bb` + `shared.hierarchy` (drop its inline closure reimpls and the `layout.cljc` symlink) |
+| `server/bin/editor_client.bb` (new) | bb entry: bootstrap, compose the registry selection (`shared.selection` → `shared.compose` → `shared.rehydrate`), call `shared.navigate`, print EDN |
+| `server/bin/annotations_report.bb` | migrate to `bootstrap.bb` + `shared.hierarchy` after `editor_client.bb` is proven (drop its inline closure reimpls and the `layout.cljc` symlink) |
 | `server/docs/persisted-artifacts.md` | note the new offline reader + the `shared.` convention |
 | `editor/emacs/clara-explorer.el` | add bb transport + config defcustoms; pre-resolve aliased symbol tokens to fq via CIDER before sending |
 | `editor/neovim/lua/clara-explorer/*.lua` | later, same transport + pre-resolution change |
@@ -394,7 +487,7 @@ nREPL transport.
        test (scoped ≡ global over every fixture).
    0b. Move aliased-symbol resolution into the editors (CIDER/Conjure resolve to
        fq before calling `navigate`), so the client does no live resolution;
-       keep passing `:caller-ns` as context.
+       keep passing `:caller-ns` as context. See "Step 0b in detail".
 1. **Extract + parity (no bb yet).** Move the navigation body and closures into
    `shared.*`, have the JVM `client.clj` and `rehydrate.clj` delegate to them,
    and pin parity with the existing `client`/`rehydrate`/`slim` tests. No
@@ -402,15 +495,17 @@ nREPL transport.
 2. **`bootstrap.bb` + bb smoke test.** Add `bootstrap.bb` and a test that
    `require`s every `shared.*` namespace under bb with no classpath beyond
    `src`.
-3. **bb entry script.** Implement `editor_client.bb` for a single unit dir;
-   verify against `annotations_report.bb`'s `producers`/`consumers` and against
-   `rehydrate` over the checked-in example registry
+3. **bb entry script.** Implement `editor_client.bb` taking a registry
+   selection (`{:root … :units […]}`). Start with a single-unit selection
+   (reusing the read path `annotations_report.bb` already has), then generalize
+   to multi-unit composition via `shared.selection`/`shared.compose`. Verify
+   against `annotations_report.bb`'s `producers`/`consumers` and `rehydrate`
+   over the checked-in example registry
    (`clara.server.tools.graph.artifacts.regen-example/example-out-dir`).
-4. **Emacs transport.** Wire the bb transport behind a defcustom; leave nREPL
-   as the default.
-5. **Registry selection (optional).** Add `{:root … :units […]}` composition in
-   `shared.` form if ad-hoc selection is wanted.
-6. **neovim.** Mirror step 4 in Lua.
+4. **Emacs transport.** Wire the bb transport behind a defcustom (shell out to
+   `editor_client.bb`); prompt for the registry selection with defaults from
+   `CLARA_RULES_REGISTRY`; leave nREPL as the default.
+5. **neovim.** Mirror step 4 in Lua.
 
 ## Risks and mitigations
 
@@ -432,32 +527,65 @@ nREPL transport.
 - **`get-production-locations` / `swap-session!` / `refresh` have no bb twin.**
   They are nREPL-only by nature; the editors gate them on transport.
 
-## Open questions
+## Decisions (from plan review)
 
-1. **Editor-side token resolution** — adopt it? Recommended: yes (both editors
-   have the repl — CIDER and Conjure `eval-str` — so the client stays pure on
-   both runtimes). Confirmed: both editors currently send raw token +
-   `:caller-ns` and resolve on the Clojure side. Keep `:caller-ns` as context
-   regardless.
-2. **Drop the scoped `:match` path** — delete `deps->targets` /
-   `:upstream`/`:downstream` from the navigation code path and go
-   global-closure-only? Recommended: yes, after a parity test pins scoped ≡
-   global.
-3. Should the bb mode read **one unit dir** first (recommended), or go straight
-   to **registry selection** (`{:root … :units […]}`)?
-4. Where does the editor get the unit dir / registry root from? A per-project
-   config var, a `.dir-locals.el`/`.nvim.lua` value, or an env var — matching
-   the "no hard-coded paths" rule both editors already follow.
-5. Does `shared.navigate` keep `NavigateInput` validation (bootstrap-provided
-   schema) in bb mode, or rely on the editors' well-formed maps? Recommended:
-   drop it in bb, keep it in the JVM shell.
-6. Do we migrate `annotations_report.bb` to `bootstrap.bb`/`shared.*` in the
-   same change, or leave it on the symlink until `editor_client.bb` proves the
-   bootstrap path? Recommended: leave it; migrate once `editor_client.bb` is
-   green.
-7. **Zero-repl bb mode** — is it a goal? If so, aliased symbols need persisted
-   namespace alias maps (currently dropped as `:ns-deps`). Recommended: not a
-   goal for now.
+1. **Editor-side token resolution** — adopt. Both editors have the repl (CIDER
+   and Conjure `eval-str`), so the client stays pure on both runtimes; the
+   editor resolves aliased symbols to fq before calling `navigate`, and
+   `:caller-ns` is still passed as context. See "Step 0b in detail".
+
+2. **Drop the scoped `:match` path** — adopt. Delete `deps->targets` /
+   `:upstream`/`:downstream` from the navigation code path and answer from the
+   global closure only, after a parity test pins scoped ≡ global. See the
+   `:match` section.
+
+3. **Registry selection, with reload.** The bb client is told which units to
+   load as a registry selection (`{:root … :units [{:repo … :branch …}]}`) —
+   the same shape the server's `:registry` mode takes — not a single unit
+   directory. Reloading is a requirement: after a unit is re-persisted, the
+   next query must read the new files. Because the bb client is a fresh
+   subprocess per query, re-reading is natural and reload-on-change is free; if
+   a cache or long-running process is added later, it must key staleness on the
+   manifest head `:sha`/`:created` (already recorded by
+   `clara.server.tools.graph.artifacts.registry/unit-info`).
+
+4. **Editor config.** The editor prompts for the registry selection, defaulting
+   to selections under `CLARA_RULES_REGISTRY` (the registry root — the
+   `rules-annos/` tree) when that variable is set. The editor resolves the env
+   var itself and passes an explicit `:root`, matching the library's "reads no
+   env var; the host resolves `$…_HOME`" convention.
+
+5. **`NavigateInput` validation in bb** — drop it in bb, keep it in the JVM
+   shell. What "validation" refers to: the JVM `navigate` runs
+   `(s/validate NavigateInput input)` against the Plumatic Schema
+   `NavigateInput` — `{:production (maybe Str) :side (enum :lhs :rhs)
+   :caller-ns Str :token Str}` (with `:production`/`:side`/`:caller-ns`
+   optional) — so a malformed map fails at the choke point rather than deep
+   inside the navigation logic. The editors already build well-formed maps, so
+   bb needs none of it: a malformed map fails naturally or returns
+   `{:error …}`, and pulling `schema.core` onto the bb classpath for this alone
+   is not worth it.
+
+6. **`annotations_report.bb` migration** — migrate it to `bootstrap.bb` /
+   `shared.*` after `editor_client.bb` is proven; leave it on the symlink until
+   then.
+
+7. **Zero-repl bb mode** — not a goal. The editor keeps its connected repl for
+   token resolution; the goal is only that no clara session is loaded and no
+   Jetty server is started on it. Persisted namespace alias maps (currently
+   dropped as `:ns-deps`) are therefore not needed.
+
+## Remaining open questions
+
+- **bb process model.** Stateless per-query subprocess (reload-on-change for
+  free, but re-reads `production-index.edn` ~1.9MB + `fact-types.edn` each
+  query) versus a long-running bb process with a staleness-aware cache keyed on
+  the manifest head. Decide once latency is measured.
+- **Env var naming** — resolved. `CLARA_RULES_REGISTRY` is the registry-root
+  var; `CLARA_RULES_EXPLORER_HOME` is the canonical repo-root name (the stale
+  `CLARA_HOME_EXPLORER` mentions in `docs/explorer-editor-navigation-neovim.md`
+  and the plugin error message were corrected). `CLARA_HOME` (no suffix) remains
+  the clara-rules *engine* checkout.
 
 ## Related
 
