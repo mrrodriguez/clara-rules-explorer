@@ -53,11 +53,43 @@ assertions), `make lint` + reflection-check clean.
 
 ## Phase 1 — extract `shared.*`, JVM delegates (no bb yet)
 
-- [ ] `shared.hierarchy` (transpose + two closures)
-- [ ] `shared.rehydrate` (four usage closures + `:downstream` transpose)
-- [ ] `shared.navigate` (pure `navigate` over a rehydrated analysis map)
-- [ ] `shared.tokens` (normalization + callsite matching; `#?(:bb/:clj)` seam)
-- [ ] `shared.selection` / `shared.compose`
+Slice 1 landed: `shared.tokens` + `shared.navigate` (both `.cljc`, only
+`clojure.*` + shared requires — verified loadable under bb with no classpath
+beyond `src`). `client.clj` is now the JVM shell (schemas, system/swap,
+live-namespace resolvers, var-metadata sources) delegating to
+`shared.navigate/navigate` with an injected `runtime` map
+(`:resolve-token` / `:token->fq-sym` / `:production-source`), following the
+`ctor/resolve-ctor-form` injection precedent. Full suite green with no test
+edits (401 tests, 2504 assertions) — delegation parity holds.
+
+- [x] `shared.tokens` (`real-type-name?`, `callsite-matches-token?` — the
+      pure helpers; live `ns-resolve`/class-loading stays JVM-side, fq
+      normalization arrives with the bb entry / 0b resolve form)
+- [x] `shared.schema` — the navigate contract (`NavigateInput`, `SourceLoc`,
+      `NavigateTarget`, `NavigateResult`, `NavigateError`,
+      `NavigateResponse`, all moved verbatim out of `client.clj`) plus the new
+      `NavigateRuntime` (`:resolve-token` / `:token->fq-sym` /
+      `:production-source`, fn schemas via `s/=>`). Docstrings across
+      `shared.navigate` name schemas instead of spelling shapes, per the
+      `artifacts.schema` house rule. Verified under bb: `schema.core` 1.4.1
+      loads via `add-deps`, `s/check` accepts plain-fn runtimes and rejects
+      bad inputs, and `shared.navigate/navigate` runs end-to-end over a stub
+      analysis with a schema-valid response (Phase 2's `bootstrap.bb` will own
+      the provisioning). `client.clj` keeps only `s/validate` + `s/defn`
+      annotations, now against `shared-schema/*`; public `navigate` there and
+      in `shared.navigate` is `s/defn`, exercised by the existing
+      `validate-schemas` fixture with no new violations.
+- [x] `shared.navigate` (pure `navigate` over a rehydrated analysis map;
+      `navigate-global` kept byte-identical — raw closures, self included,
+      no dedupe — per the no-behavior-change mandate)
+- [ ] `shared.hierarchy` (transpose + two closures — note
+      `artifacts.hierarchy` (no requires at all) and `rehydrate`'s private
+      closure fns are parallel implementations to unify, not just move)
+- [ ] `shared.rehydrate` (four usage closures + `:downstream` transpose —
+      needs `serialize/route-id` ported or injected; `rehydrate` also pulls
+      `annotations.merge` / `conditions` / `serialize`, none bb-safe)
+- [ ] `shared.selection` / `shared.compose` (need `registry` / `store` —
+      file I/O namespaces — assessed for bb-safety first)
 - [ ] `client.clj` + `rehydrate.clj` delegate; existing
       `client`/`rehydrate`/`slim` tests pin parity, no behavior change.
 

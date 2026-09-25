@@ -3,8 +3,10 @@
 
    Both the Emacs (CIDER) and future neovim (Conjure) clients eval
    `clara.server.graph.client/navigate` over nREPL and read the printed EDN
-   result.  This namespace is the shared contract; nothing transport-specific
-   lives here and no Class ever crosses the wire.
+   result.  This namespace is the JVM shell: system registration, schema
+   validation, live-namespace token resolution, and var-metadata source
+   locations. The navigation itself lives in `shared-navigate/navigate`,
+   which this namespace calls with the JVM runtime map.
 
    Resolution reuses the analyzer's own logic (`ctor/resolve-record-type`
    for record/Java constructors, the serialized
@@ -14,47 +16,11 @@
   (:require [clara.server.graph.cache :as cache]
             [clara.server.graph.server :as server]
             [clara.server.tools.graph.analyze.ctor :as ctor]
-            [clojure.set :as set]
+            [clara.server.tools.graph.shared.navigate :as shared-navigate]
+            [clara.server.tools.graph.shared.schema :as shared-schema]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
             [schema.core :as s]))
-
-;; ---------------------------------------------------------------------------
-;; Schemas
-;; ---------------------------------------------------------------------------
-
-(s/defschema NavigateInput
-  {(s/optional-key :production) (s/maybe s/Str)   ; fq "ns/rule"; nil = global path
-   (s/optional-key :side)       (s/enum :lhs :rhs)
-   (s/optional-key :caller-ns)  s/Str             ; buffer ns, for global path + ctor resolution
-   :token                       s/Str})
-
-(s/defschema SourceLoc
-  {:var?   s/Bool
-   :file   (s/maybe s/Str)
-   :line   (s/maybe s/Int)
-   :column (s/maybe s/Int)})
-
-(s/defschema NavigateTarget
-  {:name   s/Str
-   :ns     s/Str
-   :type   s/Str
-   :via    (s/enum :insert :retract)
-   :source SourceLoc})
-
-(s/defschema NavigateResult
-  {:direction  (s/enum :producer :consumer :type)
-   :production (s/maybe s/Str)
-   :type       s/Str
-   :targets    [NavigateTarget]})
-
-(s/defschema NavigateError
-  {:error s/Str})
-
-(s/defschema NavigateResponse
-  "A `navigate` result: either a `NavigateResult` or an error map."
-  (s/conditional #(contains? % :error) NavigateError
-                 #(contains? % :direction) NavigateResult))
 
 ;; ---------------------------------------------------------------------------
 ;; System registration
@@ -131,7 +97,7 @@
   []
   {:var? false :file nil :line nil :column nil})
 
-(s/defn get-production-source :- SourceLoc
+(s/defn get-production-source :- shared-schema/SourceLoc
   "Returns the source location of a production (`\"ns/rule\"`), from var
    metadata where the production interns a var, else a `:var? false`
    placeholder (the kondo tier / elisp regex fallback takes over)."
@@ -139,7 +105,7 @@
   (or (var-source fq-name) (unknown-source)))
 
 (s/defn get-production-locations
-  "Full map of every fq production name to its `SourceLoc` (debugging)."
+  "Full map of every fq production name to its `shared-schema/SourceLoc` (debugging)."
   []
   (if-let [sys (get-current-system)]
     (let [{:keys [state-atom cache]} sys
@@ -150,7 +116,7 @@
     {:error "no explorer system registered"}))
 
 ;; ---------------------------------------------------------------------------
-;; Token resolution (§7)
+;; Token resolution (live namespaces)
 ;; ---------------------------------------------------------------------------
 
 (def ^:private unreadable ::unreadable)
@@ -266,321 +232,34 @@
             (var? resolved) (var-fq-symbol resolved)
             :else nil))))))
 
-(defn- real-type-name?
-  "True when a resolved name is a genuine type name (not the unresolved-symbol
-   sentinel, and not nil)."
-  [name]
-  (and (some? name)
-       (not (str/starts-with? name "symbol["))))
-
-(defn- callsite-matches-token?
-  "True when a serialized callsite entry's `:constructor-sym` / `:fact-type` /
-   `:fact-type-spec` matches the fully-qualified token symbol (a string)."
-  [fq-sym-str callsite]
-  (or (= fq-sym-str (:constructor-sym callsite))
-      (= fq-sym-str (get-in callsite [:fact-type :name]))
-      (some #(= fq-sym-str %) (vals (:fact-type-spec callsite)))))
-
-;; ---------------------------------------------------------------------------
-;; Analysis access helpers
-;; ---------------------------------------------------------------------------
-
-(defn- production-summary
-  [analysis production]
-  (or (get-in analysis [:rules production])
-      (get-in analysis [:queries production])))
-
-(defn- type-name-set
-  [type-refs]
-  (into #{} (keep :name) type-refs))
-
-(defn- declared-lhs-type-names [summary]
-  (type-name-set (:lhs-types summary)))
-
-(defn- declared-rhs-type-names [summary]
-  (type-name-set (concat (:insert-types summary) (:retract-types summary))))
-
-(defn- resolve-rhs-types
-  "Resolves the RHS token to a set of candidate kind-explicit type names,
-   combining direct (kind/ctor) resolution with the production's serialized
-   dynamic-insert/retract callsite linkage (§7.4)."
-  [summary caller-ns-sym token]
-  (let [direct (resolve-token caller-ns-sym token)
-        fq-sym (token->fq-sym caller-ns-sym token)
-        callsite-types
-        (->> [(get summary :dynamic-insert-types-detected)
-              (get summary :dynamic-retract-types-detected)]
-             (keep :callsites)
-             (apply concat)
-             (filter #(when fq-sym (callsite-matches-token? (str fq-sym) %)))
-             (mapcat :resolved-types)
-             (keep :name)
-             set)]
-    (cond-> callsite-types
-      (real-type-name? direct) (conj direct))))
-
-(defn- exclude-querying-production
-  "Transducer dropping navigate targets that name `production` itself. The
-   dep-graph carries no self-edges — both dep-graph builders refuse
-   producer = consumer — so scoped navigation excludes the querying production
-   from the global closure."
-  [production]
-  (remove #(= (:name %) production)))
-
-(defn- dedupe-targets
-  "Merges same-name navigate targets with `:retract` winning: one production
-   can both insert and retract (a hierarchy reach of) one type, reaching the
-   global closure twice. Answers one row per production, name-sorted like the
-   closures."
-  [targets]
-  (->> targets
-       (group-by :name)
-       (sort-by key)
-       (mapv (fn [[_ rows]]
-               (assoc (first rows)
-                      :via (if (some #(= :retract (:via %)) rows)
-                             :retract
-                             :insert))))))
-
-(defn- dep->target
-  "Builds a `NavigateTarget` from a serialized production dep plus `via`."
-  [dep via]
-  {:name   (:name dep)
-   :ns     (:ns dep)
-   :type   (:type dep)
-   :via    via
-   :source (get-production-source (:name dep))})
-
-;; ---------------------------------------------------------------------------
-;; Forward declarations for global helpers used in scoped fallbacks
-;; ---------------------------------------------------------------------------
-
-(declare global-producer-targets global-consumer-targets)
-
-(defn- scoped-producer-targets
-  "Producer targets for `type-name` in `production`'s scope: the global
-   producer closure minus the querying production itself, deduped with
-   `:retract` winning. A dep-graph edge exists exactly when the global closure
-   reaches, and `:via` comes from the same inserted/retracted split."
-  [analysis production type-name]
-  (dedupe-targets
-   (into []
-         (exclude-querying-production production)
-         (global-producer-targets analysis type-name))))
-
-(defn- scoped-consumer-targets
-  "Consumer targets for `matched-types` in `production`'s scope: per-type
-   consumers from the global closure, tagged `:retract` when the type is in
-   this production's retract set, minus the querying production itself, deduped
-   with `:retract` winning."
-  [analysis summary production matched-types]
-  (let [retract-names (type-name-set (:retract-types summary))]
-    (dedupe-targets
-     (into []
-           (comp (mapcat (fn [t]
-                           (let [via (if (contains? retract-names t) :retract :insert)]
-                             (map #(assoc % :via via)
-                                  (global-consumer-targets analysis t)))))
-                 (exclude-querying-production production))
-           matched-types))))
-
-;; ---------------------------------------------------------------------------
-;; Scoped navigation (inside a defrule/defquery)
-;; ---------------------------------------------------------------------------
-
-(defn- lhs-navigate
-  [analysis summary production resolve-ns token]
-  (let [token-name (resolve-token resolve-ns token)]
-    (cond
-      (nil? token-name)
-      {:error (str "no fact type found under cursor in " production)}
-
-      (contains? (declared-lhs-type-names summary) token-name)
-      (let [targets (scoped-producer-targets analysis production token-name)]
-        (if (empty? targets)
-          (let [global (global-producer-targets analysis token-name)]
-            (if (seq global)
-              {:direction  :producer
-               :production production
-               :type       token-name
-               :targets    global}
-              {:error (str "no producer of " token-name " for " production)}))
-          {:direction  :producer
-           :production production
-           :type       token-name
-           :targets    targets}))
-
-      :else
-      (if (contains? (:fact-types analysis) token-name)
-        (let [global (global-producer-targets analysis token-name)]
-          (if (seq global)
-            {:direction  :producer
-             :production production
-             :type       token-name
-             :targets    global}
-            {:error (str "no producer of " token-name " for " production)}))
-        {:error (str "no fact type found under cursor in " production)}))))
-
-(defn- rhs-navigate
-  [analysis summary production resolve-ns token]
-  (let [candidates (resolve-rhs-types summary resolve-ns token)
-        matched-types (set/intersection candidates (declared-rhs-type-names summary))]
-    (if (seq matched-types)
-      (let [targets (scoped-consumer-targets analysis summary production matched-types)
-            type-name (first (sort matched-types))]
-        (if (empty? targets)
-          (let [global (->> matched-types
-                            (mapcat #(global-consumer-targets analysis %))
-                            (sort-by :name)
-                            vec)]
-            (if (seq global)
-              {:direction  :consumer
-               :production production
-               :type       type-name
-               :targets    global}
-              {:error (str "no consumer of " type-name " for " production)}))
-          {:direction  :consumer
-           :production production
-           :type       type-name
-           :targets    targets}))
-      (let [known-types (set (keys (:fact-types analysis)))
-            global-candidates (set/intersection candidates known-types)]
-        (if (seq global-candidates)
-          (let [type-name (first (sort global-candidates))
-                global (->> global-candidates
-                            (mapcat #(global-consumer-targets analysis %))
-                            (sort-by :name)
-                            vec)]
-            (if (seq global)
-              {:direction  :consumer
-               :production production
-               :type       type-name
-               :targets    global}
-              {:error (str "no fact type found under cursor in " production)}))
-          {:error (str "no fact type found under cursor in " production)})))))
-
-(defn- navigate-scoped
-  [analysis production side caller-ns-sym token]
-  (let [prod-ns (some-> production symbol namespace symbol)
-        resolve-ns (or caller-ns-sym prod-ns)
-        summary (production-summary analysis production)]
-    (cond
-      (nil? summary)
-      {:error (str "no production named " production)}
-
-      (and (= :rhs side)
-           (not (contains? (:rules analysis) production)))
-      {:error (str production " has no RHS (queries have no RHS)")}
-
-      (= :lhs side) (lhs-navigate analysis summary production resolve-ns token)
-
-      (= :rhs side) (rhs-navigate analysis summary production resolve-ns token)
-
-      :else {:error "a :side is required for scoped navigation"})))
-
-;; ---------------------------------------------------------------------------
-;; Global navigation (outside a defrule/defquery, §9.7)
-;; ---------------------------------------------------------------------------
-
-(defn- global-callsite-resolved-types
-  "Across every production, finds callsites whose `:constructor-sym` /
-   `:fact-type` matches the fq token symbol and collects their resolved type
-   names."
-  [analysis fq-sym]
-  (when fq-sym
-    (let [fq-str (str fq-sym)
-          detections
-          (fn [summary]
-            [(get summary :dynamic-insert-types-detected)
-             (get summary :dynamic-retract-types-detected)])]
-      (->> (concat (vals (:rules analysis)) (vals (:queries analysis)))
-           (mapcat detections)
-           (keep :callsites)
-           (apply concat)
-           (filter #(callsite-matches-token? fq-str %))
-           (mapcat :resolved-types)
-           (keep :name)
-           set))))
-
-(defn- global-producer-targets
-  "Builds `NavigateTarget`s from a fact type's `inserted-by-rules` /
-   `retracted-by-rules` production refs (hierarchy-aware producers)."
-  [analysis type-name]
-  (let [fact-type (get-in analysis [:fact-types type-name])
-        inserted (:inserted-by-rules fact-type)
-        retracted (:retracted-by-rules fact-type)]
-    (->> (concat (map #(dep->target % :insert) inserted)
-                 (map #(dep->target % :retract) retracted))
-         (sort-by :name)
-         vec)))
-
-(defn- global-consumer-targets
-  "Builds `NavigateTarget`s from a fact type's `used-by-rules` /
-   `used-by-queries` production refs (hierarchy-aware consumers)."
-  [analysis type-name]
-  (let [fact-type (get-in analysis [:fact-types type-name])
-        refs (concat (:used-by-rules fact-type)
-                     (:used-by-queries fact-type))]
-    (->> refs
-         (map #(dep->target % :insert))
-         (sort-by :name)
-         vec)))
-
-(defn- navigate-global
-  [analysis caller-ns-sym token side]
-  (let [direct (resolve-token caller-ns-sym token)
-        fq-sym (token->fq-sym caller-ns-sym token)
-        callsite-names (global-callsite-resolved-types analysis fq-sym)
-        candidates (cond-> callsite-names
-                     (real-type-name? direct) (conj direct))
-        known-types (set (keys (:fact-types analysis)))
-        matched (set/intersection candidates known-types)]
-    (cond
-      (empty? matched)
-      {:error (str "no fact type found under cursor for token " (pr-str token))}
-
-      :else
-      (let [type-name (first (sort matched))
-            producer? (= :lhs side)
-            targets (if producer?
-                      (->> matched
-                           (mapcat #(global-producer-targets analysis %))
-                           (sort-by :name)
-                           vec)
-                      (->> matched
-                           (mapcat #(global-consumer-targets analysis %))
-                           (sort-by :name)
-                           vec))
-            direction (if producer? :producer :type)]
-        (if (empty? targets)
-          {:error (str "no " (if producer? "producer" "consumer") " of " type-name)}
-          {:direction  direction
-           :production nil
-           :type       type-name
-           :targets    targets})))))
-
 ;; ---------------------------------------------------------------------------
 ;; Public API
 ;; ---------------------------------------------------------------------------
 
-(s/defn navigate :- NavigateResponse
+(defn- jvm-runtime
+  "The `shared-navigate/navigate` runtime map over the editor's live
+   namespaces: token resolution via `ns-resolve` / record-constructor
+   class-loading, source locations from var metadata."
+  []
+  {:resolve-token resolve-token
+   :token->fq-sym token->fq-sym
+   :production-source get-production-source})
+
+(s/defn navigate :- shared-schema/NavigateResponse
   "Resolves editor navigation for a fact-type token.  Returns a
-   `NavigateResult` or `{:error \"…\"}`.  Input is validated against
-   `NavigateInput` at this choke point."
+   `shared-schema/NavigateResponse`.  Input is validated against
+   `shared-schema/NavigateInput` at this choke point."
   [input]
   (let [{:keys [production side caller-ns token]} input]
     (log/infof "navigate: production=%s side=%s caller-ns=%s token=%s"
                production side caller-ns (pr-str token))
     (try
-      (s/validate NavigateInput input)
+      (s/validate shared-schema/NavigateInput input)
       (let [result
             (if-let [sys (get-current-system)]
               (let [{:keys [state-atom cache]} sys
-                    analysis (cache/get-rulebase-analysis cache @state-atom)
-                    caller-ns-sym (some-> caller-ns symbol)]
-                (if (nil? production)
-                  (navigate-global analysis caller-ns-sym token side)
-                  (navigate-scoped analysis production side caller-ns-sym token)))
+                    analysis (cache/get-rulebase-analysis cache @state-atom)]
+                (shared-navigate/navigate analysis (jvm-runtime) input))
               {:error "no explorer system registered"})]
         (if (:error result)
           (log/warnf "navigate: %s" (:error result))
