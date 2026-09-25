@@ -26,6 +26,7 @@
    [clara.server.tools.graph.artifacts.schema :as schema]
    [clara.server.tools.graph.artifacts.store :as store]
    [clara.server.tools.graph.edn-io :as edn-io]
+   [clara.server.tools.graph.shared.selection :as shared-selection]
    [clojure.java.io :as io]
    [clojure.set :as set]
    [clojure.string :as str]
@@ -44,9 +45,11 @@
 (defn unit-key
   "The string handle for a unit ref: `<repo>[@<branch>]`. A `UnitRef` map is not
   a comparable map key under the library's own `sorted-map` convention, so maps
-  keyed by unit use this."
-  [{:keys [repo branch]}]
-  (str repo (when (seq branch) (str "@" branch))))
+  keyed by unit use this. Delegates to
+  `clara.server.tools.graph.shared.selection/unit-key`, the one definition the
+  JVM and babashka share."
+  [unit]
+  (shared-selection/unit-key unit))
 
 (defn unit-ref
   "The `UnitRef` projection of a unit info map."
@@ -265,29 +268,14 @@
              #(store/read-merged-annotations (->opts registry unit))))
 
 (defn narrow-analysis
-  "Narrow `analysis` to `unit`'s `:namespaces` filter, when present: `:rules`
-  and `:queries` keep only the productions whose `:ns` is in the filter (as
-  strings). `:fact-types` stays whole — keyed by type, not namespace, and the
-  hierarchy benefits from staying global — and `:dep-graph` is left alone,
-  because `clara.server.tools.graph.artifacts.compose/->composed-analysis`
-  recomputes it over the merged productions. `:unresolved` and `:slim` pass
-  through.
-
-  Without a filter the analysis is returned unchanged. Both
-  `clara.server.tools.graph.artifacts.federate/->index` and
-  `clara.server.tools.graph.artifacts.compose/->composed-analysis` apply this
-  when they read a unit for a merge, so a `UnitRef` narrowed to a subset of a
-  unit's namespaces excludes the productions outside that subset."
+  "Narrow `analysis` to `unit`'s `:namespaces` filter, when present — delegates
+  to `clara.server.tools.graph.shared.selection/narrow-analysis`, the one
+  definition the JVM and babashka share. `:rules` and `:queries` keep only the
+  productions whose `:ns` is in the filter (as strings); `:fact-types` stays
+  whole, `:dep-graph` is left alone (the compose merge recomputes it over the
+  merged productions), and `:unresolved` / `:slim` pass through."
   [analysis unit]
-  (if-let [nses (:namespaces unit)]
-    (let [nses (into #{} (map str) nses)
-          keep? (fn [[_ {:keys [ns]}]] (contains? nses (str ns)))
-          narrow (fn [productions]
-                   (into (sorted-map) (filter keep?) productions))]
-      (cond-> analysis
-        (contains? analysis :rules) (update :rules narrow)
-        (contains? analysis :queries) (update :queries narrow)))
-    analysis))
+  (shared-selection/narrow-analysis analysis unit))
 
 (defn- ->namespace-set
   "A unit's `:namespaces` filter as a set of strings, or nil when unfiltered."

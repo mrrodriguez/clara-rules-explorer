@@ -125,12 +125,13 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
       `sha1-base36`); `rehydrate.clj` is now the JVM half (annotation
       restoration + `:slim` narrowing) delegating to `shared.rehydrate`.
       slim/rehydrate parity pins held (403 tests, 2521 assertions).
-- [ ] `shared.selection` / `shared.compose` — assessed: `registry` is NOT
+- [x] `shared.selection` / `shared.compose` — assessed: `registry` is NOT
       bb-safe (transitively pulls `serialize` → `clara.rules.schema`), so the
-      shared forms must take injected registry capabilities (`read-analysis` /
-      `narrow-analysis` / `unit-key` / `assert-compatible!`) rather than
-      `:require` `registry`. Deferred to the multi-unit Phase 3 step — the
-      single-unit bb path reads parts directly and does not need them.
+      shared forms take an injected capabilities map (`:read-analysis` /
+      `:assert-compatible!`) rather than `:require` `registry`. The pure
+      per-unit helpers (`unit-key`, `narrow-analysis`) moved into
+      `shared.selection`, and `registry` delegates to them, so there is one
+      definition on both runtimes. Landed with the Phase 3 multi-unit step.
 - [x] `shared.tokens` gained `record-ctor-class-symbol` — the pure syntactic
       half of `ctor/resolve-record-type` (strip `->`/`map->`, hyphen→underscore
       on the ns, no class-load). Pinned against `ctor/resolve-record-type` for
@@ -162,10 +163,26 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
       runtime (keyword / string / record-ctor normalization; `:var? false`
       sources). Verified over the checked-in `loan-app-ruleset` unit
       (LHS / RHS record-ctor / global / error).
-- [ ] Multi-unit via `shared.selection` / `shared.compose` (needs the injected
-      registry capabilities noted in Phase 1).
-- [ ] Verify parity against `producers`/`consumers` subcommands + `rehydrate`
-      over the checked-in example registry.
+- [x] Multi-unit via `shared.selection` / `shared.compose`. Both landed as
+      bb-loaded namespaces taking an injected capabilities map
+      (`:read-analysis` / `:assert-compatible!`); the pure per-unit helpers
+      (`unit-key`, `narrow-analysis`) moved into `shared.selection` so the JVM
+      `registry` delegates to the one definition. `editor_client.bb` now always
+      composes the selection (single and multi-unit alike, mirroring the
+      server's `:registry` mode) — `shared.selection` → `shared.compose` →
+      `shared.rehydrate` → `shared.navigate`. `compose.clj` keeps only the
+      `:layers` fold half; the `:compose` half delegates to `shared.compose`.
+      `:written-by` stays `clara.server.tools.graph.artifacts.compose` so the
+      persisted composed example is byte-for-byte unchanged
+      (`regen-example-test` still green).
+- [x] Parity verified against the checked-in example registry: new
+      `editor-client-bb-test` composes the two `rules-annos/` source units in
+      bb and asserts the producer/consumer target name-sets equal the JVM
+      `compose/->composed-analysis` + `rehydrate/rehydrate-analysis` closures,
+      that the cross-unit producer edge is reachable from the downstream unit,
+      that a single-unit record-ctor token normalizes to its class type, and
+      that the answers agree with the `producers`/`consumers` subcommands over
+      the composed unit. Full suite green (406 tests, 2544 assertions).
 
 ## Phase 4 — Emacs transport / Phase 5 — neovim transport
 
