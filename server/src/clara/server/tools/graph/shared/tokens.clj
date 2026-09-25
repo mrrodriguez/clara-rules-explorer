@@ -3,10 +3,8 @@
   name checks, constructor-syntax normalization, the editor resolve-form builder, and
   authored-callsite string matching.
 
-   The `:clara-rules-explorer/bb-loaded` metadata marks this namespace as loadable under babashka;
-  the bb smoke test requires every namespace carrying it. Live resolution (`ns-resolve`,
-  record-constructor class-loading) is NOT here: each runtime resolves aliased and bare symbols its
-  own way and calls these helpers with the resolved strings."
+   Live resolution (`ns-resolve`, record-constructor class-loading) is NOT here: each runtime
+  resolves aliased and bare symbols its own way and calls these helpers with the resolved strings."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]))
 

@@ -7,11 +7,7 @@
   stays free of namespace resolution, class-loading, and var metadata.
   `clara.server.graph.client/navigate` supplies the JVM implementations (live `ns-resolve` over the
   editor's namespaces, source locations from var metadata); the babashka client supplies
-  fully-qualified-assuming ones with an always-absent source.
-
-   The `:clara-rules-explorer/bb-loaded` metadata marks this namespace as loadable under babashka
-  (`schema.core` is provisioned by `server/bin/bootstrap.bb`); the bb smoke test requires every
-  namespace carrying it."
+  fully-qualified-assuming ones with an always-absent source."
   (:require [clara.server.tools.graph.shared.schema :as shared-schema]
             [clara.server.tools.graph.shared.tokens :as tokens]
             [clojure.set :as set]

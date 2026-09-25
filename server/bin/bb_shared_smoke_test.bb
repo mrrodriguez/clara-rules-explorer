@@ -8,23 +8,30 @@
 ;;   bb bin/bb_shared_smoke_test.bb
 (require '[babashka.fs :as fs]
          '[clojure.java.io :as io]
-         '[clojure.string :as str])
+         '[clojure.string :as str]
+         '[clojure.tools.reader :as reader])
 
 (load-file (str (fs/file (fs/parent *file*) "bootstrap.bb")))
 
 (def ^:private server-root (fs/parent (fs/parent (fs/canonicalize *file*))))
+
+(defn- source-file? [f]
+  (and (.isFile ^java.io.File f)
+       (let [n (.getName ^java.io.File f)]
+         (or (str/ends-with? n ".clj")
+             (str/ends-with? n ".cljc")))))
 
 (defn- bb-loaded-nses
   "Namespaces under `server/src` whose ns form carries
    `:clara-rules-explorer/bb-loaded true`, sorted by name."
   []
   (->> (file-seq (io/file (str (fs/file server-root "src"))))
-       (filter (fn [f]
-                 (and (.isFile ^java.io.File f)
-                      (str/ends-with? (.getName ^java.io.File f) ".clj"))))
+       (filter source-file?)
        (keep (fn [f]
                (try
-                 (let [form (read-string (slurp f))]
+                 (let [form (reader/read-string
+                             {:read-cond :allow :features #{:clj :bb} :eof ::eof}
+                             (slurp f))]
                    (when (and (seq? form) (= 'ns (first form)))
                      (let [ns-sym (second form)]
                        (when (true? (:clara-rules-explorer/bb-loaded (meta ns-sym)))
