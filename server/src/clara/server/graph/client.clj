@@ -18,6 +18,7 @@
             [clara.server.tools.graph.analyze.ctor :as ctor]
             [clara.server.tools.graph.shared.navigate :as shared-navigate]
             [clara.server.tools.graph.shared.schema :as shared-schema]
+            [clara.server.tools.graph.shared.tokens :as shared-tokens]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
             [schema.core :as s]))
@@ -144,35 +145,22 @@
    symbol) to its kind-explicit string form."
   [ctor-result]
   (cond
-    (class? ctor-result) (.getName ^Class ctor-result)
+    (class? ctor-result) (Class/.getName ctor-result)
     (symbol? ctor-result) (str ctor-result)
     :else nil))
 
 (defn- resolve-ctor-token
   "Resolves a bare constructor token (`->X`, `map->X`, `X.`, `X/new`, `new X`)
    to a kind-explicit class-name string, or nil.  Java ctor syntaxes are
-   normalized to a class symbol and delegated to `ctor/resolve-record-type`."
+   normalized to a class symbol (see `shared-tokens/normalize-ctor-target`)
+   and delegated to `ctor/resolve-record-type`."
   [caller-ns-sym form]
-  (let [n (name form)
-        ns-part (namespace form)]
-    (cond
-      ;; ->X / map->X record constructors
-      (ctor/constructor-fn-name? n)
-      (ctor-result->name (ctor/resolve-record-type caller-ns-sym form))
-
-      ;; X.  (Java constructor)
-      (str/ends-with? n ".")
-      (let [class-sym (if ns-part
-                        (symbol ns-part (subs n 0 (dec (count n))))
-                        (symbol (subs n 0 (dec (count n)))))]
-        (ctor-result->name (ctor/resolve-record-type caller-ns-sym class-sym)))
-
-      ;; X/new (modern Java constructor)
-      (= n "new")
-      (when ns-part
-        (ctor-result->name (ctor/resolve-record-type caller-ns-sym (symbol ns-part))))
-
-      :else nil)))
+  (if (ctor/constructor-fn-name? (name form))
+    ;; ->X / map->X record constructors resolve against the form itself.
+    (ctor-result->name (ctor/resolve-record-type caller-ns-sym form))
+    ;; X. / X/new normalize to a class symbol first; anything else is nil.
+    (when-let [class-sym (shared-tokens/normalize-ctor-target form)]
+      (ctor-result->name (ctor/resolve-record-type caller-ns-sym class-sym)))))
 
 (defn- resolve-symbol-type
   "Resolves a symbol token form to a kind-explicit type name string.  Mirrors
@@ -184,12 +172,12 @@
       (let [the-ns (when caller-ns-sym (find-ns caller-ns-sym))]
         (if-let [resolved (some-> the-ns (ns-resolve form))]
           (cond
-            (class? resolved) (.getName ^Class resolved)
+            (class? resolved) (Class/.getName resolved)
 
             (var? resolved)
             (let [ctor-name (ctor/resolve-record-type caller-ns-sym form)]
               (cond
-                (class? ctor-name) (.getName ^Class ctor-name)
+                (class? ctor-name) (Class/.getName ctor-name)
                 (symbol? ctor-name) (str ctor-name)
                 :else (let [{vns :ns vname :name} (meta resolved)]
                         (str (symbol (name (ns-name vns)) (name vname))))))
@@ -228,7 +216,7 @@
       (let [the-ns (when caller-ns-sym (find-ns caller-ns-sym))]
         (when-let [resolved (some-> the-ns (ns-resolve form))]
           (cond
-            (class? resolved) (symbol (.getName ^Class resolved))
+            (class? resolved) (symbol (Class/.getName resolved))
             (var? resolved) (var-fq-symbol resolved)
             :else nil))))))
 

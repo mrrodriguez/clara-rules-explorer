@@ -10,6 +10,7 @@
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
+            [clara.server.tools.graph.shared.tokens :as shared-tokens]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [schema.test :as st]))
@@ -238,6 +239,54 @@
                 "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
                 "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"]
                (mapv :name (:targets result))))))))
+
+(defn- eval-editor-resolve
+  "Evals the editor resolve form for CALLER-NS + TOKEN as the editors would."
+  [caller-ns token]
+  (eval (read-string (shared-tokens/editor-token-resolve-form caller-ns token))))
+
+(deftest test-editor-resolve-form
+  (testing "exact values mirror the JVM client"
+    (doseq [[caller-ns token expected]
+            [[loan-app "DocumentCheck"
+              "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"]
+             [loan-app "DocumentCheck."
+              "clara.server.tools.graph.rules.loan_app_facts.DocumentCheck"]
+             [loan-app "NoSuchThingXYZ" "NoSuchThingXYZ"]
+             [loan-app "\"a string\"" "\"a string\""]
+             [loan-app "(((" nil]
+             ["clara.server.tools.graph.rules.loan-hierarchy-rules"
+              "::supporting-document"
+              ":clara.server.tools.graph.rules.loan-hierarchy-rules/supporting-document"]]]
+      (is (= expected (eval-editor-resolve caller-ns token))
+          (str "token " (pr-str token)))))
+  (testing "fq results are fixpoints"
+    (doseq [[caller-ns token]
+            [[loan-app "map->ApplicationOutcome"]
+             [atr "laf/map->DocumentCheck"]]]
+      (let [once (eval-editor-resolve caller-ns token)]
+        (is (string? once) (str "token " (pr-str token)))
+        (is (= once (eval-editor-resolve caller-ns once))
+            (str "token " (pr-str token))))))
+  (testing "pre-resolution preserves navigate answers"
+    (register! combined-session combined-annotations)
+    (let [raw "laf/map->DocumentCheck"
+          resolved (eval-editor-resolve atr raw)]
+      (is (string? resolved))
+      (is (= (client/navigate {:production nil :caller-ns atr :token raw})
+             (client/navigate {:production nil :caller-ns atr :token resolved}))))
+    (register! loan-app-session loan-app-annotations)
+    (doseq [{:keys [production side token]}
+            [{:production (str loan-app "/app-outcome-approved?")
+              :side :lhs
+              :token "DocumentCheck"}
+             {:production (str loan-app "/app-outcome-approved?")
+              :side :rhs
+              :token "map->ApplicationOutcome"}]]
+      (let [resolved (eval-editor-resolve loan-app token)]
+        (is (= (client/navigate {:production production :side side :token token})
+               (client/navigate {:production production :side side :token resolved}))
+            (str "token " (pr-str token)))))))
 
 (deftest test-get-production-source-var-metadata
   (is (true? (:var? (client/get-production-source

@@ -315,3 +315,108 @@ describe("init.swap_session", function()
     assert.is_true(prompted)
   end)
 end)
+
+describe("conjure.resolve_code", function()
+  it("embeds caller-ns and token as string literals", function()
+    local code = conjure.resolve_code("my.ns", "Doc.")
+    assert.truthy(code:find('(symbol "my.ns")', 1, true))
+    assert.truthy(code:find('(read-string "Doc.")', 1, true))
+  end)
+
+  it("escapes quotes in tokens", function()
+    local code = conjure.resolve_code("ns", 'a"b')
+    assert.truthy(code:find('\\"', 1, true))
+  end)
+
+  it("matches the canonical template shape", function()
+    local code = conjure.resolve_code("ns", "tok")
+    for _, frag in ipairs({
+      "(find-ns ns-sym)",
+      "(String/.endsWith n",
+      "(Class/.getName v)",
+      "(ns-resolve the-ns target)",
+      "(keyword? form) (str form)",
+      "(nil? form) nil",
+    }) do
+      assert.truthy(code:find(frag, 1, true), "missing: " .. frag)
+    end
+  end)
+end)
+
+describe("conjure.resolve_token", function()
+  it("delivers the fq string on a value", function()
+    stub_eval(function(opts) opts["on-result"]('"fq.Doc"') end)
+    local got
+    conjure.resolve_token({
+      caller_ns = "ns",
+      token = "Doc",
+      on_resolved = function(fq) got = fq end,
+    })
+    assert.are.same("fq.Doc", got)
+  end)
+
+  it("falls back to nil on nil value", function()
+    stub_eval(function(opts) opts["on-result"]("nil") end)
+    local got = "sentinel"
+    conjure.resolve_token({
+      caller_ns = "ns",
+      token = "Doc",
+      on_resolved = function(fq) got = fq end,
+    })
+    assert.is_nil(got)
+  end)
+
+  it("falls back to nil on transport error", function()
+    stub_eval(function(opts) opts.cb({ err = "boom", ex = "ex" }) end)
+    local got = "sentinel"
+    conjure.resolve_token({
+      caller_ns = "ns",
+      token = "Doc",
+      on_resolved = function(fq) got = fq end,
+    })
+    assert.is_nil(got)
+  end)
+end)
+
+describe("init.navigate resolves before sending", function()
+  local function with_resolve_env(ctx, resolve_fn, eval_fn)
+    with_restore(conjure, "connected", function() return true end, function()
+      with_restore(vim.api, "nvim_get_current_buf", function() return 1 end, function()
+        with_restore(vim.api, "nvim_get_current_win", function() return 1 end, function()
+          with_restore(vim.api, "nvim_win_get_cursor", function() return { 1, 0 } end, function()
+            with_restore(init, "context", function() return ctx end, function()
+              with_restore(conjure, "resolve_token", resolve_fn, function()
+                with_restore(conjure, "eval_edn", eval_fn, function()
+                  init.navigate("lhs")
+                end)
+              end)
+            end)
+          end)
+        end)
+      end)
+    end)
+  end
+
+  local ctx = { production = "ns/rule", kind = "rule", side = "lhs", caller_ns = "ns", token = "Doc" }
+
+  it("sends the resolved token and keeps caller-ns", function()
+    local seen
+    with_resolve_env(
+      ctx,
+      function(o) o.on_resolved("fq.Doc") end,
+      function(o) seen = o.code end
+    )
+    assert.truthy(seen:find(':token "fq.Doc"', 1, true))
+    assert.truthy(seen:find(':caller-ns "ns"', 1, true))
+  end)
+
+  it("falls back to the raw token when resolution fails", function()
+    local seen
+    with_resolve_env(
+      ctx,
+      function(o) o.on_resolved(nil) end,
+      function(o) seen = o.code end
+    )
+    assert.truthy(seen:find(':token "Doc"', 1, true))
+  end)
+end)

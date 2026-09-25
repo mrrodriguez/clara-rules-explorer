@@ -6,6 +6,8 @@
 --   * errors surface via the `cb` key (full nREPL response), inspecting
 --     `resp.err` / `resp.ex` / `resp["root-ex"]`.
 
+local edn = require("clara-explorer.edn")
+
 local M = {}
 
 local function eval_module()
@@ -51,6 +53,59 @@ function M.navigate_code(payload)
     .. "{"
     .. table.concat(parts, " ")
     .. "}))"
+end
+
+--- Build the self-contained resolve form for CALLER_NS and TOKEN (mirrors
+-- `shared.tokens/editor-token-resolve-form`: caller-ns, token, token slots).
+-- Keep them in sync.
+function M.resolve_code(caller_ns, token)
+  return "(let [ns-sym (symbol "
+    .. M.edn_string(caller_ns or "")
+    .. ")\n      the-ns (find-ns ns-sym)\n"
+    .. "      form (binding [*read-eval* false *ns* (or the-ns *ns*)]\n"
+    .. "             (try (read-string "
+    .. M.edn_string(token)
+    .. ") (catch Exception _ nil)))]\n"
+    .. "  (cond\n"
+    .. "    (symbol? form)\n"
+    .. "    (let [n (name form)\n"
+    .. "          ns-part (namespace form)\n"
+    .. '          target (cond (String/.endsWith n ".")\n'
+    .. "                       (let [s (subs n 0 (dec (count n)))]\n"
+    .. "                         (if ns-part (symbol ns-part s) (symbol s)))\n"
+    .. '                       (and (= n "new") ns-part)\n'
+    .. "                       (symbol ns-part)\n"
+    .. "                       :else form)\n"
+    .. "          v (when the-ns\n"
+    .. "              (try (ns-resolve the-ns target) (catch Exception _ nil)))]\n"
+    .. "      (cond (class? v) (Class/.getName v)\n"
+    .. "            (var? v) (str (symbol (str (ns-name (:ns (meta v)))) (name target)))\n"
+    .. "            :else (str form)))\n"
+    .. "    (keyword? form) (str form)\n"
+    .. "    (nil? form) nil\n"
+    .. "    :else "
+    .. M.edn_string(token)
+    .. "))"
+end
+
+--- Resolve TOKEN via one eval; call `opts.on_resolved(fq_or_nil)`. Any
+-- transport or decode failure resolves to nil so the caller falls back to
+-- the raw token. `opts` carries `caller_ns`, `token`, `bufnr`, `win`.
+function M.resolve_token(opts)
+  M.eval_edn({
+    code = M.resolve_code(opts.caller_ns, opts.token),
+    bufnr = opts.bufnr,
+    win = opts.win,
+    on_value = function(value)
+      local ok, decoded = pcall(edn.decode, value)
+      if ok and type(decoded) == "string" then
+        opts.on_resolved(decoded)
+      else
+        opts.on_resolved(nil)
+      end
+    end,
+    on_error = function() opts.on_resolved(nil) end,
+  })
 end
 
 --- Concise summary of an nREPL stack-trace string (head + `Caused by:` line).

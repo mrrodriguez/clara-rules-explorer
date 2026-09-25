@@ -618,6 +618,54 @@ Used for RHS and global cases where LHS-structure is not applicable."
                  :caller-ns caller-ns
                  :token token))))
 
+(defconst clara-explorer--resolve-form-template
+  "(let [ns-sym (symbol %s)
+      the-ns (find-ns ns-sym)
+      form (binding [*read-eval* false *ns* (or the-ns *ns*)]
+             (try (read-string %s) (catch Exception _ nil)))]
+  (cond
+    (symbol? form)
+    (let [n (name form)
+          ns-part (namespace form)
+          target (cond (String/.endsWith n \".\")
+                       (let [s (subs n 0 (dec (count n)))]
+                         (if ns-part (symbol ns-part s) (symbol s)))
+                       (and (= n \"new\") ns-part)
+                       (symbol ns-part)
+                       :else form)
+          v (when the-ns
+              (try (ns-resolve the-ns target) (catch Exception _ nil)))]
+      (cond (class? v) (Class/.getName v)
+            (var? v) (str (symbol (str (ns-name (:ns (meta v)))) (name target)))
+            :else (str form)))
+    (keyword? form) (str form)
+    (nil? form) nil
+    :else %s))"
+  "Canonical resolve-form template.  Mirrors the text
+   `shared.tokens/editor-token-resolve-form` builds (same three `%s` slots:
+   caller-ns, token, token); keep them in sync.")
+
+(defun clara-explorer--resolve-form (caller-ns token)
+  "Build the self-contained resolve form for CALLER-NS and TOKEN."
+  (format clara-explorer--resolve-form-template
+          (clara-explorer--edn-value (or caller-ns ""))
+          (clara-explorer--edn-value token)
+          (clara-explorer--edn-value token)))
+
+(defun clara-explorer--resolve-token (token caller-ns conn)
+  "Resolve TOKEN to fully-qualified form via a sync eval over CONN.
+   Returns the fq string, or nil when unresolvable/unreadable — the caller
+   falls back to the raw token."
+  (when token
+    (let* ((code (clara-explorer--resolve-form caller-ns token))
+           (resp (cider-nrepl-sync-request:eval code conn))
+           (val (and resp (nrepl-dict-get resp "value"))))
+      (when (stringp val)
+        (condition-case nil
+            (let ((parsed (parseedn-read-str val)))
+              (when (stringp parsed) parsed))
+          (error nil))))))
+
 (defun clara-explorer--direction-word (direction)
   "Human word for a NavigateResult direction keyword."
   (pcase direction
@@ -729,8 +777,10 @@ Used for RHS and global cases where LHS-structure is not applicable."
       (message "queries have no RHS"))
      (t
       (let* ((eff-side side)
+             (resolved (clara-explorer--resolve-token token caller-ns conn))
              (result (clara-explorer--eval-edn
-                      (clara-explorer--navigate-code production eff-side caller-ns token)
+                      (clara-explorer--navigate-code production eff-side caller-ns
+                                                     (or resolved token))
                       conn)))
         (if result
             (clara-explorer--handle-result result)

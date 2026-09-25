@@ -477,6 +477,8 @@ Tier-1 stub path fast."
                 ((symbol-function 'cider-current-ns) (lambda () "test"))
                 ((symbol-function 'cider-symbol-at-point)
                  (lambda (&optional _) "->LoanApplication"))
+                ((symbol-function 'clara-explorer--resolve-token)
+                 (lambda (_t _ns _c) nil))
                 ((symbol-function 'clara-explorer--eval-edn)
                  (lambda (code _conn)
                    (setq code-seen code)
@@ -874,6 +876,95 @@ Tier-1 stub path fast."
   (with-clara-buffer "(r/defrule foo [Application ,, (= ?x 1)] => 1)"
     (should (equal (test--search-token "Application") "Application"))))
 
+
+;; ---------------------------------------------------------------------------
+;; Editor-side token resolution (resolve-before-send)
+;; ---------------------------------------------------------------------------
+
+(ert-deftest resolve-form-embeds-caller-ns-and-token ()
+  (let ((code (clara-explorer--resolve-form "my.ns" "Doc.")))
+    (should (string-match-p (regexp-quote "(symbol \"my.ns\")") code))
+    (should (string-match-p (regexp-quote "(read-string \"Doc.\")") code))
+    (should-not (string-match-p "%s" code))))
+
+(ert-deftest resolve-form-escapes-token-text ()
+  (let ((code (clara-explorer--resolve-form "ns" "a\"b\\c")))
+    ;; still one string literal at the read site: nothing leaks out of it
+    (should (string-match-p "read-string" code))
+    (should-not (string-match-p "%s" code))))
+
+(ert-deftest resolve-form-matches-canonical-template ()
+  "Guard against drift from `shared.tokens/editor-token-resolve-form`: the
+   canonical template's shape markers must all be present."
+  (let ((code (clara-explorer--resolve-form "ns" "tok")))
+    (dolist (frag '("(find-ns ns-sym)"
+                    "(String/.endsWith n"
+                    "(Class/.getName v)"
+                    "(ns-resolve the-ns target)"
+                    "(keyword? form) (str form)"
+                    "(nil? form) nil"))
+      (should (string-match-p (regexp-quote frag) code)))))
+
+;; `parseedn-read-str' is autoloaded (never stubbed by test-helper), so tests
+;; driving `--resolve-token' past the transport stub it with the same
+;; `read-from-string' semantics.  Values here are string/nil literals only.
+(defmacro test--with-stubbed-transport (eval-fn &rest body)
+  "Run BODY with the nREPL transport and scalar EDN parsing stubbed.
+EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'cider-nrepl-sync-request:eval) ,eval-fn)
+             ((symbol-function 'nrepl-dict-get)
+              (lambda (dict key) (cdr (assoc key dict))))
+             ((symbol-function 'parseedn-read-str)
+              (lambda (s) (car (read-from-string s)))))
+     ,@body))
+
+(ert-deftest resolve-token-returns-fq-on-value ()
+  (test--with-stubbed-transport
+      (lambda (_code _conn) '(("value" . "\"fq.Name\"")))
+    (should (equal (clara-explorer--resolve-token "Doc" "my.ns" 'conn) "fq.Name"))))
+
+(ert-deftest resolve-token-nil-falls-back ()
+  (test--with-stubbed-transport
+      (lambda (_code _conn) '(("value" . "nil")))
+    (should (null (clara-explorer--resolve-token "Doc" "my.ns" 'conn))))
+  (cl-letf (((symbol-function 'cider-nrepl-sync-request:eval)
+             (lambda (_code _conn) '(("ex" . "boom"))))
+            ((symbol-function 'nrepl-dict-get)
+             (lambda (dict key) (cdr (assoc key dict)))))
+    (should (null (clara-explorer--resolve-token "Doc" "my.ns" 'conn))))
+  (should (null (clara-explorer--resolve-token nil "my.ns" 'conn))))
+
+(ert-deftest navigate-sends-resolved-token ()
+  (let (captured)
+    (cl-letf (((symbol-function 'cider-connected-p) (lambda () t))
+              ((symbol-function 'cider-current-repl) (lambda (&rest _) 'conn))
+              ((symbol-function 'clara-explorer--context)
+               (lambda () (list :production "ns/rule" :kind 'rule :side :lhs
+                                :caller-ns "ns" :token "Doc")))
+              ((symbol-function 'clara-explorer--resolve-token)
+               (lambda (_t _ns _c) "fq.Doc"))
+              ((symbol-function 'clara-explorer--eval-edn)
+               (lambda (code _conn) (setq captured code) nil))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (clara-explorer--navigate :lhs)
+      (should (string-match-p (regexp-quote ":token \"fq.Doc\"") captured))
+      (should (string-match-p (regexp-quote ":caller-ns \"ns\"") captured)))))
+
+(ert-deftest navigate-falls-back-to-raw-token ()
+  (let (captured)
+    (cl-letf (((symbol-function 'cider-connected-p) (lambda () t))
+              ((symbol-function 'cider-current-repl) (lambda (&rest _) 'conn))
+              ((symbol-function 'clara-explorer--context)
+               (lambda () (list :production "ns/rule" :kind 'rule :side :lhs
+                                :caller-ns "ns" :token "Doc")))
+              ((symbol-function 'clara-explorer--resolve-token)
+               (lambda (_t _ns _c) nil))
+              ((symbol-function 'clara-explorer--eval-edn)
+               (lambda (code _conn) (setq captured code) nil))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (clara-explorer--navigate :lhs)
+      (should (string-match-p (regexp-quote ":token \"Doc\"") captured)))))
 
 (provide 'clara-explorer-test)
 ;;; clara-explorer-test.el ends here

@@ -84,27 +84,37 @@ function M.navigate(side)
     return
   end
 
-  local code = conjure.navigate_code({
-    production = ctx.production,
-    side = side,
+  -- Resolve the token to fully-qualified form first; on any failure the raw
+  -- token goes through and the server resolves it as before.
+  conjure.resolve_token({
     caller_ns = ctx.caller_ns,
     token = ctx.token,
-  })
-
-  conjure.eval_edn({
-    code = code,
     bufnr = bufnr,
     win = win,
-    on_value = function(value, _, cb_win)
-      if vim.api.nvim_win_is_valid(cb_win) then vim.api.nvim_set_current_win(cb_win) end
-      local result, err = edn.decode(value)
-      if err then
-        vim.notify(err, vim.log.levels.ERROR)
-        return
-      end
-      M.handle_result(result, ctx.caller_ns)
+    on_resolved = function(fq)
+      local code = conjure.navigate_code({
+        production = ctx.production,
+        side = side,
+        caller_ns = ctx.caller_ns,
+        token = fq or ctx.token,
+      })
+
+      conjure.eval_edn({
+        code = code,
+        bufnr = bufnr,
+        win = win,
+        on_value = function(value, _, cb_win)
+          if vim.api.nvim_win_is_valid(cb_win) then vim.api.nvim_set_current_win(cb_win) end
+          local result, err = edn.decode(value)
+          if err then
+            vim.notify(err, vim.log.levels.ERROR)
+            return
+          end
+          M.handle_result(result, ctx.caller_ns)
+        end,
+        on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
+      })
     end,
-    on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
   })
 end
 
