@@ -71,13 +71,17 @@ end)()
 
 --- Build the self-contained resolve form for CALLER_NS and TOKEN.
 function M.resolve_code(caller_ns, token)
-  return resolve_template:format(M.edn_string(caller_ns or ""), M.edn_string(token), M.edn_string(token))
+  return resolve_template:format(M.edn_string(caller_ns or ""), M.edn_string(token))
 end
 
 --- Resolve TOKEN via one eval; call `opts.on_resolved(fq_or_nil)`. Any
 -- transport or decode failure resolves to nil so the caller falls back to
 -- the raw token. `opts` carries `caller_ns`, `token`, `bufnr`, `win`.
 function M.resolve_token(opts)
+  if not opts or not opts.token then
+    if opts and opts.on_resolved then opts.on_resolved(nil) end
+    return
+  end
   M.eval_edn({
     code = M.resolve_code(opts.caller_ns, opts.token),
     bufnr = opts.bufnr,

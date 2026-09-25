@@ -884,7 +884,7 @@ Tier-1 stub path fast."
 (ert-deftest resolve-form-embeds-caller-ns-and-token ()
   (let ((code (clara-explorer--resolve-form "my.ns" "Doc.")))
     (should (string-match-p (regexp-quote "(symbol \"my.ns\")") code))
-    (should (string-match-p (regexp-quote "(read-string \"Doc.\")") code))
+    (should (string-match-p (regexp-quote "(read-string token-text)") code))
     (should-not (string-match-p "%s" code))))
 
 (ert-deftest resolve-form-escapes-token-text ()
@@ -898,6 +898,7 @@ Tier-1 stub path fast."
    canonical template's shape markers must all be present."
   (let ((code (clara-explorer--resolve-form "ns" "tok")))
     (dolist (frag '("(find-ns ns-sym)"
+                    "(String/.startsWith token-text"
                     "(String/.endsWith n"
                     "(Class/.getName v)"
                     "(ns-resolve the-ns target)"

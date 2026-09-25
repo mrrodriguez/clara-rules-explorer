@@ -35,10 +35,10 @@ assertions), `make lint` + reflection-check clean.
       API (self-looping `app-outcome-denied?`, both sides).
 - [x] Existing pins held without edits: `test-consumer-retract-via-flag`,
       producer/consumer/global/callsite tests.
-- [ ] Open for Phase 1: `navigate-global` (production=nil) still serves raw
-      closures *with* self and *without* dedupe — no production context there,
-      so self is meaningless, but `shared.navigate` should settle one
-      semantics (dedupe at minimum) when extracted.
+- [x] `navigate-global` settled during Phase 1 extraction: it now dedupes with
+      retract-wins like the scoped closures (raw self stays irrelevant with
+      `production=nil`, but same-name duplicates across matched types are
+      collapsed).
 
 ## Phase 0b — editor-side token resolution
 
@@ -49,13 +49,15 @@ editors.
 Single source of truth: `server/resources/.../shared/editor-resolve-form.clj`
 holds the canonical template text. It is read as a string at runtime
 everywhere — `shared.tokens/editor-token-resolve-form` slurps it via
-`io/resource` and fills the three slots, and both editors slurp it at load
-through symlinks beside their own files
+`io/resource` and fills the two slots (caller-ns, token), and both editors
+slurp it at load through symlinks beside their own files
 (`editor/emacs/`, `editor/neovim/lua/clara-explorer/`). No embedded copies
 remain, so there is nothing to drift; the sync test fails if any of the three
 reads ever disagree. (Rationale recorded: runtime sharing is impossible —
 separate installs, and nREPL-fetch would violate the no-explorer-dep
-constraint — so file-sharing is the strongest available mechanism.)
+constraint — so file-sharing is the strongest available mechanism. The
+repo-relative symlinks must be materialized by each editor's package/plugin
+build step into the package-local directory before release.)
 
 - [x] Port `client/resolve-token` prefix-stripping into the shared resolve form.
       `shared.tokens/normalize-ctor-target` (`X.` → `X`, `X/new` → `X`,
@@ -72,25 +74,28 @@ constraint — so file-sharing is the strongest available mechanism.)
 - [x] Parity pinned: `test-editor-resolve-form` eval-roundtrips the built
       form (exact values, fixpoints, navigate-equivalence raw vs resolved);
       `test-editor-resolve-form-stays-in-sync` asserts all three reads agree.
+- [x] Template is two slots (caller-ns, token) and refuses `::` resolution when
+      the buffer ns is absent (falls back to the raw token, matching the JVM
+      client's `unreadable` guard).
 - [ ] Live verification: navigate from an aliased symbol and an `X.`-style
       token in Emacs and Neovim against a running repl.
-- Note: `Class/.getName` / `String/.endsWith` call-site syntax adopted in the
-  template + `client.clj`. Pre-existing `^Class` hints elsewhere
-  (e.g. `serialize`, `ctor`) left for a later sweep.
-- Note: kondo analyzes `.cljc` for `:cljs` too, where `slurp`/`format` do not
-  exist; the one form needing them carries `#_:clj-kondo/ignore` with the
-  reason recorded. Packaging follow-up: confirm the ELPA tarball ships the
-  symlinked template file.
+- Note: `Class/.getName` / `String/.endsWith` / `String/.startsWith` call-site
+  syntax adopted in the template + `client.clj`. Pre-existing `^Class` hints
+  elsewhere (e.g. `serialize`, `ctor`) left for a later sweep.
+- Note: shared namespaces are plain `.clj` (no reader conditionals yet), so
+  kondo's `:cljs` analysis of `slurp`/`format` is not in play; `.cljc` is only
+  needed once a reader conditional lands. The template's `::` branch refuses
+  to resolve when the buffer ns is absent, mirroring `client/read-token`.
 ## Phase 1 — extract `shared.*`, JVM delegates (no bb yet)
 
-Slice 1 landed: `shared.tokens` + `shared.navigate` (both `.cljc`, only
-`clojure.*` + shared requires — verified loadable under bb with no classpath
-beyond `src`). `client.clj` is now the JVM shell (schemas, system/swap,
-live-namespace resolvers, var-metadata sources) delegating to
+Slice 1 landed: `shared.tokens` + `shared.schema` + `shared.navigate` (plain
+`.clj`; `shared.schema`/`shared.navigate` require `schema.core`, which bb
+provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
+(system/swap, live-namespace resolvers, var-metadata sources) delegating to
 `shared.navigate/navigate` with an injected `runtime` map
 (`:resolve-token` / `:token->fq-sym` / `:production-source`), following the
-`ctor/resolve-ctor-form` injection precedent. Full suite green with no test
-edits (401 tests, 2504 assertions) — delegation parity holds.
+`ctor/resolve-ctor-form` injection precedent. Full suite green (403 tests,
+2521 assertions after the Phase 0b pins) — delegation parity holds.
 
 - [x] `shared.tokens` (`real-type-name?`, `callsite-matches-token?` — the
       pure helpers; live `ns-resolve`/class-loading stays JVM-side, fq
@@ -104,14 +109,13 @@ edits (401 tests, 2504 assertions) — delegation parity holds.
       `artifacts.schema` house rule. Verified under bb: `schema.core` 1.4.1
       loads via `add-deps`, `s/check` accepts plain-fn runtimes and rejects
       bad inputs, and `shared.navigate/navigate` runs end-to-end over a stub
-      analysis with a schema-valid response (Phase 2's `bootstrap.bb` will own
-      the provisioning). `client.clj` keeps only `s/validate` + `s/defn`
-      annotations, now against `shared-schema/*`; public `navigate` there and
-      in `shared.navigate` is `s/defn`, exercised by the existing
-      `validate-schemas` fixture with no new violations.
+      analysis with a schema-valid response (`bootstrap.bb` owns the
+      provisioning). `client.clj` keeps `s/defn` annotations against
+      `shared-schema/*`; the explicit runtime `(s/validate NavigateInput …)`
+      was removed — schema enforcement is test-time only via the existing
+      `validate-schemas` fixture.
 - [x] `shared.navigate` (pure `navigate` over a rehydrated analysis map;
-      `navigate-global` kept byte-identical — raw closures, self included,
-      no dedupe — per the no-behavior-change mandate)
+      `navigate-global` dedupes with retract-wins like the scoped closures)
 - [ ] `shared.hierarchy` (transpose + two closures — note
       `artifacts.hierarchy` (no requires at all) and `rehydrate`'s private
       closure fns are parallel implementations to unify, not just move)
@@ -125,9 +129,11 @@ edits (401 tests, 2504 assertions) — delegation parity holds.
 
 ## Phase 2 — `bootstrap.bb` + bb smoke test
 
-- [ ] `server/bin/bootstrap.bb` (`server/src` + schema version from `deps.edn`).
-- [ ] bb test `require`s every `shared.*` with no classpath beyond `src`;
-      asserts the `:bb` branch is taken where conditionals exist.
+- [x] `server/bin/bootstrap.bb` (`server/src` + schema version from `deps.edn`).
+- [x] `server/bin/bb_shared_smoke_test.bb` discovers every
+      `:clara-rules-explorer/bb-loaded` ns under `server/src` and `require`s
+      each under bb; wired as `make bb-smoke-test`. All three current shared
+      namespaces load.
 
 ## Phase 3 — `editor_client.bb`
 
@@ -149,3 +155,7 @@ edits (401 tests, 2504 assertions) — delegation parity holds.
   `~/.clojure/.cpcache`, which the sandbox denies), so verification is via
   `make test` (cognitect test-runner; `-n <ns>` / `-v <var>` to focus), not the
   running REPL on `:52909`.
+- Schema is a deliberate `shared.*` dependency (`shared.schema`,
+  `shared.navigate`): it loads under bb via `bootstrap.bb` and is enforced only
+  at test time (`schema.test/validate-schemas`), with no explicit runtime
+  `s/validate`.

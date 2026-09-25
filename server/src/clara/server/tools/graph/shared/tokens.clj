@@ -3,10 +3,10 @@
   name checks, constructor-syntax normalization, the editor resolve-form builder, and
   authored-callsite string matching.
 
-   Discipline: this namespace stays dependency-free — only `clojure.*` requires — so both runtimes
-  load it (the JVM requires it normally; bb requires it with no classpath beyond `src`). Live
-  resolution (`ns-resolve`, record-constructor class-loading) is NOT here: each runtime resolves
-  aliased and bare symbols its own way and calls these helpers with the resolved strings."
+   The `:clara-rules-explorer/bb-loaded` metadata marks this namespace as loadable under babashka;
+  the bb smoke test requires every namespace carrying it. Live resolution (`ns-resolve`,
+  record-constructor class-loading) is NOT here: each runtime resolves aliased and bare symbols its
+  own way and calls these helpers with the resolved strings."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]))
 
@@ -53,5 +53,4 @@
   [caller-ns token]
   (format (slurp (io/resource "clara/server/tools/graph/shared/editor-resolve-form.clj"))
           (pr-str (str caller-ns))
-          (pr-str (str token))
           (pr-str (str token))))

@@ -1,15 +1,16 @@
 ;; Canonical editor resolve-form template. Slurped (never loaded) by
 ;; `clara.server.tools.graph.shared.tokens/editor-token-resolve-form`, which
-;; fills the three slots in order: caller-ns string, token string, token
-;; string again (the pass-through for non-symbol forms). clojure.core plus
-;; `String` interop only — no explorer dependency, so it evals on a plain
+;; fills the two slots in order: caller-ns string, token string. clojure.core
+;; plus `String` interop only — no explorer dependency, so it evals on a plain
 ;; project repl. Symlinked beside the Emacs/Neovim transports, which read it
 ;; at load; keep every copy byte-identical (the JVM sync test enforces it).
 (let [ns-sym (symbol %s)
       the-ns (find-ns ns-sym)
+      token-text %s
       form (binding [*read-eval* false *ns* (or the-ns *ns*)]
-             (try (read-string %s) (catch Exception _ nil)))]
+             (try (read-string token-text) (catch Exception _ nil)))]
   (cond
+    (and (nil? the-ns) (String/.startsWith token-text "::")) nil
     (symbol? form)
     (let [n (name form)
           ns-part (namespace form)
@@ -26,4 +27,4 @@
             :else (str form)))
     (keyword? form) (str form)
     (nil? form) nil
-    :else %s))
+    :else token-text))

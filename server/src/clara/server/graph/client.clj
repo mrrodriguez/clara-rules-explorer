@@ -150,7 +150,7 @@
     :else nil))
 
 (defn- resolve-ctor-token
-  "Resolves a bare constructor token (`->X`, `map->X`, `X.`, `X/new`, `new X`)
+  "Resolves a bare constructor token (`->X`, `map->X`, `X.`, `X/new`)
    to a kind-explicit class-name string, or nil.  Java ctor syntaxes are
    normalized to a class symbol (see `shared-tokens/normalize-ctor-target`)
    and delegated to `ctor/resolve-record-type`."
@@ -235,14 +235,14 @@
 
 (s/defn navigate :- shared-schema/NavigateResponse
   "Resolves editor navigation for a fact-type token.  Returns a
-   `shared-schema/NavigateResponse`.  Input is validated against
-   `shared-schema/NavigateInput` at this choke point."
+   `shared-schema/NavigateResponse`.  Input shape is `shared-schema/NavigateInput`;
+   schema enforcement runs through the `schema.test/validate-schemas` test
+   fixture (via `shared-navigate/navigate`), not an explicit runtime validate."
   [input]
   (let [{:keys [production side caller-ns token]} input]
     (log/infof "navigate: production=%s side=%s caller-ns=%s token=%s"
                production side caller-ns (pr-str token))
     (try
-      (s/validate shared-schema/NavigateInput input)
       (let [result
             (if-let [sys (get-current-system)]
               (let [{:keys [state-atom cache]} sys

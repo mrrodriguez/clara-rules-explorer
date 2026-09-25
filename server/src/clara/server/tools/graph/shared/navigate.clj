@@ -9,8 +9,9 @@
   editor's namespaces, source locations from var metadata); the babashka client supplies
   fully-qualified-assuming ones with an always-absent source.
 
-   Discipline: dependency-free like `tokens` (only `clojure.*`, `schema.core`, plus shared requires)
-  so both runtimes load this file."
+   The `:clara-rules-explorer/bb-loaded` metadata marks this namespace as loadable under babashka
+  (`schema.core` is provisioned by `server/bin/bootstrap.bb`); the bb smoke test requires every
+  namespace carrying it."
   (:require [clara.server.tools.graph.shared.schema :as shared-schema]
             [clara.server.tools.graph.shared.tokens :as tokens]
             [clojure.set :as set]
@@ -278,14 +279,14 @@
       (let [type-name (first (sort matched))
             producer? (= :lhs side)
             targets (if producer?
-                      (->> matched
-                           (mapcat #(global-producer-targets runtime analysis %))
-                           (sort-by :name)
-                           vec)
-                      (->> matched
-                           (mapcat #(global-consumer-targets runtime analysis %))
-                           (sort-by :name)
-                           vec))
+                      (dedupe-targets
+                       (->> matched
+                            (mapcat #(global-producer-targets runtime analysis %))
+                            vec))
+                      (dedupe-targets
+                       (->> matched
+                            (mapcat #(global-consumer-targets runtime analysis %))
+                            vec)))
             direction (if producer? :producer :type)]
         (if (empty? targets)
           {:error (str "no " (if producer? "producer" "consumer") " of " type-name)}

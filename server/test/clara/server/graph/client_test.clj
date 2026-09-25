@@ -258,7 +258,8 @@
              [loan-app "(((" nil]
              ["clara.server.tools.graph.rules.loan-hierarchy-rules"
               "::supporting-document"
-              ":clara.server.tools.graph.rules.loan-hierarchy-rules/supporting-document"]]]
+              ":clara.server.tools.graph.rules.loan-hierarchy-rules/supporting-document"]
+             [nil "::supporting-document" nil]]]
       (is (= expected (eval-editor-resolve caller-ns token))
           (str "token " (pr-str token)))))
   (testing "fq results are fixpoints"

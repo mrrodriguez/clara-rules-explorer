@@ -42,9 +42,9 @@ Lua over the same contract — nothing in the client changes for it.
 - **slim analysis** — what is on disk: the analysis with recomputable directions
   dropped. Its inverse is `rehydrate/rehydrate-analysis`.
 - **navigate** — `clara.server.graph.client/navigate`, the editor-facing query.
-- **shared namespace** — a dep-free namespace under
-  `clara.server.tools.graph.shared.*` that both the JVM and bb `require`. See
-  "Reuse between JVM and bb".
+- **shared namespace** — a namespace under `clara.server.tools.graph.shared.*`
+  that both the JVM and bb `require`, marked `:clara-rules-explorer/bb-loaded true`
+  on its ns form. See "Reuse between JVM and bb".
 
 ## Why the current client cannot run under bb
 
@@ -158,7 +158,7 @@ constructor rather than a helper fn like `->fact`. Concretely:
 
 If the token is **already fully qualified** (`com.example.Loan`, `my.ns/->Loan`),
 none of that is needed: the fq name is literally in the token, and the syntactic
-normalization (strip `->`/`map->`, `X.`/`new X` handling, hyphen→underscore) is
+normalization (strip `->`/`map->`, `X.`/`X/new` handling, hyphen→underscore) is
 pure — doable in bb. The class-load check is the only genuinely JVM-dependent
 step, and it is a heuristic the annotation callsite data **supersedes**: the
 analysis only records a `:constructor-sym`/`:fact-type` for constructors that
@@ -222,20 +222,22 @@ we share real namespaces. Two mechanisms, in order of preference:
 
 ### 1. `shared.` namespaces — the primary reuse mechanism
 
-A dep-free namespace under `clara.server.tools.graph.shared.*` is the home for
-logic both the JVM and bb `require`. Convention: **`clara.server.tools.graph.shared.<name>`
-holds logic extracted from `clara.server.tools.graph.<…>.<name>`** — one segment
-`shared.` lower, so the extracted piece and its home are visually paired.
+A namespace under `clara.server.tools.graph.shared.*` marked
+`:clara-rules-explorer/bb-loaded true` is the home for logic both the JVM and bb
+`require`. Convention: **`clara.server.tools.graph.shared.<name>` holds logic
+extracted from `clara.server.tools.graph.<…>.<name>`** — one segment `shared.`
+lower, so the extracted piece and its home are visually paired.
 
 The discipline that makes it safe: **a `shared.` namespace must not `:require`
-anything JVM-only.** This is self-enforcing — bb `require` of a namespace that
-transitively requires `clara.rules.engine` fails with "Could not locate
-clara/rules/engine… on classpath" — and it is pinned by a bb smoke test that
-`require`s every `shared.` namespace with no classpath beyond `src`.
+anything bb cannot load.** This is self-enforcing — bb `require` of a namespace
+that transitively requires `clara.rules.engine` fails with "Could not locate
+clara/rules/engine… on classpath" — and it is pinned by a bb smoke test
+(`server/bin/bb_shared_smoke_test.bb`) that discovers every
+`:clara-rules-explorer/bb-loaded` ns under `server/src` and `require`s each.
 
-`clara.server.tools.graph.artifacts.layout` is the precedent: a dep-free file
-whose docstring says "no dependencies is its whole reason to exist," loaded by
-both sides. The convention generalizes that from one file to a namespace tree.
+`clara.server.tools.graph.artifacts.layout` is the precedent: a dependency-light
+file loaded by both sides. The convention generalizes that from one file to a
+namespace tree.
 
 Candidate extractions (final naming to implementation):
 
@@ -250,9 +252,11 @@ Candidate extractions (final naming to implementation):
 
 ### 2. Reader conditionals — only for the genuinely-different boundary
 
-Where the JVM and bb behavior *must* differ (the live `ns-resolve`/class-load
-step in token resolution, the client shell's system/var-metadata access), use a
-`.cljc` with the **`:bb` branch first**:
+Shared namespaces are plain `.clj` files by default; a `.cljc` (and its kondo
+`:cljs` analysis) is needed only when a reader conditional is genuinely
+required. Where the JVM and bb behavior *must* differ (the live
+`ns-resolve`/class-load step in token resolution, the client shell's
+system/var-metadata access), use a `.cljc` with the **`:bb` branch first**:
 
 ```clojure
 #?(:bb  (require '[clojure.edn :as edn] '[clojure.set :as set] '[clojure.string :as str])
@@ -281,10 +285,10 @@ wants `NavigateInput` validation parity) on a bb script's classpath:
          '[babashka.fs :as fs]
          '[clojure.edn :as edn])
 
-(let [project-root (fs/parent (fs/parent (fs/canonicalize *file*)))
-      deps (:deps (edn/read-string (slurp (str (fs/path project-root "deps.edn")))))]
+(let [server-root (fs/parent (fs/parent (fs/canonicalize *file*)))
+      deps (:deps (edn/read-string (slurp (str (fs/path server-root "deps.edn")))))]
   (deps/add-deps {:deps (select-keys deps '[prismatic/schema])})
-  (cp/add-classpath (str (fs/path project-root "src"))))
+  (cp/add-classpath (str (fs/path server-root "src"))))
 ```
 
 A bb script then does:
@@ -301,9 +305,11 @@ loaded, which is what keeps this safe.
 
 Notes:
 
-- schema stays **out of `shared.` namespaces** — it is a bootstrap-provided
-  convenience for boundary validation, not a dependency of shared logic. Shared
-  namespaces operate on plain maps.
+- `shared.schema` is a `shared.` namespace and `schema.core` is a deliberate
+  dependency: schema is supported under bb (provisioned by `bootstrap.bb`) and
+  its `s/defn`/`s/defschema` annotations document the contract and are enforced
+  at test time by the `schema.test/validate-schemas` fixture — not by explicit
+  runtime `s/validate` calls.
 - `bootstrap.bb` + `add-classpath` could eventually supersede the
   `server/bin/layout.cljc` symlink that `annotations_report.bb` uses today
   (`require` `clara.server.tools.graph.artifacts.layout` directly). Optional
@@ -344,24 +350,37 @@ also works when the editor's repl is the user's project repl without the
 explorer on its classpath):
 
 ```clojure
-(let [ns-sym (symbol CALLER_NS)
-      form   (binding [*read-eval* false *ns* (find-ns ns-sym)]
-               (try (read-string TOKEN) (catch Exception _ nil)))]
+(let [ns-sym    (symbol CALLER_NS)
+      the-ns    (find-ns ns-sym)
+      token-text TOKEN
+      form      (binding [*read-eval* false *ns* (or the-ns *ns*)]
+                  (try (read-string token-text) (catch Exception _ nil)))]
   (cond
+    (and (nil? the-ns) (String/.startsWith token-text "::")) nil  ; no buffer ns -> don't resolve ::
     (symbol? form)
-    (let [v (try (ns-resolve ns-sym form) (catch Exception _ nil))]
-      (cond
-        (class? v) (.getName ^Class v)                                   ; imported/aliased class -> fq
-        (var? v)   (str (symbol (str (ns-name (:ns (meta v)))) (name form))) ; var -> fq var symbol
-        :else      (str form)))                                          ; unresolvable -> pass through
-    (keyword? form) (str form)   ; ::auto-resolved under *ns* by read-string
-    :else TOKEN))                 ; string/vector — the client normalizes
+    (let [n (name form)
+          ns-part (namespace form)
+          target (cond (String/.endsWith n ".")
+                       (let [s (subs n 0 (dec (count n)))]
+                         (if ns-part (symbol ns-part s) (symbol s)))
+                       (and (= n "new") ns-part)
+                       (symbol ns-part)
+                       :else form)
+          v (when the-ns
+              (try (ns-resolve the-ns target) (catch Exception _ nil)))]
+      (cond (class? v) (Class/.getName v)                                     ; imported/aliased class -> fq
+            (var? v)   (str (symbol (str (ns-name (:ns (meta v)))) (name target))) ; var -> fq var symbol
+            :else      (str form)))                                           ; unresolvable -> pass through
+    (keyword? form) (str form)   ; ::auto-resolved under the buffer ns by read-string
+    (nil? form) nil              ; unreadable -> editor falls back to the raw token
+    :else token-text))           ; string/vector — the client normalizes
 ```
 
-`:caller-ns` is interpolated as `CALLER_NS`, the raw token as `TOKEN`. This
-form resolves plain symbols (and `::` keywords), but **not** the Java
-constructor syntaxes. Here is the concrete gap, using `DocumentCheck.` (the
-`test-consumer-java-ctor-tokens` case):
+`:caller-ns` is interpolated as `CALLER_NS`, the raw token as `TOKEN` (two
+slots; the token is reused for both the read and the `:else` pass-through).
+This form resolves plain symbols (and `::` keywords when a buffer ns is
+available), but **not** the Java constructor syntaxes. Here is the concrete
+`DocumentCheck.` (the `test-consumer-java-ctor-tokens` case) walk-through:
 
 `read-string` turns `"DocumentCheck."` into the symbol `DocumentCheck.` (`.` is
 a valid symbol character, so it stays part of the name). `ns-resolve` on
@@ -376,13 +395,18 @@ a valid symbol character, so it stays part of the name). `ns-resolve` on
   so it degrades to "no fact type found".
 
 To close it, the form must *first* normalize the constructor syntax (strip the
-trailing `.`, and pull the class out of `new X` / `X/new`) **before**
+trailing `.`, and pull the class out of `X/new`) **before**
 `ns-resolve` — exactly the prefix-stripping `resolve-ctor-token` does today.
 Those few extra lines are why the full form is a port of
 `client/resolve-token` (and why it then needs `clojure.string/replace` for the
 `-`→`_` record-name step), and why it lands in
 `clara.server.tools.graph.shared.tokens` so the editor form and the client
-cannot drift.
+cannot drift. The form lives in one canonical file,
+`server/resources/clara/server/tools/graph/shared/editor-resolve-form.clj`,
+read as text by `shared.tokens/editor-token-resolve-form` and symlinked beside
+each editor transport so nothing is re-typed. The symlinks are repo-relative;
+the editor package/plugin build step must materialize the file into each
+package-local directory before release.
 
 **Editor changes.**
 
@@ -403,6 +427,14 @@ matching. The residual risk is a bare/aliased symbol that neither the editor
 resolved nor any callsite linkage covers — the same "no fact type found" shape
 the JVM path already emits.
 
+The bb `:resolve-token` returns a kind-explicit type-name string, or **nil**
+when the token is not a resolvable type name. It must not fabricate a string
+for an unresolvable token: the JVM runtime's `"symbol[...]"` sentinel is
+JVM-only (it is the filter target of `shared.tokens/real-type-name?`), and the
+bb side relies on the same `real-type-name?` `some?` check plus the
+`:fact-types` key intersection to discard non-types. Nil-for-unresolved is what
+keeps `real-type-name?` meaningful on both runtimes.
+
 ## Design
 
 Two simplifications from the feasibility section land here first, because they
@@ -412,9 +444,10 @@ shrink the port to a single, pure code path:
 - **editor-side token resolution** — the editor resolves aliased symbols to fq
   over its repl before calling `navigate`.
 
-With both, `shared.navigate` is pure over a rehydrated analysis map, and the
-only `#?(:bb/:clj)` seam left is the optional live-resolve escape hatch for the
-nREPL transport.
+With both, `shared.navigate` is pure over a rehydrated analysis map. Live
+`ns-resolve`/class-loading stays in the JVM shell (`client.clj`); the bb client
+assumes editor-resolved fully-qualified tokens, so no reader conditional is
+needed.
 
 1. **Extract `shared.` namespaces** (§Reuse 1) — move the pure navigation body
    and the rehydration closures out of `clara.server.graph.client` /
@@ -425,7 +458,7 @@ nREPL transport.
 2. **Keep `clara.server.graph.client` as the JVM shell** — it keeps what is
    JVM-only: system registration (`register!`, `get-current-system`),
    `get-production-source` (var metadata), `swap-session!` /
-   `register-session-swap-opts-fn`, `schema.core` validation of `NavigateInput`.
+   `register-session-swap-opts-fn`, and live token resolution.
    It delegates navigation to `shared.navigate`, supplying the rehydrated
    in-memory analysis from `cache/get-rulebase-analysis`. With editor-side token
    resolution (§0b) the live `ns-resolve`/`ctor` resolver becomes an optional
@@ -464,15 +497,17 @@ nREPL transport.
 
 | file | change |
 | --- | --- |
-| `server/src/clara/server/tools/graph/shared/hierarchy.cljc` (new) | transpose + the two closures, extracted from `annotations_report.bb` / `rehydrate` |
-| `server/src/clara/server/tools/graph/shared/rehydrate.cljc` (new) | four usage closures + `:downstream` transpose over slim-shaped maps |
-| `server/src/clara/server/tools/graph/shared/navigate.cljc` (new) | pure `navigate` + navigation fns over a rehydrated analysis map |
-| `server/src/clara/server/tools/graph/shared/tokens.cljc` (new) | token normalization + callsite string matching; `#?(:bb/:clj)` live-resolve seam |
-| `server/src/clara/server/tools/graph/shared/selection.cljc` (new) | the shared merge preamble (`selection/->selection`) |
-| `server/src/clara/server/tools/graph/shared/compose.cljc` (new) | production merge + fact-type union + dep-graph recompute (`compose/->composed-analysis`) |
-| `server/src/clara/server/graph/client.clj` | becomes the JVM shell: keeps `register!`, `get-production-source`, `swap-session!`, schema validation; delegates to `shared.*` |
+| `server/src/clara/server/tools/graph/shared/hierarchy.clj` (new) | transpose + the two closures, extracted from `annotations_report.bb` / `rehydrate` |
+| `server/src/clara/server/tools/graph/shared/rehydrate.clj` (new) | four usage closures + `:downstream` transpose over slim-shaped maps |
+| `server/src/clara/server/tools/graph/shared/navigate.clj` (new) | pure `navigate` + navigation fns over a rehydrated analysis map (schema-annotated, `:clara-rules-explorer/bb-loaded`) |
+| `server/src/clara/server/tools/graph/shared/schema.clj` (new) | the navigate contract schemas (`NavigateInput`/`NavigateResponse`/`NavigateRuntime`), shared by both runtimes |
+| `server/src/clara/server/tools/graph/shared/tokens.clj` (new) | token normalization + callsite string matching + the editor resolve-form builder (live `ns-resolve` stays in `client.clj`) |
+| `server/src/clara/server/tools/graph/shared/selection.clj` (new) | the shared merge preamble (`selection/->selection`) |
+| `server/src/clara/server/tools/graph/shared/compose.clj` (new) | production merge + fact-type union + dep-graph recompute (`compose/->composed-analysis`) |
+| `server/src/clara/server/graph/client.clj` | becomes the JVM shell: keeps `register!`, `get-production-source`, `swap-session!`, and live token resolution; delegates navigation to `shared.navigate` |
 | `server/src/clara/server/tools/graph/artifacts/rehydrate.clj` | delegates its closure bodies to `shared.rehydrate` / `shared.hierarchy` |
 | `server/bin/bootstrap.bb` (new) | add `server/src` + prismatic/schema to the bb classpath (version from `deps.edn`) |
+| `server/bin/bb_shared_smoke_test.bb` (new) | discover every `:clara-rules-explorer/bb-loaded` ns under `server/src` and `require` each under bb (`make bb-smoke-test`) |
 | `server/bin/editor_client.bb` (new) | bb entry: bootstrap, compose the registry selection (`shared.selection` → `shared.compose` → `shared.rehydrate`), call `shared.navigate`, print EDN |
 | `server/bin/annotations_report.bb` | migrate to `bootstrap.bb` + `shared.hierarchy` after `editor_client.bb` is proven (drop its inline closure reimpls and the `layout.cljc` symlink) |
 | `server/docs/persisted-artifacts.md` | note the new offline reader + the `shared.` convention |
@@ -493,8 +528,8 @@ nREPL transport.
    and pin parity with the existing `client`/`rehydrate`/`slim` tests. No
    behavior change; de-risks the split.
 2. **`bootstrap.bb` + bb smoke test.** Add `bootstrap.bb` and a test that
-   `require`s every `shared.*` namespace under bb with no classpath beyond
-   `src`.
+   discovers every `:clara-rules-explorer/bb-loaded` ns under `server/src` and
+   `require`s each under bb (`server/src` + schema from `deps.edn`).
 3. **bb entry script.** Implement `editor_client.bb` taking a registry
    selection (`{:root … :units […]}`). Start with a single-unit selection
    (reusing the read path `annotations_report.bb` already has), then generalize
@@ -513,12 +548,13 @@ nREPL transport.
   the closures live in `shared.hierarchy` and are `require`d by both sides, so
   there is one definition to get right. Parity is pinned by `slim-test`'s
   dropped-directions-invert-back test on the JVM side and the bb smoke test.
-- **A `shared.` namespace accidentally requires a JVM-only dep.** bb `require`
-  fails loudly at load (verified), and the bb smoke test forces every `shared.`
-  namespace through that load.
+- **A `shared.` namespace accidentally requires a bb-incompatible dep.** bb
+  `require` fails loudly at load (verified), and the bb smoke test forces every
+  `:clara-rules-explorer/bb-loaded` namespace through that load.
 - **Reader-conditional ordering.** `#?(:clj … :bb …)` silently ships JVM code
-  into bb. Mitigation: the rule is `:bb` first, stated in `shared.` docstrings
-  and checked by the bb smoke test asserting the `:bb` branch is taken.
+  into bb. Mitigation: the rule is `:bb` first, stated in the `shared.`
+  docstrings, and checked by the bb smoke test asserting the `:bb` branch is
+  taken.
 - **Token resolution regressions.** Moot if editor-side token resolution is
   adopted (the client never sees a bare/aliased symbol). Otherwise bb resolution
   is a strict subset; a bare/aliased symbol with no callsite linkage resolves to
@@ -555,16 +591,13 @@ nREPL transport.
    var itself and passes an explicit `:root`, matching the library's "reads no
    env var; the host resolves `$…_HOME`" convention.
 
-5. **`NavigateInput` validation in bb** — drop it in bb, keep it in the JVM
-   shell. What "validation" refers to: the JVM `navigate` runs
-   `(s/validate NavigateInput input)` against the Plumatic Schema
-   `NavigateInput` — `{:production (maybe Str) :side (enum :lhs :rhs)
-   :caller-ns Str :token Str}` (with `:production`/`:side`/`:caller-ns`
-   optional) — so a malformed map fails at the choke point rather than deep
-   inside the navigation logic. The editors already build well-formed maps, so
-   bb needs none of it: a malformed map fails naturally or returns
-   `{:error …}`, and pulling `schema.core` onto the bb classpath for this alone
-   is not worth it.
+5. **Schema in `shared.*`, enforced at test time only.** Schema is used in the
+   shared namespaces (`shared.schema` holds the contract, `shared.navigate` is
+   `s/defn`-annotated): it loads under bb via `bootstrap.bb` and serves as the
+   executable documentation of the contract. There are **no explicit runtime
+   `s/validate` calls** — the `schema.test/validate-schemas` test fixture turns
+   the `s/defn` annotations into test-time enforcement, and `s/defn` is inert at
+   runtime by default.
 
 6. **`annotations_report.bb` migration** — migrate it to `bootstrap.bb` /
    `shared.*` after `editor_client.bb` is proven; leave it on the symlink until

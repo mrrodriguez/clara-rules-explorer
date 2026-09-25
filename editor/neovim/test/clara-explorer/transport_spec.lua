@@ -320,7 +320,7 @@ describe("conjure.resolve_code", function()
   it("embeds caller-ns and token as string literals", function()
     local code = conjure.resolve_code("my.ns", "Doc.")
     assert.truthy(code:find('(symbol "my.ns")', 1, true))
-    assert.truthy(code:find('(read-string "Doc.")', 1, true))
+    assert.truthy(code:find('(read-string token-text)', 1, true))
   end)
 
   it("escapes quotes in tokens", function()
@@ -332,6 +332,7 @@ describe("conjure.resolve_code", function()
     local code = conjure.resolve_code("ns", "tok")
     for _, frag in ipairs({
       "(find-ns ns-sym)",
+      "(String/.startsWith token-text",
       "(String/.endsWith n",
       "(Class/.getName v)",
       "(ns-resolve the-ns target)",

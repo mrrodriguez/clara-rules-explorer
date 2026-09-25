@@ -638,13 +638,12 @@ file (a symlink to the `shared.tokens` canonical text)."
 
 (defconst clara-explorer--resolve-form-template
   (clara-explorer--load-resolve-template)
-  "Canonical resolve-form template. Same three `%s` slots: caller-ns, token, token.")
+  "Canonical resolve-form template. Same two `%s` slots: caller-ns, token.")
 
 (defun clara-explorer--resolve-form (caller-ns token)
   "Build the self-contained resolve form for CALLER-NS and TOKEN."
   (format clara-explorer--resolve-form-template
           (clara-explorer--edn-value (or caller-ns ""))
-          (clara-explorer--edn-value token)
           (clara-explorer--edn-value token)))
 
 (defun clara-explorer--resolve-token (token caller-ns conn)
