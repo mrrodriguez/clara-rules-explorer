@@ -50,9 +50,9 @@ function M.navigate_code(payload)
   if payload.caller_ns then parts[#parts + 1] = ":caller-ns " .. M.edn_string(payload.caller_ns) end
   parts[#parts + 1] = ":token " .. M.edn_string(payload.token)
   return "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/navigate "
-      .. "{"
-      .. table.concat(parts, " ")
-      .. "}))"
+    .. "{"
+    .. table.concat(parts, " ")
+    .. "}))"
 end
 
 --- Directory of this module file, for locating the resolve template.

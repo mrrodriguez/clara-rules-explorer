@@ -386,9 +386,7 @@ describe("init.navigate resolves before sending", function()
           with_restore(vim.api, "nvim_win_get_cursor", function() return { 1, 0 } end, function()
             with_restore(init, "context", function() return ctx end, function()
               with_restore(conjure, "resolve_token", resolve_fn, function()
-                with_restore(conjure, "eval_edn", eval_fn, function()
-                  init.navigate("lhs")
-                end)
+                with_restore(conjure, "eval_edn", eval_fn, function() init.navigate("lhs") end)
               end)
             end)
           end)
@@ -401,22 +399,14 @@ describe("init.navigate resolves before sending", function()
 
   it("sends the resolved token and keeps caller-ns", function()
     local seen
-    with_resolve_env(
-      ctx,
-      function(o) o.on_resolved("fq.Doc") end,
-      function(o) seen = o.code end
-    )
+    with_resolve_env(ctx, function(o) o.on_resolved("fq.Doc") end, function(o) seen = o.code end)
     assert.truthy(seen:find(':token "fq.Doc"', 1, true))
     assert.truthy(seen:find(':caller-ns "ns"', 1, true))
   end)
 
   it("falls back to the raw token when resolution fails", function()
     local seen
-    with_resolve_env(
-      ctx,
-      function(o) o.on_resolved(nil) end,
-      function(o) seen = o.code end
-    )
+    with_resolve_env(ctx, function(o) o.on_resolved(nil) end, function(o) seen = o.code end)
     assert.truthy(seen:find(':token "Doc"', 1, true))
   end)
 end)
