@@ -200,3 +200,11 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
   other window/buffer APIs) are forbidden. The callback body is therefore
   wrapped in `vim.schedule` so window restoration, `vim.notify`, the picker, and
   the jump path all run on the main loop.
+- bb mode made `jump.goto_fallback` the default jump path (every bb target is
+  `:var? false`), which exposed three latent bugs there: the nREPL `value` was
+  never EDN-decoded (strings arrive quoted, so `open_resource` never matched),
+  the resource form did not munge `-`→`_`, and it only did classpath
+  `clojure.java.io/resource` (missing buffer-eval'd namespaces). `goto_fallback`
+  now prefers the loaded var's `:file` metadata via `(resolve (symbol …))`, then
+  a munged `.clj`/`.cljc` resource lookup, decodes the value with `edn`, and
+  `open_resource` accepts plain absolute paths.
