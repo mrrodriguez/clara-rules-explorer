@@ -209,6 +209,36 @@
 ;; get-production-source
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; Scoped navigation answers from the global closure minus self (the dep-graph
+;; carries no self-edges). app-outcome-denied? both consumes and produces
+;; ApplicationOutcome, so it pins both directions excluding the querying
+;; production itself.
+;; ---------------------------------------------------------------------------
+
+(deftest test-scoped-navigation-excludes-self
+  (register! loan-app-session loan-app-annotations)
+  (let [denied? (str loan-app "/app-outcome-denied?")]
+    (testing "LHS"
+      (let [result (client/navigate {:production denied?
+                                     :side :lhs
+                                     :token "map->ApplicationOutcome"})]
+        (is (= :producer (:direction result)))
+        (is (= "clara.server.tools.graph.rules.loan_app_rules.ApplicationOutcome"
+               (:type result)))
+        (is (= ["clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"
+                "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"]
+               (mapv :name (:targets result))))))
+    (testing "RHS"
+      (let [result (client/navigate {:production denied?
+                                     :side :rhs
+                                     :token "map->ApplicationOutcome"})]
+        (is (= :consumer (:direction result)))
+        (is (= ["clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved-args-demo"
+                "clara.server.tools.graph.rules.loan-app-rules/app-outcome-pending?"
+                "clara.server.tools.graph.rules.loan-app-rules/find-app-outcome"]
+               (mapv :name (:targets result))))))))
+
 (deftest test-get-production-source-var-metadata
   (is (true? (:var? (client/get-production-source
                      "clara.server.tools.graph.rules.loan-app-rules/app-outcome-approved?"))))

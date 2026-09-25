@@ -319,13 +319,28 @@
     (cond-> callsite-types
       (real-type-name? direct) (conj direct))))
 
-(defn- match-via
-  "`:retract` when any matching type-bridge pair is retraction-coupled, else
-   `:insert`."
-  [matching-pairs]
-  (if (some #(= :retract (:via %)) matching-pairs)
-    :retract
-    :insert))
+(defn- exclude-querying-production
+  "Transducer dropping navigate targets that name `production` itself. The
+   dep-graph carries no self-edges — both dep-graph builders refuse
+   producer = consumer — so scoped navigation excludes the querying production
+   from the global closure."
+  [production]
+  (remove #(= (:name %) production)))
+
+(defn- dedupe-targets
+  "Merges same-name navigate targets with `:retract` winning: one production
+   can both insert and retract (a hierarchy reach of) one type, reaching the
+   global closure twice. Answers one row per production, name-sorted like the
+   closures."
+  [targets]
+  (->> targets
+       (group-by :name)
+       (sort-by key)
+       (mapv (fn [[_ rows]]
+               (assoc (first rows)
+                      :via (if (some #(= :retract (:via %)) rows)
+                             :retract
+                             :insert))))))
 
 (defn- dep->target
   "Builds a `NavigateTarget` from a serialized production dep plus `via`."
@@ -336,30 +351,38 @@
    :via    via
    :source (get-production-source (:name dep))})
 
-(defn- dep->matching-target
-  "Builds a `NavigateTarget` from a serialized production dep when it has a
-   `:match` pair whose `:consumer-type`/`:producer-type` name (selected by
-   `type-ref-key`) is in `type-names`; otherwise nil."
-  [dep type-ref-key type-names]
-  (let [pairs (filter #(contains? type-names (get-in % [type-ref-key :name]))
-                      (:match dep))]
-    (when (seq pairs)
-      (dep->target dep (match-via pairs)))))
-
-(defn- deps->targets
-  "Serialized production deps → `NavigateTarget`s, keeping only deps with a
-   matching `:match` pair (see `dep->matching-target`), sorted by fq name."
-  [deps type-ref-key type-names]
-  (->> deps
-       (keep #(dep->matching-target % type-ref-key type-names))
-       (sort-by :name)
-       vec))
-
 ;; ---------------------------------------------------------------------------
 ;; Forward declarations for global helpers used in scoped fallbacks
 ;; ---------------------------------------------------------------------------
 
 (declare global-producer-targets global-consumer-targets)
+
+(defn- scoped-producer-targets
+  "Producer targets for `type-name` in `production`'s scope: the global
+   producer closure minus the querying production itself, deduped with
+   `:retract` winning. A dep-graph edge exists exactly when the global closure
+   reaches, and `:via` comes from the same inserted/retracted split."
+  [analysis production type-name]
+  (dedupe-targets
+   (into []
+         (exclude-querying-production production)
+         (global-producer-targets analysis type-name))))
+
+(defn- scoped-consumer-targets
+  "Consumer targets for `matched-types` in `production`'s scope: per-type
+   consumers from the global closure, tagged `:retract` when the type is in
+   this production's retract set, minus the querying production itself, deduped
+   with `:retract` winning."
+  [analysis summary production matched-types]
+  (let [retract-names (type-name-set (:retract-types summary))]
+    (dedupe-targets
+     (into []
+           (comp (mapcat (fn [t]
+                           (let [via (if (contains? retract-names t) :retract :insert)]
+                             (map #(assoc % :via via)
+                                  (global-consumer-targets analysis t)))))
+                 (exclude-querying-production production))
+           matched-types))))
 
 ;; ---------------------------------------------------------------------------
 ;; Scoped navigation (inside a defrule/defquery)
@@ -373,9 +396,7 @@
       {:error (str "no fact type found under cursor in " production)}
 
       (contains? (declared-lhs-type-names summary) token-name)
-      (let [targets (deps->targets (:upstream summary)
-                                   :consumer-type
-                                   #{token-name})]
+      (let [targets (scoped-producer-targets analysis production token-name)]
         (if (empty? targets)
           (let [global (global-producer-targets analysis token-name)]
             (if (seq global)
@@ -405,9 +426,7 @@
   (let [candidates (resolve-rhs-types summary resolve-ns token)
         matched-types (set/intersection candidates (declared-rhs-type-names summary))]
     (if (seq matched-types)
-      (let [targets (deps->targets (:downstream summary)
-                                   :producer-type
-                                   matched-types)
+      (let [targets (scoped-consumer-targets analysis summary production matched-types)
             type-name (first (sort matched-types))]
         (if (empty? targets)
           (let [global (->> matched-types

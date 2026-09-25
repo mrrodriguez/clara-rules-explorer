@@ -453,7 +453,7 @@ nREPL transport.
 4. **Editor transport** — Emacs: add a `clara-explorer--eval-bb` transport
    (shell out to `bb server/bin/editor_client.bb`, parse stdout with
    `parseedn-read-str`) behind a defcustom, plus a prompt for the registry
-   selection (`:root` + `:units`) defaulting from `CLARA_RULES_REGISTRY` (Decision
+   selection (`:root` + `:units`) defaulting from `CLARA_RULES_EXPLORER_REGISTRY` (Decision
    4); reuse the existing `clara-explorer--navigate-code` map builder unchanged.
    `swap-session!`/`refresh` are nREPL-only and no-op in bb mode.
    Neovim: the same change later in `conjure.lua`'s `eval_edn` — an alternate
@@ -504,7 +504,7 @@ nREPL transport.
    (`clara.server.tools.graph.artifacts.regen-example/example-out-dir`).
 4. **Emacs transport.** Wire the bb transport behind a defcustom (shell out to
    `editor_client.bb`); prompt for the registry selection with defaults from
-   `CLARA_RULES_REGISTRY`; leave nREPL as the default.
+   `CLARA_RULES_EXPLORER_REGISTRY`; leave nREPL as the default.
 5. **neovim.** Mirror step 4 in Lua.
 
 ## Risks and mitigations
@@ -550,7 +550,7 @@ nREPL transport.
    `clara.server.tools.graph.artifacts.registry/unit-info`).
 
 4. **Editor config.** The editor prompts for the registry selection, defaulting
-   to selections under `CLARA_RULES_REGISTRY` (the registry root — the
+   to selections under `CLARA_RULES_EXPLORER_REGISTRY` (the registry root — the
    `rules-annos/` tree) when that variable is set. The editor resolves the env
    var itself and passes an explicit `:root`, matching the library's "reads no
    env var; the host resolves `$…_HOME`" convention.
@@ -581,7 +581,8 @@ nREPL transport.
   free, but re-reads `production-index.edn` ~1.9MB + `fact-types.edn` each
   query) versus a long-running bb process with a staleness-aware cache keyed on
   the manifest head. Decide once latency is measured.
-- **Env var naming** — resolved. `CLARA_RULES_REGISTRY` is the registry-root
+- **Env var naming** — resolved as `CLARA_RULES_EXPLORER_REGISTRY` (with the
+  `EXPLORER` infix, matching `CLARA_RULES_EXPLORER_HOME`) for the registry-root
   var; `CLARA_RULES_EXPLORER_HOME` is the canonical repo-root name (the stale
   `CLARA_HOME_EXPLORER` mentions in `docs/explorer-editor-navigation-neovim.md`
   and the plugin error message were corrected). `CLARA_HOME` (no suffix) remains
