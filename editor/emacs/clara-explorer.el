@@ -973,11 +973,24 @@ means use the registered default (0-arity)."
       (message "clara-explorer: session swapped"))))
 
 ;;;###autoload
-(defun clara-explorer-bb-select-unit ()
-  "Re-prompt for the bb transport's registry unit."
+(defun clara-explorer-toggle-transport ()
+  "Toggle `clara-explorer-transport' between nREPL and bb."
   (interactive)
-  (setq clara-explorer--bb-selection-cache (clara-explorer--bb-prompt-selection))
-  (message "clara-explorer: bb unit set"))
+  (setq clara-explorer-transport
+        (if (clara-explorer--bb-transport-p) 'nrepl 'bb))
+  (message "clara-explorer: transport is now %s"
+           (if (clara-explorer--bb-transport-p) "bb" "nrepl")))
+
+;;;###autoload
+(defun clara-explorer-select-unit ()
+  "Re-prompt for the bb transport's registry unit.
+Has no effect on the nREPL transport."
+  (interactive)
+  (if (clara-explorer--bb-transport-p)
+      (progn
+        (setq clara-explorer--bb-selection-cache (clara-explorer--bb-prompt-selection))
+        (message "clara-explorer: bb unit set"))
+    (message "clara-explorer: warning — unit selection only affects the bb transport (currently nrepl)")))
 
 (provide 'clara-explorer)
 ;;; clara-explorer.el ends here

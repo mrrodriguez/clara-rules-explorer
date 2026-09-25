@@ -1071,5 +1071,31 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
       (clara-explorer-swap-session)
       (should (string-match-p "no-op" msg)))))
 
+(ert-deftest toggle-transport-switches ()
+  (let ((clara-explorer-transport 'nrepl) msg)
+    (cl-letf (((symbol-function 'message) (lambda (fmt &rest args) (setq msg (apply #'format fmt args)))))
+      (clara-explorer-toggle-transport)
+      (should (eq clara-explorer-transport 'bb))
+      (should (string-match-p "bb" msg))
+      (clara-explorer-toggle-transport)
+      (should (eq clara-explorer-transport 'nrepl))
+      (should (string-match-p "nrepl" msg)))))
+
+(ert-deftest select-unit-warns-under-nrepl ()
+  (let ((clara-explorer-transport 'nrepl) msg)
+    (cl-letf (((symbol-function 'message) (lambda (fmt &rest args) (setq msg (apply #'format fmt args))))
+              ((symbol-function 'clara-explorer--bb-prompt-selection)
+               (lambda () (error "should not prompt"))))
+      (clara-explorer-select-unit)
+      (should (string-match-p "warning" msg)))))
+
+(ert-deftest select-unit-prompts-under-bb ()
+  (let ((clara-explorer-transport 'bb) (clara-explorer--bb-selection-cache nil) msg)
+    (cl-letf (((symbol-function 'clara-explorer--bb-prompt-selection) (lambda () "{unit}"))
+              ((symbol-function 'message) (lambda (fmt &rest args) (setq msg (apply #'format fmt args)))))
+      (clara-explorer-select-unit)
+      (should (equal clara-explorer--bb-selection-cache "{unit}"))
+      (should (string-match-p "bb unit set" msg)))))
+
 (provide 'clara-explorer-test)
 ;;; clara-explorer-test.el ends here
