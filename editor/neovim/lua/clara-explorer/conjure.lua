@@ -50,23 +50,20 @@ function M.navigate_code(payload)
   if payload.caller_ns then parts[#parts + 1] = ":caller-ns " .. M.edn_string(payload.caller_ns) end
   parts[#parts + 1] = ":token " .. M.edn_string(payload.token)
   return "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/navigate "
-    .. "{"
-    .. table.concat(parts, " ")
-    .. "}))"
+      .. "{"
+      .. table.concat(parts, " ")
+      .. "}))"
 end
 
 --- Directory of this module file, for locating the resolve template.
 local this_dir = (debug.getinfo(1, "S").source:sub(2):match("^(.*/)") or "./")
 
---- Canonical resolve-form template text, read from `editor-resolve-form.clj`
--- beside this module (a symlink to the `shared.tokens` canonical text).
+--- Canonical resolve-form template text.
 -- Read once at load; a missing file fails fast.
 local resolve_template = (function()
   local template_path = this_dir .. "editor-resolve-form.clj"
   local fh = io.open(template_path, "r")
-  if not fh then
-    error("clara-explorer: resolve template not found at " .. template_path)
-  end
+  if not fh then error("clara-explorer: resolve template not found at " .. template_path) end
   local text = fh:read("*a")
   fh:close()
   return text

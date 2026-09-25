@@ -1,17 +1,16 @@
-(ns clara.server.tools.graph.shared.navigate
-  "Pure editor navigation over a rehydrated rulebase-analysis map: given an
-   analysis and a `shared-schema/NavigateInput`, answers which productions
-   produce or consume the type under the cursor.
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.shared.navigate
+  "Pure editor navigation over a rehydrated rulebase-analysis map: given an analysis and a
+  `shared-schema/NavigateInput`, answers which productions produce or consume the type under the
+  cursor.
 
-   Runtime-provided capabilities arrive as a `shared-schema/NavigateRuntime`,
-   so this namespace stays free of namespace resolution, class-loading, and
-   var metadata. `clara.server.graph.client/navigate` supplies the JVM
-   implementations (live `ns-resolve` over the editor's namespaces, source
-   locations from var metadata); the babashka client supplies
-   fully-qualified-assuming ones with an always-absent source.
+   Runtime-provided capabilities arrive as a `shared-schema/NavigateRuntime`, so this namespace
+  stays free of namespace resolution, class-loading, and var metadata.
+  `clara.server.graph.client/navigate` supplies the JVM implementations (live `ns-resolve` over the
+  editor's namespaces, source locations from var metadata); the babashka client supplies
+  fully-qualified-assuming ones with an always-absent source.
 
-   Discipline: dependency-free like `tokens` (only `clojure.*`, `schema.core`,
-   plus shared requires) so both runtimes load this file."
+   Discipline: dependency-free like `tokens` (only `clojure.*`, `schema.core`, plus shared requires)
+  so both runtimes load this file."
   (:require [clara.server.tools.graph.shared.schema :as shared-schema]
             [clara.server.tools.graph.shared.tokens :as tokens]
             [clojure.set :as set]
@@ -37,9 +36,8 @@
   (type-name-set (concat (:insert-types summary) (:retract-types summary))))
 
 (defn- resolve-rhs-types
-  "Resolves the RHS token to a set of candidate kind-explicit type names,
-   combining direct (kind/ctor) resolution with the production's serialized
-   dynamic-insert/retract callsite linkage."
+  "Resolves the RHS token to a set of candidate kind-explicit type names, combining direct
+  (kind/ctor) resolution with the production's serialized dynamic-insert/retract callsite linkage."
   [runtime summary caller-ns-sym token]
   (let [{:keys [resolve-token token->fq-sym]} runtime
         direct (resolve-token caller-ns-sym token)
@@ -57,18 +55,16 @@
       (tokens/real-type-name? direct) (conj direct))))
 
 (defn- exclude-querying-production
-  "Transducer dropping navigate targets that name `production` itself. The
-   dep-graph carries no self-edges — both dep-graph builders refuse
-   producer = consumer — so scoped navigation excludes the querying production
-   from the global closure."
+  "Transducer dropping navigate targets that name `production` itself. The dep-graph carries no
+  self-edges — both dep-graph builders refuse producer = consumer — so scoped navigation excludes
+  the querying production from the global closure."
   [production]
   (remove #(= (:name %) production)))
 
 (defn- dedupe-targets
-  "Merges same-name navigate targets with `:retract` winning: one production
-   can both insert and retract (a hierarchy reach of) one type, reaching the
-   global closure twice. Answers one row per production, name-sorted like the
-   closures."
+  "Merges same-name navigate targets with `:retract` winning: one production can both insert and
+  retract (a hierarchy reach of) one type, reaching the global closure twice. Answers one row per
+  production, name-sorted like the closures."
   [targets]
   (->> targets
        (group-by :name)
@@ -80,8 +76,8 @@
                              :insert))))))
 
 (defn- dep->target
-  "Builds a `shared-schema/NavigateTarget` from a serialized production dep
-   plus `via`, with the source location from the runtime."
+  "Builds a `shared-schema/NavigateTarget` from a serialized production dep plus `via`, with the
+  source location from the runtime."
   [runtime dep via]
   (let [source (:production-source runtime)]
     {:name   (:name dep)
@@ -95,8 +91,8 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- global-producer-targets
-  "Builds navigate targets from a fact type's `inserted-by-rules` /
-   `retracted-by-rules` production refs (hierarchy-aware producers)."
+  "Builds navigate targets from a fact type's `inserted-by-rules` / `retracted-by-rules` production
+  refs (hierarchy-aware producers)."
   [runtime analysis type-name]
   (let [fact-type (get-in analysis [:fact-types type-name])
         inserted (:inserted-by-rules fact-type)
@@ -107,8 +103,8 @@
          vec)))
 
 (defn- global-consumer-targets
-  "Builds navigate targets from a fact type's `used-by-rules` /
-   `used-by-queries` production refs (hierarchy-aware consumers)."
+  "Builds navigate targets from a fact type's `used-by-rules` / `used-by-queries` production refs
+  (hierarchy-aware consumers)."
   [runtime analysis type-name]
   (let [fact-type (get-in analysis [:fact-types type-name])
         refs (concat (:used-by-rules fact-type)
@@ -303,12 +299,10 @@
 ;; ---------------------------------------------------------------------------
 
 (s/defn navigate :- shared-schema/NavigateResponse
-  "Resolves editor navigation for a fact-type token over `analysis`,
-   answering a `shared-schema/NavigateResponse`. `input` is a
-   `shared-schema/NavigateInput` (`:production` nil selects the global
-   path). Performs no input validation and no logging —
-   `clara.server.graph.client/navigate` is the validating, logging JVM
-   entry point."
+  "Resolves editor navigation for a fact-type token over `analysis`, answering a
+   `shared-schema/NavigateResponse`. `input` is a `shared-schema/NavigateInput` (`:production` nil
+   selects the global path). Performs no input validation and no logging —
+   `clara.server.graph.client/navigate` is the validating, logging JVM entry point."
   [analysis :- s/Any runtime :- shared-schema/NavigateRuntime input :- shared-schema/NavigateInput]
   (let [{:keys [production side caller-ns token]} input
         caller-ns-sym (some-> caller-ns symbol)]

@@ -1,16 +1,10 @@
-(ns clara.server.tools.graph.shared.schema
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.shared.schema
   "The shapes the editor-navigation namespaces hand each other, in one place.
 
-  The navigate contract — input, targets, results, and the runtime capabilities
-  map — travels between `shared.navigate`, its JVM shell
-  (`clara.server.graph.client`), and the babashka client, far enough from where
-  each piece is built that prose in whichever docstring happened to receive it
-  would drift silently. These schemas are that description, in a form
-  `s/with-fn-validation` runs against the real values every test produces. A
-  docstring names the schema; the schema says what is in it.
-
-  Annotation is `s/defn`, which validates **only** under
-  `s/with-fn-validation`; production runs pay nothing but the metadata."
+  The navigate contract — input, targets, results, and the runtime capabilities map — travels
+  between `shared.navigate`, its JVM shell (`clara.server.graph.client`), and the babashka client,
+  far enough from where each piece is built that prose in whichever docstring happened to receive it
+  would drift silently."
   (:require [schema.core :as s]))
 
 (s/defschema NavigateInput
@@ -47,11 +41,10 @@
                  #(contains? % :direction) NavigateResult))
 
 (s/defschema NavigateRuntime
-  "Runtime-provided capabilities for `shared.navigate`: resolution and source
-   location, which differ per runtime. The JVM resolves aliased and bare
-   symbols over the editor's live namespaces and reads var metadata; the
-   babashka client assumes editor-resolved fully-qualified tokens and reports
-   every source as absent."
+  "Runtime-provided capabilities for `shared.navigate`: resolution and source location, which differ
+   per runtime. The JVM resolves aliased and bare symbols over the editor's live namespaces and
+   reads var metadata; the babashka client assumes editor-resolved fully-qualified tokens and
+   reports every source as absent."
   {:resolve-token      (s/=> (s/maybe s/Str) (s/maybe s/Symbol) s/Str)
    :token->fq-sym      (s/=> (s/maybe s/Symbol) (s/maybe s/Symbol) s/Str)
    :production-source  (s/=> SourceLoc s/Str)})
