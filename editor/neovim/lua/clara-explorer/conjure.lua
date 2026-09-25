@@ -55,6 +55,17 @@ function M.navigate_code(payload)
     .. "}))"
 end
 
+--- Build the EDN `NavigateInput` map for a payload — the same keys as
+-- `navigate_code`, but a plain EDN map (the bb transport reads EDN, not a form).
+function M.navigate_input(payload)
+  local parts = {}
+  if payload.production then parts[#parts + 1] = ":production " .. M.edn_string(payload.production) end
+  if payload.side then parts[#parts + 1] = ":side :" .. payload.side end
+  if payload.caller_ns then parts[#parts + 1] = ":caller-ns " .. M.edn_string(payload.caller_ns) end
+  parts[#parts + 1] = ":token " .. M.edn_string(payload.token)
+  return "{" .. table.concat(parts, " ") .. "}"
+end
+
 --- Directory of this module file, for locating the resolve template.
 local this_dir = (debug.getinfo(1, "S").source:sub(2):match("^(.*/)") or "./")
 
@@ -159,6 +170,132 @@ function M.eval_edn(opts)
       end
     end,
   })
+end
+
+--- babashka transport — shell out to `bb editor_client.bb` over the
+-- persisted artifacts instead of evaling over Conjure.
+
+--- The configured transport: `"nrepl"` (default) or `"bb"`.
+function M.transport() return vim.g.clara_explorer_transport or "nrepl" end
+
+--- True when navigation uses the babashka transport.
+function M.bb_transport_p() return M.transport() == "bb" end
+
+--- Registry root for the bb transport: `g:clara_explorer_registry_root` when
+-- set, else `CLARA_RULES_EXPLORER_REGISTRY`; expanded to an absolute path.
+function M.registry_root()
+  local root = vim.g.clara_explorer_registry_root
+  if not root or root == "" then root = vim.env.CLARA_RULES_EXPLORER_REGISTRY end
+  if not root or root == "" then return nil end
+  return vim.fn.fnamemodify(root, ":p")
+end
+
+--- Path to `editor_client.bb`: `g:clara_explorer_bb_script` when set, else the
+-- repo symlink beside this module.
+function M.bb_script()
+  local script = vim.g.clara_explorer_bb_script
+  if script and script ~= "" then return script end
+  return vim.fn.fnamemodify(this_dir .. "editor_client.bb", ":p")
+end
+
+--- Repo-relative unit directories (the dir holding rules-inspect-manifest.edn)
+-- under ROOT, sorted — mirrors the elisp `clara-explorer--bb-list-unit-repos`.
+function M.bb_list_unit_repos(root)
+  local root_abs = vim.fn.fnamemodify(root, ":p")
+  local prefix = root_abs:gsub("/+$", "") .. "/"
+  local repos = {}
+  for _, path in ipairs(vim.fn.globpath(root_abs, "**/rules-inspect-manifest.edn", 0, 1) or {}) do
+    local dir = vim.fn.fnamemodify(path, ":p:h")
+    local rel = dir
+    if vim.startswith(rel, prefix) then rel = rel:sub(#prefix + 1) end
+    rel = rel:gsub("/+$", "")
+    if rel ~= "" then repos[#repos + 1] = rel end
+  end
+  table.sort(repos)
+  return repos
+end
+
+--- Prompt for a single-unit registry selection under the registry root.
+-- Calls `cb(selection_edn)` with the EDN map string, or `cb(nil)` when
+-- cancelled/absent. Mirrors the elisp `clara-explorer--bb-prompt-selection`.
+function M.bb_prompt_selection(cb)
+  local root = M.registry_root()
+  if not root or vim.fn.isdirectory(root) ~= 1 then
+    vim.notify(
+      "clara-explorer: set CLARA_RULES_EXPLORER_REGISTRY (or g:clara_explorer_registry_root) to a registry root",
+      vim.log.levels.ERROR
+    )
+    cb(nil)
+    return
+  end
+  local repos = M.bb_list_unit_repos(root)
+  if #repos == 0 then
+    vim.notify("clara-explorer: no units (rules-inspect-manifest.edn) found under " .. root, vim.log.levels.ERROR)
+    cb(nil)
+    return
+  end
+  vim.ui.select(repos, { prompt = "Unit repo (under " .. root .. "): " }, function(repo)
+    if not repo then
+      cb(nil)
+      return
+    end
+    cb("{:root " .. M.edn_string(root) .. " :units [{:repo " .. M.edn_string(repo) .. "}]}")
+  end)
+end
+
+M.bb_selection_cache = nil
+
+--- The cached bb registry-selection EDN, prompting once when unset.
+function M.bb_selection(cb)
+  if M.bb_selection_cache then
+    cb(M.bb_selection_cache)
+    return
+  end
+  M.bb_prompt_selection(function(sel)
+    if sel then M.bb_selection_cache = sel end
+    cb(sel)
+  end)
+end
+
+--- Re-prompt for the bb transport's registry unit (clears the cache).
+function M.bb_select_unit(cb)
+  M.bb_selection_cache = nil
+  M.bb_selection(cb)
+end
+
+--- Run `bb editor_client.bb SELECTION INPUT` and call `cb(result, err)` with
+-- the decoded EDN result (or `cb(nil, err)` on transport/EDN failure). Mirrors
+-- the elisp `clara-explorer--bb-eval`.
+function M.bb_eval(selection_edn, input_edn, cb)
+  local script = M.bb_script()
+  if vim.fn.filereadable(script) ~= 1 then
+    cb(nil, "clara-explorer: editor_client.bb not found at " .. script)
+    return
+  end
+  local function on_exit(out)
+    vim.schedule(function()
+      if out.code ~= 0 then
+        local msg
+        if out.code then
+          msg = "clara-explorer: bb transport failed (exit " .. out.code .. ")"
+        else
+          msg = "clara-explorer: bb transport failed (terminated by signal " .. tostring(out.signal) .. ")"
+        end
+        local details = vim.trim((out.stderr or "") .. (out.stdout or ""))
+        if details ~= "" then msg = msg .. ": " .. details end
+        cb(nil, msg)
+        return
+      end
+      local result, err = edn.decode(out.stdout or "")
+      if err then
+        cb(nil, "clara-explorer: bb transport returned invalid EDN: " .. err)
+        return
+      end
+      cb(result, nil)
+    end)
+  end
+  local ok, spawn_err = pcall(vim.system, { "bb", script, selection_edn, input_edn }, { text = true }, on_exit)
+  if not ok then cb(nil, "clara-explorer: bb not found (" .. tostring(spawn_err) .. ")") end
 end
 
 return M

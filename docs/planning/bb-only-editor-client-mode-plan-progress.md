@@ -175,7 +175,15 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
       `CLARA_RULES_EXPLORER_REGISTRY`, and `refresh`/`swap-session!` no-op in bb
       mode. `editor/emacs/editor_client.bb` symlinks to the script. Tier1 green
       (92 tests, 0 unexpected), byte-compile clean.
-- [ ] Same in Lua (`conjure.lua` alternate executor).
+- [x] Neovim bb transport landed: `g:clara_explorer_transport` ("nrepl" default,
+      "bb" alternate), `conjure.bb_eval` (shells out via `vim.system` to
+      `bb editor_client.bb`, parses EDN), single-unit registry-selection prompt
+      (`g:clara_explorer_registry_root` / `CLARA_RULES_EXPLORER_REGISTRY`,
+      `conjure.bb_select_unit` re-prompts), and `refresh`/`swap_session` no-op in
+      bb mode. `editor/neovim/lua/clara-explorer/editor_client.bb` symlinks to the
+      script; `:ClaraExplorerToggleTransport` / `:ClaraExplorerSelectUnit`
+      commands added. `bb_transport_spec.lua` added (29 tests); full suite green
+      (152 tests, 0 failures/errors), format-check + lint clean.
 
 ## Notes / decisions while implementing
 
@@ -187,3 +195,8 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
   `shared.navigate`): it loads under bb via `bootstrap.bb` and is enforced only
   at test time (`schema.test/validate-schemas`), with no explicit runtime
   `s/validate`.
+- The neovim bb transport's `vim.system` `on_exit` callback runs in a LibUV
+  "fast event" context where `nvim_win_is_valid` / `nvim_set_current_win` (and
+  other window/buffer APIs) are forbidden. The callback body is therefore
+  wrapped in `vim.schedule` so window restoration, `vim.notify`, the picker, and
+  the jump path all run on the main loop.

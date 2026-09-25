@@ -92,11 +92,37 @@ function M.navigate(side)
     bufnr = bufnr,
     win = win,
     on_resolved = function(fq)
+      local resolved_token = fq or ctx.token
+      if conjure.bb_transport_p() then
+        conjure.bb_selection(function(selection)
+          if not selection then return end
+          local input = conjure.navigate_input({
+            production = ctx.production,
+            side = side,
+            caller_ns = ctx.caller_ns,
+            token = resolved_token,
+          })
+          conjure.bb_eval(selection, input, function(result, err)
+            if vim.api.nvim_win_is_valid(win) then vim.api.nvim_set_current_win(win) end
+            if err then
+              vim.notify(err, vim.log.levels.ERROR)
+              return
+            end
+            if not result then
+              vim.notify("clara-explorer: no result from navigate", vim.log.levels.ERROR)
+              return
+            end
+            M.handle_result(result, ctx.caller_ns)
+          end)
+        end)
+        return
+      end
+
       local code = conjure.navigate_code({
         production = ctx.production,
         side = side,
         caller_ns = ctx.caller_ns,
-        token = fq or ctx.token,
+        token = resolved_token,
       })
 
       conjure.eval_edn({
@@ -120,6 +146,13 @@ end
 
 --- `:ClaraExplorerRefresh` — re-derive annotations and re-warm the analysis.
 function M.refresh()
+  if conjure.bb_transport_p() then
+    vim.notify(
+      "clara-explorer: refresh is a no-op in bb mode (re-persist the artifacts to pick up changes)",
+      vim.log.levels.INFO
+    )
+    return
+  end
   if not conjure.connected() then
     vim.notify("Not connected to a Conjure Clojure REPL", vim.log.levels.WARN)
     return
@@ -154,6 +187,10 @@ end
 --- `:ClaraExplorerSwapSession` — prompt (re-prompt when `bang` is `"!"`), cache
 -- last per buffer.
 function M.swap_session(bang)
+  if conjure.bb_transport_p() then
+    vim.notify("clara-explorer: swap-session is a no-op in bb mode", vim.log.levels.INFO)
+    return
+  end
   if not conjure.connected() then
     vim.notify("Not connected to a Conjure Clojure REPL", vim.log.levels.WARN)
     return
@@ -169,6 +206,26 @@ function M.swap_session(bang)
       return -- cancelled
     end
     M.perform_swap(input, bufnr)
+  end)
+end
+
+--- `:ClaraExplorerToggleTransport` — toggle between the nREPL and bb transports.
+function M.toggle_transport()
+  vim.g.clara_explorer_transport = conjure.bb_transport_p() and "nrepl" or "bb"
+  vim.notify("clara-explorer: transport is now " .. vim.g.clara_explorer_transport, vim.log.levels.INFO)
+end
+
+--- `:ClaraExplorerSelectUnit` — re-prompt for the bb transport's registry unit.
+function M.select_unit()
+  if not conjure.bb_transport_p() then
+    vim.notify(
+      "clara-explorer: warning — unit selection only affects the bb transport (currently nrepl)",
+      vim.log.levels.WARN
+    )
+    return
+  end
+  conjure.bb_select_unit(function(sel)
+    if sel then vim.notify("clara-explorer: bb unit set", vim.log.levels.INFO) end
   end)
 end
 

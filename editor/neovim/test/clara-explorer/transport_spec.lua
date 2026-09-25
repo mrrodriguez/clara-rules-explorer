@@ -320,7 +320,7 @@ describe("conjure.resolve_code", function()
   it("embeds caller-ns and token as string literals", function()
     local code = conjure.resolve_code("my.ns", "Doc.")
     assert.truthy(code:find('(symbol "my.ns")', 1, true))
-    assert.truthy(code:find('(read-string token-text)', 1, true))
+    assert.truthy(code:find("(read-string token-text)", 1, true))
   end)
 
   it("escapes quotes in tokens", function()

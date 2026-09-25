@@ -9,3 +9,5 @@ command! -nargs=0 ClaraExplorerNavigateProducer lua require("clara-explorer").na
 command! -nargs=0 ClaraExplorerNavigateConsumer lua require("clara-explorer").navigate("rhs")
 command! -nargs=0 ClaraExplorerRefresh lua require("clara-explorer").refresh()
 command! -nargs=0 -bang ClaraExplorerSwapSession lua require("clara-explorer").swap_session(<bang>)
+command! -nargs=0 ClaraExplorerToggleTransport lua require("clara-explorer").toggle_transport()
+command! -nargs=0 ClaraExplorerSelectUnit lua require("clara-explorer").select_unit()
