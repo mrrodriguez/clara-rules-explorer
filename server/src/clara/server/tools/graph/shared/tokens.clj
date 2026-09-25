@@ -42,6 +42,22 @@
 
       :else nil)))
 
+(defn record-ctor-class-symbol
+  "If `form` is a fully-qualified record-constructor symbol (`ns/->X` or `ns/map->X`), the fq class
+  symbol it denotes (`ns_with_underscores.X`) — the pure syntactic half of
+  `clara.server.tools.graph.analyze.ctor/resolve-record-type`, minus the class-load check. The bb
+  client uses this where the JVM class-loads. Otherwise nil."
+  [form]
+  (let [n (name form)
+        ns-part (namespace form)]
+    (when (and ns-part
+               (or (str/starts-with? n "->")
+                   (str/starts-with? n "map->")))
+      (let [class-name (if (str/starts-with? n "map->")
+                         (subs n 5)
+                         (subs n 2))]
+        (symbol (str (str/replace ns-part "-" "_") "." class-name))))))
+
 (defn editor-token-resolve-form
   "Builds the editor resolve form (as a string) for CALLER-NS and TOKEN by filling the canonical
   resource template's slots with string literals, so arbitrary token text cannot break out of the

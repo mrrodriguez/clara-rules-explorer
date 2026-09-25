@@ -6,6 +6,7 @@
             [clara.server.tools.graph.analyze :as analyze]
             [clara.server.tools.graph.annotation-fixtures :as fixtures]
             [clara.server.tools.graph.annotations.merge :as ann.merge]
+            [clara.server.tools.graph.analyze.ctor :as ctor]
             [clara.server.tools.graph.rules.analyze-test-rules]
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
@@ -245,6 +246,18 @@
   "Evals the editor resolve form for CALLER-NS + TOKEN as the editors would."
   [caller-ns token]
   (eval (read-string (shared-tokens/editor-token-resolve-form caller-ns token))))
+
+(deftest test-record-ctor-class-symbol
+  (let [ns-sym 'clara.server.tools.graph.rules.loan-app-rules]
+    (doseq [ctor-name ["->ApplicationOutcome" "map->ApplicationOutcome"]]
+      (is (= (ctor/resolve-record-type ns-sym (symbol ctor-name))
+             (shared-tokens/record-ctor-class-symbol (symbol (str ns-sym) ctor-name)))
+          ctor-name)))
+  ;; The pure form does not class-load; a constructor-named helper degrades to its
+  ;; syntactic class symbol, which the callsite linkage / known-types filter out.
+  (is (= 'clara.server.tools.graph.rules.helpers.fact
+         (shared-tokens/record-ctor-class-symbol
+          'clara.server.tools.graph.rules.helpers/->fact))))
 
 (deftest test-editor-resolve-form
   (testing "exact values mirror the JVM client"

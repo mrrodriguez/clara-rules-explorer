@@ -116,16 +116,34 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
       `validate-schemas` fixture.
 - [x] `shared.navigate` (pure `navigate` over a rehydrated analysis map;
       `navigate-global` dedupes with retract-wins like the scoped closures)
-- [ ] `shared.hierarchy` (transpose + two closures — note
-      `artifacts.hierarchy` (no requires at all) and `rehydrate`'s private
-      closure fns are parallel implementations to unify, not just move)
-- [ ] `shared.rehydrate` (four usage closures + `:downstream` transpose —
-      needs `serialize/route-id` ported or injected; `rehydrate` also pulls
-      `annotations.merge` / `conditions` / `serialize`, none bb-safe)
-- [ ] `shared.selection` / `shared.compose` (need `registry` / `store` —
-      file I/O namespaces — assessed for bb-safety first)
-- [ ] `client.clj` + `rehydrate.clj` delegate; existing
-      `client`/`rehydrate`/`slim` tests pin parity, no behavior change.
+- [x] `shared.hierarchy` (transpose + two closures) — extracted from
+      `artifacts.hierarchy`; `artifacts.hierarchy` now delegates
+      `->descendants` / `ancestor-closure` / `descendant-closure` to it, and
+      `rehydrate`'s transpose delegates to the same definition.
+- [x] `shared.rehydrate` (four usage closures + `:downstream` transpose +
+      reference expansion) — `serialize/route-id` ported (`slug` +
+      `sha1-base36`); `rehydrate.clj` is now the JVM half (annotation
+      restoration + `:slim` narrowing) delegating to `shared.rehydrate`.
+      slim/rehydrate parity pins held (403 tests, 2521 assertions).
+- [ ] `shared.selection` / `shared.compose` — assessed: `registry` is NOT
+      bb-safe (transitively pulls `serialize` → `clara.rules.schema`), so the
+      shared forms must take injected registry capabilities (`read-analysis` /
+      `narrow-analysis` / `unit-key` / `assert-compatible!`) rather than
+      `:require` `registry`. Deferred to the multi-unit Phase 3 step — the
+      single-unit bb path reads parts directly and does not need them.
+- [x] `shared.tokens` gained `record-ctor-class-symbol` — the pure syntactic
+      half of `ctor/resolve-record-type` (strip `->`/`map->`, hyphen→underscore
+      on the ns, no class-load). Pinned against `ctor/resolve-record-type` for
+      the fixture record ctors; the bb `resolve-token` uses it for RHS ctor
+      tokens.
+- [x] `client.clj` (Phase 1 slice 1) + `rehydrate.clj` (this slice) delegate;
+      existing `client`/`rehydrate`/`slim` tests pin parity, no behavior change.
+- [x] End-to-end bb smoke (scratch, not committed): built the slim analysis
+      from the checked-in `loan-app-ruleset` parts, `shared-rehydrate/rehydrate-analysis`
+      produced correct `:id`/`:inserted-by-rules`/`:used-by-rules`, and
+      `shared-navigate/navigate` answered LHS/global/RHS (with record-ctor
+      normalization) over the rehydrated map. Confirms the Phase 3 single-unit
+      core works under bb.
 
 ## Phase 2 — `bootstrap.bb` + bb smoke test
 
@@ -137,10 +155,17 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
 
 ## Phase 3 — `editor_client.bb`
 
-- [ ] Single-unit selection first (reuse `annotations_report.bb`'s read path),
-      then multi-unit via `shared.selection`/`shared.compose`.
-- [ ] Verify against `producers`/`consumers` subcommands + `rehydrate` over the
-      checked-in example registry.
+- [x] Single-unit `editor_client.bb` landed: `bb bin/editor_client.bb <unit-dir>
+      <navigate-input-edn>` reads the four parts (`production-index` /
+      `fact-types` / `dep-graph` / `meta`), rehydrates via `shared.rehydrate`,
+      and answers `shared.navigate` with a pure bb runtime (keyword / string /
+      record-ctor normalization; `:var? false` sources). Verified over the
+      checked-in `loan-app-ruleset` unit (LHS / RHS record-ctor / global /
+      error).
+- [ ] Multi-unit via `shared.selection` / `shared.compose` (needs the injected
+      registry capabilities noted in Phase 1).
+- [ ] Verify parity against `producers`/`consumers` subcommands + `rehydrate`
+      over the checked-in example registry.
 
 ## Phase 4 — Emacs transport / Phase 5 — neovim transport
 
