@@ -618,32 +618,28 @@ Used for RHS and global cases where LHS-structure is not applicable."
                  :caller-ns caller-ns
                  :token token))))
 
+(defun clara-explorer--resolve-template-file ()
+  "Absolute path of the canonical resolve-form template shipped beside this
+file (a symlink to the `shared.tokens` canonical text)."
+  (let ((base (or load-file-name (buffer-file-name))))
+    (unless base
+      (error "clara-explorer: cannot locate resolve template (no load-file-name)"))
+    (expand-file-name "editor-resolve-form.clj"
+                      (file-name-directory base))))
+
+(defun clara-explorer--load-resolve-template ()
+  "Read the canonical resolve-form template text."
+  (let ((file (clara-explorer--resolve-template-file)))
+    (unless (file-readable-p file)
+      (error "clara-explorer: resolve template not found at %s" file))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (buffer-string))))
+
 (defconst clara-explorer--resolve-form-template
-  "(let [ns-sym (symbol %s)
-      the-ns (find-ns ns-sym)
-      form (binding [*read-eval* false *ns* (or the-ns *ns*)]
-             (try (read-string %s) (catch Exception _ nil)))]
-  (cond
-    (symbol? form)
-    (let [n (name form)
-          ns-part (namespace form)
-          target (cond (String/.endsWith n \".\")
-                       (let [s (subs n 0 (dec (count n)))]
-                         (if ns-part (symbol ns-part s) (symbol s)))
-                       (and (= n \"new\") ns-part)
-                       (symbol ns-part)
-                       :else form)
-          v (when the-ns
-              (try (ns-resolve the-ns target) (catch Exception _ nil)))]
-      (cond (class? v) (Class/.getName v)
-            (var? v) (str (symbol (str (ns-name (:ns (meta v)))) (name target)))
-            :else (str form)))
-    (keyword? form) (str form)
-    (nil? form) nil
-    :else %s))"
-  "Canonical resolve-form template.  Mirrors the text
-   `shared.tokens/editor-token-resolve-form` builds (same three `%s` slots:
-   caller-ns, token, token); keep them in sync.")
+  (clara-explorer--load-resolve-template)
+  "Canonical resolve-form template.  Same three `%s` slots: caller-ns, token,
+   token.  Read from the file above, so there is exactly one text to keep.")
 
 (defun clara-explorer--resolve-form (caller-ns token)
   "Build the self-contained resolve form for CALLER-NS and TOKEN."

@@ -11,6 +11,7 @@
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
             [clara.server.tools.graph.shared.tokens :as shared-tokens]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [schema.test :as st]))
@@ -287,6 +288,27 @@
         (is (= (client/navigate {:production production :side side :token token})
                (client/navigate {:production production :side side :token resolved}))
             (str "token " (pr-str token)))))))
+
+(defn- repo-root
+  "Repo root, found by walking up from the JVM cwd while `server/` + `editor/`
+   are both absent. `make test` runs with cwd=server/."
+  []
+  (loop [dir (io/file (System/getProperty "user.dir"))]
+    (if (and (.exists (io/file dir "server")) (.exists (io/file dir "editor")))
+      dir
+      (if-let [parent (.getParentFile dir)]
+        (recur parent)
+        (throw (ex-info "repo root (server/+editor/) not found above user.dir" {}))))))
+
+(deftest test-editor-resolve-form-stays-in-sync
+  (let [root (repo-root)
+        canonical (slurp (io/file root "server/resources/clara/server/tools/graph/shared/editor-resolve-form.clj"))
+        el (slurp (io/file root "editor/emacs/editor-resolve-form.clj"))
+        lua (slurp (io/file root "editor/neovim/lua/clara-explorer/editor-resolve-form.clj"))]
+    (is (= canonical el)
+        "emacs resolve template differs from the canonical resource")
+    (is (= canonical lua)
+        "neovim resolve template differs from the canonical resource")))
 
 (deftest test-get-production-source-var-metadata
   (is (true? (:var? (client/get-production-source

@@ -55,37 +55,26 @@ function M.navigate_code(payload)
     .. "}))"
 end
 
---- Build the self-contained resolve form for CALLER_NS and TOKEN (mirrors
--- `shared.tokens/editor-token-resolve-form`: caller-ns, token, token slots).
--- Keep them in sync.
+--- Directory of this module file, for locating the resolve template.
+local this_dir = (debug.getinfo(1, "S").source:sub(2):match("^(.*/)") or "./")
+
+--- Canonical resolve-form template text, read from `editor-resolve-form.clj`
+-- beside this module (a symlink to the `shared.tokens` canonical text).
+-- Read once at load; a missing file fails fast.
+local resolve_template = (function()
+  local template_path = this_dir .. "editor-resolve-form.clj"
+  local fh = io.open(template_path, "r")
+  if not fh then
+    error("clara-explorer: resolve template not found at " .. template_path)
+  end
+  local text = fh:read("*a")
+  fh:close()
+  return text
+end)()
+
+--- Build the self-contained resolve form for CALLER_NS and TOKEN.
 function M.resolve_code(caller_ns, token)
-  return "(let [ns-sym (symbol "
-    .. M.edn_string(caller_ns or "")
-    .. ")\n      the-ns (find-ns ns-sym)\n"
-    .. "      form (binding [*read-eval* false *ns* (or the-ns *ns*)]\n"
-    .. "             (try (read-string "
-    .. M.edn_string(token)
-    .. ") (catch Exception _ nil)))]\n"
-    .. "  (cond\n"
-    .. "    (symbol? form)\n"
-    .. "    (let [n (name form)\n"
-    .. "          ns-part (namespace form)\n"
-    .. '          target (cond (String/.endsWith n ".")\n'
-    .. "                       (let [s (subs n 0 (dec (count n)))]\n"
-    .. "                         (if ns-part (symbol ns-part s) (symbol s)))\n"
-    .. '                       (and (= n "new") ns-part)\n'
-    .. "                       (symbol ns-part)\n"
-    .. "                       :else form)\n"
-    .. "          v (when the-ns\n"
-    .. "              (try (ns-resolve the-ns target) (catch Exception _ nil)))]\n"
-    .. "      (cond (class? v) (Class/.getName v)\n"
-    .. "            (var? v) (str (symbol (str (ns-name (:ns (meta v)))) (name target)))\n"
-    .. "            :else (str form)))\n"
-    .. "    (keyword? form) (str form)\n"
-    .. "    (nil? form) nil\n"
-    .. "    :else "
-    .. M.edn_string(token)
-    .. "))"
+  return resolve_template:format(M.edn_string(caller_ns or ""), M.edn_string(token), M.edn_string(token))
 end
 
 --- Resolve TOKEN via one eval; call `opts.on_resolved(fq_or_nil)`. Any

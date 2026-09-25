@@ -46,31 +46,41 @@ Landed. Verified headlessly on all three sides; the live repl round trip
 (CIDER/Conjure against a real project) still wants a click-through in your
 editors.
 
+Single source of truth: `server/resources/.../shared/editor-resolve-form.clj`
+holds the canonical template text. It is read as a string at runtime
+everywhere — `shared.tokens/editor-token-resolve-form` slurps it via
+`io/resource` and fills the three slots, and both editors slurp it at load
+through symlinks beside their own files
+(`editor/emacs/`, `editor/neovim/lua/clara-explorer/`). No embedded copies
+remain, so there is nothing to drift; the sync test fails if any of the three
+reads ever disagree. (Rationale recorded: runtime sharing is impossible —
+separate installs, and nREPL-fetch would violate the no-explorer-dep
+constraint — so file-sharing is the strongest available mechanism.)
+
 - [x] Port `client/resolve-token` prefix-stripping into the shared resolve form.
       `shared.tokens/normalize-ctor-target` (`X.` → `X`, `X/new` → `X`,
       ctors/plain pass through); `client/resolve-ctor-token` refactored onto
-      it with identical behavior. `shared.tokens/editor-token-resolve-form`
-      builds the self-contained eval string (core + `String` interop only)
-      from quoted template data, so the reader checks the parens on every
-      load in both runtimes.
+      it with identical behavior.
 - [x] Emacs: `clara-explorer--resolve-token` via CIDER sync eval, wired into
       `clara-explorer--navigate` before the navigate map is built; nil/error
-      falls back to the raw token; `:caller-ns` still passed. Elisp template
-      mechanically diffed byte-identical (modulo whitespace) to the builder
-      output. Tier1 green (84 tests), byte-compile clean.
+      falls back to the raw token; `:caller-ns` still passed. Tier1 green
+      (84 tests), byte-compile clean.
 - [x] Neovim: `conjure.resolve_token` over `eval-str`, wired into
-      `init.lua` `M.navigate` (one extra nested eval); same fallback. Lua
-      template likewise diffed identical. Suite green (123 tests).
+      `init.lua` `M.navigate` (one extra nested eval); same fallback. Suite
+      green (all five files, 0 failures/errors).
 - [x] JVM `resolve-token` kept as back-compat escape hatch (untouched paths).
 - [x] Parity pinned: `test-editor-resolve-form` eval-roundtrips the built
-      form (exact values, fixpoints, navigate-equivalence raw vs resolved).
+      form (exact values, fixpoints, navigate-equivalence raw vs resolved);
+      `test-editor-resolve-form-stays-in-sync` asserts all three reads agree.
 - [ ] Live verification: navigate from an aliased symbol and an `X.`-style
       token in Emacs and Neovim against a running repl.
 - Note: `Class/.getName` / `String/.endsWith` call-site syntax adopted in the
-  template + `client.clj` (also fixes the emitted form being reflective —
-  `pr-str` drops `^Class` metadata). Pre-existing `^Class` hints elsewhere
+  template + `client.clj`. Pre-existing `^Class` hints elsewhere
   (e.g. `serialize`, `ctor`) left for a later sweep.
-
+- Note: kondo analyzes `.cljc` for `:cljs` too, where `slurp`/`format` do not
+  exist; the one form needing them carries `#_:clj-kondo/ignore` with the
+  reason recorded. Packaging follow-up: confirm the ELPA tarball ships the
+  symlinked template file.
 ## Phase 1 — extract `shared.*`, JVM delegates (no bb yet)
 
 Slice 1 landed: `shared.tokens` + `shared.navigate` (both `.cljc`, only
