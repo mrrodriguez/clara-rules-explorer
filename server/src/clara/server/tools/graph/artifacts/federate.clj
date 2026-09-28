@@ -24,7 +24,7 @@
   (:require
    [clara.server.tools.graph.artifacts.registry :as registry]
    [clara.server.tools.graph.artifacts.selection :as selection]
-   [clara.server.tools.graph.artifacts.shared.hierarchy :as hierarchy]
+   [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
    [clara.server.tools.graph.artifacts.shared.registry :as shared-registry]
    [clara.server.tools.graph.artifacts.store :as store]
    [clara.server.tools.graph.edn-io :as edn-io]

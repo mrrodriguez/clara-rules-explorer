@@ -11,7 +11,7 @@
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
-            [clara.server.graph.shared.tokens :as shared-tokens]
+            [clara.server.graph.tokens :as tokens]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
@@ -245,18 +245,18 @@
 (defn- eval-editor-resolve
   "Evals the editor resolve form for CALLER-NS + TOKEN as the editors would."
   [caller-ns token]
-  (eval (read-string (shared-tokens/editor-token-resolve-form caller-ns token))))
+  (eval (read-string (tokens/editor-token-resolve-form caller-ns token))))
 
 (deftest test-record-ctor-class-symbol
   (let [ns-sym 'clara.server.tools.graph.rules.loan-app-rules]
     (doseq [ctor-name ["->ApplicationOutcome" "map->ApplicationOutcome"]]
       (is (= (ctor/resolve-record-type ns-sym (symbol ctor-name))
-             (shared-tokens/record-ctor-class-symbol (symbol (str ns-sym) ctor-name)))
+             (tokens/record-ctor-class-symbol (symbol (str ns-sym) ctor-name)))
           ctor-name)))
   ;; The pure form does not class-load; a constructor-named helper degrades to its
   ;; syntactic class symbol, which the callsite linkage / known-types filter out.
   (is (= 'clara.server.tools.graph.rules.helpers.fact
-         (shared-tokens/record-ctor-class-symbol
+         (tokens/record-ctor-class-symbol
           'clara.server.tools.graph.rules.helpers/->fact))))
 
 (deftest test-editor-resolve-form
@@ -316,7 +316,7 @@
 
 (deftest test-editor-resolve-form-stays-in-sync
   (let [root (repo-root)
-        canonical (slurp (io/file root "server/resources/clara/server/graph/shared/editor-resolve-form.clj"))
+        canonical (slurp (io/file root "server/resources/clara/server/graph/editor-resolve-form.clj"))
         el (slurp (io/file root "editor/emacs/editor-resolve-form.clj"))
         lua (slurp (io/file root "editor/neovim/lua/clara-explorer/editor-resolve-form.clj"))]
     (is (= canonical el)

@@ -11,7 +11,7 @@
 
   Nothing here decides which units belong together — the selection arrives named and ordered, and
   `->selection` returns a value describing it."
-  (:require [clara.server.tools.graph.artifacts.shared.hierarchy :as hierarchy]
+  (:require [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
             [clara.server.tools.graph.artifacts.shared.registry :as shared-registry]
             [clojure.set :as set]))
 

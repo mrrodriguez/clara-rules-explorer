@@ -8,14 +8,14 @@
 ;; <selection-edn> is a registry selection `{:root "…" :units [{:repo "…"}]}` — the same shape the
 ;; server's `:registry` mode takes; the editor resolves the `CLARA_RULES_EXPLORER_REGISTRY` root
 ;; itself and passes it explicitly. <navigate-input-edn> is a
-;; `clara.server.graph.shared.schema/NavigateInput` map, e.g. `{:production "ns/rule" :side
+;; `clara.server.graph.schema/NavigateInput` map, e.g. `{:production "ns/rule" :side
 ;; :lhs :token "com.example.Loan"}`.
 ;;
 ;; A single unit and a multi-unit selection take the same path:
 ;; `clara.server.tools.graph.artifacts.shared.selection/->selection` →
 ;; `clara.server.tools.graph.artifacts.shared.compose/->composed-analysis` →
 ;; `clara.server.tools.graph.artifacts.shared.rehydrate/rehydrate-analysis` →
-;; `clara.server.graph.shared.navigate/navigate`. This mirrors the server's `:registry` mode, so the
+;; `clara.server.graph.navigate/navigate`. This mirrors the server's `:registry` mode, so the
 ;; bb answer and the nREPL answer over the same selection agree.
 ;;
 ;; The editor resolves aliased/:: tokens to fq over its repl before calling, so this script assumes
@@ -31,8 +31,8 @@
          '[clara.server.tools.graph.artifacts.shared.compose :as shared-compose]
          '[clara.server.tools.graph.artifacts.shared.rehydrate :as shared-rehydrate]
          '[clara.server.tools.graph.artifacts.shared.registry :as shared-registry]
-         '[clara.server.graph.shared.navigate :as shared-navigate]
-         '[clara.server.graph.shared.tokens :as tokens])
+         '[clara.server.graph.navigate :as navigate]
+         '[clara.server.graph.tokens :as tokens])
 
 (defn- die [& msg]
   (binding [*out* *err*] (apply println msg))
@@ -142,7 +142,7 @@
                 :assert-compatible! #(assert-compatible! root %)}
           analysis (shared-compose/->composed-analysis caps units)
           rehydrated (shared-rehydrate/rehydrate-analysis analysis)]
-      (shared-navigate/navigate rehydrated bb-runtime input))))
+      (navigate/navigate rehydrated bb-runtime input))))
 
 (let [[selection-edn input-edn] *command-line-args*]
   (when-not (and selection-edn input-edn)

@@ -1,4 +1,4 @@
-(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.artifacts.shared.hierarchy
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.artifacts.hierarchy
   "The fact-type hierarchy operations shared by the JVM artifact merge and the babashka editor
   client: the ancestor union, transitive re-closure, deterministic deepest-first ordering, and the
   two closure directions.

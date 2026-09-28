@@ -221,7 +221,7 @@
 (defn- ->descendants
   "Transpose of a closed ancestor map: `{ancestor-name #{descendant-name}}` —
   the same shape and meaning as
-  `clara.server.tools.graph.artifacts.shared.hierarchy/->descendants`."
+  `clara.server.tools.graph.artifacts.hierarchy/->descendants`."
   [ancestors]
   (let [desc (volatile! {})]
     (doseq [[ft as] ancestors
@@ -235,7 +235,7 @@
   the direction and is already closed: `ancestors` runs the opposite way from
   `descendants`, and passing the wrong one is a wrong answer no exception flags —
   the same warning
-  `clara.server.tools.graph.artifacts.shared.hierarchy/ancestor-closure` gives."
+  `clara.server.tools.graph.artifacts.hierarchy/ancestor-closure` gives."
   [edge-map base-names]
   (reduce (fn [acc t] (into acc (cons t (get edge-map t #{})))) #{} base-names))
 
@@ -431,7 +431,7 @@
   "One fact type's place in the hierarchy: its ancestors and its descendants,
   read from fact-types.edn. Descendants are the transpose of the recorded
   `:ancestors` — the same direction
-  `clara.server.tools.graph.artifacts.shared.hierarchy/->descendants` gives."
+  `clara.server.tools.graph.artifacts.hierarchy/->descendants` gives."
   [fact-types raw]
   (when-let [resolved (resolve-type-names fact-types raw)]
     (let [ancestors (->ancestors fact-types)

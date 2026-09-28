@@ -7,7 +7,7 @@
   dep-graph transpose, and the reference expansion that puts `:id`/`TypeReference` shapes back. It
   is free of live-session concerns: annotation restoration and the `:slim` block narrowing stay in
   the JVM namespace."
-  (:require [clara.server.tools.graph.artifacts.shared.hierarchy :as shared-hierarchy]
+  (:require [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
             [clojure.string :as str]
             [clojure.walk :as walk]))
 
@@ -89,7 +89,7 @@
 (defn- ->descendants-index
   "Transpose of `:ancestors`: `{ancestor-name #{descendant-name …}}`."
   [fact-types]
-  (shared-hierarchy/->descendants
+  (hierarchy/->descendants
    (into {} (map (fn [[type-name entry]] [type-name (set (:ancestors entry))])) fact-types)))
 
 (defn- descendant-depth

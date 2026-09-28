@@ -1,15 +1,15 @@
-(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.graph.shared.navigate
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.graph.navigate
   "Pure editor navigation over a rehydrated rulebase-analysis map: given an analysis and a
-  `shared-schema/NavigateInput`, answers which productions produce or consume the type under the
+  `schema/NavigateInput`, answers which productions produce or consume the type under the
   cursor.
 
-   Runtime-provided capabilities arrive as a `shared-schema/NavigateRuntime`, so this namespace
+   Runtime-provided capabilities arrive as a `schema/NavigateRuntime`, so this namespace
   stays free of namespace resolution, class-loading, and var metadata.
   `clara.server.graph.client/navigate` supplies the JVM implementations (live `ns-resolve` over the
   editor's namespaces, source locations from var metadata); the babashka client supplies
   fully-qualified-assuming ones with an always-absent source."
-  (:require [clara.server.graph.shared.schema :as shared-schema]
-            [clara.server.graph.shared.tokens :as tokens]
+  (:require [clara.server.graph.schema :as schema]
+            [clara.server.graph.tokens :as tokens]
             [clojure.set :as set]
             [schema.core :as s]))
 
@@ -73,7 +73,7 @@
                              :insert))))))
 
 (defn- dep->target
-  "Builds a `shared-schema/NavigateTarget` from a serialized production dep plus `via`, with the
+  "Builds a `schema/NavigateTarget` from a serialized production dep plus `via`, with the
   source location from the runtime."
   [runtime dep via]
   (let [source (:production-source runtime)]
@@ -295,12 +295,12 @@
 ;; Public API
 ;; ---------------------------------------------------------------------------
 
-(s/defn navigate :- shared-schema/NavigateResponse
+(s/defn navigate :- schema/NavigateResponse
   "Resolves editor navigation for a fact-type token over `analysis`, answering a
-   `shared-schema/NavigateResponse`. `input` is a `shared-schema/NavigateInput` (`:production` nil
+   `schema/NavigateResponse`. `input` is a `schema/NavigateInput` (`:production` nil
    selects the global path). Performs no input validation and no logging —
    `clara.server.graph.client/navigate` is the validating, logging JVM entry point."
-  [analysis :- s/Any runtime :- shared-schema/NavigateRuntime input :- shared-schema/NavigateInput]
+  [analysis :- s/Any runtime :- schema/NavigateRuntime input :- schema/NavigateInput]
   (let [{:keys [production side caller-ns token]} input
         caller-ns-sym (some-> caller-ns symbol)]
     (if (nil? production)

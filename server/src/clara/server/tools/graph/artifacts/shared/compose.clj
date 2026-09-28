@@ -14,7 +14,7 @@
   free of `clara.server.tools.graph.artifacts.registry`, which bb cannot load. The layer-fold half
   of `clara.server.tools.graph.artifacts.compose` stays JVM-side: it needs the live annotation
   merge."
-  (:require [clara.server.tools.graph.artifacts.shared.hierarchy :as hierarchy]
+  (:require [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
             [clara.server.tools.graph.artifacts.shared.registry :as shared-registry]
             [clara.server.tools.graph.artifacts.shared.selection :as shared-selection]
             [clojure.set :as set]))
@@ -47,7 +47,7 @@
   "The composed `:fact-types` map from `ancestors` (the already-closed unioned
   hierarchy) and the units' raw fact-type maps: per type name, `:ns` from the
   first unit that declares it, `:ancestors` ordered deepest-first via
-  `clara.server.tools.graph.artifacts.shared.hierarchy/hierarchy-order`."
+  `clara.server.tools.graph.artifacts.hierarchy/hierarchy-order`."
   [fact-type-maps ancestors]
   (into (sorted-map)
         (map (fn [name]
@@ -62,8 +62,8 @@
   "Merge slim fact-type maps from multiple units. Per name, `:ancestors` is the
   union of every unit's ancestor edge set, re-closed transitively and ordered
   deepest-first — the same closure the federated index computes, via
-  `clara.server.tools.graph.artifacts.shared.hierarchy`. `:ns` comes from the
-  first unit that has the name."
+  `clara.server.tools.graph.artifacts.hierarchy`. `:ns` comes from the first
+  unit that has the name."
   [fact-type-maps]
   (let [fact-type-maps (into [] (remove nil?) fact-type-maps)]
     (->fact-type-map fact-type-maps
@@ -101,8 +101,8 @@
   is recomputed over the unioned fact-type hierarchy rather than unioned.
   `ancestors` is the closed, unioned ancestor map — the one hierarchy every
   merge mode shares — so the producer→consumer closure direction lives in
-  `clara.server.tools.graph.artifacts.shared.hierarchy/ancestor-closure`
-  rather than inline here."
+  `clara.server.tools.graph.artifacts.hierarchy/ancestor-closure` rather than
+  inline here."
   [rules queries ancestors]
   (let [type-analysis (->type-analysis-map rules queries)
         consumers-by-type (->consumers-by-type type-analysis)

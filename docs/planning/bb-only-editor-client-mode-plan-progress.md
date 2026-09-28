@@ -203,21 +203,21 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
   `make test` (cognitect test-runner; `-n <ns>` / `-v <var>` to focus), not the
   running REPL on `:52909`.
 - Schema is a deliberate shared dependency
-  (`clara.server.graph.shared.schema`, `clara.server.graph.shared.navigate`):
+  (`clara.server.graph.schema`, `clara.server.graph.navigate`):
   it loads under bb via `bootstrap.bb` and is enforced only at test time
   (`schema.test/validate-schemas`), with no explicit runtime `s/validate`.
 - Re-scoping: the flat `clara.server.tools.graph.shared.*` prefix was replaced
   with domain-scoped shared namespaces that mirror where each piece came from —
-  `clara.server.tools.graph.artifacts.shared.hierarchy` /
+  `clara.server.tools.graph.artifacts.hierarchy` /
   `.rehydrate` / `.selection` / `.compose` / `.registry`, and
-  `clara.server.graph.shared.navigate` / `.tokens` / `.schema`. Pure passthrough
+  `clara.server.graph.navigate` / `.tokens` / `.schema`. Pure passthrough
   delegates (`artifacts.registry/unit-key` and `narrow-analysis`,
   `artifacts.compose/union-fact-types`, and the `artifacts.hierarchy` closure
   re-exports) were removed — callers require the shared namespace directly —
   while the value-adding JVM delegates (`selection/->selection`,
   `compose/->composed-analysis`, `rehydrate/rehydrate-analysis`, `client/navigate`)
   stay. The editor resolve-form resource moved beside `shared.tokens`
-  (`resources/clara/server/graph/shared/`), and the editor symlinks re-point.
+  (`resources/clara/server/graph/`), and the editor symlinks re-point.
 - The neovim bb transport's `vim.system` `on_exit` callback runs in a LibUV
   "fast event" context where `nvim_win_is_valid` / `nvim_set_current_win` (and
   other window/buffer APIs) are forbidden. The callback body is therefore

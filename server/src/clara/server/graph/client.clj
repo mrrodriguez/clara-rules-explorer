@@ -5,7 +5,7 @@
    `clara.server.graph.client/navigate` over nREPL and read the printed EDN
    result.  This namespace is the JVM shell: system registration, schema
    validation, live-namespace token resolution, and var-metadata source
-   locations. The navigation itself lives in `shared-navigate/navigate`,
+   locations. The navigation itself lives in `nav/navigate`,
    which this namespace calls with the JVM runtime map.
 
    Resolution reuses the analyzer's own logic (`ctor/resolve-record-type`
@@ -16,9 +16,9 @@
   (:require [clara.server.graph.cache :as cache]
             [clara.server.graph.server :as server]
             [clara.server.tools.graph.analyze.ctor :as ctor]
-            [clara.server.graph.shared.navigate :as shared-navigate]
-            [clara.server.graph.shared.schema :as shared-schema]
-            [clara.server.graph.shared.tokens :as shared-tokens]
+            [clara.server.graph.navigate :as nav]
+            [clara.server.graph.schema :as schema]
+            [clara.server.graph.tokens :as tokens]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
             [schema.core :as s]))
@@ -98,7 +98,7 @@
   []
   {:var? false :file nil :line nil :column nil})
 
-(s/defn get-production-source :- shared-schema/SourceLoc
+(s/defn get-production-source :- schema/SourceLoc
   "Returns the source location of a production (`\"ns/rule\"`), from var
    metadata where the production interns a var, else a `:var? false`
    placeholder (the kondo tier / elisp regex fallback takes over)."
@@ -106,7 +106,7 @@
   (or (var-source fq-name) (unknown-source)))
 
 (s/defn get-production-locations
-  "Full map of every fq production name to its `shared-schema/SourceLoc` (debugging)."
+  "Full map of every fq production name to its `schema/SourceLoc` (debugging)."
   []
   (if-let [sys (get-current-system)]
     (let [{:keys [state-atom cache]} sys
@@ -152,14 +152,14 @@
 (defn- resolve-ctor-token
   "Resolves a bare constructor token (`->X`, `map->X`, `X.`, `X/new`)
    to a kind-explicit class-name string, or nil.  Java ctor syntaxes are
-   normalized to a class symbol (see `shared-tokens/normalize-ctor-target`)
+   normalized to a class symbol (see `tokens/normalize-ctor-target`)
    and delegated to `ctor/resolve-record-type`."
   [caller-ns-sym form]
   (if (ctor/constructor-fn-name? (name form))
     ;; ->X / map->X record constructors resolve against the form itself.
     (ctor-result->name (ctor/resolve-record-type caller-ns-sym form))
     ;; X. / X/new normalize to a class symbol first; anything else is nil.
-    (when-let [class-sym (shared-tokens/normalize-ctor-target form)]
+    (when-let [class-sym (tokens/normalize-ctor-target form)]
       (ctor-result->name (ctor/resolve-record-type caller-ns-sym class-sym)))))
 
 (defn- resolve-symbol-type
@@ -225,7 +225,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- jvm-runtime
-  "The `shared-navigate/navigate` runtime map over the editor's live
+  "The `nav/navigate` runtime map over the editor's live
    namespaces: token resolution via `ns-resolve` / record-constructor
    class-loading, source locations from var metadata."
   []
@@ -233,11 +233,11 @@
    :token->fq-sym token->fq-sym
    :production-source get-production-source})
 
-(s/defn navigate :- shared-schema/NavigateResponse
+(s/defn navigate :- schema/NavigateResponse
   "Resolves editor navigation for a fact-type token.  Returns a
-   `shared-schema/NavigateResponse`.  Input shape is `shared-schema/NavigateInput`;
+   `schema/NavigateResponse`.  Input shape is `schema/NavigateInput`;
    schema enforcement runs through the `schema.test/validate-schemas` test
-   fixture (via `shared-navigate/navigate`), not an explicit runtime validate."
+   fixture (via `nav/navigate`), not an explicit runtime validate."
   [input]
   (let [{:keys [production side caller-ns token]} input]
     (log/infof "navigate: production=%s side=%s caller-ns=%s token=%s"
@@ -247,7 +247,7 @@
             (if-let [sys (get-current-system)]
               (let [{:keys [state-atom cache]} sys
                     analysis (cache/get-rulebase-analysis cache @state-atom)]
-                (shared-navigate/navigate analysis (jvm-runtime) input))
+                (nav/navigate analysis (jvm-runtime) input))
               {:error "no explorer system registered"})]
         (if (:error result)
           (log/warnf "navigate: %s" (:error result))

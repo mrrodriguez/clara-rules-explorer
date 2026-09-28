@@ -1,4 +1,4 @@
-(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.graph.shared.tokens
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.graph.tokens
   "Pure token helpers shared by the JVM editor client and the babashka editor client: kind-explicit
   name checks, constructor-syntax normalization, the editor resolve-form builder, and
   authored-callsite string matching.
@@ -65,6 +65,6 @@
   `str` of keywords, the raw token text for any other readable form (the client normalizes those),
   and nil when the token is unreadable — the editor falls back to the raw token then."
   [caller-ns token]
-  (format (slurp (io/resource "clara/server/graph/shared/editor-resolve-form.clj"))
+  (format (slurp (io/resource "clara/server/graph/editor-resolve-form.clj"))
           (pr-str (str caller-ns))
           (pr-str (str token))))
