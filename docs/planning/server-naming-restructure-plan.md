@@ -13,18 +13,21 @@ a separate doc once this plan is approved.
 ## 1. Goals
 
 1. Rename the top-level project directory `server/` to `explorer/`.
-2. Every namespace starts with `clara.explorer.*`.
+2. Every namespace starts with `clara.explorer.*` (except the `user` REPL
+   namespace, which stays `user`).
 3. Namespaces that run/define the HTTP server live under `clara.explorer.server.*`.
 4. Namespaces that read/write explorer artifacts live under `clara.explorer.artifacts.*`.
-5. Namespaces that do graph/analysis live under `clara.explorer.graph.*`.
+5. Namespaces that do graph/analysis live top-level under `clara.explorer.*` —
+   there is **no `graph` segment**.
 6. The rename ripples through every non-namespace surface that carries a name:
    doc strings, comments, `deps.edn` aliases, `Makefile`s, bb scripts, lint
    config, CI, editor clients, UI demo data, and the checked-in artifact
    examples.
 
 This is a **rename**, not a behavioral change. No function signatures, HTTP
-routes, or artifact schemas change; only the strings that are namespaces and
-namespace-derived paths change.
+routes, or artifact schemas change; only namespace strings, namespace-derived
+paths, and the one deliberate `:clara-rules-explorer/normalized` marker change
+(§7.3) change.
 
 ---
 
@@ -59,9 +62,9 @@ regenerable.
 | ---------------------------------------------- | ------------------------------- | ---------------------------------------------------------------- |
 | `clara.server.graph.*`                         | `clara.explorer.server.*`       | HTTP/API/server layer                                            |
 | `clara.server.tools.graph.artifacts.*`         | `clara.explorer.artifacts.*`    | artifact read/write, registry, compose, rehydrate                |
-| `clara.server.tools.graph.*` (everything else) | `clara.explorer.graph.*`        | graph/analysis, annotations, memory, serialize, etc.             |
+| `clara.server.tools.graph.*` (everything else) | `clara.explorer.*` (top-level)  | analysis, annotations, core, memory, serialize, utils — no `graph` segment |
 | `clara.server.vendor.tools.*`                  | `clara.explorer.vendor.tools.*` | vendored tooling (no bucket fit)                                 |
-| test mirror of the above                       | same buckets + `-test`          | test namespaces                                                  |
+| test mirror of the above                       | mirror src buckets + `-test`    | test namespaces                                                  |
 | `clara.server.tools.graph.rules.*`             | `clara.explorer.test.rules.*`   | test rule namespaces (demo/domain fixtures loaded into sessions) |
 
 The `server/` directory rename and the namespace package rename are independent
@@ -106,43 +109,44 @@ Shared leaves: `shared.compose`, `shared.registry`, `shared.rehydrate`,
 `shared.selection` → `clara.explorer.artifacts.shared.*`, files under
 `src/clara/explorer/artifacts/shared/`.
 
-#### Graph/analysis bucket → `clara.explorer.graph.*`
+#### Analysis / core bucket → top-level `clara.explorer.*` (no `graph` segment)
 
-Every `clara.server.tools.graph.<leaf>` (except `artifacts.*`) maps to
-`clara.explorer.graph.<leaf>`. Files move from
-`src/clara/server/tools/graph/` to `src/clara/explorer/graph/`.
+Every `clara.server.tools.graph.<leaf>` (except `artifacts.*` and `rules.*`)
+maps to top-level `clara.explorer.<leaf>`. Files move from
+`src/clara/server/tools/graph/` to `src/clara/explorer/`. `analyze` and
+`annotations` remain their own top-level namespaces with sub-namespaces.
 
 | Old ns                                          | New ns                                      |
 | ----------------------------------------------- | ------------------------------------------- |
-| `clara.server.tools.graph.analyze`              | `clara.explorer.graph.analyze`              |
-| `clara.server.tools.graph.analyze.alias`        | `clara.explorer.graph.analyze.alias`        |
-| `clara.server.tools.graph.analyze.callsite`     | `clara.explorer.graph.analyze.callsite`     |
-| `clara.server.tools.graph.analyze.ctor`         | `clara.explorer.graph.analyze.ctor`         |
-| `clara.server.tools.graph.analyze.index`        | `clara.explorer.graph.analyze.index`        |
-| `clara.server.tools.graph.analyze.kondo`        | `clara.explorer.graph.analyze.kondo`        |
-| `clara.server.tools.graph.analyze.synth`        | `clara.explorer.graph.analyze.synth`        |
-| `clara.server.tools.graph.analyze.utils`        | `clara.explorer.graph.analyze.utils`        |
-| `clara.server.tools.graph.annotations`          | `clara.explorer.graph.annotations`          |
-| `clara.server.tools.graph.annotations.callsite` | `clara.explorer.graph.annotations.callsite` |
-| `clara.server.tools.graph.annotations.merge`    | `clara.explorer.graph.annotations.merge`    |
-| `clara.server.tools.graph.annotations.rebase`   | `clara.explorer.graph.annotations.rebase`   |
-| `clara.server.tools.graph.annotations.report`   | `clara.explorer.graph.annotations.report`   |
-| `clara.server.tools.graph.classpath`            | `clara.explorer.graph.classpath`            |
-| `clara.server.tools.graph.conditions`           | `clara.explorer.graph.conditions`           |
-| `clara.server.tools.graph.core`                 | `clara.explorer.graph.core`                 |
-| `clara.server.tools.graph.edn-io`               | `clara.explorer.graph.edn-io`               |
-| `clara.server.tools.graph.fact-types`           | `clara.explorer.graph.fact-types`           |
-| `clara.server.tools.graph.kondo-config`         | `clara.explorer.graph.kondo-config`         |
-| `clara.server.tools.graph.memory`               | `clara.explorer.graph.memory`               |
-| `clara.server.tools.graph.nodes`                | `clara.explorer.graph.nodes`                |
-| `clara.server.tools.graph.ns-deps`              | `clara.explorer.graph.ns-deps`              |
-| `clara.server.tools.graph.serialize`            | `clara.explorer.graph.serialize`            |
-| `clara.server.tools.graph.utils`                | `clara.explorer.graph.utils`                |
+| `clara.server.tools.graph.analyze`              | `clara.explorer.analyze`                    |
+| `clara.server.tools.graph.analyze.alias`        | `clara.explorer.analyze.alias`              |
+| `clara.server.tools.graph.analyze.callsite`     | `clara.explorer.analyze.callsite`           |
+| `clara.server.tools.graph.analyze.ctor`         | `clara.explorer.analyze.ctor`               |
+| `clara.server.tools.graph.analyze.index`        | `clara.explorer.analyze.index`              |
+| `clara.server.tools.graph.analyze.kondo`        | `clara.explorer.analyze.kondo`              |
+| `clara.server.tools.graph.analyze.synth`        | `clara.explorer.analyze.synth`              |
+| `clara.server.tools.graph.analyze.utils`        | `clara.explorer.analyze.utils`              |
+| `clara.server.tools.graph.annotations`          | `clara.explorer.annotations`                |
+| `clara.server.tools.graph.annotations.callsite` | `clara.explorer.annotations.callsite`       |
+| `clara.server.tools.graph.annotations.merge`    | `clara.explorer.annotations.merge`          |
+| `clara.server.tools.graph.annotations.rebase`   | `clara.explorer.annotations.rebase`         |
+| `clara.server.tools.graph.annotations.report`   | `clara.explorer.annotations.report`         |
+| `clara.server.tools.graph.classpath`            | `clara.explorer.classpath`                  |
+| `clara.server.tools.graph.conditions`           | `clara.explorer.conditions`                 |
+| `clara.server.tools.graph.core`                 | `clara.explorer.core`                       |
+| `clara.server.tools.graph.edn-io`               | `clara.explorer.edn-io`                     |
+| `clara.server.tools.graph.fact-types`           | `clara.explorer.fact-types`                 |
+| `clara.server.tools.graph.kondo-config`         | `clara.explorer.kondo-config`               |
+| `clara.server.tools.graph.memory`               | `clara.explorer.memory`                     |
+| `clara.server.tools.graph.nodes`                | `clara.explorer.nodes`                      |
+| `clara.server.tools.graph.ns-deps`              | `clara.explorer.ns-deps`                    |
+| `clara.server.tools.graph.serialize`            | `clara.explorer.serialize`                  |
+| `clara.server.tools.graph.utils`                | `clara.explorer.utils`                      |
 
 Note: filenames with `_` map to hyphenated ns names, exactly as today
-(`edn_io.clj` → `...graph.edn-io`, `fact_types.clj` → `...graph.fact-types`,
-`kondo_config.clj` → `...graph.kondo-config`, `ns_deps.clj` →
-`...graph.ns-deps`).
+(`edn_io.clj` → `...explorer.edn-io`, `fact_types.clj` → `...explorer.fact-types`,
+`kondo_config.clj` → `...explorer.kondo-config`, `ns_deps.clj` →
+`...explorer.ns-deps`).
 
 #### Vendor
 
@@ -155,13 +159,13 @@ File: `src/clara/server/vendor/tools/inspect.clj` →
 
 ### 4.2 `test/` — mirror of `src/` plus fixtures and rule namespaces
 
-All `-test` namespaces map identically to their `src/` counterpart with the
-same bucket prefix. Non-`-test` test namespaces:
+All `-test` namespaces mirror their `src/` counterpart (top-level for the
+former `graph` namespaces). Non-`-test` test namespaces:
 
 | Old ns                                             | New ns                                     |
 | -------------------------------------------------- | ------------------------------------------ |
-| `clara.server.tools.graph.annotation-fixtures`     | `clara.explorer.graph.annotation-fixtures` |
-| `clara.server.tools.graph.test-utils`              | `clara.explorer.graph.test-utils`          |
+| `clara.server.tools.graph.annotation-fixtures`     | `clara.explorer.annotation-fixtures`       |
+| `clara.server.tools.graph.test-utils`              | `clara.explorer.test-utils`                |
 | `clara.server.tools.graph.artifacts.test-fixtures` | `clara.explorer.artifacts.test-fixtures`   |
 | `clara.server.tools.graph.artifacts.regen-example` | `clara.explorer.artifacts.regen-example`   |
 
@@ -192,33 +196,34 @@ persisted contract — see [§7](#7-persisted-artifacts-and-annotations-contract
 | `clara.server.graph.demo-run`                | `clara.explorer.server.demo-run`          |
 | `clara.server.graph.demo-setup`              | `clara.explorer.server.demo-setup`        |
 | `clara.server.graph.hierarchy-run`           | `clara.explorer.server.hierarchy-run`     |
-| `clara.server.tools.graph.kondo-config-sync` | `clara.explorer.graph.kondo-config-sync`  |
-| `user`                                       | `clara.explorer.dev.user` ⚠️              |
-| `regen-fixture`                              | `clara.explorer.dev.regen-fixture` ⚠️     |
-| `regen-artifacts`                            | `clara.explorer.dev.regen-artifacts` ⚠️   |
-| `compose-artifacts`                          | `clara.explorer.dev.compose-artifacts` ⚠️ |
+| `clara.server.tools.graph.kondo-config-sync` | `clara.explorer.dev.kondo-config-sync`    |
+| `user`                                       | `user` (kept as-is — REPL convention)     |
+| `regen-fixture`                              | `clara.explorer.dev.regen-fixture`        |
+| `regen-artifacts`                            | `clara.explorer.dev.regen-artifacts`      |
+| `compose-artifacts`                          | `clara.explorer.dev.compose-artifacts`    |
 
-Files move from `dev/clara/server/...` to `dev/clara/explorer/...`. The four
-top-level script namespaces currently live at `dev/*.clj`; see
-[§5](#5-naming-decisions).
+Files move from `dev/clara/server/...` to `dev/clara/explorer/...`. The
+`clara.explorer.dev.*` scripts move to `dev/clara/explorer/dev/`; `user` stays
+at `dev/clara/explorer/user.clj`. The demo/hierarchy runners are server runners,
+so they keep the `server` bucket rather than `dev`.
 
 ### 4.4 `resources/` — resource paths mirror namespaces
 
 | Old path                                               | New path                                                  |
 | ------------------------------------------------------ | --------------------------------------------------------- |
 | `resources/clara/server/graph/editor-resolve-form.clj` | `resources/clara/explorer/server/editor-resolve-form.clj` |
-| `resources/clara/server/tools/graph/kondo-config/**`   | `resources/clara/explorer/graph/kondo-config/**`          |
+| `resources/clara/server/tools/graph/kondo-config/**`   | `resources/clara/explorer/kondo-config/**`                |
 
 The resource _lookup strings_ also change:
 
 - `clara/server/graph/editor-resolve-form.clj` (in `tokens.clj`) → `clara/explorer/server/editor-resolve-form.clj`
-- `clara/server/tools/graph/kondo-config` (in `analyze.clj`, `kondo_config.clj`) → `clara/explorer/graph/kondo-config`
-- `clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn` (in `demo_run.clj`, `integration_test.clj`, `server_test.clj`, `annotation_fixtures.clj`) → `clara/explorer/graph/annotations/loan-doc-rules-annotations.edn`
+- `clara/server/tools/graph/kondo-config` (in `analyze.clj`, `kondo_config.clj`) → `clara/explorer/kondo-config`
+- `clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn` (in `demo_run.clj`, `integration_test.clj`, `server_test.clj`, `annotation_fixtures.clj`) → `clara/explorer/annotations/loan-doc-rules-annotations.edn`
 
 The corresponding `test-resources/` fixture directory also moves:
 
-- `test-resources/clara/server/tools/graph/annotations/…` → `test-resources/clara/explorer/graph/annotations/…`
-- `test-resources/clara/server/tools/graph/empty-kondo-config` → `test-resources/clara/explorer/graph/empty-kondo-config`
+- `test-resources/clara/server/tools/graph/annotations/…` → `test-resources/clara/explorer/annotations/…`
+- `test-resources/clara/server/tools/graph/empty-kondo-config` → `test-resources/clara/explorer/empty-kondo-config`
 
 The checked-in `test-resources/rules-annos/**` example registry keeps its
 directory layout (`rules-annos/` is an artifact root, not a namespace path) but
@@ -239,33 +244,35 @@ its **contents** are regenerated — see [§7](#7-persisted-artifacts-and-annota
    [migration guide](#8-migration-guide) for the single consumer.
 3. **Vendored tooling** — `clara.server.vendor.tools.inspect` →
    `clara.explorer.vendor.tools.inspect` (no bucket fit).
-4. **Test rule namespaces → `clara.explorer.test.rules.*`.**
-   `clara.server.tools.graph.rules.*` no longer makes sense under the new
-   buckets: these are test fixtures, not graph/analysis code. They move to
-   `clara.explorer.test.rules.*` (see §4.2).
+4. **Test rule namespaces → `clara.explorer.test.rules.*`.** Test fixtures, not
+   graph/analysis code.
+5. **No `graph` segment.** `clara.server.tools.graph.*` (excluding `artifacts.*`
+   and `rules.*`) promotes to top-level `clara.explorer.*` — the `graph`
+   segment is dropped as meaningless. `analyze` / `annotations` stay their own
+   top-level namespaces with sub-namespaces; `kondo-config` (runtime) sits
+   top-level beside `analyze`.
+6. **Dev scripts → `clara.explorer.dev.*`.** `regen-fixture`, `regen-artifacts`,
+   `compose-artifacts`, and `kondo-config-sync` live under `clara.explorer.dev.*`
+   in `dev/`. The exception is `user`, which stays `user` (REPL convention).
+   The demo/hierarchy runners stay `clara.explorer.server.*` because they run
+   servers.
+7. **`::conditions/normalized` → `:clara-rules-explorer/normalized`.** The
+   internal LHS-normalization marker becomes a project-stable keyword so a
+   library namespace keyword never leaks into `:slim :dropped` again. The
+   migration guide (§8) must tell consumers how to handle the one-time
+   `:dropped` key change across old/new artifact sets.
+8. **`artifacts.serve` stays.** Both `clara.explorer.server.serve` (Jetty
+   lifecycle) and `clara.explorer.artifacts.serve` (selecting layer files to
+   hand a server) are semantically fine; buckets disambiguate. No rename.
 
-**Open (need a decision):**
+**Remaining note:**
 
-5. **Dev script namespaces** — `user`, `regen-fixture`, `regen-artifacts`,
-   `compose-artifacts`. Proposal: `clara.explorer.dev.*`; the demo/hierarchy
-   runners stay purpose-mapped to `clara.explorer.server.*` because they run
-   servers. `user` is the conventional REPL ns; renaming it changes the
-   `(user/reload-nses)` save-hook name, so it may be the one deliberate
-   exception.
-6. **`kondo-config-sync`** — mapped to `clara.explorer.graph.kondo-config-sync`
-   (it syncs a graph resource). Confirm.
-7. **Cross-bucket leaf collisions** — after (1), two leaf names appear in two
-   buckets:
-   - `serve`: `clara.explorer.server.serve` (Jetty lifecycle) vs
-     `clara.explorer.artifacts.serve` (selecting layer files to hand a server).
-   - `schema`: `clara.explorer.server.schema` (navigate contract) vs
-     `clara.explorer.artifacts.schema` (artifact key schemas).
-   Buckets disambiguate, so this is acceptable — but the two `serve`
-   namespaces are semantically adjacent and worth a deliberate choice. Options:
-   keep both, or rename `artifacts.serve` → `artifacts.layers` /
-   `artifacts.served-paths` / `artifacts.layer-selection`.
+- **`schema` appears in two buckets** — `clara.explorer.server.schema`
+  (navigate contract) and `clara.explorer.artifacts.schema` (artifact key
+  schemas). Buckets disambiguate; no action required, just a conscious
+  collision.
 
-No other `foo.foo` stutter remains once `server.server` becomes `server.serve`.
+No `foo.foo` stutter remains.
 
 ---
 
@@ -420,7 +427,7 @@ artifact values, not just the example rule namespaces. Verified in the checked-i
 | Value | Where | Kind |
 |---|---|---|
 | `"clara.server.tools.graph.artifacts.slim"` | `meta.edn` `:slim :written-by` | provenance string |
-| `:clara.server.tools.graph.conditions/normalized` | `meta.edn` `:slim :dropped` | **namespaced keyword (data key)** |
+| `:clara.server.tools.graph.conditions/normalized` (→ `:clara-rules-explorer/normalized`) | `meta.edn` `:slim :dropped` | **namespaced keyword (data key)** |
 | `clara.server.tools.graph.core/->rulebase-analysis`, `…conditions/normalize-lhs`, `…artifacts.store/read-merged-annotations` | `meta.edn` `:slim :recover` | prose |
 | `clara.server.tools.graph.artifacts.store/read-merged-annotations` | `rulebase-analysis-digest.edn` `:more` | prose |
 | `"live-session (clara.server.tools.graph.analyze/->rule-source-analysis)"` | `rules-inspect-manifest.edn` `:analysis-run :method` | provenance string |
@@ -436,18 +443,15 @@ Consequence for the single consumer:
   `:dep-graph`, `:name`, `:ns`, …); the library-ns strings above are provenance
   and prose, not read-time lookup keys.
 - **The one structural exception** is the `:slim :dropped` namespaced keyword
-  `:clara.server.tools.graph.conditions/normalized`. After the rename it
-  becomes `:clara.explorer.graph.conditions/normalized`.
-  `registry/compatibility-report` and `assert-compatible!` compare the
-  `:dropped` **key set** across units, so **mixing pre-rename and post-rename
-  units in one registry selection would be flagged/refused as shape skew** even
-  though the shape is semantically identical. If the consumer regenerates all
-  of their artifact sets once after upgrading, this never surfaces.
-- **Recommendation:** make the internal marker stable so a library namespace
-  keyword never leaks into `:slim :dropped` again — e.g. rename
-  `::conditions/normalized` to an unnamespaced `:normalized` or a project-stable
-  `:clara-rules-explorer/normalized`. This is optional and should land in the
-  same breaking release as the namespace rename.
+  `:clara.server.tools.graph.conditions/normalized`. This release changes it to
+  the project-stable `:clara-rules-explorer/normalized` (see §5.7), so it stops
+  tracking a library namespace entirely. `registry/compatibility-report` and
+  `assert-compatible!` compare the `:dropped` **key set** across units, so
+  **mixing pre- and post-change units in one registry selection is
+  flagged/refused as shape skew** even though the shape is semantically
+  identical. Regenerating all of a consumer's artifact sets once after
+  upgrading removes the old key everywhere and makes this a non-issue; the
+  migration guide must state this explicitly.
 
 ### 7.4 What does _not_ change
 
@@ -455,8 +459,9 @@ Consequence for the single consumer:
   `merged-rulebase-analysis/…`, `rules-inspect-manifest.edn`, etc.).
 - Top-level keys and their meaning.
 - The `:name`-as-handle rule (the handle itself changes value, not shape).
-- The `slim` drop-list *shape*: the set of unnamespaced dropped keys is stable;
-  only the one `::conditions/normalized` namespaced keyword's namespace changes.
+- The `slim` drop-list *shape*: the set of dropped keys is stable going forward;
+  the one `::conditions/normalized` keyword changes once, to the project-stable
+  `:clara-rules-explorer/normalized`.
 - `rebase-layer`'s mechanism (it already exists for exactly this class of
   change).
 
@@ -470,7 +475,7 @@ Consequence for the single consumer:
   regenerated with `make regen-artifacts` (and `make regen-fixture` for the
   annotation fixture).
 - **Migrated, never regenerated:** `agent-annotations.edn` (curated). Use
-  `clara.explorer.graph.annotations.rebase/rebase-layer` with an
+  `clara.explorer.annotations.rebase/rebase-layer` with an
   `{old-ns new-ns}` mapping. `rebase-layer` already remaps rule-name keys,
   `:ns-name-sym`, `:constructor-sym`, `:filename`, `:resolved-types`,
   `:fact-type`, `:via`, and recomputes callsite ids — exactly the fields §7.1
@@ -502,19 +507,24 @@ for external callers. Outline:
 1. **One-paragraph summary** of what changed and why (namespace prefix
    `clara.server.*` → `clara.explorer.*`; dir `server/` → `explorer/`).
 2. **Require/import table** — old → new for every public namespace a caller may
-   `require` (`server`, `main`, `client`, `api`, `core`, `analyze`,
-   `annotations.merge`, `artifacts.flow`, `artifacts.store`, `artifacts.registry`,
-   `serialize`, `memory`, …).
+   `require` (`serve`, `main`, `client`, `api`, `core`, `analyze`,
+   `annotations.merge`, `artifacts.flow`, `artifacts.store`,
+   `artifacts.registry`, `serialize`, `memory`, …).
 3. **Entry-point changes** — `clara.server.graph.server/start!` →
    `clara.explorer.server.serve/start!`, `clara.server.graph.main/-main` →
    `clara.explorer.server.main/-main`, demo/hierarchy runner `:main-opts`.
 4. **Persisted artifacts** — regeneration vs. migration split from §7.5, with a
    concrete `rebase-layer` invocation for `agent-annotations.edn`, plus the
    old-vs-new `:slim :dropped` shape-skew caveat from §7.3.
-5. **Annotation sidecars** — string-key rule names, `:ns-name-sym`, and callsite
+5. **The `:clara-rules-explorer/normalized` marker change** — explain that the
+   dropped-key keyword changes once from
+   `:clara.server.tools.graph.conditions/normalized` to
+   `:clara-rules-explorer/normalized`; consumers must regenerate derived
+   artifacts (or avoid mixing old/new units in one registry selection).
+6. **Annotation sidecars** — string-key rule names, `:ns-name-sym`, and callsite
    `:filename` values change; the format is otherwise unchanged.
-6. **Editor integration** — updated eval snippets and symlink targets.
-7. **Checklist** — how to verify a caller is fully migrated (no
+7. **Editor integration** — updated eval snippets and symlink targets.
+8. **Checklist** — how to verify a caller is fully migrated (no
    `clara.server.` grep hits in their code/artifacts).
 
 ---
@@ -554,7 +564,7 @@ check targets must pass.
   `clara.server.*` (this project) with `clara.rules.*` (the dependency). The
   rename to `clara.explorer.*` actually reduces that ambiguity.
 - **`clara.explorer.server.serve` vs `clara.explorer.artifacts.serve`** — two
-  `serve` leaves in different buckets; resolve §5.7 before the mechanical pass.
+  `serve` leaves in different buckets; accepted (§5.8), buckets disambiguate.
 - **Rule-namespace rename changes artifact ids** — the derived `:id` strings in
   `production-index.edn` and demo data are content-addressed from the fq name;
   every one of them changes, so golden tests and UI snapshots must be
@@ -566,6 +576,6 @@ check targets must pass.
   because `git grep` sees the target, not the link; verify with `find -type l`.
 - **Docs drift** — every doc is migrated to current (no historical copies); the
   only interim exception is the consumer migration guide.
-- **`::conditions/normalized` leaks into `:slim :dropped`** — the one library
-  namespace keyword persisted as data; it changes with the rename and affects
-  old/new registry shape comparison (§7.3). Consider making it stable.
+- **`::conditions/normalized` → `:clara-rules-explorer/normalized`** — the one
+  library namespace keyword persisted as data is being made stable (§5.7);
+  consumers must be told about the one-time `:dropped` key change (§8).
