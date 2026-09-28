@@ -4,7 +4,8 @@
   analysis can answer the same questions a live one can.
 
   The pure recomputation — the four usage closures, the `:downstream` transpose,
-  and the reference expansion — lives in `clara.server.tools.graph.shared.rehydrate`.
+  and the reference expansion — lives in
+  `clara.server.tools.graph.artifacts.shared.rehydrate`.
   This namespace is the JVM half: the annotation-backed restoration and the
   `:slim` block narrowing, which need the live annotation merge.
 
@@ -19,7 +20,7 @@
   (:require
    [clara.server.tools.graph.annotations.merge :as ann.merge]
    [clara.server.tools.graph.conditions :as conditions]
-   [clara.server.tools.graph.shared.rehydrate :as shared-rehydrate]
+   [clara.server.tools.graph.artifacts.shared.rehydrate :as shared-rehydrate]
    [clojure.set :as set]))
 
 (set! *warn-on-reflection* true)
@@ -80,7 +81,7 @@
 (defn rehydrate-analysis
   "`analysis` with every direction `slim` dropped because it is recomputable put
   back. The pure recomputation delegates to
-  `clara.server.tools.graph.shared.rehydrate/rehydrate-analysis`; this wrapper
+  `clara.server.tools.graph.artifacts.shared.rehydrate/rehydrate-analysis`; this wrapper
   adds the annotation-backed restoration and narrows the `:slim` block.
 
   `opts`:

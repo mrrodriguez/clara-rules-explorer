@@ -1,1 +1,1 @@
-../../server/resources/clara/server/tools/graph/shared/editor-resolve-form.clj
+../../server/resources/clara/server/graph/shared/editor-resolve-form.clj

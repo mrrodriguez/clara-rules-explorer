@@ -1,4 +1,4 @@
-(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.shared.navigate
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.graph.shared.navigate
   "Pure editor navigation over a rehydrated rulebase-analysis map: given an analysis and a
   `shared-schema/NavigateInput`, answers which productions produce or consume the type under the
   cursor.
@@ -8,8 +8,8 @@
   `clara.server.graph.client/navigate` supplies the JVM implementations (live `ns-resolve` over the
   editor's namespaces, source locations from var metadata); the babashka client supplies
   fully-qualified-assuming ones with an always-absent source."
-  (:require [clara.server.tools.graph.shared.schema :as shared-schema]
-            [clara.server.tools.graph.shared.tokens :as tokens]
+  (:require [clara.server.graph.shared.schema :as shared-schema]
+            [clara.server.graph.shared.tokens :as tokens]
             [clojure.set :as set]
             [schema.core :as s]))
 

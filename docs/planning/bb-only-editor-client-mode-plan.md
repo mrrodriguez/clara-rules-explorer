@@ -42,9 +42,11 @@ Lua over the same contract — nothing in the client changes for it.
 - **slim analysis** — what is on disk: the analysis with recomputable directions
   dropped. Its inverse is `rehydrate/rehydrate-analysis`.
 - **navigate** — `clara.server.graph.client/navigate`, the editor-facing query.
-- **shared namespace** — a namespace under `clara.server.tools.graph.shared.*`
-  that both the JVM and bb `require`, marked `:clara-rules-explorer/bb-loaded true`
-  on its ns form. See "Reuse between JVM and bb".
+- **shared namespace** — a namespace marked `:clara-rules-explorer/bb-loaded true`
+  that both the JVM and bb `require`, scoped to mirror its source domain:
+  `clara.server.tools.graph.artifacts.shared.*` for artifact-merge logic and
+  `clara.server.graph.shared.*` for editor-navigation logic. See "Reuse between
+  JVM and bb".
 
 ## Why the current client cannot run under bb
 
@@ -222,11 +224,13 @@ we share real namespaces. Two mechanisms, in order of preference:
 
 ### 1. `shared.` namespaces — the primary reuse mechanism
 
-A namespace under `clara.server.tools.graph.shared.*` marked
-`:clara-rules-explorer/bb-loaded true` is the home for logic both the JVM and bb
-`require`. Convention: **`clara.server.tools.graph.shared.<name>` holds logic
-extracted from `clara.server.tools.graph.<…>.<name>`** — one segment `shared.`
-lower, so the extracted piece and its home are visually paired.
+A namespace marked `:clara-rules-explorer/bb-loaded true` is the home for logic
+both the JVM and bb `require`. Convention: **a shared namespace sits beside its
+source domain** — the shared parts of `clara.server.tools.graph.artifacts.registry`
+live in `clara.server.tools.graph.artifacts.shared.registry`, and the shared
+parts of `clara.server.graph.client` live in `clara.server.graph.shared.*` — so
+the extracted piece keeps its semantic grouping instead of flattening into one
+`shared.*` tree.
 
 The discipline that makes it safe: **a `shared.` namespace must not `:require`
 anything bb cannot load.** This is self-enforcing — bb `require` of a namespace
@@ -243,12 +247,14 @@ Candidate extractions (final naming to implementation):
 
 | shared namespace | extracted from | holds |
 | --- | --- | --- |
-| `…graph.shared.hierarchy` | `annotations_report.bb` (`->descendants`, `with-hierarchy`) + `rehydrate` + `artifacts.hierarchy` | the transpose and the two closure directions — the one part that is easy to get wrong |
-| `…graph.shared.rehydrate` | `rehydrate`'s `->usage-maps` / `->downstream` | the four usage closures + `:downstream` transpose, over slim-shaped maps |
+| `…artifacts.shared.hierarchy` | `annotations_report.bb` (`->descendants`, `with-hierarchy`) + `artifacts.hierarchy` | the transpose, the two closure directions, the ancestor union + re-closure, and the deepest-first order |
+| `…artifacts.shared.registry` | `artifacts.registry`'s `unit-key` / `narrow-analysis` | the pure per-unit helpers |
+| `…artifacts.shared.rehydrate` | `rehydrate`'s `->usage-maps` / `->downstream` | the four usage closures + `:downstream` transpose, over slim-shaped maps |
+| `…artifacts.shared.selection` | `selection/->selection` | the shared merge preamble: read + narrow + assert-compatible + unioned hierarchy + coverage |
+| `…artifacts.shared.compose` | `compose/->composed-analysis` | production merge by fq name, fact-type union, dep-graph recompute |
 | `…graph.shared.navigate` | `client/navigate` + its private fns | pure navigation over a rehydrated analysis map |
 | `…graph.shared.tokens` | `client`'s `resolve-token` fns | keyword/string/ctor-form syntactic normalization + callsite string matching |
-| `…graph.shared.selection` | `selection/->selection` | the shared merge preamble: read + narrow + assert-compatible + unioned hierarchy + coverage |
-| `…graph.shared.compose` | `compose/->composed-analysis` | production merge by fq name, fact-type union, dep-graph recompute |
+| `…graph.shared.schema` | `client`'s navigate schemas | the navigate contract, shared by both runtimes |
 
 ### 2. Reader conditionals — only for the genuinely-different boundary
 
@@ -295,7 +301,7 @@ A bb script then does:
 
 ```clojure
 (load-file (str (fs/path (fs/parent (fs/canonicalize *file*)) "bootstrap.bb")))
-(require '[clara.server.tools.graph.shared.navigate :as navigate])
+(require '[clara.server.graph.shared.navigate :as navigate])
 ```
 
 `load-file`d (not `require`d) because bootstrap is what makes `require` work in
@@ -305,8 +311,9 @@ loaded, which is what keeps this safe.
 
 Notes:
 
-- `shared.schema` is a `shared.` namespace and `schema.core` is a deliberate
-  dependency: schema is supported under bb (provisioned by `bootstrap.bb`) and
+- `clara.server.graph.shared.schema` is a shared namespace and `schema.core` is
+  a deliberate dependency: schema is supported under bb (provisioned by
+  `bootstrap.bb`) and
   its `s/defn`/`s/defschema` annotations document the contract and are enforced
   at test time by the `schema.test/validate-schemas` fixture — not by explicit
   runtime `s/validate` calls.
@@ -400,10 +407,11 @@ trailing `.`, and pull the class out of `X/new`) **before**
 Those few extra lines are why the full form is a port of
 `client/resolve-token` (and why it then needs `clojure.string/replace` for the
 `-`→`_` record-name step), and why it lands in
-`clara.server.tools.graph.shared.tokens` so the editor form and the client
-cannot drift. The form lives in one canonical file,
-`server/resources/clara/server/tools/graph/shared/editor-resolve-form.clj`,
-read as text by `shared.tokens/editor-token-resolve-form` and symlinked beside
+`clara.server.graph.shared.tokens` so the editor form and the client cannot
+drift. The form lives in one canonical file,
+`server/resources/clara/server/graph/shared/editor-resolve-form.clj`,
+read as text by `clara.server.graph.shared.tokens/editor-token-resolve-form`
+and symlinked beside
 each editor transport so nothing is re-typed. The symlinks are repo-relative;
 the editor package/plugin build step must materialize the file into each
 package-local directory before release.
@@ -430,10 +438,11 @@ the JVM path already emits.
 The bb `:resolve-token` returns a kind-explicit type-name string, or **nil**
 when the token is not a resolvable type name. It must not fabricate a string
 for an unresolvable token: the JVM runtime's `"symbol[...]"` sentinel is
-JVM-only (it is the filter target of `shared.tokens/real-type-name?`), and the
-bb side relies on the same `real-type-name?` `some?` check plus the
-`:fact-types` key intersection to discard non-types. Nil-for-unresolved is what
-keeps `real-type-name?` meaningful on both runtimes.
+JVM-only (it is the filter target of
+`clara.server.graph.shared.tokens/real-type-name?`), and the bb side relies on
+the same `real-type-name?` `some?` check plus the `:fact-types` key
+intersection to discard non-types. Nil-for-unresolved is what keeps
+`real-type-name?` meaningful on both runtimes.
 
 ## Design
 
@@ -444,26 +453,27 @@ shrink the port to a single, pure code path:
 - **editor-side token resolution** — the editor resolves aliased symbols to fq
   over its repl before calling `navigate`.
 
-With both, `shared.navigate` is pure over a rehydrated analysis map. Live
-`ns-resolve`/class-loading stays in the JVM shell (`client.clj`); the bb client
-assumes editor-resolved fully-qualified tokens, so no reader conditional is
-needed.
+With both, `clara.server.graph.shared.navigate` is pure over a rehydrated
+analysis map. Live `ns-resolve`/class-loading stays in the JVM shell
+(`client.clj`); the bb client assumes editor-resolved fully-qualified tokens, so
+no reader conditional is needed.
 
 1. **Extract `shared.` namespaces** (§Reuse 1) — move the pure navigation body
    and the rehydration closures out of `clara.server.graph.client` /
-   `clara.server.tools.graph.artifacts.rehydrate` into
-   `clara.server.tools.graph.shared.*`. Both the JVM side and bb `require` the
-   same code; the closures are defined once, so the drift risk disappears.
+   `clara.server.tools.graph.artifacts.rehydrate` into the domain-scoped shared
+   namespaces. Both the JVM side and bb `require` the same code; the closures
+   are defined once, so the drift risk disappears.
 
 2. **Keep `clara.server.graph.client` as the JVM shell** — it keeps what is
    JVM-only: system registration (`register!`, `get-current-system`),
    `get-production-source` (var metadata), `swap-session!` /
    `register-session-swap-opts-fn`, and live token resolution.
-   It delegates navigation to `shared.navigate`, supplying the rehydrated
-   in-memory analysis from `cache/get-rulebase-analysis`. With editor-side token
-   resolution (§0b) the live `ns-resolve`/`ctor` resolver becomes an optional
-   back-compat escape hatch (the `:clj` branch of `shared.tokens`) for nREPL
-   callers that still send raw tokens, not a required part of the contract.
+   It delegates navigation to `clara.server.graph.shared.navigate`, supplying
+   the rehydrated in-memory analysis from `cache/get-rulebase-analysis`. With
+   editor-side token resolution (§0b) the live `ns-resolve`/`ctor` resolver
+   becomes an optional back-compat escape hatch (the `:clj` branch of
+   `clara.server.graph.shared.tokens`) for nREPL callers that still send raw
+   tokens, not a required part of the contract.
 
 3. **A bb entry point with the same EDN contract** — `server/bin/editor_client.bb`
    (beside `annotations_report.bb`) is the bb twin of `navigate`:
@@ -473,10 +483,13 @@ needed.
    ```
 
    It `load-file`s `bootstrap.bb`, composes the selected units on the fly —
-   `shared.selection` → `shared.compose` → `shared.rehydrate` (the pure forms
-   of `selection/->selection`, `compose/->composed-analysis`,
-   `rehydrate/rehydrate-analysis`) — then calls `shared.navigate/navigate` with
-   the bb token resolver and prints the EDN `NavigateResponse` to stdout; errors
+   `clara.server.tools.graph.artifacts.shared.selection` →
+   `clara.server.tools.graph.artifacts.shared.compose` →
+   `clara.server.tools.graph.artifacts.shared.rehydrate` (the pure forms of
+   `selection/->selection`, `compose/->composed-analysis`,
+   `rehydrate/rehydrate-analysis`) — then calls
+   `clara.server.graph.shared.navigate/navigate` with the bb token resolver and
+   prints the EDN `NavigateResponse` to stdout; errors
    print `{:error "…"}`. A fresh subprocess per query re-reads the selected
    units every time, so reload-on-change is free (Decision 3). Incremental
    starting point: implement against a single-unit selection
@@ -497,19 +510,20 @@ needed.
 
 | file | change |
 | --- | --- |
-| `server/src/clara/server/tools/graph/shared/hierarchy.clj` (new) | transpose + the two closures, extracted from `annotations_report.bb` / `rehydrate` |
-| `server/src/clara/server/tools/graph/shared/rehydrate.clj` (new) | four usage closures + `:downstream` transpose over slim-shaped maps |
-| `server/src/clara/server/tools/graph/shared/navigate.clj` (new) | pure `navigate` + navigation fns over a rehydrated analysis map (schema-annotated, `:clara-rules-explorer/bb-loaded`) |
-| `server/src/clara/server/tools/graph/shared/schema.clj` (new) | the navigate contract schemas (`NavigateInput`/`NavigateResponse`/`NavigateRuntime`), shared by both runtimes |
-| `server/src/clara/server/tools/graph/shared/tokens.clj` (new) | token normalization + callsite string matching + the editor resolve-form builder (live `ns-resolve` stays in `client.clj`) |
-| `server/src/clara/server/tools/graph/shared/selection.clj` (new) | the shared merge preamble (`selection/->selection`) |
-| `server/src/clara/server/tools/graph/shared/compose.clj` (new) | production merge + fact-type union + dep-graph recompute (`compose/->composed-analysis`) |
-| `server/src/clara/server/graph/client.clj` | becomes the JVM shell: keeps `register!`, `get-production-source`, `swap-session!`, and live token resolution; delegates navigation to `shared.navigate` |
-| `server/src/clara/server/tools/graph/artifacts/rehydrate.clj` | delegates its closure bodies to `shared.rehydrate` / `shared.hierarchy` |
+| `server/src/clara/server/tools/graph/artifacts/shared/hierarchy.clj` (new) | transpose + closures + union + re-closure + order, extracted from `annotations_report.bb` / `artifacts.hierarchy` |
+| `server/src/clara/server/tools/graph/artifacts/shared/registry.clj` (new) | `unit-key` + `narrow-analysis` (pure per-unit helpers) |
+| `server/src/clara/server/tools/graph/artifacts/shared/rehydrate.clj` (new) | four usage closures + `:downstream` transpose over slim-shaped maps |
+| `server/src/clara/server/tools/graph/artifacts/shared/selection.clj` (new) | the shared merge preamble (`selection/->selection`) |
+| `server/src/clara/server/tools/graph/artifacts/shared/compose.clj` (new) | production merge + fact-type union + dep-graph recompute (`compose/->composed-analysis`) |
+| `server/src/clara/server/graph/shared/navigate.clj` (new) | pure `navigate` + navigation fns over a rehydrated analysis map (schema-annotated, `:clara-rules-explorer/bb-loaded`) |
+| `server/src/clara/server/graph/shared/schema.clj` (new) | the navigate contract schemas (`NavigateInput`/`NavigateResponse`/`NavigateRuntime`), shared by both runtimes |
+| `server/src/clara/server/graph/shared/tokens.clj` (new) | token normalization + callsite string matching + the editor resolve-form builder (live `ns-resolve` stays in `client.clj`) |
+| `server/src/clara/server/graph/client.clj` | becomes the JVM shell: keeps `register!`, `get-production-source`, `swap-session!`, and live token resolution; delegates navigation to `clara.server.graph.shared.navigate` |
+| `server/src/clara/server/tools/graph/artifacts/rehydrate.clj` | delegates its closure bodies to `clara.server.tools.graph.artifacts.shared.rehydrate` |
 | `server/bin/bootstrap.bb` (new) | add `server/src` + prismatic/schema to the bb classpath (version from `deps.edn`) |
 | `server/bin/bb_shared_smoke_test.bb` (new) | discover every `:clara-rules-explorer/bb-loaded` ns under `server/src` and `require` each under bb (`make bb-smoke-test`) |
-| `server/bin/editor_client.bb` (new) | bb entry: bootstrap, compose the registry selection (`shared.selection` → `shared.compose` → `shared.rehydrate`), call `shared.navigate`, print EDN |
-| `server/bin/annotations_report.bb` | migrate to `bootstrap.bb` + `shared.hierarchy` after `editor_client.bb` is proven (drop its inline closure reimpls and the `layout.cljc` symlink) |
+| `server/bin/editor_client.bb` (new) | bb entry: bootstrap, compose the registry selection (`clara.server.tools.graph.artifacts.shared.selection` → `clara.server.tools.graph.artifacts.shared.compose` → `clara.server.tools.graph.artifacts.shared.rehydrate`), call `clara.server.graph.shared.navigate`, print EDN |
+| `server/bin/annotations_report.bb` | migrate to `bootstrap.bb` + `clara.server.tools.graph.artifacts.shared.hierarchy` after `editor_client.bb` is proven (drop its inline closure reimpls and the `layout.cljc` symlink) |
 | `server/docs/persisted-artifacts.md` | note the new offline reader + the `shared.` convention |
 | `editor/emacs/clara-explorer.el` | add bb transport + config defcustoms; pre-resolve aliased symbol tokens to fq via CIDER before sending |
 | `editor/neovim/lua/clara-explorer/*.lua` | later, same transport + pre-resolution change |
@@ -524,16 +538,18 @@ needed.
        fq before calling `navigate`), so the client does no live resolution;
        keep passing `:caller-ns` as context. See "Step 0b in detail".
 1. **Extract + parity (no bb yet).** Move the navigation body and closures into
-   `shared.*`, have the JVM `client.clj` and `rehydrate.clj` delegate to them,
-   and pin parity with the existing `client`/`rehydrate`/`slim` tests. No
-   behavior change; de-risks the split.
+   the domain-scoped shared namespaces, have the JVM `client.clj` and
+   `rehydrate.clj` delegate to them, and pin parity with the existing
+   `client`/`rehydrate`/`slim` tests. No behavior change; de-risks the split.
 2. **`bootstrap.bb` + bb smoke test.** Add `bootstrap.bb` and a test that
    discovers every `:clara-rules-explorer/bb-loaded` ns under `server/src` and
    `require`s each under bb (`server/src` + schema from `deps.edn`).
 3. **bb entry script.** Implement `editor_client.bb` taking a registry
    selection (`{:root … :units […]}`). Start with a single-unit selection
    (reusing the read path `annotations_report.bb` already has), then generalize
-   to multi-unit composition via `shared.selection`/`shared.compose`. Verify
+   to multi-unit composition via
+   `clara.server.tools.graph.artifacts.shared.selection` /
+   `clara.server.tools.graph.artifacts.shared.compose`. Verify
    against `annotations_report.bb`'s `producers`/`consumers` and `rehydrate`
    over the checked-in example registry
    (`clara.server.tools.graph.artifacts.regen-example/example-out-dir`).
@@ -545,9 +561,10 @@ needed.
 ## Risks and mitigations
 
 - **Closure direction wrong in a reimplementation.** Eliminated, not mitigated:
-  the closures live in `shared.hierarchy` and are `require`d by both sides, so
-  there is one definition to get right. Parity is pinned by `slim-test`'s
-  dropped-directions-invert-back test on the JVM side and the bb smoke test.
+  the closures live in `clara.server.tools.graph.artifacts.shared.hierarchy`
+  and are `require`d by both sides, so there is one definition to get right.
+  Parity is pinned by `slim-test`'s dropped-directions-invert-back test on the
+  JVM side and the bb smoke test.
 - **A `shared.` namespace accidentally requires a bb-incompatible dep.** bb
   `require` fails loudly at load (verified), and the bb smoke test forces every
   `:clara-rules-explorer/bb-loaded` namespace through that load.
@@ -591,13 +608,13 @@ needed.
    var itself and passes an explicit `:root`, matching the library's "reads no
    env var; the host resolves `$…_HOME`" convention.
 
-5. **Schema in `shared.*`, enforced at test time only.** Schema is used in the
-   shared namespaces (`shared.schema` holds the contract, `shared.navigate` is
-   `s/defn`-annotated): it loads under bb via `bootstrap.bb` and serves as the
-   executable documentation of the contract. There are **no explicit runtime
-   `s/validate` calls** — the `schema.test/validate-schemas` test fixture turns
-   the `s/defn` annotations into test-time enforcement, and `s/defn` is inert at
-   runtime by default.
+5. **Schema in shared namespaces, enforced at test time only.** Schema is used
+   in the shared namespaces (`clara.server.graph.shared.schema` holds the
+   contract, `clara.server.graph.shared.navigate` is `s/defn`-annotated): it
+   loads under bb via `bootstrap.bb` and serves as the executable documentation
+   of the contract. There are **no explicit runtime `s/validate` calls** — the
+   `schema.test/validate-schemas` test fixture turns the `s/defn` annotations
+   into test-time enforcement, and `s/defn` is inert at runtime by default.
 
 6. **`annotations_report.bb` migration** — migrate it to `bootstrap.bb` /
    `shared.*` after `editor_client.bb` is proven; leave it on the symlink until

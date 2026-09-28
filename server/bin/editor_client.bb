@@ -8,14 +8,15 @@
 ;; <selection-edn> is a registry selection `{:root "…" :units [{:repo "…"}]}` — the same shape the
 ;; server's `:registry` mode takes; the editor resolves the `CLARA_RULES_EXPLORER_REGISTRY` root
 ;; itself and passes it explicitly. <navigate-input-edn> is a
-;; `clara.server.tools.graph.shared.schema/NavigateInput` map, e.g. `{:production "ns/rule" :side
+;; `clara.server.graph.shared.schema/NavigateInput` map, e.g. `{:production "ns/rule" :side
 ;; :lhs :token "com.example.Loan"}`.
 ;;
 ;; A single unit and a multi-unit selection take the same path:
-;; `shared.selection` (read + narrow + assert-compatible + unioned hierarchy) →
-;; `shared.compose` (production merge + fact-type union + dep-graph recompute) →
-;; `shared.rehydrate` → `shared.navigate`. This mirrors the server's `:registry` mode, so the bb
-;; answer and the nREPL answer over the same selection agree.
+;; `clara.server.tools.graph.artifacts.shared.selection/->selection` →
+;; `clara.server.tools.graph.artifacts.shared.compose/->composed-analysis` →
+;; `clara.server.tools.graph.artifacts.shared.rehydrate/rehydrate-analysis` →
+;; `clara.server.graph.shared.navigate/navigate`. This mirrors the server's `:registry` mode, so the
+;; bb answer and the nREPL answer over the same selection agree.
 ;;
 ;; The editor resolves aliased/:: tokens to fq over its repl before calling, so this script assumes
 ;; fq-in and does only pure normalization + callsite string matching. Source locations are always
@@ -27,11 +28,11 @@
 (load-file (str (fs/file (fs/parent (fs/canonicalize *file*)) "bootstrap.bb")))
 
 (require '[clara.server.tools.graph.artifacts.layout :as layout]
-         '[clara.server.tools.graph.shared.compose :as shared-compose]
-         '[clara.server.tools.graph.shared.navigate :as shared-navigate]
-         '[clara.server.tools.graph.shared.rehydrate :as shared-rehydrate]
-         '[clara.server.tools.graph.shared.selection :as shared-selection]
-         '[clara.server.tools.graph.shared.tokens :as tokens])
+         '[clara.server.tools.graph.artifacts.shared.compose :as shared-compose]
+         '[clara.server.tools.graph.artifacts.shared.rehydrate :as shared-rehydrate]
+         '[clara.server.tools.graph.artifacts.shared.registry :as shared-registry]
+         '[clara.server.graph.shared.navigate :as shared-navigate]
+         '[clara.server.graph.shared.tokens :as tokens])
 
 (defn- die [& msg]
   (binding [*out* *err*] (apply println msg))
@@ -91,13 +92,13 @@
     (when (seq no-analysis)
       (throw (ex-info (format "%d unit(s) have no merged-rulebase-analysis to merge: %s"
                               (count no-analysis)
-                              (pr-str (mapv shared-selection/unit-key no-analysis)))
+                              (pr-str (mapv shared-registry/unit-key no-analysis)))
                       {:no-analysis no-analysis})))
     (when-not (apply = dropped)
       (throw (ex-info (format "Cannot merge registry units with differing slim shapes: %s"
-                              (pr-str (mapv shared-selection/unit-key selection)))
+                              (pr-str (mapv shared-registry/unit-key selection)))
                       {:dropped (into {} (map (fn [unit d]
-                                                [(shared-selection/unit-key unit) d])
+                                                [(shared-registry/unit-key unit) d])
                                               selection dropped))})))))
 
 (defn- read-token

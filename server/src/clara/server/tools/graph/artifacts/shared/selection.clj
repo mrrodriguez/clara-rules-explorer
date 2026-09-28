@@ -1,4 +1,4 @@
-(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.shared.selection
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.artifacts.shared.selection
   "The merge preamble shared by the JVM artifact merge and the babashka editor client: read a
   caller-named selection of artifact units, narrow each to its `:namespaces` filter, and compute
   the unioned, re-closed hierarchy and the namespace coverage — once, for every merge mode.
@@ -6,48 +6,14 @@
   Registry I/O is injected through the capabilities map so this namespace stays free of
   `clara.server.tools.graph.artifacts.registry`, which bb cannot load (it transitively pulls
   `clara.server.tools.graph.serialize` → `clara.rules.schema`). `:read-analysis` reads one unit's
-  slim analysis, `:assert-compatible!` refuses shape skew, and the pure per-unit helpers
-  (`unit-key`, `narrow-analysis`) live here — `clara.server.tools.graph.artifacts.registry`
-  delegates to them so the JVM and bb share one definition.
+  slim analysis, `:assert-compatible!` refuses shape skew. The pure per-unit helpers live in
+  `clara.server.tools.graph.artifacts.shared.registry`.
 
   Nothing here decides which units belong together — the selection arrives named and ordered, and
   `->selection` returns a value describing it."
-  (:require [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
+  (:require [clara.server.tools.graph.artifacts.shared.hierarchy :as hierarchy]
+            [clara.server.tools.graph.artifacts.shared.registry :as shared-registry]
             [clojure.set :as set]))
-
-;; ===========================================================================
-;; per-unit helpers (pure — shared with `artifacts.registry`)
-;; ===========================================================================
-
-(defn unit-key
-  "The string handle for a unit ref: `<repo>[@<branch>]`. A `UnitRef` map is not
-  a comparable map key under the library's own `sorted-map` convention, so maps
-  keyed by unit use this."
-  [{:keys [repo branch]}]
-  (str repo (when (seq branch) (str "@" branch))))
-
-(defn narrow-analysis
-  "Narrow `analysis` to `unit`'s `:namespaces` filter, when present: `:rules`
-  and `:queries` keep only the productions whose `:ns` is in the filter (as
-  strings). `:fact-types` stays whole — keyed by type, not namespace, and the
-  hierarchy benefits from staying global — and `:dep-graph` is left alone,
-  because the compose merge recomputes it over the merged productions.
-  `:unresolved` and `:slim` pass through.
-
-  Without a filter the analysis is returned unchanged. Both
-  `clara.server.tools.graph.artifacts.federate/->index` and the compose merge
-  apply this when they read a unit for a merge, so a `UnitRef` narrowed to a
-  subset of a unit's namespaces excludes the productions outside that subset."
-  [analysis unit]
-  (if-let [nses (:namespaces unit)]
-    (let [nses (into #{} (map str) nses)
-          keep? (fn [[_ {:keys [ns]}]] (contains? nses (str ns)))
-          narrow (fn [productions]
-                   (into (sorted-map) (filter keep?) productions))]
-      (cond-> analysis
-        (contains? analysis :rules) (update :rules narrow)
-        (contains? analysis :queries) (update :queries narrow)))
-    analysis))
 
 ;; ===========================================================================
 ;; reading the selection
@@ -60,7 +26,7 @@
   [read-analysis unit]
   (or (read-analysis unit)
       (throw (ex-info (format "Unit %s has no merged-rulebase-analysis to merge"
-                              (unit-key unit))
+                              (shared-registry/unit-key unit))
                       {:unit unit}))))
 
 ;; ===========================================================================
@@ -103,7 +69,7 @@
   [covered-by-unit selection]
   (into {}
         (map (fn [unit]
-               (let [uk (unit-key unit)]
+               (let [uk (shared-registry/unit-key unit)]
                  [uk (->scoped-namespaces
                       (get covered-by-unit uk #{})
                       (->requested-namespaces unit))])))
@@ -164,14 +130,15 @@
     (assert-compatible! selection)
     (let [un-narrowed (into {}
                             (map (fn [unit]
-                                   [(unit-key unit) (read-analysis! read-analysis unit)]))
+                                   [(shared-registry/unit-key unit)
+                                    (read-analysis! read-analysis unit)]))
                             selection)
           covered-by-unit (->covered-namespaces-by-unit un-narrowed)
           analyses (into {}
                          (map (fn [unit]
-                                [(unit-key unit)
-                                 (narrow-analysis
-                                  (get un-narrowed (unit-key unit)) unit)]))
+                                [(shared-registry/unit-key unit)
+                                 (shared-registry/narrow-analysis
+                                  (get un-narrowed (shared-registry/unit-key unit)) unit)]))
                          selection)
           ancestors (->> (vals analyses)
                          (map :fact-types)
@@ -181,6 +148,6 @@
        :ancestors ancestors
        :descendants (hierarchy/->descendants ancestors)
        :hierarchy-conflicts (->ancestor-conflicts analyses)
-       :coverage {:units (mapv unit-key selection)
+       :coverage {:units (mapv shared-registry/unit-key selection)
                   :namespaces (->namespaces covered-by-unit selection)
                   :unknown-namespaces (->unknown-namespaces covered-by-unit selection)}})))

@@ -5,11 +5,11 @@
   namespace coverage — once, for every merge mode.
 
   The pure preamble lives in
-  `clara.server.tools.graph.shared.selection/->selection`, which takes the
-  registry I/O as an injected capabilities map so the babashka editor client can
-  share it without loading `clara.server.tools.graph.artifacts.registry`. This
-  namespace supplies the JVM registry's capabilities: memoized `read-analysis`
-  and the shape-skew `assert-compatible!`.
+  `clara.server.tools.graph.artifacts.shared.selection/->selection`, which takes
+  the registry I/O as an injected capabilities map so the babashka editor client
+  can share it without loading `clara.server.tools.graph.artifacts.registry`.
+  This namespace supplies the JVM registry's capabilities: memoized
+  `read-analysis` and the shape-skew `assert-compatible!`.
 
   `clara.server.tools.graph.artifacts.compose` and
   `clara.server.tools.graph.artifacts.federate` both consume this: it is the
@@ -23,14 +23,15 @@
   and ordered, and this namespace returns a value describing it."
   (:require
    [clara.server.tools.graph.artifacts.registry :as registry]
-   [clara.server.tools.graph.shared.selection :as shared-selection]))
+   [clara.server.tools.graph.artifacts.shared.selection :as shared-selection]))
 
 (set! *warn-on-reflection* true)
 
 (defn ->selection
   "A mergeable selection of `units` under `registry`, as one value — delegates
-  to `clara.server.tools.graph.shared.selection/->selection` with the JVM
-  registry's capabilities. See that namespace for the returned value's shape."
+  to `clara.server.tools.graph.artifacts.shared.selection/->selection` with the
+  JVM registry's capabilities. See that namespace for the returned value's
+  shape."
   [registry selection]
   (shared-selection/->selection
    {:read-analysis #(registry/read-analysis registry %)

@@ -128,10 +128,8 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
 - [x] `shared.selection` / `shared.compose` — assessed: `registry` is NOT
       bb-safe (transitively pulls `serialize` → `clara.rules.schema`), so the
       shared forms take an injected capabilities map (`:read-analysis` /
-      `:assert-compatible!`) rather than `:require` `registry`. The pure
-      per-unit helpers (`unit-key`, `narrow-analysis`) moved into
-      `shared.selection`, and `registry` delegates to them, so there is one
-      definition on both runtimes. Landed with the Phase 3 multi-unit step.
+      `:assert-compatible!`) rather than `:require` `registry`. Landed with the
+      Phase 3 multi-unit step, then re-scoped (see the re-scoping note).
 - [x] `shared.tokens` gained `record-ctor-class-symbol` — the pure syntactic
       half of `ctor/resolve-record-type` (strip `->`/`map->`, hyphen→underscore
       on the ns, no class-load). Pinned against `ctor/resolve-record-type` for
@@ -163,18 +161,14 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
       runtime (keyword / string / record-ctor normalization; `:var? false`
       sources). Verified over the checked-in `loan-app-ruleset` unit
       (LHS / RHS record-ctor / global / error).
-- [x] Multi-unit via `shared.selection` / `shared.compose`. Both landed as
-      bb-loaded namespaces taking an injected capabilities map
-      (`:read-analysis` / `:assert-compatible!`); the pure per-unit helpers
-      (`unit-key`, `narrow-analysis`) moved into `shared.selection` so the JVM
-      `registry` delegates to the one definition. `editor_client.bb` now always
-      composes the selection (single and multi-unit alike, mirroring the
-      server's `:registry` mode) — `shared.selection` → `shared.compose` →
-      `shared.rehydrate` → `shared.navigate`. `compose.clj` keeps only the
-      `:layers` fold half; the `:compose` half delegates to `shared.compose`.
-      `:written-by` stays `clara.server.tools.graph.artifacts.compose` so the
-      persisted composed example is byte-for-byte unchanged
-      (`regen-example-test` still green).
+- [x] Multi-unit via the shared selection + compose namespaces, each taking an
+      injected capabilities map (`:read-analysis` / `:assert-compatible!`).
+      `editor_client.bb` always composes the selection (single and multi-unit
+      alike, mirroring the server's `:registry` mode). `compose.clj` keeps only
+      the `:layers` fold half; the `:compose` half delegates to the shared
+      compose. `:written-by` stays
+      `clara.server.tools.graph.artifacts.compose` so the persisted composed
+      example is byte-for-byte unchanged (`regen-example-test` still green).
 - [x] Parity verified against the checked-in example registry: new
       `editor-client-bb-test` composes the two `rules-annos/` source units in
       bb and asserts the producer/consumer target name-sets equal the JVM
@@ -208,10 +202,22 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
   `~/.clojure/.cpcache`, which the sandbox denies), so verification is via
   `make test` (cognitect test-runner; `-n <ns>` / `-v <var>` to focus), not the
   running REPL on `:52909`.
-- Schema is a deliberate `shared.*` dependency (`shared.schema`,
-  `shared.navigate`): it loads under bb via `bootstrap.bb` and is enforced only
-  at test time (`schema.test/validate-schemas`), with no explicit runtime
-  `s/validate`.
+- Schema is a deliberate shared dependency
+  (`clara.server.graph.shared.schema`, `clara.server.graph.shared.navigate`):
+  it loads under bb via `bootstrap.bb` and is enforced only at test time
+  (`schema.test/validate-schemas`), with no explicit runtime `s/validate`.
+- Re-scoping: the flat `clara.server.tools.graph.shared.*` prefix was replaced
+  with domain-scoped shared namespaces that mirror where each piece came from —
+  `clara.server.tools.graph.artifacts.shared.hierarchy` /
+  `.rehydrate` / `.selection` / `.compose` / `.registry`, and
+  `clara.server.graph.shared.navigate` / `.tokens` / `.schema`. Pure passthrough
+  delegates (`artifacts.registry/unit-key` and `narrow-analysis`,
+  `artifacts.compose/union-fact-types`, and the `artifacts.hierarchy` closure
+  re-exports) were removed — callers require the shared namespace directly —
+  while the value-adding JVM delegates (`selection/->selection`,
+  `compose/->composed-analysis`, `rehydrate/rehydrate-analysis`, `client/navigate`)
+  stay. The editor resolve-form resource moved beside `shared.tokens`
+  (`resources/clara/server/graph/shared/`), and the editor symlinks re-point.
 - The neovim bb transport's `vim.system` `on_exit` callback runs in a LibUV
   "fast event" context where `nvim_win_is_valid` / `nvim_set_current_win` (and
   other window/buffer APIs) are forbidden. The callback body is therefore

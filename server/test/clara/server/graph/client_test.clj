@@ -11,7 +11,7 @@
             [clara.server.tools.graph.rules.loan-app-rules]
             [clara.server.tools.graph.rules.loan-doc-rules]
             [clara.server.tools.graph.rules.loan-hierarchy-rules :as lhr]
-            [clara.server.tools.graph.shared.tokens :as shared-tokens]
+            [clara.server.graph.shared.tokens :as shared-tokens]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
@@ -316,7 +316,7 @@
 
 (deftest test-editor-resolve-form-stays-in-sync
   (let [root (repo-root)
-        canonical (slurp (io/file root "server/resources/clara/server/tools/graph/shared/editor-resolve-form.clj"))
+        canonical (slurp (io/file root "server/resources/clara/server/graph/shared/editor-resolve-form.clj"))
         el (slurp (io/file root "editor/emacs/editor-resolve-form.clj"))
         lua (slurp (io/file root "editor/neovim/lua/clara-explorer/editor-resolve-form.clj"))]
     (is (= canonical el)

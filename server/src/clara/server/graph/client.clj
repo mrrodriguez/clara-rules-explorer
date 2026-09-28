@@ -16,9 +16,9 @@
   (:require [clara.server.graph.cache :as cache]
             [clara.server.graph.server :as server]
             [clara.server.tools.graph.analyze.ctor :as ctor]
-            [clara.server.tools.graph.shared.navigate :as shared-navigate]
-            [clara.server.tools.graph.shared.schema :as shared-schema]
-            [clara.server.tools.graph.shared.tokens :as shared-tokens]
+            [clara.server.graph.shared.navigate :as shared-navigate]
+            [clara.server.graph.shared.schema :as shared-schema]
+            [clara.server.graph.shared.tokens :as shared-tokens]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
             [schema.core :as s]))

@@ -1,10 +1,10 @@
-(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.shared.schema
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.graph.shared.schema
   "The shapes the editor-navigation namespaces hand each other, in one place.
 
   The navigate contract — input, targets, results, and the runtime capabilities map — travels
-  between `shared.navigate`, its JVM shell (`clara.server.graph.client`), and the babashka client,
-  far enough from where each piece is built that prose in whichever docstring happened to receive it
-  would drift silently."
+  between `clara.server.graph.shared.navigate`, its JVM shell (`clara.server.graph.client`), and
+  the babashka client, far enough from where each piece is built that prose in whichever docstring
+  happened to receive it would drift silently."
   (:require [schema.core :as s]))
 
 (s/defschema NavigateInput

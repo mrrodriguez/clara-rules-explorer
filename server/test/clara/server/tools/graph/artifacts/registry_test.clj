@@ -5,6 +5,7 @@
   (:require
    [clara.server.tools.graph.artifacts.layout :as layout]
    [clara.server.tools.graph.artifacts.registry :as registry]
+   [clara.server.tools.graph.artifacts.shared.registry :as shared-registry]
    [clara.server.tools.graph.artifacts.store :as store]
    [clara.server.tools.graph.edn-io :as edn-io]
    [clojure.java.io :as io]
@@ -96,7 +97,7 @@
       (let [reg (registry/discover {:root root})
             refs (registry/units reg)]
         (is (= #{"a" "b" "d" "d@feature-x"}
-               (set (map registry/unit-key refs))))
+               (set (map shared-registry/unit-key refs))))
         (testing "branch variants are refs with a :branch label"
           (is (= {:repo "d" :branch "feature-x"}
                  (first (filter #(= "feature-x" (:branch %)) refs)))))
@@ -112,7 +113,7 @@
       (let [reg (registry/->registry {:root root
                                       :units [{:repo "a"}
                                               {:repo "missing"}]})]
-        (is (= ["a" "missing"] (mapv registry/unit-key (registry/units reg))))
+        (is (= ["a" "missing"] (mapv shared-registry/unit-key (registry/units reg))))
         (is (nil? (registry/read-manifest reg {:repo "missing"}))
             "an absent unit reads as nil rather than throwing")))))
 
@@ -215,7 +216,7 @@
       (write-unit! root "a" #{:nodes :id})
       (write-manifest! (io/file root "b") "b")
       (let [reg (registry/discover {:root root})]
-        (is (= ["a"] (mapv registry/unit-key (registry/units-with-analysis reg))))))))
+        (is (= ["a"] (mapv shared-registry/unit-key (registry/units-with-analysis reg))))))))
 
 (defn- write-aggregate-unit!
   "A minimal unit whose manifest claims an aggregate `:mode` (and, when given,
@@ -266,9 +267,9 @@
 
       (let [reg (registry/discover {:root root})]
         (is (= ["a" "agg" "b"]
-               (mapv registry/unit-key (registry/units reg))))
+               (mapv shared-registry/unit-key (registry/units reg))))
         (is (= ["a" "b"]
-               (mapv registry/unit-key (registry/source-units reg))))))))
+               (mapv shared-registry/unit-key (registry/source-units reg))))))))
 
 (deftest compatibility-report-lists-missing-artifacts
   (with-temp-root

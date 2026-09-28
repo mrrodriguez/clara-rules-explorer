@@ -238,26 +238,18 @@ bb "$S" '{:root "…" :units [{:repo "…"} {:repo "…"}]}' \
         '{:production nil :side :lhs :token ":loan/applicant"}'
 ```
 
-It composes the selected units on the fly — `shared.selection` →
-`shared.compose` → `shared.rehydrate` → `shared.navigate` — the same pure
-namespaces the JVM client delegates to, so the bb answer and the nREPL answer
-over the same selection agree. The editor resolves aliased/`::` tokens to fq
-over its repl first; source locations are always `:var? false` (bb loads no
-rule namespaces).
+It composes the selected units on the fly with the same shared composition and
+rehydration logic the JVM `:registry` mode runs, so the bb answer and the nREPL
+answer over the same selection agree. The editor resolves aliased/`::` tokens
+to fq over its repl first; source locations are always `:var? false` (bb loads
+no rule namespaces).
 
 ### The `shared.` convention
 
-The navigation body, the four usage closures, the hierarchy transpose, the
-selection preamble, and the compose merge live under
-`src/clara/server/tools/graph/shared/*`, each marked
-`:clara-rules-explorer/bb-loaded true` on its ns form. They are plain `.clj`
-files that both the JVM and bb `require`; the one rule is that a `shared.`
-namespace must not `require` anything bb cannot load (self-enforcing — bb
-`require` fails loudly — and pinned by `make bb-smoke-test`). Where the JVM and
-bb genuinely differ, registry I/O is injected as a capabilities map
-(`:read-analysis` / `:assert-compatible!`), and the pure per-unit helpers
-(`unit-key`, `narrow-analysis`) live in `shared.selection` with
-`artifacts.registry` delegating to them.
+Logic both the JVM and bb `require` is marked
+`:clara-rules-explorer/bb-loaded true` on its ns form, and `make bb-smoke-test`
+requires every marked namespace under bb — so a namespace that pulls in
+anything bb cannot load fails the check rather than shipping.
 
 ## Writing your own reader
 

@@ -21,7 +21,7 @@
         inverses over the whole composition, the one thing a per-unit artifact
         cannot contain.
 
-  The pure `:compose` half lives in `clara.server.tools.graph.shared.compose`,
+  The pure `:compose` half lives in `clara.server.tools.graph.artifacts.shared.compose`,
   which takes the registry I/O as an injected capabilities map so the babashka
   editor client can share it without loading
   `clara.server.tools.graph.artifacts.registry`. The `:layers` half stays here —
@@ -32,8 +32,9 @@
   (:require
    [clara.server.tools.graph.annotations.merge :as ann.merge]
    [clara.server.tools.graph.artifacts.registry :as registry]
+   [clara.server.tools.graph.artifacts.shared.compose :as shared-compose]
+   [clara.server.tools.graph.artifacts.shared.registry :as shared-registry]
    [clara.server.tools.graph.artifacts.store :as store]
-   [clara.server.tools.graph.shared.compose :as shared-compose]
    [clojure.walk :as walk]))
 
 (set! *warn-on-reflection* true)
@@ -46,7 +47,7 @@
   "A layer id qualified with its unit, so `:provenance` names whose layer a fold
   credited. `<repo>[@<branch>]/<layer-id>`."
   [unit layer-id]
-  (format "%s/%s" (registry/unit-key unit) layer-id))
+  (format "%s/%s" (shared-registry/unit-key unit) layer-id))
 
 (defn- ->opts
   [registry unit]
@@ -80,7 +81,7 @@
   (into (sorted-map)
         (keep (fn [unit]
                 (when-let [nses (seq (:namespaces unit))]
-                  [(registry/unit-key unit) (mapv str nses)])))
+                  [(shared-registry/unit-key unit) (mapv str nses)])))
         selection))
 
 (defn fold-layers
@@ -140,7 +141,7 @@
                                {:id role-id
                                 :annotations (strip-derived-callsite-provenance
                                               (ann.merge/annotations folded))
-                                :source (cond-> {:composed-of (mapv registry/unit-key selection)
+                                :source (cond-> {:composed-of (mapv shared-registry/unit-key selection)
                                                  :role role}
                                           (seq narrowed) (assoc :namespaces narrowed))})]))))
                 store/layer-artifacts))))
@@ -149,24 +150,15 @@
 ;; composed analysis (delegates to the shared, bb-loadable implementation)
 ;; ===========================================================================
 
-(defn union-fact-types
-  "Merge slim fact-type maps from multiple units — delegates to
-  `clara.server.tools.graph.shared.compose/union-fact-types`. Per name,
-  `:ancestors` is the union of every unit's ancestor edge set, re-closed
-  transitively and ordered deepest-first. `:ns` comes from the first unit that
-  has the name."
-  [fact-type-maps]
-  (shared-compose/union-fact-types fact-type-maps))
-
 (defn ->composed-analysis
   "One slim `RulebaseAnalysis` over the selected units, which the caller asserts
   are components of ONE rulebase — delegates to
-  `clara.server.tools.graph.shared.compose/->composed-analysis` with the JVM
-  registry's capabilities. Each unit is narrowed to its `:namespaces` filter
-  first; rules/queries merge by fq name (collision refused), fact types merge
-  per name with ancestors unioned, the dep-graph is recomputed over the merged
-  set, and each production gains `:unit`. Rehydrate the result to rebuild the
-  inverses over the whole composition."
+  `clara.server.tools.graph.artifacts.shared.compose/->composed-analysis` with
+  the JVM registry's capabilities. Each unit is narrowed to its `:namespaces`
+  filter first; rules/queries merge by fq name (collision refused), fact types
+  merge per name with ancestors unioned, the dep-graph is recomputed over the
+  merged set, and each production gains `:unit`. Rehydrate the result to
+  rebuild the inverses over the whole composition."
   [registry selection]
   (shared-compose/->composed-analysis
    {:read-analysis #(registry/read-analysis registry %)

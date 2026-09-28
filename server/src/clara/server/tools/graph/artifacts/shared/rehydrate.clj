@@ -1,4 +1,4 @@
-(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.shared.rehydrate
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.artifacts.shared.rehydrate
   "The pure core of `clara.server.tools.graph.artifacts.rehydrate`, shared by the JVM and babashka:
   rebuild the directions `slim` drops because they are recomputable from what it keeps.
 
@@ -7,7 +7,7 @@
   dep-graph transpose, and the reference expansion that puts `:id`/`TypeReference` shapes back. It
   is free of live-session concerns: annotation restoration and the `:slim` block narrowing stay in
   the JVM namespace."
-  (:require [clara.server.tools.graph.shared.hierarchy :as shared-hierarchy]
+  (:require [clara.server.tools.graph.artifacts.shared.hierarchy :as shared-hierarchy]
             [clojure.string :as str]
             [clojure.walk :as walk]))
 

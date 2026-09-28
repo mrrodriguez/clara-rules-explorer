@@ -1,4 +1,4 @@
-(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.shared.compose
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.artifacts.shared.compose
   "The pure compose half of `clara.server.tools.graph.artifacts.compose`: combine a caller-named
   selection of artifact units into one slim `RulebaseAnalysis`.
 
@@ -10,11 +10,13 @@
   composition, the one thing a per-unit artifact cannot contain.
 
   Registry I/O arrives through the same capabilities map
-  `clara.server.tools.graph.shared.selection/->selection` takes, so this namespace stays free of
-  `clara.server.tools.graph.artifacts.registry`, which bb cannot load. The layer-fold half of
-  `clara.server.tools.graph.artifacts.compose` stays JVM-side: it needs the live annotation merge."
-  (:require [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
-            [clara.server.tools.graph.shared.selection :as shared-selection]
+  `clara.server.tools.graph.artifacts.shared.selection/->selection` takes, so this namespace stays
+  free of `clara.server.tools.graph.artifacts.registry`, which bb cannot load. The layer-fold half
+  of `clara.server.tools.graph.artifacts.compose` stays JVM-side: it needs the live annotation
+  merge."
+  (:require [clara.server.tools.graph.artifacts.shared.hierarchy :as hierarchy]
+            [clara.server.tools.graph.artifacts.shared.registry :as shared-registry]
+            [clara.server.tools.graph.artifacts.shared.selection :as shared-selection]
             [clojure.set :as set]))
 
 ;; ===========================================================================
@@ -29,7 +31,7 @@
   (let [acc (volatile! {:productions (sorted-map) :units {}})]
     (doseq [[analysis unit] (map vector analyses units)
             [p-name production] (get analysis kind)]
-      (let [uk (shared-selection/unit-key unit)
+      (let [uk (shared-registry/unit-key unit)
             existing (get-in @acc [:units p-name])]
         (when existing
           (throw (ex-info (format "Cannot compose: %s is claimed by both %s and %s"
@@ -45,7 +47,7 @@
   "The composed `:fact-types` map from `ancestors` (the already-closed unioned
   hierarchy) and the units' raw fact-type maps: per type name, `:ns` from the
   first unit that declares it, `:ancestors` ordered deepest-first via
-  `clara.server.tools.graph.artifacts.hierarchy/hierarchy-order`."
+  `clara.server.tools.graph.artifacts.shared.hierarchy/hierarchy-order`."
   [fact-type-maps ancestors]
   (into (sorted-map)
         (map (fn [name]
@@ -60,8 +62,8 @@
   "Merge slim fact-type maps from multiple units. Per name, `:ancestors` is the
   union of every unit's ancestor edge set, re-closed transitively and ordered
   deepest-first — the same closure the federated index computes, via
-  `clara.server.tools.graph.artifacts.hierarchy`. `:ns` comes from the first
-  unit that has the name."
+  `clara.server.tools.graph.artifacts.shared.hierarchy`. `:ns` comes from the
+  first unit that has the name."
   [fact-type-maps]
   (let [fact-type-maps (into [] (remove nil?) fact-type-maps)]
     (->fact-type-map fact-type-maps
@@ -99,8 +101,8 @@
   is recomputed over the unioned fact-type hierarchy rather than unioned.
   `ancestors` is the closed, unioned ancestor map — the one hierarchy every
   merge mode shares — so the producer→consumer closure direction lives in
-  `clara.server.tools.graph.artifacts.hierarchy/ancestor-closure` rather than
-  inline here."
+  `clara.server.tools.graph.artifacts.shared.hierarchy/ancestor-closure`
+  rather than inline here."
   [rules queries ancestors]
   (let [type-analysis (->type-analysis-map rules queries)
         consumers-by-type (->consumers-by-type type-analysis)
@@ -138,7 +140,7 @@
 (defn ->composed-analysis
   "One slim `RulebaseAnalysis` over the selected units, which the caller asserts
   are components of ONE rulebase. `caps` is the same capabilities map
-  `clara.server.tools.graph.shared.selection/->selection` takes. Each unit is
+  `clara.server.tools.graph.artifacts.shared.selection/->selection` takes. Each unit is
   narrowed to its `:namespaces` filter first; rules/queries merge by fq name
   (collision refused), fact types merge per name with ancestors unioned, the
   dep-graph is recomputed over the merged set, and each production gains
@@ -146,7 +148,7 @@
   composition."
   [caps selection]
   (let [sel (shared-selection/->selection caps selection)
-        analyses (mapv #(get (:analyses sel) (shared-selection/unit-key %)) selection)
+        analyses (mapv #(get (:analyses sel) (shared-registry/unit-key %)) selection)
         rules (merge-production-map analyses selection :rules)
         queries (merge-production-map analyses selection :queries)
         fact-types (->fact-type-map (map :fact-types analyses) (:ancestors sel))
