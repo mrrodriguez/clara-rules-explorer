@@ -1,7 +1,7 @@
 --- Tier 2: babashka transport — the `bb editor_client.bb` shell-out executor,
 -- registry-selection prompt/cache, and the bb-mode dispatch in `init.lua`
--- (navigate / refresh / swap-session / toggle / select-unit). Mirrors the
--- elisp babashka-transport tests.
+-- (navigate / refresh / swap-session / toggle / select-unit). Mirrors
+-- `editor/emacs/test/clara-explorer-test.el`'s babashka-transport tests.
 
 local conjure = require("clara-explorer.conjure")
 local init = require("clara-explorer.init")
@@ -104,31 +104,68 @@ describe("conjure.bb_script", function()
 end)
 
 describe("conjure.bb_list_unit_repos", function()
-  it("strips the root prefix and sorts", function()
-    local function fake_fnamemodify(p, mods)
-      if mods == ":p" then return p end
-      if mods == ":p:h" then return p:match("^(.*)/[^/]+$") or "" end
-      return p
-    end
-    with_restore(vim.fn, "fnamemodify", fake_fnamemodify, function()
-      with_restore(
-        vim.fn,
-        "globpath",
-        function(root, _pattern)
-          assert.are.same("/root", root)
+  it("shells out to --list-units and decodes the sorted EDN vector", function()
+    local captured
+    with_restore(conjure, "bb_script", function() return "/p/editor_client.bb" end, function()
+      with_restore(vim.fn, "filereadable", function() return 1 end, function()
+        with_restore(vim, "system", function(cmd, opts)
+          captured = { cmd = cmd, opts = opts }
           return {
-            "/root/loan-app-ruleset/rules-inspect-manifest.edn",
-            "/root/composed/loan-app-plus-disposition/rules-inspect-manifest.edn",
-            "/root/loan-disposition-ruleset/rules-inspect-manifest.edn",
+            wait = function()
+              return {
+                code = 0,
+                stdout = '["composed/loan-app-plus-disposition" "loan-app-ruleset" "loan-disposition-ruleset"]',
+                stderr = "",
+              }
+            end,
           }
-        end,
-        function()
+        end, function()
           assert.are.same(
             { "composed/loan-app-plus-disposition", "loan-app-ruleset", "loan-disposition-ruleset" },
             conjure.bb_list_unit_repos("/root")
           )
-        end
-      )
+          assert.are.same({ "bb", "/p/editor_client.bb", "--list-units", "/root" }, captured.cmd)
+          assert.are.same(true, captured.opts.text)
+        end)
+      end)
+    end)
+  end)
+
+  it("notifies and returns empty when the script fails", function()
+    with_restore(conjure, "bb_script", function() return "/p/editor_client.bb" end, function()
+      with_restore(vim.fn, "filereadable", function() return 1 end, function()
+        with_restore(vim, "system", function()
+          return { wait = function() return { code = 3, stdout = "", stderr = "oops" } end }
+        end, function()
+          local msg
+          with_restore(
+            vim,
+            "notify",
+            function(m) msg = m end,
+            function() assert.are.same({}, conjure.bb_list_unit_repos("/root")) end
+          )
+          assert.truthy(msg:find("exit 3", 1, true))
+        end)
+      end)
+    end)
+  end)
+
+  it("notifies and returns empty when bb reports an :error", function()
+    with_restore(conjure, "bb_script", function() return "/p/editor_client.bb" end, function()
+      with_restore(vim.fn, "filereadable", function() return 1 end, function()
+        with_restore(vim, "system", function()
+          return { wait = function() return { code = 0, stdout = '{:error "not a directory"}', stderr = "" } end }
+        end, function()
+          local msg
+          with_restore(
+            vim,
+            "notify",
+            function(m) msg = m end,
+            function() assert.are.same({}, conjure.bb_list_unit_repos("/root")) end
+          )
+          assert.are.same("clara-explorer: not a directory", msg)
+        end)
+      end)
     end)
   end)
 end)

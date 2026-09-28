@@ -82,6 +82,16 @@ local function open_resource(url)
   return false
 end
 
+--- Source-location eval form: returns the loaded var's `:file` metadata when
+-- the name resolves, else the munged `.clj`/`.cljc` classpath resource. Two
+-- `%s` slots: the namespace and the fully-qualified name, both as EDN strings.
+local SOURCE_LOC_FORM = [[(do (require 'clojure.string)
+     (let [p (str (clojure.string/replace (munge %s) "." "/"))]
+       (or (try (some-> (resolve (symbol %s)) meta :file)
+               (catch Throwable _ nil))
+           (some-> (clojure.java.io/resource (str p ".clj")) str)
+           (some-> (clojure.java.io/resource (str p ".cljc")) str))))]]
+
 --- Regex fallback: open the namespace file and search for `(defrule|defquery NAME`.
 -- The eval prefers the loaded var's `:file` metadata (which works for a
 -- buffer-eval'd namespace that is not on the classpath), then falls back to a
@@ -94,16 +104,7 @@ function M.goto_fallback(target, eval_edn)
     return
   end
   local unqualified = name:match("/([^/]+)$") or name
-  local resource_form = "(do (require 'clojure.string)\n"
-    .. "     (let [p (str (clojure.string/replace (munge "
-    .. conjure.edn_string(ns)
-    .. ') "." "/"))]\n'
-    .. "       (or (try (some-> (resolve (symbol "
-    .. conjure.edn_string(name)
-    .. ")) meta :file)\n"
-    .. "               (catch Throwable _ nil))\n"
-    .. '           (some-> (clojure.java.io/resource (str p ".clj")) str)\n'
-    .. '           (some-> (clojure.java.io/resource (str p ".cljc")) str))))'
+  local resource_form = SOURCE_LOC_FORM:format(conjure.edn_string(ns), conjure.edn_string(name))
   local function on_value(value)
     local ok, url = pcall(edn.decode, value)
     if not ok or type(url) ~= "string" then url = nil end

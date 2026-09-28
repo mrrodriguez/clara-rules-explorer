@@ -4,6 +4,11 @@
 ;; navigate query.
 ;;
 ;;   bb bin/editor_client.bb '<selection-edn>' '<navigate-input-edn>'
+;;   bb bin/editor_client.bb --list-units '<registry-root>'
+;;
+;; `--list-units` prints the repo names (paths relative to the root) of every unit under the root,
+;; sorted — the registry discovery the editors used to do themselves, so the registry layout has
+;; one owner here.
 ;;
 ;; <selection-edn> is a registry selection `{:root "…" :units [{:repo "…"}]}` — the same shape the
 ;; server's `:registry` mode takes; the editor resolves the `CLARA_RULES_EXPLORER_REGISTRY` root
@@ -38,6 +43,9 @@
   (binding [*out* *err*] (apply println msg))
   (System/exit 1))
 
+(defn- print-error [e]
+  (prn {:error (or (.getMessage e) (str e))}))
+
 (defn- unit-dir
   "The persistence dir of one unit, mirroring `clara.server.tools.graph.artifacts.store/get-out-dir`:
   `<:root>/<:repo>/`, with `:branch` nested under `<repo>/branches/<branch>/`."
@@ -46,6 +54,21 @@
     (if (str/blank? branch)
       base
       (fs/file base "branches" branch))))
+
+(defn- list-unit-repos
+  "Every unit repo under `root`, as paths relative to the root, sorted. Discovery is the
+  directory walk the editors previously did themselves: find every
+  `rules-inspect-manifest.edn` and name the unit by its directory relative to the root. The
+  registry layout therefore has one owner (this script), and the editors only prompt over the
+  returned list."
+  [root]
+  (let [root-file (fs/canonicalize root)]
+    (when-not (fs/directory? root-file)
+      (throw (ex-info (format "Registry root is not a directory: %s" root) {:root root})))
+    (->> (fs/glob root-file "**/rules-inspect-manifest.edn")
+         (map (comp fs/unixify (fn [manifest] (fs/relativize root-file (fs/parent manifest)))))
+         sort
+         vec)))
 
 (defn- read-part-or-nil
   "One part of the unit's split `merged-rulebase-analysis/` directory, or nil when the part is
@@ -144,16 +167,30 @@
           rehydrated (shared-rehydrate/rehydrate-analysis analysis)]
       (navigate/navigate rehydrated bb-runtime input))))
 
-(let [[selection-edn input-edn] *command-line-args*]
-  (when-not (and selection-edn input-edn)
-    (die "usage: bb editor_client.bb '<selection-edn>' '<navigate-input-edn>'"))
-  (let [selection (try (edn/read-string selection-edn)
+(let [[cmd arg1] *command-line-args*]
+  (cond
+    ;; Registry discovery: the editors shell out here rather than walking the tree themselves.
+    (= cmd "--list-units")
+    (do
+      (when-not arg1
+        (die "usage: bb editor_client.bb --list-units '<registry-root>'"))
+      (try
+        (prn (list-unit-repos arg1))
+        (catch Throwable e
+          (print-error e))))
+
+    :else
+    (let [selection-edn cmd
+          input-edn arg1]
+      (when-not (and selection-edn input-edn)
+        (die "usage: bb editor_client.bb '<selection-edn>' '<navigate-input-edn>'"))
+      (let [selection (try (edn/read-string selection-edn)
+                           (catch Throwable e
+                             (die "Could not read selection-edn:" (.getMessage e))))
+            input (try (edn/read-string input-edn)
                        (catch Throwable e
-                         (die "Could not read selection-edn:" (.getMessage e))))
-        input (try (edn/read-string input-edn)
-                   (catch Throwable e
-                     (die "Could not read navigate-input-edn:" (.getMessage e))))]
-    (try
-      (println (pr-str (run selection input)))
-      (catch Throwable e
-        (println (pr-str {:error (or (.getMessage e) (str e))}))))))
+                         (die "Could not read navigate-input-edn:" (.getMessage e))))]
+        (try
+          (prn (run selection input))
+          (catch Throwable e
+            (print-error e)))))))

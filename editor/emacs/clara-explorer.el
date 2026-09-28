@@ -199,12 +199,39 @@ Reads `CLARA_RULES_EXPLORER_REGISTRY' if `clara-explorer-registry-root' is nil."
 (defvar clara-explorer--bb-selection-cache nil
   "Cached registry-selection EDN for the babashka transport.")
 
+(defun clara-explorer--bb-run (args)
+  "Run `bb SCRIPT ARGS…' and return the parsed EDN result.
+Signals `user-error' on a missing script or `bb', a non-zero exit, or invalid
+EDN.  ARGS is a list of argument strings appended after the script path."
+  (let ((script (clara-explorer--bb-script)))
+    (unless (file-readable-p script)
+      (user-error "clara-explorer: editor_client.bb not found at %s" script))
+    (with-temp-buffer
+      (let ((status (condition-case err
+                        (apply #'call-process "bb" nil (current-buffer) nil
+                               (cons script args))
+                      (file-error (user-error "clara-explorer: bb not found (%s)"
+                                              (error-message-string err))))))
+        (unless (eql status 0)
+          (user-error "clara-explorer: bb failed (exit %s): %s"
+                      status (string-trim (buffer-string))))
+        (condition-case err
+            (parseedn-read-str (buffer-string))
+          (error (user-error "clara-explorer: bb returned invalid EDN: %s"
+                             (error-message-string err))))))))
+
 (defun clara-explorer--bb-list-unit-repos (root)
-  "Repo names (relative to ROOT) of every unit under ROOT, sorted."
-  (sort
-   (mapcar (lambda (f) (file-relative-name (directory-file-name (file-name-directory f)) root))
-           (directory-files-recursively root "\\`rules-inspect-manifest\\.edn\\'"))
-   #'string<))
+  "Repo names (relative to ROOT) of every unit under ROOT, sorted.
+Discovery lives in `bb editor_client.bb --list-units' — the one place that
+knows the registry layout — so this function only shells out and returns the
+result."
+  (let* ((result (clara-explorer--bb-run (list "--list-units" root)))
+         (err (and (hash-table-p result)
+                   (clara-explorer--edn-get :error result))))
+    (cond
+     (err (user-error "clara-explorer: %s" err))
+     ((vectorp result) (append result nil))
+     (t (user-error "clara-explorer: unexpected list-units result: %S" result)))))
 
 (defun clara-explorer--bb-prompt-selection ()
   "Prompt for a single-unit registry selection under the registry root."
@@ -226,22 +253,7 @@ Reads `CLARA_RULES_EXPLORER_REGISTRY' if `clara-explorer-registry-root' is nil."
 
 (defun clara-explorer--bb-eval (selection-edn input-edn)
   "Run `bb editor_client.bb SELECTION-EDN INPUT-EDN' and parse the EDN result."
-  (let ((script (clara-explorer--bb-script)))
-    (unless (file-readable-p script)
-      (user-error "clara-explorer: editor_client.bb not found at %s" script))
-    (with-temp-buffer
-      (let ((status (condition-case err
-                        (apply #'call-process "bb" nil (current-buffer) nil
-                               (list script selection-edn input-edn))
-                      (file-error (user-error "clara-explorer: bb not found (%s)"
-                                              (error-message-string err))))))
-        (unless (eql status 0)
-          (user-error "clara-explorer: bb transport failed (exit %s): %s"
-                      status (string-trim (buffer-string))))
-        (condition-case err
-            (parseedn-read-str (buffer-string))
-          (error (user-error "clara-explorer: bb transport returned invalid EDN: %s"
-                             (error-message-string err))))))))
+  (clara-explorer--bb-run (list selection-edn input-edn)))
 
 ;; ---------------------------------------------------------------------------
 ;; Structural navigation (§9.2)

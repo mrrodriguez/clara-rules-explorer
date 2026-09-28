@@ -90,6 +90,17 @@
     (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
     out))
 
+(deftest editor-client-lists-unit-repos-test
+  (if-not (runnable?)
+    (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")
+    (let [{:keys [exit out err]}
+          (shell/sh "bb" (str editor-client-script) "--list-units" (registry-root))]
+      (is (zero? exit) (str "editor_client.bb --list-units exited " exit ": " err))
+      (is (= ["composed/loan-app-plus-disposition"
+              "loan-app-ruleset"
+              "loan-disposition-ruleset"]
+             (edn/read-string out))))))
+
 (deftest editor-client-composes-multi-unit-selection-and-matches-rehydrate-test
   (if-not (runnable?)
     (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")

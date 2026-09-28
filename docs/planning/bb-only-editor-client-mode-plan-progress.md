@@ -231,3 +231,16 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
   now prefers the loaded var's `:file` metadata via `(resolve (symbol …))`, then
   a munged `.clj`/`.cljc` resource lookup, decodes the value with `edn`, and
   `open_resource` accepts plain absolute paths.
+- Review follow-ups (post Phase 4/5):
+  - Unit discovery moved into `editor_client.bb --list-units '<root>'`, so the
+    registry layout has one owner. Both editors dropped their own
+    `rules-inspect-manifest.edn` walk — elisp
+    `clara-explorer--bb-list-unit-repos` and `conjure.bb_list_unit_repos` now
+    shell out and decode the sorted EDN vector; a `--list-units` pin was added
+    to `editor-client-bb-test`.
+  - Elisp references in the Lua are qualified with the project-relative path
+    (`editor/emacs/clara-explorer.el`'s `clara-explorer--…`), not a bare naming
+    convention.
+  - `jump.goto_fallback`'s source-location form is a single `SOURCE_LOC_FORM`
+    format template (two `%s` slots: ns, fq name) instead of interleaved string
+    concatenation, so the Clojure form reads as one block.

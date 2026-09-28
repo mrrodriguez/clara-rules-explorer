@@ -24,7 +24,7 @@ function M.connected()
   return ok2 and res == true
 end
 
---- Current buffer namespace (like `cider-current-ns`), or nil.
+--- Current buffer namespace (like CIDER's `cider-current-ns`), or nil.
 function M.current_ns()
   local ok, extract = pcall(require, "conjure.extract")
   if ok and extract and extract.context then
@@ -42,7 +42,8 @@ local ESC = { ["\\"] = "\\\\", ['"'] = '\\"', ["\n"] = "\\n", ["\t"] = "\\t", ["
 function M.edn_string(s) return '"' .. (s:gsub('[\\"\n\t\r]', ESC)) .. '"' end
 
 --- Build the Clojure `client/navigate` form for a payload
--- `{production, side, caller_ns, token}` (mirrors the elisp `--navigate-code`).
+-- `{production, side, caller_ns, token}` (mirrors `editor/emacs/clara-explorer.el`'s
+-- `clara-explorer--navigate-code`).
 function M.navigate_code(payload)
   local parts = {}
   if payload.production then parts[#parts + 1] = ":production " .. M.edn_string(payload.production) end
@@ -198,26 +199,50 @@ function M.bb_script()
   return vim.fn.fnamemodify(this_dir .. "editor_client.bb", ":p")
 end
 
---- Repo-relative unit directories (the dir holding rules-inspect-manifest.edn)
--- under ROOT, sorted — mirrors the elisp `clara-explorer--bb-list-unit-repos`.
+--- Repo names (relative to ROOT) of every unit under ROOT, sorted. Discovery
+-- lives in `bb editor_client.bb --list-units` — the one place that knows the
+-- registry layout — so this function only runs the subprocess and decodes the
+-- EDN vector it prints. Mirrors `editor/emacs/clara-explorer.el`'s
+-- `clara-explorer--bb-list-unit-repos`.
 function M.bb_list_unit_repos(root)
-  local root_abs = vim.fn.fnamemodify(root, ":p")
-  local prefix = root_abs:gsub("/+$", "") .. "/"
-  local repos = {}
-  for _, path in ipairs(vim.fn.globpath(root_abs, "**/rules-inspect-manifest.edn", 0, 1) or {}) do
-    local dir = vim.fn.fnamemodify(path, ":p:h")
-    local rel = dir
-    if vim.startswith(rel, prefix) then rel = rel:sub(#prefix + 1) end
-    rel = rel:gsub("/+$", "")
-    if rel ~= "" then repos[#repos + 1] = rel end
+  local script = M.bb_script()
+  if vim.fn.filereadable(script) ~= 1 then
+    vim.notify("clara-explorer: editor_client.bb not found at " .. script, vim.log.levels.ERROR)
+    return {}
   end
-  table.sort(repos)
+  local out = vim.system({ "bb", script, "--list-units", root }, { text = true }):wait()
+  if out.code ~= 0 then
+    local msg
+    if out.code then
+      msg = "clara-explorer: bb list-units failed (exit " .. out.code .. ")"
+    else
+      msg = "clara-explorer: bb list-units failed (terminated by signal " .. tostring(out.signal) .. ")"
+    end
+    local details = vim.trim((out.stderr or "") .. (out.stdout or ""))
+    if details ~= "" then msg = msg .. ": " .. details end
+    vim.notify(msg, vim.log.levels.ERROR)
+    return {}
+  end
+  local repos, err = edn.decode(out.stdout or "")
+  if err then
+    vim.notify("clara-explorer: bb list-units returned invalid EDN: " .. err, vim.log.levels.ERROR)
+    return {}
+  end
+  if type(repos) ~= "table" then
+    vim.notify("clara-explorer: bb list-units returned " .. type(repos) .. ", expected a vector", vim.log.levels.ERROR)
+    return {}
+  end
+  if repos.error then
+    vim.notify("clara-explorer: " .. repos.error, vim.log.levels.ERROR)
+    return {}
+  end
   return repos
 end
 
 --- Prompt for a single-unit registry selection under the registry root.
 -- Calls `cb(selection_edn)` with the EDN map string, or `cb(nil)` when
--- cancelled/absent. Mirrors the elisp `clara-explorer--bb-prompt-selection`.
+-- cancelled/absent. Mirrors `editor/emacs/clara-explorer.el`'s
+-- `clara-explorer--bb-prompt-selection`.
 function M.bb_prompt_selection(cb)
   local root = M.registry_root()
   if not root or vim.fn.isdirectory(root) ~= 1 then
@@ -265,7 +290,7 @@ end
 
 --- Run `bb editor_client.bb SELECTION INPUT` and call `cb(result, err)` with
 -- the decoded EDN result (or `cb(nil, err)` on transport/EDN failure). Mirrors
--- the elisp `clara-explorer--bb-eval`.
+-- `editor/emacs/clara-explorer.el`'s `clara-explorer--bb-eval`.
 function M.bb_eval(selection_edn, input_edn, cb)
   local script = M.bb_script()
   if vim.fn.filereadable(script) ~= 1 then
