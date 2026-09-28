@@ -554,7 +554,9 @@ no reader conditional is needed.
    (`clara.server.tools.graph.artifacts.regen-example/example-out-dir`).
 4. **Emacs transport.** Wire the bb transport behind a defcustom (shell out to
    `editor_client.bb`); prompt for the registry selection with defaults from
-   `CLARA_RULES_EXPLORER_REGISTRY`; leave nREPL as the default.
+   `CLARA_RULES_EXPLORER_REGISTRY`; default the defcustom to `auto` (nREPL
+   when the connected repl has a running explorer system, bb otherwise —
+   Decision 8).
 5. **neovim.** Mirror step 4 in Lua.
 
 ## Risks and mitigations
@@ -623,6 +625,13 @@ no reader conditional is needed.
    token resolution; the goal is only that no clara session is loaded and no
    Jetty server is started on it. Persisted namespace alias maps (currently
    dropped as `:ns-deps`) are therefore not needed.
+
+8. **Smart transport default** — `auto` is the default in both editors: nREPL
+   when the connected repl has a running explorer system
+   (`clara.server.graph.client/get-current-system`), bb otherwise. The
+   connected repl is required in both modes (token resolution + source
+   mapping); the discriminator is explorer-server availability, not nREPL
+   client connection — bb mode still has a connected CIDER/Conjure session.
 
 ## Remaining open questions
 

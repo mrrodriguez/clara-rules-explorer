@@ -17,6 +17,8 @@ The client is `editor/neovim/` (a clean Lua plugin).
 | `:ClaraExplorerRefresh`             | re-derive annotations and re-warm the analysis                        |
 | `:ClaraExplorerSwapSession`         | swap in a rebuilt session (`!` re-prompts)                            |
 | `:ClaraExplorerToggleTransport`     | toggle between the nREPL and babashka transports                      |
+| `:ClaraExplorerTransportStatus`     | open the effective + configured transport (and the explorer-server probe) in a scratch buffer |
+| `:ClaraExplorerLastError`           | open the full last nREPL error (stack trace + code) in a scratch buffer |
 | `:ClaraExplorerSelectUnit`          | re-prompt for the babashka transport's registry unit                  |
 
 Direct jump when exactly one candidate; `vim.ui.select` picker when more than
@@ -35,15 +37,19 @@ integration configured).
 These are consumer-facing Neovim plugins, installed via lazy.nvim /
 AstroNvim — not mise/brew.
 
-## Babashka transport (offline)
+## Babashka transport (offline artifacts)
 
-Navigation queries default to the nREPL transport (`client/navigate` over
-Conjure). Set `vim.g.clara_explorer_transport = "bb"` (or toggle it with
-`:ClaraExplorerToggleTransport`) to answer navigation from the persisted
-artifact set instead, shelling out to `bb editor_client.bb` — no Clara
-session is loaded and no Jetty server is started on the repl.
+Navigation queries default to the `"auto"` transport: nREPL
+(`client/navigate` over Conjure) when the connected session has a running
+explorer system, otherwise the babashka transport (shelling out to
+`bb editor_client.bb` over the persisted artifact set — no Clara session is
+loaded and no Jetty server is started on the repl). The connected repl is
+still required in both modes: it resolves aliased/`::` symbols to
+fully-qualified form and maps namespaces to source files. Set
+`vim.g.clara_explorer_transport = "bb"` (or `"nrepl"`) to force one, or
+toggle it with `:ClaraExplorerToggleTransport`.
 
-- **`g:clara_explorer_transport`** — `"nrepl"` (default) or `"bb"`.
+- **`g:clara_explorer_transport`** — `"auto"` (default), `"nrepl"`, or `"bb"`.
 - **`g:clara_explorer_registry_root`** — the registry root (the `rules-annos/`
   tree). When unset, `CLARA_RULES_EXPLORER_REGISTRY` is read from the
   environment.
@@ -52,12 +58,12 @@ session is loaded and no Jetty server is started on the repl.
   plugin build step must materialize that repo-relative symlink into the
   plugin-local directory before release).
 
-The bb transport still uses the connected Conjure repl for token resolution
-(aliased/`::` symbols are resolved to fully-qualified form over `eval-str`
-before the query), then shells out for the navigation itself.
-`:ClaraExplorerSelectUnit` prompts for the single-unit registry selection and
-caches it; `:ClaraExplorerRefresh` and `:ClaraExplorerSwapSession` are no-ops
-in bb mode (re-persist the artifacts to pick up changes).
+The bb transport resolves aliased/`::` symbols to fully-qualified form over
+`eval-str` before the query, exactly like the nREPL transport, then shells out
+for the navigation itself. `:ClaraExplorerSelectUnit` prompts for the
+single-unit registry selection and caches it; `:ClaraExplorerRefresh` and
+`:ClaraExplorerSwapSession` are no-ops in bb mode (re-persist the artifacts to
+pick up changes).
 
 ## Development dependencies
 
@@ -162,6 +168,13 @@ as Emacs:
 - `transport_spec.lua` asserts the Clojure payload is built correctly, EDN is
   parsed, 0/1/N dispatch works, the jump path is invoked with the right
   target, and the `cb` error path surfaces nREPL errors.
+
+On an nREPL error the full stack trace is appended to the Conjure log buffer
+(with `; (err) ` prefixes) and stored for `:ClaraExplorerLastError`; the
+`:ClaraExplorerTransportStatus` command opens the effective transport plus
+the explorer-server probe result in a scratch buffer. Plain stderr output
+(e.g. the INFO logs `client/navigate` writes) is not treated as a navigation
+error, so it cannot swallow the `value` message that follows.
 - `jump_spec.lua` asserts the var-vs-non-var jump dispatch, the
   `(defrule|defquery NAME)` and whole-symbol fallback regexes (including
   punctuation-bearing names like `my-thing?`), and `file:`/`jar:` resource

@@ -59,7 +59,10 @@ cd editor/emacs && make package
   :commands (clara-explorer-navigate-producer
              clara-explorer-navigate-consumer
              clara-explorer-refresh
-             clara-explorer-swap-session))
+             clara-explorer-swap-session
+             clara-explorer-toggle-transport
+             clara-explorer-transport-status
+             clara-explorer-select-unit))
 ```
 
 `package-install-file` resolves the `cider`/`parseedn`/`clojure-mode`

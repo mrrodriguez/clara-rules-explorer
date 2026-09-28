@@ -14,6 +14,8 @@ local function with_restore(tbl, key, stub, fn)
   assert(ok, err)
 end
 
+local function stub_eval(fn) package.loaded["conjure.eval"] = { ["eval-str"] = fn } end
+
 describe("conjure.navigate_input", function()
   it("builds the EDN NavigateInput map", function()
     local input = conjure.navigate_input({
@@ -38,18 +40,126 @@ describe("conjure.navigate_input", function()
 end)
 
 describe("conjure.transport", function()
-  it("defaults to nrepl", function()
+  it("defaults to auto", function()
     with_restore(vim.g, "clara_explorer_transport", nil, function()
-      assert.are.same("nrepl", conjure.transport())
-      assert.is_false(conjure.bb_transport_p())
+      assert.are.same("auto", conjure.transport())
     end)
   end)
 
-  it("reflects the configured transport", function()
+  it("explicit bb resolves without probing", function()
     with_restore(vim.g, "clara_explorer_transport", "bb", function()
       assert.are.same("bb", conjure.transport())
+      assert.are.same("bb", conjure.effective_transport())
       assert.is_true(conjure.bb_transport_p())
     end)
+  end)
+
+  it("auto defaults to bb before any probe", function()
+    with_restore(vim.g, "clara_explorer_transport", nil, function()
+      with_restore(conjure, "server_available_cache", nil, function()
+        assert.are.same("bb", conjure.effective_transport())
+        assert.is_true(conjure.bb_transport_p())
+      end)
+    end)
+  end)
+
+  it("auto uses nrepl when the last probe found a server", function()
+    with_restore(vim.g, "clara_explorer_transport", nil, function()
+      with_restore(conjure, "server_available_cache", true, function()
+        assert.are.same("nrepl", conjure.effective_transport())
+        assert.is_false(conjure.bb_transport_p())
+      end)
+    end)
+  end)
+end)
+
+describe("conjure.server_available", function()
+  it("reports true and caches it", function()
+    stub_eval(function(opts) opts["on-result"]("true") end)
+    local got, cached
+    with_restore(conjure, "server_available_cache", nil, function()
+      conjure.server_available(function(v) got = v end)
+      cached = conjure.server_available_cache
+    end)
+    assert.is_true(got)
+    assert.is_true(cached)
+  end)
+
+  it("reports false on a probe error", function()
+    stub_eval(function(opts) opts.cb({ err = "boom", ex = "clojure.lang.ExceptionInfo" }) end)
+    local got, cached
+    with_restore(conjure, "server_available_cache", nil, function()
+      conjure.server_available(function(v) got = v end)
+      cached = conjure.server_available_cache
+    end)
+    assert.is_false(got)
+    assert.is_false(cached)
+  end)
+end)
+
+describe("conjure.with_transport", function()
+  it("passes explicit transports through synchronously", function()
+    with_restore(vim.g, "clara_explorer_transport", "nrepl", function()
+      local got
+      conjure.with_transport(function(t) got = t end)
+      assert.are.same("nrepl", got)
+    end)
+  end)
+
+  it("auto probes the server", function()
+    with_restore(vim.g, "clara_explorer_transport", nil, function()
+      with_restore(conjure, "server_available", function(cb) cb(true) end, function()
+        local got
+        conjure.with_transport(function(t) got = t end)
+        assert.are.same("nrepl", got)
+      end)
+    end)
+  end)
+end)
+
+describe("conjure.record_error", function()
+  it("stores the full error for :ClaraExplorerLastError", function()
+    with_restore(conjure, "last_error", nil, function()
+      with_restore(package.loaded, "conjure.log", nil, function()
+        conjure.record_error({ code = "(boom)", err = "line1\nline2", ex = "boom" })
+        assert.are.same("(boom)", conjure.last_error.code)
+        assert.are.same("boom", conjure.last_error.ex)
+      end)
+    end)
+  end)
+end)
+
+describe("conjure.show_last_error", function()
+  it("notifies when there is no last error", function()
+    local notified
+    with_restore(conjure, "last_error", nil, function()
+      with_restore(vim, "notify", function(msg) notified = msg end, function() conjure.show_last_error() end)
+    end)
+    assert.are.same("clara-explorer: no last error", notified)
+  end)
+end)
+
+describe("init.transport_status", function()
+  it("shows the effective transport first in a scratch buffer", function()
+    local shown_name, shown_lines
+    with_restore(vim.g, "clara_explorer_transport", "nrepl", function()
+      with_restore(conjure, "connected", function() return true end, function()
+        with_restore(conjure, "with_transport", function(cb) cb("nrepl") end, function()
+          with_restore(
+            conjure,
+            "show_scratch",
+            function(name, lines)
+              shown_name, shown_lines = name, lines
+            end,
+            function() init.transport_status() end
+          )
+        end)
+      end)
+    end)
+    assert.are.same("clara-explorer://transport-status", shown_name)
+    assert.truthy(vim.tbl_contains(shown_lines, "effective       nrepl"))
+    assert.truthy(vim.tbl_contains(shown_lines, "configured      nrepl"))
+    assert.truthy(vim.tbl_contains(shown_lines, "connected       yes"))
   end)
 end)
 
@@ -353,8 +463,8 @@ describe("init.navigate bb dispatch", function()
   local ctx = { production = "ns/rule", kind = "rule", side = "lhs", caller_ns = "ns", token = "Doc" }
 
   local function with_bb_nav_env(overrides, fn)
-    with_restore(conjure, "connected", function() return true end, function()
-      with_restore(conjure, "bb_transport_p", function() return true end, function()
+    with_restore(conjure, "connected", function() return overrides.connected == nil and true or overrides.connected end, function()
+      with_restore(conjure, "with_transport", function(cb) cb("bb") end, function()
         with_restore(vim.api, "nvim_get_current_buf", function() return 1 end, function()
           with_restore(vim.api, "nvim_get_current_win", function() return 1 end, function()
             with_restore(vim.api, "nvim_win_get_cursor", function() return { 1, 0 } end, function()
@@ -423,8 +533,8 @@ end)
 describe("init refresh/swap bb no-ops", function()
   it("refresh is a no-op in bb mode", function()
     local notified
-    with_restore(conjure, "bb_transport_p", function() return true end, function()
-      with_restore(conjure, "connected", function() error("must not be called") end, function()
+    with_restore(conjure, "connected", function() return true end, function()
+      with_restore(conjure, "with_transport", function(cb) cb("bb") end, function()
         with_restore(vim, "notify", function(msg) notified = msg end, function() init.refresh() end)
       end)
     end)
@@ -433,8 +543,8 @@ describe("init refresh/swap bb no-ops", function()
 
   it("swap_session is a no-op in bb mode", function()
     local notified
-    with_restore(conjure, "bb_transport_p", function() return true end, function()
-      with_restore(conjure, "connected", function() error("must not be called") end, function()
+    with_restore(conjure, "connected", function() return true end, function()
+      with_restore(conjure, "with_transport", function(cb) cb("bb") end, function()
         with_restore(vim, "notify", function(msg) notified = msg end, function() init.swap_session(nil) end)
       end)
     end)

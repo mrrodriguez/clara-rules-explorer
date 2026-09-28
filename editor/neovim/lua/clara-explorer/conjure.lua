@@ -98,6 +98,7 @@ function M.resolve_token(opts)
     code = M.resolve_code(opts.caller_ns, opts.token),
     bufnr = opts.bufnr,
     win = opts.win,
+    passive = true,
     on_value = function(value)
       local ok, decoded = pcall(edn.decode, value)
       if ok and type(decoded) == "string" then
@@ -129,6 +130,75 @@ function M.err_summary(err)
   return head
 end
 
+--- Last full nREPL error (code + err + ex), surfaced by `:ClaraExplorerLastError`.
+M.last_error = nil
+
+local function conjure_log()
+  local ok, log = pcall(require, "conjure.log")
+  if ok and log and log.append then return log end
+  return nil
+end
+
+--- Record the full nREPL error and append it to the Conjure log buffer.
+-- Conjure's `eval-str` skips its own `display-result` when a `cb` is passed,
+-- so without this the full stack trace never reaches the log. `cb` is called
+-- with the raw nREPL response and the error is surfaced here.
+function M.record_error(e)
+  M.last_error = e
+  local log = conjure_log()
+  if not log then return end
+  local lines = { "; (err) " .. (e.ex or "eval failed") }
+  if e.err and e.err ~= "" then
+    for _, l in ipairs(vim.split(e.err, "\n")) do
+      lines[#lines + 1] = "; (err) " .. l
+    end
+  end
+  local ok, append_err = pcall(log.append, lines, { ["break?"] = true })
+  if not ok then
+    vim.schedule(function()
+      vim.notify("clara-explorer: failed to append to Conjure log: " .. tostring(append_err), vim.log.levels.WARN)
+    end)
+  end
+end
+
+--- Open (or reuse) a named scratch buffer with LINES in a split.
+function M.show_scratch(name, lines, filetype)
+  local existing = vim.fn.bufnr(name)
+  local buf = existing ~= -1 and existing or vim.api.nvim_create_buf(false, true)
+  if existing == -1 then
+    vim.api.nvim_buf_set_name(buf, name)
+  end
+  vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
+  vim.api.nvim_set_option_value("filetype", filetype or "", { buf = buf })
+  vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+  vim.cmd("sbuffer " .. buf)
+end
+
+--- Open the last full nREPL error (stack trace + code) in a scratch buffer.
+function M.show_last_error()
+  local e = M.last_error
+  if not e then
+    vim.notify("clara-explorer: no last error", vim.log.levels.INFO)
+    return
+  end
+  local lines = { ";; clara-explorer last nREPL error", ";; " .. (e.ex or "eval failed"), "" }
+  if e.err and e.err ~= "" then
+    for _, l in ipairs(vim.split(e.err, "\n")) do
+      lines[#lines + 1] = l
+    end
+    lines[#lines + 1] = ""
+  end
+  lines[#lines + 1] = ";; --- code ---"
+  if e.code and e.code ~= "" then
+    for _, l in ipairs(vim.split(e.code, "\n")) do
+      lines[#lines + 1] = l
+    end
+  end
+  M.show_scratch("clara-explorer://last-error", lines, "clojure")
+end
+
 --- Eval `opts.code` over Conjure; on a value call `opts.on_value(value, bufnr, win)`;
 -- on an nREPL error call `opts.on_error(summary, bufnr, win)`.  `bufnr`/`win`
 -- are captured at call time (the eval is async).
@@ -151,6 +221,7 @@ function M.eval_edn(opts)
   eval["eval-str"]({
     code = opts.code,
     origin = "clara-explorer",
+    ["passive?"] = opts.passive,
     ["on-result"] = function(value)
       finish(opts.on_value or function() end, value, bufnr, win)
     end,
@@ -158,17 +229,22 @@ function M.eval_edn(opts)
       if settled then return end
       local err = resp.err
       local ex = resp.ex or resp["root-ex"]
-      if err and err ~= "" then
-        local summary = M.err_summary(err)
-        finish(
-          opts.on_error or function() end,
-          "clara-explorer: " .. (ex or "eval failed") .. (summary ~= "" and (" — " .. summary) or ""),
-          bufnr,
-          win
-        )
-      elseif ex and ex ~= "" then
-        finish(opts.on_error or function() end, "clara-explorer: " .. ex, bufnr, win)
-      end
+      local eval_error = resp.status and resp.status["eval-error"]
+      -- nREPL delivers stderr/stdout as separate messages (e.g. the INFO logs
+      -- from `client/navigate`). Only a real exception (`ex` / `root-ex` / the
+      -- `eval-error` status) is a navigation failure; plain `err` without an
+      -- exception is just logging and must not swallow the value that follows.
+      local failed = (ex and ex ~= "") or eval_error
+      if not failed then return end
+      local summary = M.err_summary(err)
+      M.record_error({ code = opts.code, err = err or "", ex = ex or "eval failed", summary = summary })
+      finish(
+        opts.on_error or function() end,
+        "clara-explorer: " .. (ex or "eval failed") .. (summary ~= "" and (" — " .. summary) or "")
+          .. " (see :ClaraExplorerLastError)",
+        bufnr,
+        win
+      )
     end,
   })
 end
@@ -176,11 +252,55 @@ end
 --- babashka transport — shell out to `bb editor_client.bb` over the
 -- persisted artifacts instead of evaling over Conjure.
 
---- The configured transport: `"nrepl"` (default) or `"bb"`.
-function M.transport() return vim.g.clara_explorer_transport or "nrepl" end
+--- The configured transport: `"auto"` (default), `"nrepl"`, or `"bb"`.
+function M.transport() return vim.g.clara_explorer_transport or "auto" end
+
+--- Cached result of the last explorer-server availability probe. Synchronous
+-- callers (e.g. `effective_transport`) read this; async callers go through
+-- `with_transport`, which probes fresh.
+M.server_available_cache = nil
+
+--- Probe the connected session for a running explorer system. Calls
+-- `cb(true)` / `cb(false)`; a missing explorer classpath (or any probe error)
+-- resolves to false. Updates `server_available_cache`.
+function M.server_available(cb)
+  M.eval_edn({
+    code = "(try (some? ((requiring-resolve 'clara.server.graph.client/get-current-system))) (catch Throwable _ false))",
+    passive = true,
+    on_value = function(value)
+      local ok, decoded = pcall(edn.decode, value)
+      local available = ok and decoded == true
+      M.server_available_cache = available
+      cb(available)
+    end,
+    on_error = function()
+      M.server_available_cache = false
+      cb(false)
+    end,
+  })
+end
+
+--- Resolve the effective transport for this call and invoke `cb(transport)`.
+-- Explicit modes resolve synchronously; `"auto"` probes the connected session.
+function M.with_transport(cb)
+  local t = M.transport()
+  if t ~= "auto" then
+    cb(t)
+    return
+  end
+  M.server_available(function(available) cb(available and "nrepl" or "bb") end)
+end
+
+--- Synchronous best-effort effective transport: explicit modes, or the last
+-- probe result for `"auto"` (default `"bb"` before any probe).
+function M.effective_transport()
+  local t = M.transport()
+  if t == "auto" then return M.server_available_cache == true and "nrepl" or "bb" end
+  return t
+end
 
 --- True when navigation uses the babashka transport.
-function M.bb_transport_p() return M.transport() == "bb" end
+function M.bb_transport_p() return M.effective_transport() == "bb" end
 
 --- Registry root for the bb transport: `g:clara_explorer_registry_root` when
 -- set, else `CLARA_RULES_EXPLORER_REGISTRY`; expanded to an absolute path.

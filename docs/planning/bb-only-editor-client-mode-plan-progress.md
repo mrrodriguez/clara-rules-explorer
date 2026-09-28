@@ -196,6 +196,60 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
       commands added. `bb_transport_spec.lua` added (29 tests); full suite green
       (152 tests, 0 failures/errors), format-check + lint clean.
 
+## Phase 6 — smart transport default (bb by default, nREPL when an explorer server is running)
+
+Landed (revised): the transport default is now `auto` in both editors. `auto`
+resolves to nREPL only when the connected repl actually has a running explorer
+system; otherwise it resolves to bb. Both modes still require a connected
+repl — bb mode just has no explorer JVM/server on it. There is no "offline bb"
+mode: without a repl, tokens cannot be resolved and namespaces cannot be
+mapped to source files, so navigation cannot work.
+
+- [x] Emacs: `clara-explorer-transport` default `'auto` (new choice alongside
+      `'nrepl`/`'bb`); `clara-explorer--server-available-p` probes
+      `clara.server.graph.client/get-current-system` via `requiring-resolve`
+      (false when the explorer is absent from the classpath or no system is
+      registered); `clara-explorer--effective-transport` uses that probe.
+- [x] Emacs: `clara-explorer--navigate` keeps the hard "Not connected to a
+      CIDER REPL" gate and always resolves the token over the repl, then
+      dispatches on the probed transport.
+- [x] Neovim: `conjure.transport()` default `"auto"`; new async
+      `conjure.server_available(cb)` (probe + `server_available_cache`) and
+      `conjure.with_transport(cb)`; `conjure.bb_transport_p()` is the
+      synchronous best-effort read for toggle/select-unit (default bb until
+      probed).
+- [x] Neovim: `init.navigate`/`init.refresh`/`init.swap_session` resolve the
+      transport via `conjure.with_transport`; navigate still gates on
+      `conjure.connected()` and resolves the token first.
+- [x] Transport visibility + full errors: Emacs `clara-explorer-transport-status`
+      and Neovim `:ClaraExplorerTransportStatus` report configured/effective
+      transport plus the explorer-server probe (both put effective first;
+      Neovim opens a scratch buffer). Neovim `:ClaraExplorerLastError` opens
+      the last full nREPL stack trace + code; `conjure.record_error` also
+      appends the full trace to the Conjure log (Conjure's `eval-str` skips
+      its own `display-result` when a `cb` is passed, so this was previously
+      dropped).
+- [x] Neovim nREPL transport fix: `eval_edn` no longer treats a plain
+      `resp.err` (stderr, e.g. the INFO logs `client/navigate` writes) as a
+      navigation failure. It now fails only on `resp.ex`/`root-ex` or the
+      nREPL `eval-error` status, so the stderr message can't swallow the
+      `value` message that follows and block producer/consumer jumps.
+- [x] Tests: Emacs tier-1 104 passed, byte-compile clean; Neovim suite green
+      (21 edn + 6 structural + 16 jump + 33 transport + 50 token + 40
+      bb-transport = 166 tests, 0 failures/errors). `stylua`/`selene` are not
+      installed in this sandbox, so `make format-check lint` could not run.
+- [x] Docs: `docs/explorer-editor-navigation-neovim.md` transport + command
+      sections updated, and `docs/explorer-editor-navigation-emacs.md` command
+      list extended.
+
+Behavior notes:
+- The discriminator is explorer-server availability, not nREPL-client
+  connection: bb mode still has a connected CIDER/Conjure session (it just
+  lacks the explorer JVM), so `cider-connected-p`/`conjure.connected()` is
+  true in both modes and cannot choose between them.
+- The probe is cheap: `requiring-resolve` fails fast when the explorer is not
+  on the classpath, and returns nil when no system is registered.
+
 ## Notes / decisions while implementing
 
 - `clj-nrepl-eval` is unusable in this sandbox (its bb bootstrapping writes to

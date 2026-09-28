@@ -43,11 +43,14 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
   :type 'boolean
   :group 'clara-explorer)
 
-(defcustom clara-explorer-transport 'nrepl
+(defcustom clara-explorer-transport 'auto
   "Transport for navigation queries.
-`nrepl' evals `client/navigate' over the CIDER session (default);
+`auto' uses nREPL when the CIDER session has a running explorer system,
+otherwise babashka (default);
+`nrepl' evals `client/navigate' over the CIDER session;
 `bb' shells out to `editor_client.bb' over the persisted artifacts."
-  :type '(choice (const :tag "nREPL (live session)" nrepl)
+  :type '(choice (const :tag "Auto (nREPL when the explorer server is running, else babashka)" auto)
+                 (const :tag "nREPL (live session)" nrepl)
                  (const :tag "babashka (offline artifacts)" bb))
   :group 'clara-explorer)
 
@@ -177,9 +180,35 @@ comment to end of line, repeatedly until point stops moving.  Uses
 ;; babashka transport (§Phase 4)
 ;; ---------------------------------------------------------------------------
 
+(defconst clara-explorer--server-probe-code
+  (concat "(try (some? ((requiring-resolve"
+          " 'clara.server.graph.client/get-current-system)))"
+          " (catch Throwable _ false))")
+  "Form evaluating to `true' when the connected repl has an explorer system.")
+
+(defun clara-explorer--server-available-p (&optional conn)
+  "Non-nil when the connected CIDER session has a running explorer system.
+Probes `clara.server.graph.client/get-current-system' via `requiring-resolve';
+a repl without the explorer on its classpath (or no registered system)
+resolves to nil."
+  (let ((conn (or conn (and (cider-connected-p)
+                            (cider-current-repl 'infer 'ensure)))))
+    (when conn
+      (let* ((resp (cider-nrepl-sync-request:eval clara-explorer--server-probe-code conn))
+             (val (and resp (nrepl-dict-get resp "value"))))
+        (and (stringp val) (string= val "true"))))))
+
+(defun clara-explorer--effective-transport (&optional conn)
+  "Resolve `clara-explorer-transport' to the transport used for this call.
+`auto' selects nREPL when the connected CIDER session has a running explorer
+system, otherwise babashka."
+  (if (eq clara-explorer-transport 'auto)
+      (if (clara-explorer--server-available-p conn) 'nrepl 'bb)
+    clara-explorer-transport))
+
 (defun clara-explorer--bb-transport-p ()
   "Non-nil when navigation uses the babashka transport."
-  (eq clara-explorer-transport 'bb))
+  (eq (clara-explorer--effective-transport) 'bb))
 
 (defun clara-explorer--registry-root ()
   "The registry root as an absolute path.
@@ -881,9 +910,12 @@ file (a symlink to the `shared.tokens` canonical text)."
        (clara-explorer--edn-get :targets result)))))
 
 (defun clara-explorer--navigate (side)
-  "Shared dispatcher for producer (:lhs) / consumer (:rhs) navigation."
+  "Shared dispatcher for producer (:lhs) / consumer (:rhs) navigation.
+The transport is resolved at call time: `auto' picks nREPL when the connected
+CIDER session has a running explorer system, otherwise bb."
   (unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))
   (let* ((conn (cider-current-repl 'infer 'ensure))
+         (transport (clara-explorer--effective-transport conn))
          (ctx (clara-explorer--context))
          (production (plist-get ctx :production))
          (kind (plist-get ctx :kind))
@@ -896,7 +928,7 @@ file (a symlink to the `shared.tokens` canonical text)."
      (t
       (let* ((eff-side side)
              (resolved (clara-explorer--resolve-token token caller-ns conn))
-             (result (if (clara-explorer--bb-transport-p)
+             (result (if (eq transport 'bb)
                          (clara-explorer--bb-eval
                           (clara-explorer--bb-selection)
                           (clara-explorer--edn-map
@@ -992,6 +1024,22 @@ means use the registered default (0-arity)."
         (if (clara-explorer--bb-transport-p) 'nrepl 'bb))
   (message "clara-explorer: transport is now %s"
            (if (clara-explorer--bb-transport-p) "bb" "nrepl")))
+
+;;;###autoload
+(defun clara-explorer-transport-status ()
+  "Show the configured and effective transport, and the explorer-server probe."
+  (interactive)
+  (let* ((connected (cider-connected-p))
+         (server (clara-explorer--server-available-p))
+         (effective (if (eq clara-explorer-transport 'auto)
+                        (if server 'nrepl 'bb)
+                      clara-explorer-transport)))
+    (message
+     "clara-explorer: effective=%S configured=%S connected=%s explorer-server=%s"
+     effective
+     clara-explorer-transport
+     (if connected "yes" "no")
+     (if server "yes" "no"))))
 
 ;;;###autoload
 (defun clara-explorer-select-unit ()

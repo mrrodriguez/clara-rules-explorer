@@ -88,6 +88,20 @@ describe("conjure.eval_edn", function()
     assert.truthy(err_msg:match("Caused by: reason"))
   end)
 
+  it("ignores stderr-only messages and waits for the value", function()
+    stub_eval(function(opts)
+      opts.cb({ err = "2026-09-28 INFO [nREPL-session] clara.server.graph.client - navigate" })
+      opts["on-result"]('{:direction :producer :type "X" :targets []}')
+    end)
+    local value_seen
+    conjure.eval_edn({
+      code = "x",
+      on_value = function(v) value_seen = v end,
+      on_error = function() error("stderr-only must not surface an error") end,
+    })
+    assert.are.same('{:direction :producer :type "X" :targets []}', value_seen)
+  end)
+
   it("on-result wins over a later cb message", function()
     stub_eval(function(opts)
       opts["on-result"]("value")
@@ -278,7 +292,9 @@ describe("init.swap_session", function()
 
   local function with_swap_env(bufnr, fn)
     with_restore(conjure, "connected", function() return true end, function()
-      with_restore(vim.api, "nvim_get_current_buf", function() return bufnr end, fn)
+      with_restore(vim.g, "clara_explorer_transport", "nrepl", function()
+        with_restore(vim.api, "nvim_get_current_buf", function() return bufnr end, fn)
+      end)
     end)
   end
 
@@ -382,12 +398,14 @@ end)
 describe("init.navigate resolves before sending", function()
   local function with_resolve_env(ctx, resolve_fn, eval_fn)
     with_restore(conjure, "connected", function() return true end, function()
-      with_restore(vim.api, "nvim_get_current_buf", function() return 1 end, function()
-        with_restore(vim.api, "nvim_get_current_win", function() return 1 end, function()
-          with_restore(vim.api, "nvim_win_get_cursor", function() return { 1, 0 } end, function()
-            with_restore(init, "context", function() return ctx end, function()
-              with_restore(conjure, "resolve_token", resolve_fn, function()
-                with_restore(conjure, "eval_edn", eval_fn, function() init.navigate("lhs") end)
+      with_restore(vim.g, "clara_explorer_transport", "nrepl", function()
+        with_restore(vim.api, "nvim_get_current_buf", function() return 1 end, function()
+          with_restore(vim.api, "nvim_get_current_win", function() return 1 end, function()
+            with_restore(vim.api, "nvim_win_get_cursor", function() return { 1, 0 } end, function()
+              with_restore(init, "context", function() return ctx end, function()
+                with_restore(conjure, "resolve_token", resolve_fn, function()
+                  with_restore(conjure, "eval_edn", eval_fn, function() init.navigate("lhs") end)
+                end)
               end)
             end)
           end)
