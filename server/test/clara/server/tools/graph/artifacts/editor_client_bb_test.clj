@@ -98,7 +98,8 @@
       (is (zero? exit) (str "editor_client.bb --list-units exited " exit ": " err))
       (is (= ["composed/loan-app-plus-disposition"
               "loan-app-ruleset"
-              "loan-disposition-ruleset"]
+              "loan-disposition-ruleset"
+              "loan-disposition-ruleset@alt"]
              (edn/read-string out))))))
 
 (deftest editor-client-composes-multi-unit-selection-and-matches-rehydrate-test
@@ -154,3 +155,23 @@
                (:type answer)))
         (is (contains? (set (map :name (:targets answer)))
                        "clara.server.tools.graph.rules.loan-app-rules/app-outcome-denied?"))))))
+
+(deftest editor-client-branch-unit-matches-mainline-test
+  (if-not (runnable?)
+    (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")
+    (let [mainline {:root (registry-root) :units [{:repo "loan-disposition-ruleset"}]}
+          branch {:root (registry-root)
+                  :units [{:repo "loan-disposition-ruleset" :branch "alt"}]}
+          input {:production nil :side :rhs :token keyword-outcome}
+          run (fn [selection]
+                (let [{:keys [exit out err]}
+                      (shell/sh "bb" (str editor-client-script)
+                                (pr-str selection) (pr-str input))]
+                  (is (zero? exit) (str "editor_client.bb exited " exit ": " err))
+                  (edn/read-string out)))]
+      (testing "a branch variant is read from <repo>/branches/<label> and answers like the mainline"
+        (let [mainline-answer (run mainline)
+              branch-answer (run branch)]
+          (is (not (contains? branch-answer :error)) branch-answer)
+          (is (= (set (map :name (:targets mainline-answer)))
+                 (set (map :name (:targets branch-answer))))))))))

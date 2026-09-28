@@ -66,22 +66,13 @@
          '[clojure.pprint :as pprint]
          '[clojure.string :as str])
 
-;; Artifact filenames, the layer fold order, and the merged-annotations.edn
-;; decode come from the JVM source, through the `layout.cljc` symlink
-;; beside this script. Do not replace it with a copy: a copy still parses long
-;; after it stops agreeing with what wrote the files.
-(def ^:private layout-file
-  (fs/file (fs/parent (fs/canonicalize *file*)) "layout.cljc"))
+;; Put `server/src` on the classpath (and schema, if a script wants it), then
+;; `require` the JVM source namespaces directly instead of `load-file`ing a
+;; symlinked copy of `layout`. `bootstrap.bb` is what makes `require` work.
+(load-file (str (fs/file (fs/parent (fs/canonicalize *file*)) "bootstrap.bb")))
 
-(when-not (fs/exists? layout-file)
-  (binding [*out* *err*]
-    (println "Missing layout.cljc beside this script:" (str layout-file))
-    (println "It symlinks to src/clara/server/tools/graph/artifacts/layout.cljc — run this")
-    (println "script from a checkout, not from a copy of the file alone."))
-  (System/exit 1))
-
-(load-file (str layout-file))
-(alias 'layout 'clara.server.tools.graph.artifacts.layout)
+(require '[clara.server.tools.graph.artifacts.layout :as layout]
+         '[clara.server.tools.graph.artifacts.hierarchy :as hierarchy])
 
 (def ^:private dims
   [[:clara-rules/dynamic-insert-types-detected :clara-rules/insert-types "insert"]
@@ -217,27 +208,6 @@
         (map (fn [[name entry]]
                [name (into #{} (map str) (:ancestors entry))]))
         fact-types))
-
-(defn- ->descendants
-  "Transpose of a closed ancestor map: `{ancestor-name #{descendant-name}}` —
-  the same shape and meaning as
-  `clara.server.tools.graph.artifacts.hierarchy/->descendants`."
-  [ancestors]
-  (let [desc (volatile! {})]
-    (doseq [[ft as] ancestors
-            a as]
-      (vswap! desc update a (fnil conj #{}) ft))
-    @desc))
-
-(defn- with-hierarchy
-  "`base-names` plus every name reached through `edge-map` (`{name #{name}}`),
-  transitively. One `get` per name is the whole closure because the map passed IS
-  the direction and is already closed: `ancestors` runs the opposite way from
-  `descendants`, and passing the wrong one is a wrong answer no exception flags —
-  the same warning
-  `clara.server.tools.graph.artifacts.hierarchy/ancestor-closure` gives."
-  [edge-map base-names]
-  (reduce (fn [acc t] (into acc (cons t (get edge-map t #{})))) #{} base-names))
 
 (defn- resolve-type-names
   "The known fact-type names `raw` means, as a set of canonical strings, resolved
@@ -388,8 +358,8 @@
   closure over `:insert-types`."
   [anns fact-types raw]
   (when-let [resolved (resolve-type-names fact-types raw)]
-    (let [descendants (->descendants (->ancestors fact-types))
-          closure (with-hierarchy descendants resolved)
+    (let [descendants (hierarchy/->descendants (->ancestors fact-types))
+          closure (hierarchy/descendant-closure descendants resolved)
           matches (into []
                         (keep (fn [[rule a]]
                                 (let [m (rule-match resolved closure
@@ -413,7 +383,7 @@
   [index fact-types raw]
   (when-let [resolved (resolve-type-names fact-types raw)]
     (let [ancestors (->ancestors fact-types)
-          closure (with-hierarchy ancestors resolved)
+          closure (hierarchy/ancestor-closure ancestors resolved)
           matches (into []
                         (keep (fn [[rule r]]
                                 (let [m (rule-match resolved closure
@@ -435,7 +405,7 @@
   [fact-types raw]
   (when-let [resolved (resolve-type-names fact-types raw)]
     (let [ancestors (->ancestors fact-types)
-          descendants (->descendants ancestors)]
+          descendants (hierarchy/->descendants ancestors)]
       (doseq [name (sort resolved)
               :let [as (sort (get ancestors name #{}))
                     ds (sort (get descendants name #{}))]]

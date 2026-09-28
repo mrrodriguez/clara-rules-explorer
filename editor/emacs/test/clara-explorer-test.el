@@ -906,7 +906,7 @@ Tier-1 stub path fast."
     (should-not (string-match-p "%s" code))))
 
 (ert-deftest resolve-form-matches-canonical-template ()
-  "Guard against drift from `shared.tokens/editor-token-resolve-form`: the
+  "Guard against drift from `clara.server.graph.tokens/editor-token-resolve-form`: the
    canonical template's shape markers must all be present."
   (let ((code (clara-explorer--resolve-form "ns" "tok")))
     (dolist (frag '("(find-ns ns-sym)"
@@ -1004,6 +1004,16 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
              (lambda (_prompt coll _req _match) (car coll))))
     (should (equal (clara-explorer--bb-prompt-selection)
                    "{:root \"/reg\" :units [{:repo \"loan-app-ruleset\"}]}"))))
+
+(ert-deftest bb-prompt-selection-builds-branch-edn ()
+  (cl-letf (((symbol-function 'clara-explorer--registry-root) (lambda () "/reg"))
+            ((symbol-function 'file-directory-p) (lambda (_d) t))
+            ((symbol-function 'clara-explorer--bb-list-unit-repos)
+             (lambda (_root) '("loan-disposition-ruleset@alt")))
+            ((symbol-function 'completing-read)
+             (lambda (_prompt coll _req _match) (car coll))))
+    (should (equal (clara-explorer--bb-prompt-selection)
+                   "{:root \"/reg\" :units [{:repo \"loan-disposition-ruleset\" :branch \"alt\"}]}"))))
 
 (ert-deftest bb-list-unit-repos-shells-out ()
   (cl-letf (((symbol-function 'clara-explorer--bb-script) (lambda () "/p/editor_client.bb"))

@@ -304,6 +304,32 @@ describe("conjure.bb_prompt_selection", function()
     end)
   end)
 
+  it("splits a repo@branch unit-key into :repo and :branch", function()
+    local notified
+    with_restore(conjure, "registry_root", function() return "/reg" end, function()
+      with_restore(vim.fn, "isdirectory", function() return 1 end, function()
+        with_restore(
+          conjure,
+          "bb_list_unit_repos",
+          function(_root) return { "loan-disposition-ruleset@alt" } end,
+          function()
+            with_restore(vim.ui, "select", function(items, _opts, cb) cb(items[1]) end, function()
+              with_restore(vim, "notify", function(msg) notified = msg end, function()
+                local got
+                conjure.bb_prompt_selection(function(sel) got = sel end)
+                assert.are.same(
+                  '{:root "/reg" :units [{:repo "loan-disposition-ruleset" :branch "alt"}]}',
+                  got
+                )
+                assert.is_nil(notified)
+              end)
+            end)
+          end
+        )
+      end)
+    end)
+  end)
+
   it("notifies when the registry root is missing", function()
     local notified
     with_restore(conjure, "registry_root", function() return nil end, function()

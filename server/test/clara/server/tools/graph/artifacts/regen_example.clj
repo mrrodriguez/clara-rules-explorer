@@ -32,6 +32,7 @@
    [clara.rules :as r]
    [clara.server.tools.graph.artifacts.flow :as flow]
    [clara.server.tools.graph.artifacts.manifest :as manifest]
+   [clara.server.tools.graph.artifacts.store :as store]
    [clara.server.tools.graph.rules.loan-app-facts :as laf]
    [clara.server.tools.graph.rules.loan-app-rules]
    [clara.server.tools.graph.rules.loan-doc-queries]
@@ -150,22 +151,35 @@
    :analysis-run
    {:scope "composed loan-app + loan-disposition"}})
 
+(def example-branch
+  "The checked-in branch variant: the same unfired disposition session persisted
+   under `<repo>/branches/<label>`, so the registry walk's `branches/` convention
+   is exercised end-to-end on a real unit."
+  {:repo (:repo loan-disposition-ruleset)
+   :branch "alt"})
+
 (def example-repos
-  "Every repo generated into the example registry, source bundles first."
-  (conj (mapv :repo example-rulesets) composed-example-repo))
+  "Every repo and branch variant generated into the example registry, source
+   bundles first, then the composed unit, then the branch variant (named by its
+   registry-relative path)."
+  (into (mapv :repo example-rulesets)
+        [composed-example-repo
+         (str (:repo example-branch) "/branches/" (:branch example-branch))]))
 
 ;; ---------------------------------------------------------------------------
 ;; Generation
 ;; ---------------------------------------------------------------------------
 
 (defn- persist-ruleset!
-  "Generate and persist one ruleset bundle under the registry root `root`."
-  [root {:keys [repo session-fn fact-constructors analysis-run]}]
+  "Generate and persist one ruleset bundle under the registry root `root`.
+   `:branch` (when present) nests the bundle under `<repo>/branches/<label>`."
+  [root {:keys [repo session-fn fact-constructors analysis-run branch]}]
   (let [session (session-fn)
-        dir (str (io/file root repo))
-        opts {:dir dir
-              :repo repo
-              :generated-by example-generated-by}
+        opts (cond-> {:root root
+                      :repo repo
+                      :generated-by example-generated-by}
+               branch (assoc :branch branch))
+        dir (store/get-out-dir opts)
         generated (flow/generate
                    (cond-> {:session session
                             :generated-by example-generated-by}
@@ -181,11 +195,12 @@
                        (assoc opts
                               :session session
                               :analysis-run analysis-run))]
-    {:repo repo
-     :dir dir
-     :generated-rule-count (count (:annotations (:layer generated)))
-     :memory-rule-count (if memory-layer (count (:annotations memory-layer)) 0)
-     :manifest manifest-file}))
+    (cond-> {:repo repo
+             :dir dir
+             :generated-rule-count (count (:annotations (:layer generated)))
+             :memory-rule-count (if memory-layer (count (:annotations memory-layer)) 0)
+             :manifest manifest-file}
+      branch (assoc :branch branch))))
 
 (defn- persist-composed-example!
   "Compose the source rulesets under `root` into one unit-shaped directory and
@@ -222,4 +237,6 @@
   [dir]
   {:dir dir
    :rulesets (mapv #(persist-ruleset! dir %) example-rulesets)
+   :branch (persist-ruleset! dir (assoc loan-disposition-ruleset
+                                        :branch (:branch example-branch)))
    :composed (persist-composed-example! dir composed-example)})

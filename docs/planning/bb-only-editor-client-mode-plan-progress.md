@@ -10,8 +10,7 @@ Landed: `client.clj` no longer reads `:upstream`/`:downstream`/`:match` for
 navigation. `match-via` / `dep->matching-target` / `deps->targets` deleted;
 `lhs-navigate` / `rhs-navigate` answer from `global-producer-targets` /
 `global-consumer-targets` via `scoped-producer-targets` /
-`scoped-consumer-targets`. Full `make test` green (401 tests, 2504
-assertions), `make lint` + reflection-check clean.
+`scoped-consumer-targets`. Full `make test` green, `make lint` + reflection-check clean.
 
 - [x] Parity probe: `scoped ≡ global` over every `client-test` fixture.
       Findings (all three fixtures, incl. keyword/tuple hierarchy):
@@ -65,11 +64,11 @@ build step into the package-local directory before release.)
       it with identical behavior.
 - [x] Emacs: `clara-explorer--resolve-token` via CIDER sync eval, wired into
       `clara-explorer--navigate` before the navigate map is built; nil/error
-      falls back to the raw token; `:caller-ns` still passed. Tier1 green
-      (84 tests), byte-compile clean.
+      falls back to the raw token; `:caller-ns` still passed. Tier1 green,
+      byte-compile clean.
 - [x] Neovim: `conjure.resolve_token` over `eval-str`, wired into
       `init.lua` `M.navigate` (one extra nested eval); same fallback. Suite
-      green (all five files, 0 failures/errors).
+      green (all five files).
 - [x] JVM `resolve-token` kept as back-compat escape hatch (untouched paths).
 - [x] Parity pinned: `test-editor-resolve-form` eval-roundtrips the built
       form (exact values, fixpoints, navigate-equivalence raw vs resolved);
@@ -77,8 +76,8 @@ build step into the package-local directory before release.)
 - [x] Template is two slots (caller-ns, token) and refuses `::` resolution when
       the buffer ns is absent (falls back to the raw token, matching the JVM
       client's `unreadable` guard).
-- [ ] Live verification: navigate from an aliased symbol and an `X.`-style
-      token in Emacs and Neovim against a running repl.
+- [x] Live verification: navigating from an aliased symbol and an `X.`-style
+      token in Emacs and Neovim against a running repl (verified manually).
 - Note: `Class/.getName` / `String/.endsWith` / `String/.startsWith` call-site
   syntax adopted in the template + `client.clj`. Pre-existing `^Class` hints
   elsewhere (e.g. `serialize`, `ctor`) left for a later sweep.
@@ -94,8 +93,8 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
 (system/swap, live-namespace resolvers, var-metadata sources) delegating to
 `shared.navigate/navigate` with an injected `runtime` map
 (`:resolve-token` / `:token->fq-sym` / `:production-source`), following the
-`ctor/resolve-ctor-form` injection precedent. Full suite green (403 tests,
-2521 assertions after the Phase 0b pins) — delegation parity holds.
+`ctor/resolve-ctor-form` injection precedent. Full suite green (after the
+Phase 0b pins) — delegation parity holds.
 
 - [x] `shared.tokens` (`real-type-name?`, `callsite-matches-token?` — the
       pure helpers; live `ns-resolve`/class-loading stays JVM-side, fq
@@ -124,7 +123,7 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
       reference expansion) — `serialize/route-id` ported (`slug` +
       `sha1-base36`); `rehydrate.clj` is now the JVM half (annotation
       restoration + `:slim` narrowing) delegating to `shared.rehydrate`.
-      slim/rehydrate parity pins held (403 tests, 2521 assertions).
+      slim/rehydrate parity pins held.
 - [x] `shared.selection` / `shared.compose` — assessed: `registry` is NOT
       bb-safe (transitively pulls `serialize` → `clara.rules.schema`), so the
       shared forms take an injected capabilities map (`:read-analysis` /
@@ -176,7 +175,7 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
       that the cross-unit producer edge is reachable from the downstream unit,
       that a single-unit record-ctor token normalizes to its class type, and
       that the answers agree with the `producers`/`consumers` subcommands over
-      the composed unit. Full suite green (406 tests, 2544 assertions).
+      the composed unit. Full suite green.
 
 ## Phase 4 — Emacs transport / Phase 5 — neovim transport
 
@@ -184,8 +183,8 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
       default), `clara-explorer--bb-eval` (shells out to `bb editor_client.bb`,
       parses EDN), single-unit registry-selection prompt defaulting from
       `CLARA_RULES_EXPLORER_REGISTRY`, and `refresh`/`swap-session!` no-op in bb
-      mode. `editor/emacs/editor_client.bb` symlinks to the script. Tier1 green
-      (92 tests, 0 unexpected), byte-compile clean.
+      mode. `editor/emacs/editor_client.bb` symlinks to the script. Tier1 green,
+      byte-compile clean.
 - [x] Neovim bb transport landed: `g:clara_explorer_transport` ("nrepl" default,
       "bb" alternate), `conjure.bb_eval` (shells out via `vim.system` to
       `bb editor_client.bb`, parses EDN), single-unit registry-selection prompt
@@ -193,8 +192,8 @@ provisions via `bootstrap.bb`). `client.clj` is now the JVM shell
       `conjure.bb_select_unit` re-prompts), and `refresh`/`swap_session` no-op in
       bb mode. `editor/neovim/lua/clara-explorer/editor_client.bb` symlinks to the
       script; `:ClaraExplorerToggleTransport` / `:ClaraExplorerSelectUnit`
-      commands added. `bb_transport_spec.lua` added (29 tests); full suite green
-      (152 tests, 0 failures/errors), format-check + lint clean.
+      commands added. `bb_transport_spec.lua` added; full suite green,
+      format-check + lint clean.
 
 ## Phase 6 — smart transport default (bb by default, nREPL when an explorer server is running)
 
@@ -234,9 +233,8 @@ mapped to source files, so navigation cannot work.
       navigation failure. It now fails only on `resp.ex`/`root-ex` or the
       nREPL `eval-error` status, so the stderr message can't swallow the
       `value` message that follows and block producer/consumer jumps.
-- [x] Tests: Emacs tier-1 104 passed, byte-compile clean; Neovim suite green
-      (21 edn + 6 structural + 16 jump + 33 transport + 50 token + 40
-      bb-transport = 166 tests, 0 failures/errors). `stylua`/`selene` are not
+- [x] Tests: Emacs green (both Tier 1 and Tier 2), byte-compile clean; Neovim
+      suite green. `stylua`/`selene` are not
       installed in this sandbox, so `make format-check lint` could not run.
 - [x] Docs: `docs/explorer-editor-navigation-neovim.md` transport + command
       sections updated, and `docs/explorer-editor-navigation-emacs.md` command
@@ -298,3 +296,37 @@ Behavior notes:
   - `jump.goto_fallback`'s source-location form is a single `SOURCE_LOC_FORM`
     format template (two `%s` slots: ns, fq name) instead of interleaved string
     concatenation, so the Clojure form reads as one block.
+
+## Post-review fixes
+
+Landed after the plan-review sweep; each is verified by the suite the section
+it touched runs under.
+
+- [x] `navigate-global` candidates are always a set: `(conj nil direct)` was
+      producing a list, so an unknown keyword/string token threw a
+      `ClassCastException` from `set/intersection` instead of reaching the clean
+      "no fact type found" error. Pinned by `test-global-unknown-keyword-token-errors`.
+- [x] `schema/SourceLoc`'s `:file`/`:line`/`:column` are optional keys — they only
+      exist when `:var?` is true, so the bb runtime's `{:var? false}` source is
+      now schema-valid.
+- [x] Emacs Tier-1 stub fix: `test-helper.el`'s `(autoload …)` forms made the
+      stubbed `nrepl-dict-get`/`parseedn-read-str` unreachable (`fboundp` was
+      true for the autoload). Guards now use `test-helper--real-fn-p`, and the
+      dict stub compares string keys with `equal`; both `make test` and
+      `make test-tier1` are green.
+- [x] `annotations_report.bb` migrated onto `bootstrap.bb` + the shared
+      `hierarchy` namespace — the inline `->descendants` / `with-hierarchy`
+      reimplementations and the `layout.cljc` symlink are gone, and `layout` is
+      now `:clara-rules-explorer/bb-loaded true` (the smoke test requires 9
+      namespaces).
+- [x] Branches example: `make regen-artifacts` now persists a byte-identical
+      copy of `loan-disposition-ruleset` under `branches/alt`, so the registry
+      walk's `branches/` convention is pinned end-to-end. `editor_client.bb
+      --list-units` returns `repo@branch` unit keys, and both editors split the
+      `@` into `{:repo … :branch …}`; the JVM registry discovery and the bb
+      list agree on the same branch label.
+- [x] Doc-reference sweep: the stale `shared.*` / flat-prefix references in the
+      editor resolve-form resource, `graph/schema.clj`, the elisp, and its test
+      now resolve to `clara.server.graph.*`.
+- [x] Root `AGENTS.md` lists the editor projects and points at `editor/AGENTS.md`,
+      which documents the Emacs Tier-1/Tier-2 split that hid the stub failure.

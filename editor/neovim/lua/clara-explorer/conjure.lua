@@ -359,6 +359,15 @@ function M.bb_list_unit_repos(root)
   return repos
 end
 
+--- Split a unit-key (`repo` or `repo@branch`) into its repo and branch parts.
+local function split_unit_key(unit_key)
+  local at = unit_key:find("@", 1, true)
+  if not at then
+    return unit_key, nil
+  end
+  return unit_key:sub(1, at - 1), unit_key:sub(at + 1)
+end
+
 --- Prompt for a single-unit registry selection under the registry root.
 -- Calls `cb(selection_edn)` with the EDN map string, or `cb(nil)` when
 -- cancelled/absent. Mirrors `editor/emacs/clara-explorer.el`'s
@@ -379,12 +388,17 @@ function M.bb_prompt_selection(cb)
     cb(nil)
     return
   end
-  vim.ui.select(repos, { prompt = "Unit repo (under " .. root .. "): " }, function(repo)
-    if not repo then
+  vim.ui.select(repos, { prompt = "Unit (under " .. root .. "): " }, function(unit_key)
+    if not unit_key then
       cb(nil)
       return
     end
-    cb("{:root " .. M.edn_string(root) .. " :units [{:repo " .. M.edn_string(repo) .. "}]}")
+    local repo, branch = split_unit_key(unit_key)
+    local unit = "{:repo "
+      .. M.edn_string(repo)
+      .. (branch and (" :branch " .. M.edn_string(branch)) or "")
+      .. "}"
+    cb("{:root " .. M.edn_string(root) .. " :units [" .. unit .. "]}")
   end)
 end
 

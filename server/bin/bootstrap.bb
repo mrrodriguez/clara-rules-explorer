@@ -18,6 +18,6 @@
 (let [server-root (fs/parent (fs/parent (fs/canonicalize *file*)))
       deps (:deps (edn/read-string (slurp (str (fs/path server-root "deps.edn")))))]
   ;; Schema is the one external dependency shared namespaces are allowed to
-  ;; pull in (see `shared.schema`); it is a plain Clojure library bb loads.
+  ;; pull in (see `clara.server.graph.schema`); it is a plain Clojure library bb loads.
   (deps/add-deps {:deps (select-keys deps '[prismatic/schema])})
   (cp/add-classpath (str (fs/path server-root "src"))))

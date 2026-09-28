@@ -183,6 +183,16 @@
     ;; (the helper uses the laf/ alias), so no fact type is found.
     (is (str/includes? (:error result) "no fact type found"))))
 
+(deftest test-global-unknown-keyword-token-errors
+  (register! combined-session combined-annotations)
+  ;; A keyword token resolves to a kind-explicit name with no ns-resolve, so
+  ;; the global path's candidates must still be a set — an unknown keyword must
+  ;; reach the clean "no fact type found" error, not a set/intersection cast.
+  (let [result (client/navigate {:production nil
+                                 :caller-ns atr
+                                 :token ":no/such-type"})]
+    (is (str/includes? (:error result) "no fact type found"))))
+
 ;; ---------------------------------------------------------------------------
 ;; Error paths
 ;; ---------------------------------------------------------------------------

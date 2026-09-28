@@ -1,5 +1,5 @@
 ;; Canonical editor resolve-form template. Slurped (never loaded) by
-;; `clara.server.tools.graph.shared.tokens/editor-token-resolve-form`, which
+;; `clara.server.graph.tokens/editor-token-resolve-form`, which
 ;; fills the two slots in order: caller-ns string, token string. clojure.core
 ;; plus `String` interop only — no explorer dependency, so it evals on a plain
 ;; project repl. Symlinked beside the Emacs/Neovim transports, which read it

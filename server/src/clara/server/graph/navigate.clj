@@ -263,7 +263,11 @@
         direct (resolve-token caller-ns-sym token)
         fq-sym (token->fq-sym caller-ns-sym token)
         callsite-names (global-callsite-resolved-types analysis fq-sym)
-        candidates (cond-> callsite-names
+        ;; `callsite-names` is nil when the token is not a symbol (keyword/string/
+        ;; vector), so conjing onto nil would produce a list and
+        ;; `set/intersection` would throw for a non-matching type. Start from a
+        ;; set so the fall-through below reaches the clean error path.
+        candidates (cond-> (or callsite-names #{})
                      (tokens/real-type-name? direct) (conj direct))
         known-types (set (keys (:fact-types analysis)))
         matched (set/intersection candidates known-types)]

@@ -14,10 +14,13 @@
    :token                       s/Str})
 
 (s/defschema SourceLoc
-  {:var?   s/Bool
-   :file   (s/maybe s/Str)
-   :line   (s/maybe s/Int)
-   :column (s/maybe s/Int)})
+  "A production source location. `:var?` true carries var metadata
+   `:file`/`:line`/`:column`; `:var?` false has none of them, so those three
+   keys are optional."
+  {:var?                      s/Bool
+   (s/optional-key :file)   (s/maybe s/Str)
+   (s/optional-key :line)   (s/maybe s/Int)
+   (s/optional-key :column) (s/maybe s/Int)})
 
 (s/defschema NavigateTarget
   {:name   s/Str
@@ -41,7 +44,7 @@
                  #(contains? % :direction) NavigateResult))
 
 (s/defschema NavigateRuntime
-  "Runtime-provided capabilities for `shared.navigate`: resolution and source location, which differ
+  "Runtime-provided capabilities for `clara.server.graph.navigate`: resolution and source location, which differ
    per runtime. The JVM resolves aliased and bare symbols over the editor's live namespaces and
    reads var metadata; the babashka client assumes editor-resolved fully-qualified tokens and
    reports every source as absent."

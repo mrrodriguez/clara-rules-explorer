@@ -6,9 +6,9 @@
 ;;   bb bin/editor_client.bb '<selection-edn>' '<navigate-input-edn>'
 ;;   bb bin/editor_client.bb --list-units '<registry-root>'
 ;;
-;; `--list-units` prints the repo names (paths relative to the root) of every unit under the root,
-;; sorted — the registry discovery the editors used to do themselves, so the registry layout has
-;; one owner here.
+;; `--list-units` prints the unit keys (`repo`, or `repo@branch` for a branch variant) of every
+;; unit under the root, sorted — the registry discovery the editors used to do themselves, so the
+;; registry layout has one owner here.
 ;;
 ;; <selection-edn> is a registry selection `{:root "…" :units [{:repo "…"}]}` — the same shape the
 ;; server's `:registry` mode takes; the editor resolves the `CLARA_RULES_EXPLORER_REGISTRY` root
@@ -55,8 +55,25 @@
       base
       (fs/file base "branches" branch))))
 
+(def ^:private branches-subdir
+  "The `branches/` segment, mirroring
+  `clara.server.tools.graph.artifacts.store/branches-subdir`."
+  "branches")
+
+(defn- ->unit-key
+  "A unit's registry-relative path segments → its unit-key string (`repo[@branch]`), mirroring
+  `clara.server.tools.graph.artifacts.registry/->unit-ref` +
+  `clara.server.tools.graph.artifacts.shared.registry/unit-key`."
+  [segments]
+  (let [bi (first (keep-indexed (fn [i seg] (when (= branches-subdir seg) i)) segments))]
+    (if bi
+      (str (str/join "/" (subvec segments 0 bi))
+           "@"
+           (str/join "/" (subvec segments (inc bi))))
+      (str/join "/" segments))))
+
 (defn- list-unit-repos
-  "Every unit repo under `root`, as paths relative to the root, sorted. Discovery is the
+  "Every unit under `root`, as unit-key strings (`repo` or `repo@branch`), sorted. Discovery is the
   directory walk the editors previously did themselves: find every
   `rules-inspect-manifest.edn` and name the unit by its directory relative to the root. The
   registry layout therefore has one owner (this script), and the editors only prompt over the
@@ -66,7 +83,9 @@
     (when-not (fs/directory? root-file)
       (throw (ex-info (format "Registry root is not a directory: %s" root) {:root root})))
     (->> (fs/glob root-file "**/rules-inspect-manifest.edn")
-         (map (comp fs/unixify (fn [manifest] (fs/relativize root-file (fs/parent manifest)))))
+         (map (fn [manifest]
+                (let [rel (fs/unixify (fs/relativize root-file (fs/parent manifest)))]
+                  (->unit-key (str/split rel #"/")))))
          sort
          vec)))
 
