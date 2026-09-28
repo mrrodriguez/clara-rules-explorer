@@ -1,12 +1,14 @@
 (ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.artifacts.shared.compose
   "The pure compose half of `clara.server.tools.graph.artifacts.compose`: combine a caller-named
-  selection of artifact units into one slim `RulebaseAnalysis`.
+  selection of artifact units into one slim
+  `clara.server.tools.graph.artifacts.schema/RulebaseAnalysis`.
 
-  The caller asserts the units are components of ONE rulebase and gets one slim `RulebaseAnalysis`
-  back. Rules/queries merge by fq name (a name in two units is an error), fact types merge per name
-  with `:ancestors` unioned across units, the dep-graph is recomputed over the merged production set
-  so cross-unit edges exist, and each production gains `:unit`. The result is meant to be rehydrated
-  — see `clara.server.tools.graph.artifacts.rehydrate` — which rebuilds the inverses over the whole
+  The caller asserts the units are components of ONE rulebase and gets one slim
+  `clara.server.tools.graph.artifacts.schema/RulebaseAnalysis` back. Rules/queries merge by fq name
+  (a name in two units is an error), fact types merge per name with `:ancestors` unioned across
+  units, the dep-graph is recomputed over the merged production set so cross-unit edges exist, and
+  each production gains `:unit`. The result is meant to be rehydrated — see
+  `clara.server.tools.graph.artifacts.rehydrate` — which rebuilds the inverses over the whole
   composition, the one thing a per-unit artifact cannot contain.
 
   Registry I/O arrives through the same capabilities map
@@ -138,7 +140,7 @@
    :recover (into {} (mapcat #(get-in % [:slim :recover])) analyses)})
 
 (defn ->composed-analysis
-  "One slim `RulebaseAnalysis` over the selected units, which the caller asserts
+  "One slim `clara.server.tools.graph.artifacts.schema/RulebaseAnalysis` over the selected units, which the caller asserts
   are components of ONE rulebase. `caps` is the same capabilities map
   `clara.server.tools.graph.artifacts.shared.selection/->selection` takes. Each unit is
   narrowed to its `:namespaces` filter first; rules/queries merge by fq name
