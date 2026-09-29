@@ -41,9 +41,7 @@ end)
 
 describe("conjure.transport", function()
   it("defaults to auto", function()
-    with_restore(vim.g, "clara_explorer_transport", nil, function()
-      assert.are.same("auto", conjure.transport())
-    end)
+    with_restore(vim.g, "clara_explorer_transport", nil, function() assert.are.same("auto", conjure.transport()) end)
   end)
 
   it("explicit bb resolves without probing", function()
@@ -145,14 +143,9 @@ describe("init.transport_status", function()
     with_restore(vim.g, "clara_explorer_transport", "nrepl", function()
       with_restore(conjure, "connected", function() return true end, function()
         with_restore(conjure, "with_transport", function(cb) cb("nrepl") end, function()
-          with_restore(
-            conjure,
-            "show_scratch",
-            function(name, lines)
-              shown_name, shown_lines = name, lines
-            end,
-            function() init.transport_status() end
-          )
+          with_restore(conjure, "show_scratch", function(name, lines)
+            shown_name, shown_lines = name, lines
+          end, function() init.transport_status() end)
         end)
       end)
     end)
@@ -317,10 +310,7 @@ describe("conjure.bb_prompt_selection", function()
               with_restore(vim, "notify", function(msg) notified = msg end, function()
                 local got
                 conjure.bb_prompt_selection(function(sel) got = sel end)
-                assert.are.same(
-                  '{:root "/reg" :units [{:repo "loan-disposition-ruleset" :branch "alt"}]}',
-                  got
-                )
+                assert.are.same('{:root "/reg" :units [{:repo "loan-disposition-ruleset" :branch "alt"}]}', got)
                 assert.is_nil(notified)
               end)
             end)
@@ -489,33 +479,38 @@ describe("init.navigate bb dispatch", function()
   local ctx = { production = "ns/rule", kind = "rule", side = "lhs", caller_ns = "ns", token = "Doc" }
 
   local function with_bb_nav_env(overrides, fn)
-    with_restore(conjure, "connected", function() return overrides.connected == nil and true or overrides.connected end, function()
-      with_restore(conjure, "with_transport", function(cb) cb("bb") end, function()
-        with_restore(vim.api, "nvim_get_current_buf", function() return 1 end, function()
-          with_restore(vim.api, "nvim_get_current_win", function() return 1 end, function()
-            with_restore(vim.api, "nvim_win_get_cursor", function() return { 1, 0 } end, function()
-              with_restore(init, "context", function() return ctx end, function()
-                with_restore(conjure, "resolve_token", overrides.resolve_token, function()
-                  with_restore(
-                    conjure,
-                    "eval_edn",
-                    function() error("nREPL must not be used in bb mode") end,
-                    function()
-                      with_restore(
-                        conjure,
-                        "bb_selection",
-                        overrides.bb_selection,
-                        function() with_restore(conjure, "bb_eval", overrides.bb_eval, fn) end
-                      )
-                    end
-                  )
+    with_restore(
+      conjure,
+      "connected",
+      function() return overrides.connected == nil and true or overrides.connected end,
+      function()
+        with_restore(conjure, "with_transport", function(cb) cb("bb") end, function()
+          with_restore(vim.api, "nvim_get_current_buf", function() return 1 end, function()
+            with_restore(vim.api, "nvim_get_current_win", function() return 1 end, function()
+              with_restore(vim.api, "nvim_win_get_cursor", function() return { 1, 0 } end, function()
+                with_restore(init, "context", function() return ctx end, function()
+                  with_restore(conjure, "resolve_token", overrides.resolve_token, function()
+                    with_restore(
+                      conjure,
+                      "eval_edn",
+                      function() error("nREPL must not be used in bb mode") end,
+                      function()
+                        with_restore(
+                          conjure,
+                          "bb_selection",
+                          overrides.bb_selection,
+                          function() with_restore(conjure, "bb_eval", overrides.bb_eval, fn) end
+                        )
+                      end
+                    )
+                  end)
                 end)
               end)
             end)
           end)
         end)
-      end)
-    end)
+      end
+    )
   end
 
   it("sends the resolved token over bb with the selection", function()
