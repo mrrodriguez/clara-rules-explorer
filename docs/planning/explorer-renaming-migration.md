@@ -9,12 +9,14 @@ The top-level directory moved `server/` → `explorer/` in the same pass.
 
 Every namespace that started with `clara.server.` now starts with
 `clara.explorer.`, and the meaningless `graph` / `tools.graph` middle segments
-are gone. There is no behavior change: no function signatures, HTTP routes, or
-artifact schemas changed. Only namespace strings, namespace-derived file paths,
-resource lookup strings, the layer-`:id` keywords (§5.2), and the
-`:clara.explorer.internal/normalized` marker (§5.1) changed. If you `require` this
-library, merge its artifacts, or speak its editor protocol, remap as below and
-regenerate your derived data once.
+are gone. There is no behavior change to function signatures or HTTP routes. The
+namespace strings, namespace-derived file paths, resource lookup strings, the
+layer-`:id` keywords (§5.2), and the `:clara.explorer.internal/normalized`
+marker (§5.1) all changed, and a few persisted-artifact sections shed prose —
+the `:slim` block, the digests' `:more`, and the manifest's
+`:analysis-run :method` (§4). If you `require` this library, merge its
+artifacts, or speak its editor protocol, remap as below and regenerate your
+derived data once.
 
 ## 2. Require table (namespaces a caller may use)
 
@@ -76,11 +78,11 @@ Note the two intentional collisions, disambiguated by bucket:
 
 ## 4. Persisted artifacts: regenerate, except one file
 
-The **format is unchanged** (same files, same top-level keys, same
-string-key normalization), but every namespace-bearing **value** moved
-(`:name`, `:ns`, fact-type names, callsite `:ns-name-sym`/`:filename`,
-derived `:id`s, manifest `:namespaces`). Old and new artifacts must not be
-merged as if they were the same namespace.
+The **files and top-level keys are unchanged**, but every namespace-bearing
+**value** moved (`:name`, `:ns`, fact-type names, callsite
+`:ns-name-sym`/`:filename`, derived `:id`s, manifest `:namespaces`), and a few
+sections were simplified (below). Old and new artifacts must not be merged as
+if they were the same namespace.
 
 - **Regenerate** (pure functions of your rules/session — never hand-migrate):
   `auto-gen-annotations.edn`, `memory-annotations.edn`,
@@ -114,7 +116,10 @@ prose: `rulebase-analysis-digest.edn` / `registry-digest.edn` no longer carry a
 `:more` orientation paragraph, and `rules-inspect-manifest.edn`'s
 `:analysis-run :method` is now the bare
 `"clara.explorer.analyze/->rule-source-analysis"` (no `"live-session (…)"`
-prefix).
+prefix). If you read any of these removed fields, stop expecting them — the
+`:dropped` set is the contract; the rest is re-derivable or regenerated. The
+`:session-hint` option that `merge-persisted!` / `compose-persist!` accepted is
+gone too (it only appended to `:more`), so drop it from those calls.
 
 **Shape-skew caveat.** `registry/compatibility-report` and
 `assert-compatible!` compare the `:slim :dropped` key set across units. The
@@ -196,3 +201,5 @@ only for the bundled demo/test rules
 5. No pre/post-upgrade units mixed in one registry selection
    (`compatibility-report` clean).
 6. Editor snippets + vendored resolve-form updated (§7).
+7. No reader still destructures `:slim :recover` / `:slim :references` / a
+   digest's `:more`, or passes `:session-hint` (§4).
