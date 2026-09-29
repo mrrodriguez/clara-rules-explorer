@@ -13,3 +13,5 @@ command! -nargs=0 ClaraExplorerToggleTransport lua require("clara-explorer").tog
 command! -nargs=0 ClaraExplorerTransportStatus lua require("clara-explorer").transport_status()
 command! -nargs=0 ClaraExplorerLastError lua require("clara-explorer.conjure").show_last_error()
 command! -nargs=0 ClaraExplorerSelectUnit lua require("clara-explorer").select_unit()
+command! -nargs=0 ClaraExplorerToggleDebug lua require("clara-explorer.conjure").toggle_debug()
+command! -nargs=0 ClaraExplorerDebugLog lua require("clara-explorer.conjure").show_debug_log()

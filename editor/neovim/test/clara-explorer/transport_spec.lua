@@ -115,6 +115,13 @@ describe("conjure.eval_edn", function()
     })
     assert.are.same(1, value_count)
   end)
+
+  it("forwards passive as passive? to eval-str", function()
+    local seen_opts
+    stub_eval(function(opts) seen_opts = opts end)
+    conjure.eval_edn({ code = "x", passive = true })
+    assert.is_true(seen_opts["passive?"])
+  end)
 end)
 
 describe("init.handle_result dispatch", function()
@@ -427,5 +434,11 @@ describe("init.navigate resolves before sending", function()
     local seen
     with_resolve_env(ctx, function(o) o.on_resolved(nil) end, function(o) seen = o.code end)
     assert.truthy(seen:find(':token "Doc"', 1, true))
+  end)
+
+  it("marks the navigate eval passive (no Conjure log HUD)", function()
+    local passive
+    with_resolve_env(ctx, function(o) o.on_resolved("fq.Doc") end, function(o) passive = o.passive end)
+    assert.is_true(passive)
   end)
 end)

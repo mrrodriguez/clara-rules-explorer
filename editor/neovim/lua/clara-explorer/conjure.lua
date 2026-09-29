@@ -94,6 +94,7 @@ function M.resolve_token(opts)
     if opts and opts.on_resolved then opts.on_resolved(nil) end
     return
   end
+  M.debug_log("resolve-token caller-ns=" .. tostring(opts.caller_ns) .. " token=" .. tostring(opts.token))
   M.eval_edn({
     code = M.resolve_code(opts.caller_ns, opts.token),
     bufnr = opts.bufnr,
@@ -102,12 +103,17 @@ function M.resolve_token(opts)
     on_value = function(value)
       local ok, decoded = pcall(edn.decode, value)
       if ok and type(decoded) == "string" then
+        M.debug_log("resolve-token -> fq " .. tostring(decoded))
         opts.on_resolved(decoded)
       else
+        M.debug_log("resolve-token -> nil (value=" .. tostring(value) .. " ok=" .. tostring(ok) .. ")")
         opts.on_resolved(nil)
       end
     end,
-    on_error = function() opts.on_resolved(nil) end,
+    on_error = function()
+      M.debug_log("resolve-token -> error")
+      opts.on_resolved(nil)
+    end,
   })
 end
 
@@ -176,6 +182,61 @@ function M.show_scratch(name, lines, filetype)
   vim.cmd("sbuffer " .. buf)
 end
 
+--- Debug tracing. When `g:clara_explorer_debug` is set, `debug_log` appends a
+-- line to the `clara-explorer://debug-log` scratch buffer — a persistent,
+-- non-truncated window (unlike `vim.notify`), mirroring Emacs'
+-- `clara-explorer-debug` + `clara-explorer--log` (which writes to *Messages*).
+function M.debug_enabled()
+  return vim.g.clara_explorer_debug == true or vim.g.clara_explorer_debug == 1
+end
+
+local function debug_buf()
+  local name = "clara-explorer://debug-log"
+  local existing = vim.fn.bufnr(name)
+  local buf = existing ~= -1 and existing or vim.api.nvim_create_buf(false, true)
+  if existing == -1 then
+    vim.api.nvim_buf_set_name(buf, name)
+  end
+  vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
+  vim.api.nvim_set_option_value("filetype", "clojure", { buf = buf })
+  return buf
+end
+
+function M.debug_log(...)
+  if not M.debug_enabled() then return end
+  local parts = {}
+  for _, v in ipairs({ ... }) do
+    parts[#parts + 1] = (type(v) == "string") and v or vim.inspect(v)
+  end
+  local text = ";; " .. table.concat(parts, " ")
+  -- Values often carry newlines (bb stdout, the resolve form, stacked errors),
+  -- and `nvim_buf_set_lines` refuses a line containing one — split first.
+  local lines = vim.split(text, "\n")
+  -- The nREPL/`vim.system` callbacks that call this run in a LibUV fast-event
+  -- context where buffer APIs are forbidden, so defer to the main loop.
+  vim.schedule(function()
+    local buf = debug_buf()
+    vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+    vim.api.nvim_buf_set_lines(buf, -1, -1, false, lines)
+    vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+  end)
+end
+
+--- Open the debug log buffer in a split.
+function M.show_debug_log()
+  vim.cmd("sbuffer " .. debug_buf())
+end
+
+--- Toggle `g:clara_explorer_debug` and report the new state.
+function M.toggle_debug()
+  vim.g.clara_explorer_debug = not M.debug_enabled()
+  vim.notify(
+    "clara-explorer: debug logging "
+      .. (M.debug_enabled() and "enabled — run :ClaraExplorerDebugLog to view" or "disabled"),
+    vim.log.levels.INFO
+  )
+end
+
 --- Open the last full nREPL error (stack trace + code) in a scratch buffer.
 function M.show_last_error()
   local e = M.last_error
@@ -202,6 +263,11 @@ end
 --- Eval `opts.code` over Conjure; on a value call `opts.on_value(value, bufnr, win)`;
 -- on an nREPL error call `opts.on_error(summary, bufnr, win)`.  `bufnr`/`win`
 -- are captured at call time (the eval is async).
+--
+-- `opts.passive` forwards Conjure's `passive?` flag: the eval still delivers
+-- its value through `on-result`/`cb`, but Conjure skips the request preview, so
+-- it never pops the log HUD. Every clara-explorer eval is passive — the result
+-- is surfaced via `vim.notify`/the picker/the jump path instead.
 function M.eval_edn(opts)
   local eval = eval_module()
   local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
@@ -264,16 +330,19 @@ M.server_available_cache = nil
 -- `cb(true)` / `cb(false)`; a missing explorer classpath (or any probe error)
 -- resolves to false. Updates `server_available_cache`.
 function M.server_available(cb)
+  M.debug_log("server-available probe")
   M.eval_edn({
     code = "(try (some? ((requiring-resolve 'clara.server.graph.client/get-current-system))) (catch Throwable _ false))",
     passive = true,
     on_value = function(value)
       local ok, decoded = pcall(edn.decode, value)
       local available = ok and decoded == true
+      M.debug_log("server-available -> " .. tostring(available) .. " (value=" .. tostring(value) .. ")")
       M.server_available_cache = available
       cb(available)
     end,
     on_error = function()
+      M.debug_log("server-available -> false (error)")
       M.server_available_cache = false
       cb(false)
     end,
@@ -359,13 +428,21 @@ function M.bb_list_unit_repos(root)
   return repos
 end
 
---- Split a unit-key (`repo` or `repo@branch`) into its repo and branch parts.
-local function split_unit_key(unit_key)
+--- EDN for the `:units` entry named by a unit-key (`repo` or `repo@branch`).
+-- Mirrors `editor/emacs/clara-explorer.el`'s `clara-explorer--unit-edn`.
+local function unit_edn(unit_key)
+  local repo, branch
   local at = unit_key:find("@", 1, true)
-  if not at then
-    return unit_key, nil
+  if at then
+    repo = unit_key:sub(1, at - 1)
+    branch = unit_key:sub(at + 1)
+  else
+    repo = unit_key
   end
-  return unit_key:sub(1, at - 1), unit_key:sub(at + 1)
+  if branch then
+    return string.format("{:repo %s :branch %s}", M.edn_string(repo), M.edn_string(branch))
+  end
+  return string.format("{:repo %s}", M.edn_string(repo))
 end
 
 --- Prompt for a single-unit registry selection under the registry root.
@@ -393,12 +470,7 @@ function M.bb_prompt_selection(cb)
       cb(nil)
       return
     end
-    local repo, branch = split_unit_key(unit_key)
-    local unit = "{:repo "
-      .. M.edn_string(repo)
-      .. (branch and (" :branch " .. M.edn_string(branch)) or "")
-      .. "}"
-    cb("{:root " .. M.edn_string(root) .. " :units [" .. unit .. "]}")
+    cb(string.format("{:root %s :units [%s]}", M.edn_string(root), unit_edn(unit_key)))
   end)
 end
 
@@ -427,12 +499,16 @@ end
 -- `editor/emacs/clara-explorer.el`'s `clara-explorer--bb-eval`.
 function M.bb_eval(selection_edn, input_edn, cb)
   local script = M.bb_script()
+  M.debug_log("bb-eval script=" .. script)
+  M.debug_log("bb-eval selection=" .. selection_edn)
+  M.debug_log("bb-eval input=" .. input_edn)
   if vim.fn.filereadable(script) ~= 1 then
     cb(nil, "clara-explorer: editor_client.bb not found at " .. script)
     return
   end
   local function on_exit(out)
     vim.schedule(function()
+      M.debug_log("bb-eval exit=" .. tostring(out.code) .. " stdout=" .. tostring(out.stdout) .. " stderr=" .. tostring(out.stderr))
       if out.code ~= 0 then
         local msg
         if out.code then

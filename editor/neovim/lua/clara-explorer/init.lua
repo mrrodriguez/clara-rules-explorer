@@ -48,6 +48,7 @@ end
 
 --- Handle a decoded navigate result: relay `error`, else choose/jump to targets.
 function M.handle_result(result, caller_ns)
+  conjure.debug_log("handle-result", result)
   if result.error then
     vim.notify(result.error, vim.log.levels.INFO)
     return
@@ -70,6 +71,7 @@ function M.navigate(side)
   local win = vim.api.nvim_get_current_win()
   local crow, ccol = unpack(vim.api.nvim_win_get_cursor(0))
   local ctx = M.context(bufnr, crow - 1, ccol)
+  conjure.debug_log("navigate side=" .. tostring(side) .. " ctx=" .. vim.inspect(ctx))
 
   if not ctx.token then
     vim.notify("not on a fact type", vim.log.levels.INFO)
@@ -95,7 +97,9 @@ function M.navigate(side)
     win = win,
     on_resolved = function(fq)
       local resolved_token = fq or ctx.token
+      conjure.debug_log("navigate resolved-token=" .. tostring(resolved_token) .. " (fq=" .. tostring(fq) .. ")")
       conjure.with_transport(function(transport)
+        conjure.debug_log("navigate transport=" .. tostring(transport))
         if transport == "bb" then
           conjure.bb_selection(function(selection)
             if not selection then return end
@@ -132,6 +136,7 @@ function M.navigate(side)
           code = code,
           bufnr = bufnr,
           win = win,
+          passive = true,
           on_value = function(value, _, cb_win)
             if vim.api.nvim_win_is_valid(cb_win) then vim.api.nvim_set_current_win(cb_win) end
             local result, err = edn.decode(value)
@@ -164,6 +169,7 @@ function M.refresh()
     end
     conjure.eval_edn({
       code = "(do (require 'clara.server.graph.server)\n     (clara.server.graph.server/reload-annotations!))",
+      passive = true,
       on_value = function() vim.notify("clara-explorer: analysis refreshed", vim.log.levels.INFO) end,
       on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
     })
@@ -185,6 +191,7 @@ function M.perform_swap(raw, bufnr)
   end
   conjure.eval_edn({
     code = code,
+    passive = true,
     on_value = function() vim.notify("clara-explorer: session swapped", vim.log.levels.INFO) end,
     on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
   })
