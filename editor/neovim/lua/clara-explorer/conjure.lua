@@ -39,33 +39,41 @@ end
 local ESC = { ["\\"] = "\\\\", ['"'] = '\\"', ["\n"] = "\\n", ["\t"] = "\\t", ["\r"] = "\\r" }
 
 --- Serialize a Lua string as an EDN string literal.
-function M.edn_string(s) return '"' .. (s:gsub('[\\"\n\t\r]', ESC)) .. '"' end
+function M.edn_string(s) return ('"%s"'):format(s:gsub('[\\"\n\t\r]', ESC)) end
+
+--- Clojure `client/navigate` form: one `%s` slot for the EDN payload map.
+-- Kept as a single balanced-paren template (filled via `:format`) so the form
+-- stays inspectable instead of split across `..` concats.
+local NAVIGATE_FORM = [[(do (require 'clara.server.graph.client)
+     (clara.server.graph.client/navigate {%s}))]]
+
+--- EDN `NavigateInput` map: one `%s` slot for the space-joined entries.
+local NAVIGATE_INPUT_TEMPLATE = "{%s}"
+
+--- Space-joined EDN entries for a navigate payload
+-- `{production, side, caller_ns, token}` (mirrors `editor/emacs/clara-explorer.el`'s
+-- `clara-explorer--navigate-code`).
+local function navigate_entries(payload)
+  local parts = {}
+  if payload.production then
+    parts[#parts + 1] = (":production %s"):format(M.edn_string(payload.production))
+  end
+  if payload.side then parts[#parts + 1] = (":side :%s"):format(payload.side) end
+  if payload.caller_ns then
+    parts[#parts + 1] = (":caller-ns %s"):format(M.edn_string(payload.caller_ns))
+  end
+  parts[#parts + 1] = (":token %s"):format(M.edn_string(payload.token))
+  return table.concat(parts, " ")
+end
 
 --- Build the Clojure `client/navigate` form for a payload
 -- `{production, side, caller_ns, token}` (mirrors `editor/emacs/clara-explorer.el`'s
 -- `clara-explorer--navigate-code`).
-function M.navigate_code(payload)
-  local parts = {}
-  if payload.production then parts[#parts + 1] = ":production " .. M.edn_string(payload.production) end
-  if payload.side then parts[#parts + 1] = ":side :" .. payload.side end
-  if payload.caller_ns then parts[#parts + 1] = ":caller-ns " .. M.edn_string(payload.caller_ns) end
-  parts[#parts + 1] = ":token " .. M.edn_string(payload.token)
-  return "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/navigate "
-    .. "{"
-    .. table.concat(parts, " ")
-    .. "}))"
-end
+function M.navigate_code(payload) return NAVIGATE_FORM:format(navigate_entries(payload)) end
 
 --- Build the EDN `NavigateInput` map for a payload — the same keys as
 -- `navigate_code`, but a plain EDN map (the bb transport reads EDN, not a form).
-function M.navigate_input(payload)
-  local parts = {}
-  if payload.production then parts[#parts + 1] = ":production " .. M.edn_string(payload.production) end
-  if payload.side then parts[#parts + 1] = ":side :" .. payload.side end
-  if payload.caller_ns then parts[#parts + 1] = ":caller-ns " .. M.edn_string(payload.caller_ns) end
-  parts[#parts + 1] = ":token " .. M.edn_string(payload.token)
-  return "{" .. table.concat(parts, " ") .. "}"
-end
+function M.navigate_input(payload) return NAVIGATE_INPUT_TEMPLATE:format(navigate_entries(payload)) end
 
 --- Directory of this module file, for locating the resolve template.
 local this_dir = (debug.getinfo(1, "S").source:sub(2):match("^(.*/)") or "./")

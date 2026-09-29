@@ -178,6 +178,14 @@ end
 
 local swap_opts_by_buf = {}
 
+--- Session-swap forms: balanced-paren templates filled via `:format`, so the
+-- parens stay inspectable instead of split across `..` concats.
+local SWAP_DEFAULT_FORM = [[(do (require 'clara.server.graph.client)
+     (clara.server.graph.client/swap-session!))]]
+
+local SWAP_OPTS_FORM = [[(do (require 'clara.server.graph.client)
+     (clara.server.graph.client/swap-session! %s))]]
+
 --- Eval a session-swap (or the registered default) and cache the last opts.
 function M.perform_swap(raw, bufnr)
   local trimmed = (raw or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -185,9 +193,9 @@ function M.perform_swap(raw, bufnr)
   if not use_default then swap_opts_by_buf[bufnr] = trimmed end
   local code
   if use_default then
-    code = "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/swap-session!))"
+    code = SWAP_DEFAULT_FORM
   else
-    code = "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/swap-session! " .. trimmed .. "))"
+    code = SWAP_OPTS_FORM:format(trimmed)
   end
   conjure.eval_edn({
     code = code,

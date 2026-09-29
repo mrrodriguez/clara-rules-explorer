@@ -26,8 +26,8 @@ describe("conjure.navigate_code", function()
       token = "map->X",
     })
     assert.are.same(
-      "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/navigate "
-        .. '{:production "ns/rule" :side :rhs :caller-ns "ns" :token "map->X"}))',
+      [[(do (require 'clara.server.graph.client)
+     (clara.server.graph.client/navigate {:production "ns/rule" :side :rhs :caller-ns "ns" :token "map->X"}))]],
       code
     )
   end)
