@@ -1,18 +1,51 @@
-(ns clara.server.tools.graph.artifacts.hierarchy
-  "The fact-type hierarchy union, transitive re-closure, and deterministic
-  deepest-first ordering shared by `clara.server.tools.graph.artifacts.compose`
-  and `clara.server.tools.graph.artifacts.federate` — the one place the
-  cross-unit ancestor repair lives.
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.artifacts.hierarchy
+  "The fact-type hierarchy operations shared by the JVM artifact merge and the babashka editor
+  client: the ancestor union, transitive re-closure, deterministic deepest-first ordering, and the
+  two closure directions.
 
-  Both merge modes face the same defect `artifact-registry-plan.md` §7 names:
-  `:ancestors` is a transitive closure computed on the classpath each analysis
-  had, so two units can hold different ancestor sets for one type name and both
-  are locally correct. The repair is the same in both: union every unit's edge
-  set, re-close transitively, order deepest-first, and record disagreements
-  rather than pick a winner. `compose/union-fact-types` and `federate/->index`
-  both call these.")
+   `->descendants` is the transpose of a closed ancestor map. `ancestor-closure` /
+  `descendant-closure` are the one-step reach over an already-transitively-closed map — the map
+  passed IS the direction, so the names exist to carry which way it runs. These two directions are
+  the part that is easy to get wrong: `:used-by-*` closes over descendants, while
+  `:inserted-by-rules` / `:retracted-by-rules` close over ancestors.
 
-(set! *warn-on-reflection* true)
+   `union-ancestors` / `closed-ancestors` / `hierarchy-order` repair the cross-unit ancestor sets
+  `clara.server.tools.graph.artifacts.compose` and
+  `clara.server.tools.graph.artifacts.federate` share: `:ancestors` is a transitive closure computed
+  on the classpath each analysis had, so two units can hold different ancestor sets for one type
+  name and both are locally correct. The repair is the same in both: union every unit's edge set,
+  re-close transitively, order deepest-first, and record disagreements rather than pick a winner.")
+
+(defn ->descendants
+  "Transpose of a closed ancestor map `{type-name #{ancestor-name …}}` into
+  `{ancestor-name #{descendant-name …}}`."
+  [ancestors]
+  (let [index (volatile! {})]
+    (doseq [[ft as] ancestors
+            ancestor as]
+      (vswap! index update ancestor (fnil conj #{}) ft))
+    @index))
+
+(defn- ->closure
+  "`base-types` plus every name reached through `edge-map` (`{type-name #{type-name}}`). One `get`
+  per name is the whole closure because the map passed is already transitively closed — passing a
+  non-closed map here is a wrong answer no exception will flag."
+  [edge-map base-types]
+  (reduce (fn [acc t] (into acc (cons t (get edge-map t #{})))) #{} base-types))
+
+(defn ancestor-closure
+  "`base-types` and everything they derive from: the set a holder of `base-types` satisfies — a fact
+  of type `T` *is a* each of `T`'s ancestors. `ancestors` is a closed
+  `{type-name #{ancestor-name}}` map."
+  [ancestors base-types]
+  (->closure ancestors base-types))
+
+(defn descendant-closure
+  "`base-types` and everything deriving from them: the set a matcher of `base-types` is reached by —
+  a rule matching `T` is matched by any descendant of `T`. `descendants` is a closed
+  `{ancestor-name #{descendant-name}}` map."
+  [descendants base-types]
+  (->closure descendants base-types))
 
 (defn union-ancestors
   "Union each type name's ancestor set across `fact-type-maps` (each a slim
@@ -43,41 +76,6 @@
     (loop [m ancestors]
       (let [m' (step m)]
         (if (= m' m) m' (recur m'))))))
-
-(defn ->descendants
-  "Transpose of a closed ancestor map: `{ancestor-name #{descendant-name …}}`."
-  [ancestors]
-  (let [index (volatile! {})]
-    (doseq [[ft as] ancestors
-            ancestor as]
-      (vswap! index update ancestor (fnil conj #{}) ft))
-    @index))
-
-(defn- ->closure
-  "`base-types` plus their transitive closure under `edge-map` (`{type-name
-  #{type-name}}`). The map passed IS the direction, so the two public wrappers
-  exist to put the direction in the name rather than make a caller remember
-  which map to pass — the closure over `:ancestors` runs the opposite way from
-  the closure over `:descendants`, and passing the wrong one is a wrong answer
-  that no exception will flag."
-  [edge-map base-types]
-  (reduce (fn [acc t] (into acc (cons t (get edge-map t #{})))) #{} base-types))
-
-(defn ancestor-closure
-  "`base-types` and everything they derive from, transitively: the set a holder
-  of `base-types` satisfies — a fact of type `T` *is a* each of `T`'s ancestors.
-  `ancestors` is a `{type-name #{ancestor-name}}` map, as `closed-ancestors`
-  returns."
-  [ancestors base-types]
-  (->closure ancestors base-types))
-
-(defn descendant-closure
-  "`base-types` and everything deriving from them, transitively: the set a
-  matcher of `base-types` is reached by — a rule matching `T` is matched by any
-  descendant of `T`. `descendants` is a `{ancestor-name #{descendant-name}}`
-  map, as `->descendants` returns."
-  [descendants base-types]
-  (->closure descendants base-types))
 
 (defn- pick-next
   "The next name to emit in deterministic deepest-first order: a node with no

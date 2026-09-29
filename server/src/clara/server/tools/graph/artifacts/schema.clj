@@ -734,8 +734,8 @@
   `:dropped` key set and no selected unit is missing its analysis), which
   analyzed units disagree with the majority shape, which units have no analysis
   to read, the per-unit dropped sets, and the artifacts each unit is missing.
-  Keyed by `registry/unit-key` rather than by the `UnitRef` map, which is not a
-  comparable map key."
+  Keyed by `clara.server.tools.graph.artifacts.shared.registry/unit-key` rather
+  than by the `UnitRef` map, which is not a comparable map key."
   {:compatible? s/Bool
    :majority-shape (s/maybe #{s/Keyword})
    :shape-mismatch [UnitRef]

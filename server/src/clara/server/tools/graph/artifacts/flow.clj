@@ -35,6 +35,7 @@
    [clara.server.tools.graph.artifacts.manifest :as manifest]
    [clara.server.tools.graph.artifacts.registry :as registry]
    [clara.server.tools.graph.artifacts.schema :as schema]
+   [clara.server.tools.graph.artifacts.shared.registry :as shared-registry]
    [clara.server.tools.graph.artifacts.slim :as slim]
    [clara.server.tools.graph.artifacts.store :as store]
    [clara.server.tools.graph.core :as core]
@@ -378,8 +379,8 @@
   [composed-units]
   (into (sorted-map)
         (map (fn [{:keys [repo branch sha created]}]
-               [(registry/unit-key (cond-> {:repo repo}
-                                     branch (assoc :branch branch)))
+               [(shared-registry/unit-key (cond-> {:repo repo}
+                                            branch (assoc :branch branch)))
                 (cond-> {:sha sha :created created}
                   branch (assoc :branch branch))]))
         composed-units))

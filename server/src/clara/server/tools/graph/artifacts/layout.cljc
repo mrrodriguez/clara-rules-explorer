@@ -1,4 +1,4 @@
-(ns clara.server.tools.graph.artifacts.layout
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.server.tools.graph.artifacts.layout
   "What the persisted artifacts are called, and how to read back the one of them
   that is not stored literally.
 

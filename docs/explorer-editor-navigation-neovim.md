@@ -16,6 +16,10 @@ The client is `editor/neovim/` (a clean Lua plugin).
 | `:ClaraExplorerNavigateConsumer`    | jump from an **RHS** fact type to the downstream productions (or the global consumers when outside a rule) |
 | `:ClaraExplorerRefresh`             | re-derive annotations and re-warm the analysis                        |
 | `:ClaraExplorerSwapSession`         | swap in a rebuilt session (`!` re-prompts)                            |
+| `:ClaraExplorerToggleTransport`     | toggle between the nREPL and babashka transports                      |
+| `:ClaraExplorerTransportStatus`     | open the effective + configured transport (and the explorer-server probe) in a scratch buffer |
+| `:ClaraExplorerLastError`           | open the full last nREPL error (stack trace + code) in a scratch buffer |
+| `:ClaraExplorerSelectUnit`          | re-prompt for the babashka transport's registry unit                  |
 
 Direct jump when exactly one candidate; `vim.ui.select` picker when more than
 one (delegates to Telescope/snacks/fzf-lua if you have a `ui-select`
@@ -32,6 +36,34 @@ integration configured).
 
 These are consumer-facing Neovim plugins, installed via lazy.nvim /
 AstroNvim — not mise/brew.
+
+## Babashka transport (offline artifacts)
+
+Navigation queries default to the `"auto"` transport: nREPL
+(`client/navigate` over Conjure) when the connected session has a running
+explorer system, otherwise the babashka transport (shelling out to
+`bb editor_client.bb` over the persisted artifact set — no Clara session is
+loaded and no Jetty server is started on the repl). The connected repl is
+still required in both modes: it resolves aliased/`::` symbols to
+fully-qualified form and maps namespaces to source files. Set
+`vim.g.clara_explorer_transport = "bb"` (or `"nrepl"`) to force one, or
+toggle it with `:ClaraExplorerToggleTransport`.
+
+- **`g:clara_explorer_transport`** — `"auto"` (default), `"nrepl"`, or `"bb"`.
+- **`g:clara_explorer_registry_root`** — the registry root (the `rules-annos/`
+  tree). When unset, `CLARA_RULES_EXPLORER_REGISTRY` is read from the
+  environment.
+- **`g:clara_explorer_bb_script`** — path to `editor_client.bb`. When unset,
+  the `editor_client.bb` symlink shipped beside `conjure.lua` is used (the
+  plugin build step must materialize that repo-relative symlink into the
+  plugin-local directory before release).
+
+The bb transport resolves aliased/`::` symbols to fully-qualified form over
+`eval-str` before the query, exactly like the nREPL transport, then shells out
+for the navigation itself. `:ClaraExplorerSelectUnit` prompts for the
+single-unit registry selection and caches it; `:ClaraExplorerRefresh` and
+`:ClaraExplorerSwapSession` are no-ops in bb mode (re-persist the artifacts to
+pick up changes).
 
 ## Development dependencies
 
@@ -51,14 +83,14 @@ just invokes `stylua`/`selene`. The selene `neovim` std is vendored as
 ## Install (lazy.nvim / AstroNvim)
 
 The plugin is loaded from a local checkout located via the
-`CLARA_HOME_EXPLORER` environment variable (the repo root). The spec derives
-the plugin directory as `$CLARA_HOME_EXPLORER/editor/neovim`. If the variable
+`CLARA_RULES_EXPLORER_HOME` environment variable (the repo root). The spec derives
+the plugin directory as `$CLARA_RULES_EXPLORER_HOME/editor/neovim`. If the variable
 is unset, the plugin is skipped and a warning is emitted — no hard failure.
 The variable is read once at Neovim startup; change it and restart.
 
 ```sh
 # per machine — the repo root of your clara-rules-explorer checkout
-export CLARA_HOME_EXPLORER="$HOME/Projects/clara-rules-explorer"
+export CLARA_RULES_EXPLORER_HOME="$HOME/Projects/clara-rules-explorer"
 ```
 
 ```lua
@@ -68,7 +100,7 @@ local plugins = {
   { "nvim-treesitter/nvim-treesitter", opts = { ensure_installed = { "clojure" } } },
 }
 
-local clara_root = vim.env.CLARA_HOME_EXPLORER
+local clara_root = vim.env.CLARA_RULES_EXPLORER_HOME
 if clara_root then
   plugins[#plugins + 1] = {
     dir = clara_root .. "/editor/neovim",
@@ -86,7 +118,7 @@ if clara_root then
     end
   }
 else
-  vim.notify("CLARA_HOME_EXPLORER is not set — clara-explorer not loaded", vim.log.levels.WARN)
+  vim.notify("CLARA_RULES_EXPLORER_HOME is not set — clara-explorer not loaded", vim.log.levels.WARN)
 end
 
 return plugins
@@ -95,7 +127,7 @@ return plugins
 AstroNvim users add the same spec to their `lua/plugins/` directory; the
 plugin loads automatically and registers the four user commands. The plugin
 does not hard-code any machine-specific paths, home directories, or ports —
-the checkout location comes from `CLARA_HOME_EXPLORER`.
+the checkout location comes from `CLARA_RULES_EXPLORER_HOME`.
 
 ## Architecture
 
@@ -105,7 +137,7 @@ lua/clara-explorer/
 ├── structural.lua (tree-sitter skeleton: enclosing defrule/defquery)
 ├── token.lua      (Clara token resolution — port of the elisp heuristics)
 ├── edn.lua        (EDN subset reader — the only module that knows the wire format)
-├── conjure.lua    (eval-str wrapper, error surfacing, async plumbing)
+├── conjure.lua    (eval-str wrapper, error surfacing, async plumbing, bb transport)
 ├── picker.lua     (vim.ui.select)
 └── jump.lua       (def-str / resource / regex fallback + jump-list push)
 ```
@@ -136,6 +168,13 @@ as Emacs:
 - `transport_spec.lua` asserts the Clojure payload is built correctly, EDN is
   parsed, 0/1/N dispatch works, the jump path is invoked with the right
   target, and the `cb` error path surfaces nREPL errors.
+
+On an nREPL error the full stack trace is appended to the Conjure log buffer
+(with `; (err) ` prefixes) and stored for `:ClaraExplorerLastError`; the
+`:ClaraExplorerTransportStatus` command opens the effective transport plus
+the explorer-server probe result in a scratch buffer. Plain stderr output
+(e.g. the INFO logs `client/navigate` writes) is not treated as a navigation
+error, so it cannot swallow the `value` message that follows.
 - `jump_spec.lua` asserts the var-vs-non-var jump dispatch, the
   `(defrule|defquery NAME)` and whole-symbol fallback regexes (including
   punctuation-bearing names like `my-thing?`), and `file:`/`jar:` resource

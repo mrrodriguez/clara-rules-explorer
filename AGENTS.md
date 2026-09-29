@@ -1,15 +1,17 @@
 # Agent Instructions
 
-This repo contains two independent projects in separate directories with
+This repo contains independent projects in separate directories with
 different languages, toolchains, and engineering standards. Keep them
 organized separately — do not mix tooling or conventions between them.
 
 ## Project Layout
 
-| Directory | Language              | Toolchain | Test runner     |
-| --------- | --------------------- | --------- | --------------- |
-| `server/` | Clojure (tools.deps)  | `make`    | `make test`     |
-| `ui/`     | TypeScript + Svelte 5 | `pnpm`    | `pnpm run test` |
+| Directory        | Language              | Toolchain | Test runner      |
+| ---------------- | --------------------- | --------- | ---------------- |
+| `server/`        | Clojure (tools.deps)  | `make`    | `make test`      |
+| `ui/`            | TypeScript + Svelte 5 | `pnpm`    | `pnpm run test`  |
+| `editor/emacs/`  | Emacs Lisp            | `make`    | `make test`      |
+| `editor/neovim/` | Lua (Neovim plugin)   | `make`    | `make test`      |
 
 ---
 
@@ -83,6 +85,15 @@ pnpm run dev            # dev server (requires backend on :9999)
 
 ---
 
+## Editors (`editor/emacs/`, `editor/neovim/`)
+
+Both editor integrations have their own `Makefile`s and are the authoritative
+source for their quality commands — including a Tier-1/Tier-2 test split that is
+**not** obvious from `make test` alone. See
+[`editor/AGENTS.md`](editor/AGENTS.md) before touching either.
+
+---
+
 ## Finding clara-rules Source Code
 
 This project builds on the clara-rules engine. When you need to read, reference,
@@ -110,3 +121,6 @@ When making changes that span both projects:
 1. Make and verify the server change first (`make test lint reflection-check`).
 2. Then update the UI to match, verifying with `make format check lint`.
 3. If the API contract changes, update `docs/explorer-graph-api.md`.
+4. For editor transport changes, verify both editor suites (see
+   [`editor/AGENTS.md`](editor/AGENTS.md)) and keep the shared
+   `server/resources/clara/server/graph/editor-resolve-form.clj` in sync.

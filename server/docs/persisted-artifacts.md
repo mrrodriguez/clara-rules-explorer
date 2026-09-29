@@ -226,6 +226,31 @@ replace that symlink with a copy**: a copy still parses long after it stops
 agreeing with what wrote the files. Run the script from a checkout, not from a
 detached copy of the file alone.
 
+## Navigating offline: `editor_client.bb`
+
+`bin/editor_client.bb` is the babashka twin of the editor navigation query
+(`clara.server.graph.client/navigate`): EDN-in, EDN-out over a registry
+selection, no JVM, no session, no Jetty.
+
+```bash
+S="$CLARA_RULES_EXPLORER_HOME/server/bin/editor_client.bb"
+bb "$S" '{:root "…" :units [{:repo "…"} {:repo "…"}]}' \
+        '{:production nil :side :lhs :token ":loan/applicant"}'
+```
+
+It composes the selected units on the fly with the same shared composition and
+rehydration logic the JVM `:registry` mode runs, so the bb answer and the nREPL
+answer over the same selection agree. The editor resolves aliased/`::` tokens
+to fq over its repl first; source locations are always `:var? false` (bb loads
+no rule namespaces).
+
+### The `shared.` convention
+
+Logic both the JVM and bb `require` is marked
+`:clara-rules-explorer/bb-loaded true` on its ns form, and `make bb-smoke-test`
+requires every marked namespace under bb — so a namespace that pulls in
+anything bb cannot load fails the check rather than shipping.
+
 ## Writing your own reader
 
 Open the one part your question lives in. On the JVM:

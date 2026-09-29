@@ -67,6 +67,14 @@
 (autoload 'nrepl-dict-get "nrepl-dict")
 (autoload 'nrepl-dict-put "nrepl-dict")
 
+(defun test-helper--real-fn-p (sym)
+  "Non-nil when SYM names a real (non-autoload) function.
+   The `(autoload ...)` forms above make these symbols `fboundp` in the bare
+   Tier-1 batch, so a bare `fboundp` guard would skip the stubs below and the
+   autoload would then fail to load its absent library at call time."
+  (and (fboundp sym)
+       (not (autoloadp (symbol-function sym)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Minimal nREPL dict stub — only defined when real `nrepl-dict' is absent.
 ;; Real cider (Eldev) provides a richer impl; this handles the mock dict
@@ -74,23 +82,29 @@
 ;; plist.
 ;; ---------------------------------------------------------------------------
 
-(unless (fboundp 'nrepl-dict-get)
+(unless (test-helper--real-fn-p 'nrepl-dict-get)
   (defun nrepl-dict-get (dict key)
-    "Lookup KEY in DICT.  Supports hash-table, alist, and `(dict ...)` plist."
+    "Lookup KEY in DICT.  Supports hash-table, alist, and `(dict ...)` plist.
+
+  Keys are strings in the nREPL shapes this stub serves, so plist lookups
+  compare with `equal`, not `eq`."
     (cond
      ((null dict) nil)
      ((hash-table-p dict) (gethash key dict))
      ((and (listp dict) (eq (car dict) 'dict))
-      (plist-get (cdr dict) key))
+      ;; (dict "k" "v" ...) — string keys, so `equal`, not `eq`.
+      (cl-loop for (k v) on (cdr dict) by #'cddr
+               when (equal k key) return v))
      ((and (listp dict) (consp (car dict)))
-      ;; alist of (key . val) with string keys
+      ;; alist of (key . val) with string keys — `assoc` compares with `equal`.
       (cdr (assoc key dict)))
      ((listp dict)
-      ;; flat plist (\"k\" \"v\" ...) without leading `dict`
-      (plist-get dict key))
+      ;; flat plist ("k" "v" ...) without leading `dict`.
+      (cl-loop for (k v) on dict by #'cddr
+               when (equal k key) return v))
      (t nil))))
 
-(unless (fboundp 'nrepl-dict-put)
+(unless (test-helper--real-fn-p 'nrepl-dict-put)
   (defun nrepl-dict-put (dict key val)
     "Put KEY VAL into DICT (stub: returns new dict)."
     (cond
@@ -107,7 +121,7 @@
 ;; and runs only under Eldev with the real library.
 ;; ---------------------------------------------------------------------------
 
-(unless (fboundp 'parseedn-read-str)
+(unless (test-helper--real-fn-p 'parseedn-read-str)
   (defun parseedn-read-str (str)
     "Minimal EDN reader for stubbed tests: delegates to `read' with keyword fixup."
     (let ((result (car (read-from-string str))))

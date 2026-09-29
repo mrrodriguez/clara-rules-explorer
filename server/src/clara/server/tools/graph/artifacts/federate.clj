@@ -22,9 +22,10 @@
   The index is a value — nothing is persisted on the path to an answer. Read the
   units, build the index, ask it."
   (:require
-   [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
    [clara.server.tools.graph.artifacts.registry :as registry]
    [clara.server.tools.graph.artifacts.selection :as selection]
+   [clara.server.tools.graph.artifacts.hierarchy :as hierarchy]
+   [clara.server.tools.graph.artifacts.shared.registry :as shared-registry]
    [clara.server.tools.graph.artifacts.store :as store]
    [clara.server.tools.graph.edn-io :as edn-io]
    [clojure.java.io :as io]
@@ -33,7 +34,7 @@
 
 (set! *warn-on-reflection* true)
 
-(defn- unit-key [unit] (registry/unit-key unit))
+(defn- unit-key [unit] (shared-registry/unit-key unit))
 
 ;; ===========================================================================
 ;; aggregate overlap refusal
@@ -53,7 +54,7 @@
         (keep (fn [unit]
                 (when (registry/aggregate-unit? registry unit)
                   {:key (unit-key unit)
-                   :composed-from (mapv registry/unit-key
+                   :composed-from (mapv shared-registry/unit-key
                                         (:composed-from (registry/unit-info registry unit)))})))
         selection))
 

@@ -89,13 +89,32 @@ describe("jump.goto_fallback", function()
         end, function()
           jump.goto_fallback(
             { name = "my.ns/my-rule", ns = "my.ns" },
-            function(o) o.on_value("file:/repo/src/my/ns.clj") end
+            function(o) o.on_value('"file:/repo/src/my/ns.clj"') end
           )
         end)
       end)
     end)
     assert.are.same("/repo/src/my/ns.clj", edited)
     assert.are.same(jump.fallback_regex("my-rule"), searched)
+  end)
+
+  it("passes exactly one argument to :edit (no gsub count leak)", function()
+    local nargs, edited
+    with_restore(vim.cmd, "edit", function(...)
+      nargs = select("#", ...)
+      edited = ...
+    end, function()
+      with_restore(vim.cmd, "normal", function() end, function()
+        with_restore(vim.fn, "search", function() return 1 end, function()
+          jump.goto_fallback(
+            { name = "my.ns/my-rule", ns = "my.ns" },
+            function(o) o.on_value('"file:/repo/src/my/ns.clj"') end
+          )
+        end)
+      end)
+    end)
+    assert.are.same(1, nargs)
+    assert.are.same("/repo/src/my/ns.clj", edited)
   end)
 
   it("falls back to the whole-symbol search when the head search misses", function()
@@ -108,7 +127,7 @@ describe("jump.goto_fallback", function()
         end, function()
           jump.goto_fallback(
             { name = "my.ns/app-outcome-approved?", ns = "my.ns" },
-            function(o) o.on_value("file:/repo/src/my/ns.clj") end
+            function(o) o.on_value('"file:/repo/src/my/ns.clj"') end
           )
         end)
       end)
@@ -126,7 +145,7 @@ describe("jump.goto_fallback", function()
           with_restore(vim.fn, "search", function() return 1 end, function()
             jump.goto_fallback(
               { name = "my.ns/my-rule", ns = "my.ns" },
-              function(o) o.on_value("jar:file:/repo/lib.jar!/my/ns.clj") end
+              function(o) o.on_value('"jar:file:/repo/lib.jar!/my/ns.clj"') end
             )
           end)
         end)
@@ -138,8 +157,37 @@ describe("jump.goto_fallback", function()
   it("notifies when the namespace cannot be resolved", function()
     local msg
     with_restore(vim, "notify", function(m) msg = m end, function()
-      jump.goto_fallback({ name = "my.ns/my-rule", ns = "my.ns" }, function(o) o.on_value(nil) end)
+      jump.goto_fallback({ name = "my.ns/my-rule", ns = "my.ns" }, function(o) o.on_value("nil") end)
     end)
     assert.are.same("clara-explorer: cannot resolve namespace my.ns", msg)
+  end)
+
+  it("opens a plain absolute path from var :file metadata", function()
+    local edited
+    with_restore(vim.cmd, "edit", function(path) edited = path end, function()
+      with_restore(vim.cmd, "normal", function() end, function()
+        with_restore(vim.fn, "search", function() return 1 end, function()
+          jump.goto_fallback(
+            { name = "my.ns/my-rule", ns = "my.ns" },
+            function(o) o.on_value('"/repo/src/my/ns.clj"') end
+          )
+        end)
+      end)
+    end)
+    assert.are.same("/repo/src/my/ns.clj", edited)
+  end)
+
+  it("resolves the var file first, then munged .clj/.cljc resources", function()
+    local code
+    jump.goto_fallback(
+      { name = "my.ns-with-hyphens/my-rule", ns = "my.ns-with-hyphens" },
+      function(o) code = o.code end
+    )
+    assert.truthy(code:find("(resolve (symbol ", 1, true))
+    assert.truthy(code:find('"my.ns-with-hyphens/my-rule"', 1, true))
+    assert.truthy(code:find("(munge ", 1, true))
+    assert.truthy(code:find('"my.ns-with-hyphens"', 1, true))
+    assert.truthy(code:find('".clj"', 1, true))
+    assert.truthy(code:find('".cljc"', 1, true))
   end)
 end)

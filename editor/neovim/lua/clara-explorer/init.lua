@@ -48,6 +48,7 @@ end
 
 --- Handle a decoded navigate result: relay `error`, else choose/jump to targets.
 function M.handle_result(result, caller_ns)
+  conjure.debug_log("handle-result", result)
   if result.error then
     vim.notify(result.error, vim.log.levels.INFO)
     return
@@ -70,6 +71,7 @@ function M.navigate(side)
   local win = vim.api.nvim_get_current_win()
   local crow, ccol = unpack(vim.api.nvim_win_get_cursor(0))
   local ctx = M.context(bufnr, crow - 1, ccol)
+  conjure.debug_log("navigate side=" .. tostring(side) .. " ctx=" .. vim.inspect(ctx))
 
   if not ctx.token then
     vim.notify("not on a fact type", vim.log.levels.INFO)
@@ -84,27 +86,70 @@ function M.navigate(side)
     return
   end
 
-  local code = conjure.navigate_code({
-    production = ctx.production,
-    side = side,
+  -- Resolve the token to fully-qualified form first (the repl is always
+  -- connected — bb mode just has no explorer JVM on it), then choose the
+  -- transport: nREPL when the connected session has a running explorer system,
+  -- bb otherwise.
+  conjure.resolve_token({
     caller_ns = ctx.caller_ns,
     token = ctx.token,
-  })
-
-  conjure.eval_edn({
-    code = code,
     bufnr = bufnr,
     win = win,
-    on_value = function(value, _, cb_win)
-      if vim.api.nvim_win_is_valid(cb_win) then vim.api.nvim_set_current_win(cb_win) end
-      local result, err = edn.decode(value)
-      if err then
-        vim.notify(err, vim.log.levels.ERROR)
-        return
-      end
-      M.handle_result(result, ctx.caller_ns)
+    on_resolved = function(fq)
+      local resolved_token = fq or ctx.token
+      conjure.debug_log("navigate resolved-token=" .. tostring(resolved_token) .. " (fq=" .. tostring(fq) .. ")")
+      conjure.with_transport(function(transport)
+        conjure.debug_log("navigate transport=" .. tostring(transport))
+        if transport == "bb" then
+          conjure.bb_selection(function(selection)
+            if not selection then return end
+            local input = conjure.navigate_input({
+              production = ctx.production,
+              side = side,
+              caller_ns = ctx.caller_ns,
+              token = resolved_token,
+            })
+            conjure.bb_eval(selection, input, function(result, err)
+              if vim.api.nvim_win_is_valid(win) then vim.api.nvim_set_current_win(win) end
+              if err then
+                vim.notify(err, vim.log.levels.ERROR)
+                return
+              end
+              if not result then
+                vim.notify("clara-explorer: no result from navigate", vim.log.levels.ERROR)
+                return
+              end
+              M.handle_result(result, ctx.caller_ns)
+            end)
+          end)
+          return
+        end
+
+        local code = conjure.navigate_code({
+          production = ctx.production,
+          side = side,
+          caller_ns = ctx.caller_ns,
+          token = resolved_token,
+        })
+
+        conjure.eval_edn({
+          code = code,
+          bufnr = bufnr,
+          win = win,
+          passive = true,
+          on_value = function(value, _, cb_win)
+            if vim.api.nvim_win_is_valid(cb_win) then vim.api.nvim_set_current_win(cb_win) end
+            local result, err = edn.decode(value)
+            if err then
+              vim.notify(err, vim.log.levels.ERROR)
+              return
+            end
+            M.handle_result(result, ctx.caller_ns)
+          end,
+          on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
+        })
+      end)
     end,
-    on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
   })
 end
 
@@ -114,14 +159,32 @@ function M.refresh()
     vim.notify("Not connected to a Conjure Clojure REPL", vim.log.levels.WARN)
     return
   end
-  conjure.eval_edn({
-    code = "(do (require 'clara.server.graph.server)\n     (clara.server.graph.server/reload-annotations!))",
-    on_value = function() vim.notify("clara-explorer: analysis refreshed", vim.log.levels.INFO) end,
-    on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
-  })
+  conjure.with_transport(function(transport)
+    if transport == "bb" then
+      vim.notify(
+        "clara-explorer: refresh is a no-op in bb mode (re-persist the artifacts to pick up changes)",
+        vim.log.levels.INFO
+      )
+      return
+    end
+    conjure.eval_edn({
+      code = "(do (require 'clara.server.graph.server)\n     (clara.server.graph.server/reload-annotations!))",
+      passive = true,
+      on_value = function() vim.notify("clara-explorer: analysis refreshed", vim.log.levels.INFO) end,
+      on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
+    })
+  end)
 end
 
 local swap_opts_by_buf = {}
+
+--- Session-swap forms: balanced-paren templates filled via `:format`, so the
+-- parens stay inspectable instead of split across `..` concats.
+local SWAP_DEFAULT_FORM = [[(do (require 'clara.server.graph.client)
+     (clara.server.graph.client/swap-session!))]]
+
+local SWAP_OPTS_FORM = [[(do (require 'clara.server.graph.client)
+     (clara.server.graph.client/swap-session! %s))]]
 
 --- Eval a session-swap (or the registered default) and cache the last opts.
 function M.perform_swap(raw, bufnr)
@@ -130,12 +193,13 @@ function M.perform_swap(raw, bufnr)
   if not use_default then swap_opts_by_buf[bufnr] = trimmed end
   local code
   if use_default then
-    code = "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/swap-session!))"
+    code = SWAP_DEFAULT_FORM
   else
-    code = "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/swap-session! " .. trimmed .. "))"
+    code = SWAP_OPTS_FORM:format(trimmed)
   end
   conjure.eval_edn({
     code = code,
+    passive = true,
     on_value = function() vim.notify("clara-explorer: session swapped", vim.log.levels.INFO) end,
     on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
   })
@@ -150,15 +214,68 @@ function M.swap_session(bang)
   end
   local bufnr = vim.api.nvim_get_current_buf()
   local cached = swap_opts_by_buf[bufnr]
-  if bang ~= "!" and cached ~= nil then
-    M.perform_swap(cached, bufnr)
+  conjure.with_transport(function(transport)
+    if transport == "bb" then
+      vim.notify("clara-explorer: swap-session is a no-op in bb mode", vim.log.levels.INFO)
+      return
+    end
+    if bang ~= "!" and cached ~= nil then
+      M.perform_swap(cached, bufnr)
+      return
+    end
+    vim.ui.input({ prompt = "Swap opts (EDN map, empty for default): " }, function(input)
+      if input == nil then
+        return -- cancelled
+      end
+      M.perform_swap(input, bufnr)
+    end)
+  end)
+end
+
+--- `:ClaraExplorerToggleTransport` — toggle between the nREPL and bb transports.
+function M.toggle_transport()
+  vim.g.clara_explorer_transport = conjure.bb_transport_p() and "nrepl" or "bb"
+  vim.notify("clara-explorer: transport is now " .. vim.g.clara_explorer_transport, vim.log.levels.INFO)
+end
+
+--- `:ClaraExplorerTransportStatus` — report the configured and effective transport.
+function M.transport_status()
+  local configured = conjure.transport()
+  local connected = conjure.connected() and "yes" or "no"
+  conjure.with_transport(function(effective)
+    local server
+    if conjure.server_available_cache == nil then
+      server = "unknown"
+    elseif conjure.server_available_cache then
+      server = "yes"
+    else
+      server = "no"
+    end
+    local lines = {
+      "clara-explorer transport status",
+      "",
+      "effective       " .. effective,
+      "configured      " .. configured,
+      "connected       " .. connected,
+      "explorer-server " .. server,
+    }
+    -- A scratch buffer (not `vim.notify`/`nvim_echo`) gives the full status in a
+    -- persistent window that neither vanishes nor triggers the Conjure HUD.
+    conjure.show_scratch("clara-explorer://transport-status", lines, "clojure")
+  end)
+end
+
+--- `:ClaraExplorerSelectUnit` — re-prompt for the bb transport's registry unit.
+function M.select_unit()
+  if not conjure.bb_transport_p() then
+    vim.notify(
+      "clara-explorer: warning — unit selection only affects the bb transport (currently nrepl)",
+      vim.log.levels.WARN
+    )
     return
   end
-  vim.ui.input({ prompt = "Swap opts (EDN map, empty for default): " }, function(input)
-    if input == nil then
-      return -- cancelled
-    end
-    M.perform_swap(input, bufnr)
+  conjure.bb_select_unit(function(sel)
+    if sel then vim.notify("clara-explorer: bb unit set", vim.log.levels.INFO) end
   end)
 end
 

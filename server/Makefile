@@ -1,9 +1,13 @@
-.PHONY: test lint clean reflection-check format format-check regen-fixture regen-artifacts demo-setup demo-run hierarchy-run repl
+.PHONY: test bb-smoke-test lint clean reflection-check format format-check regen-fixture regen-artifacts demo-setup demo-run hierarchy-run repl
 
 SHELL := /bin/bash
 
 test:
 	clojure -M:test:run-tests
+
+# Verify every :clara-rules-explorer/bb-loaded namespace requires under bb.
+bb-smoke-test:
+	bb bin/bb_shared_smoke_test.bb
 
 # Start a headless nREPL server with dev and test dependencies loaded (for Conjure, CIDER, etc.)
 repl:

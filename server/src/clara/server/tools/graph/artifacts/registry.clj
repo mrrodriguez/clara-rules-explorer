@@ -24,6 +24,7 @@
    [clara.server.tools.graph.artifacts.layout :as layout]
    [clara.server.tools.graph.artifacts.parts :as parts]
    [clara.server.tools.graph.artifacts.schema :as schema]
+   [clara.server.tools.graph.artifacts.shared.registry :as shared-registry]
    [clara.server.tools.graph.artifacts.store :as store]
    [clara.server.tools.graph.edn-io :as edn-io]
    [clojure.java.io :as io]
@@ -41,13 +42,6 @@
 
 (defrecord Registry [root units units-by-key cache])
 
-(defn unit-key
-  "The string handle for a unit ref: `<repo>[@<branch>]`. A `UnitRef` map is not
-  a comparable map key under the library's own `sorted-map` convention, so maps
-  keyed by unit use this."
-  [{:keys [repo branch]}]
-  (str repo (when (seq branch) (str "@" branch))))
-
 (defn unit-ref
   "The `UnitRef` projection of a unit info map."
   [{:keys [repo branch]}]
@@ -64,7 +58,7 @@
   "The recorded info for `unit` (its artifacts, slim shape, layer ids, manifest
   head), or nil when the registry does not hold it."
   [^Registry registry unit]
-  (get (:units-by-key registry) (unit-key unit)))
+  (get (:units-by-key registry) (shared-registry/unit-key unit)))
 
 (defn aggregate-unit?
   "Is `unit` an aggregate — a unit whose manifest's `:analysis-run :mode` is
@@ -142,7 +136,7 @@
          (filter #(.isDirectory ^File %))
          (filter unit-dir?)
          (keep #(some-> (relative-segments root %) ->unit-ref))
-         (sort-by unit-key)
+         (sort-by shared-registry/unit-key)
          vec)))
 
 ;; ===========================================================================
@@ -202,7 +196,7 @@
   (when (str/blank? root)
     (throw (ex-info "registry requires :root (an artifact root)" {})))
   (let [infos (mapv #(->unit-info root %) units)]
-    (->Registry root infos (into {} (map (fn [i] [(unit-key i) i])) infos) (atom {}))))
+    (->Registry root infos (into {} (map (fn [i] [(shared-registry/unit-key i) i])) infos) (atom {}))))
 
 (s/defn discover :- Registry
   "Discover every unit under `:root` — a directory holding
@@ -236,7 +230,7 @@
   unit has no `merged-rulebase-analysis/` directory."
   [registry :- Registry
    unit :- schema/UnitRef]
-  (memo-read registry [:analysis (unit-key unit)]
+  (memo-read registry [:analysis (shared-registry/unit-key unit)]
              #(when-let [ps (store/read-analysis-parts (->opts registry unit))]
                 (parts/<-parts ps))))
 
@@ -244,7 +238,7 @@
   "The `rulebase-analysis-digest.edn` of `unit`, or nil when absent."
   [registry :- Registry
    unit :- schema/UnitRef]
-  (memo-read registry [:digest (unit-key unit)]
+  (memo-read registry [:digest (shared-registry/unit-key unit)]
              #(edn-io/read-edn-file
                (io/file (store/get-out-dir (->opts registry unit))
                         (:rulebase-analysis-digest layout/artifact-files)))))
@@ -253,7 +247,7 @@
   "The `rules-inspect-manifest.edn` of `unit`, or nil when absent."
   [registry :- Registry
    unit :- schema/UnitRef]
-  (memo-read registry [:manifest (unit-key unit)]
+  (memo-read registry [:manifest (shared-registry/unit-key unit)]
              #(edn-io/read-edn-file (store/get-artifact-file :manifest (->opts registry unit)))))
 
 (s/defn read-annotations :- (s/maybe schema/MergedAnnotations)
@@ -261,33 +255,8 @@
   unit has no `merged-annotations.edn`."
   [registry :- Registry
    unit :- schema/UnitRef]
-  (memo-read registry [:annotations (unit-key unit)]
+  (memo-read registry [:annotations (shared-registry/unit-key unit)]
              #(store/read-merged-annotations (->opts registry unit))))
-
-(defn narrow-analysis
-  "Narrow `analysis` to `unit`'s `:namespaces` filter, when present: `:rules`
-  and `:queries` keep only the productions whose `:ns` is in the filter (as
-  strings). `:fact-types` stays whole — keyed by type, not namespace, and the
-  hierarchy benefits from staying global — and `:dep-graph` is left alone,
-  because `clara.server.tools.graph.artifacts.compose/->composed-analysis`
-  recomputes it over the merged productions. `:unresolved` and `:slim` pass
-  through.
-
-  Without a filter the analysis is returned unchanged. Both
-  `clara.server.tools.graph.artifacts.federate/->index` and
-  `clara.server.tools.graph.artifacts.compose/->composed-analysis` apply this
-  when they read a unit for a merge, so a `UnitRef` narrowed to a subset of a
-  unit's namespaces excludes the productions outside that subset."
-  [analysis unit]
-  (if-let [nses (:namespaces unit)]
-    (let [nses (into #{} (map str) nses)
-          keep? (fn [[_ {:keys [ns]}]] (contains? nses (str ns)))
-          narrow (fn [productions]
-                   (into (sorted-map) (filter keep?) productions))]
-      (cond-> analysis
-        (contains? analysis :rules) (update :rules narrow)
-        (contains? analysis :queries) (update :queries narrow)))
-    analysis))
 
 (defn- ->namespace-set
   "A unit's `:namespaces` filter as a set of strings, or nil when unfiltered."
@@ -393,14 +362,14 @@
                              (mapv unit-ref))
          dropped-key-sets (into (sorted-map)
                                 (map (fn [info]
-                                       [(unit-key info) (:slim-dropped info)]))
+                                       [(shared-registry/unit-key info) (:slim-dropped info)]))
                                 infos)
          missing-artifacts (into (sorted-map)
                                  (keep (fn [info]
                                          (let [missing (set/difference (all-artifacts info)
                                                                        (:artifacts info))]
                                            (when (seq missing)
-                                             [(unit-key info) missing]))))
+                                             [(shared-registry/unit-key info) missing]))))
                                  infos)]
      {:compatible? (and (empty? no-analysis) (empty? shape-mismatch))
       :majority-shape majority-shape
@@ -419,10 +388,10 @@
     (when (seq (:no-analysis report))
       (throw (ex-info (format "%d unit(s) have no merged-rulebase-analysis to merge: %s"
                               (count (:no-analysis report))
-                              (pr-str (mapv unit-key (:no-analysis report))))
+                              (pr-str (mapv shared-registry/unit-key (:no-analysis report))))
                       report)))
     (when (seq (:shape-mismatch report))
       (throw (ex-info (format "Cannot merge registry units with differing slim shapes: %s"
-                              (pr-str (mapv unit-key (:shape-mismatch report))))
+                              (pr-str (mapv shared-registry/unit-key (:shape-mismatch report))))
                       report)))
     true))

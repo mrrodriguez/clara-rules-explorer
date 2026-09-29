@@ -1,11 +1,13 @@
---- Clara fact-type token resolution — a self-contained port of the Emacs
--- `clara-explorer.el` §9.2 heuristics.  Engine-agnostic: works on a flat buffer
--- string with 0-indexed byte offsets, and depends on neither tree-sitter nor
--- `vim` (so `token_spec.lua` runs without the clojure parser).
+--- Clara fact-type token resolution — a self-contained port of
+-- `editor/emacs/clara-explorer.el`'s structural-navigation heuristics.
+-- Engine-agnostic: works on a flat buffer string with 0-indexed byte offsets,
+-- and depends on neither tree-sitter nor `vim` (so `token_spec.lua` runs
+-- without the clojure parser).
 --
--- The port mirrors the elisp `forward-sexp`/`down-list` logic with a small
+-- The port mirrors Emacs's `forward-sexp`/`down-list` logic with a small
 -- byte-based sexp walker.  Symbol reading uses the same token character class
--- the elisp uses: `A-Za-z0-9._:/!?*+<>-`.
+-- as `editor/emacs/clara-explorer.el`'s `clara-explorer--symbol-chars`:
+-- `A-Za-z0-9._:/!?*+<>-`.
 
 local M = {}
 
