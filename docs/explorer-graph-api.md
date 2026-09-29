@@ -16,15 +16,15 @@ The explorer server wraps a Clara `session` in a Ring/Jetty HTTP server and expo
 
 | Family | Mount Point | Source | State |
 |--------|-------------|--------|-------|
-| **Rulebase analysis** | `/v1/...` | `clara.server.tools.graph.core` | Stateless — derived from the compiled rulebase |
-| **Session state** | `/v1/session/...` | `clara.server.tools.graph.memory` | Point-in-time memory-analysis of working memory |
+| **Rulebase analysis** | `/v1/...` | `clara.explorer.core` | Stateless — derived from the compiled rulebase |
+| **Session state** | `/v1/session/...` | `clara.explorer.memory` | Point-in-time memory-analysis of working memory |
 
 The session and merged annotations are held in atoms so the host application can swap them at runtime without restarting.
 
 ### Server bootstrap
 
 ```clojure
-(require '[clara.server.graph.server :as server])
+(require '[clara.explorer.server.serve :as server])
 
 ;; Layers are folded lowest precedence first.  The rule-:props base layer is
 ;; always included first; additional layers overlay it.
@@ -59,7 +59,7 @@ The session and merged annotations are held in atoms so the host application can
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `:session` | session or rulebase | _required unless `:registry` is given_ | Clara session (working memory enabled) or raw Rete rulebase (working memory disabled; session routes return 409 `:rulebase-input`) |
-| `:registry` | map | _none_ | Registry-backed serving: `{:root … :units […]}` composes a selection of artifact units into one rehydrated analysis and serves it with no live session. Session routes return 409 `:no-session`. Exactly one of `:session` / `:registry` is present. See [Persisted artifacts](../server/docs/persisted-artifacts.md). |
+| `:registry` | map | _none_ | Registry-backed serving: `{:root … :units […]}` composes a selection of artifact units into one rehydrated analysis and serves it with no live session. Session routes return 409 `:no-session`. Exactly one of `:session` / `:registry` is present. See [Persisted artifacts](../explorer/docs/persisted-artifacts.md). |
 | `:port` | int | `9999` | HTTP listen port |
 | `:annotations` | annotations spec or legacy form | `nil` | Annotation source + enrichment (an `AnnotationsSpec` map, or a legacy vector-of-layers / path string / bare map / `MergedAnnotations`) |
 | `:working-memory-enabled` | boolean | `true` | When `false`, all `/v1/session/*` and `/v1/memory-analysis` routes return 409 `:disabled-by-config` regardless of session type |
@@ -77,7 +77,7 @@ forwarded to the generated analysis layer:
 Both hooks only take effect when the *generated* analysis layer actually runs: a
 pre-generated sidecar layer carrying `:id :clara.tools.graph.analyze/generated`
 suppresses live generation (the explicit source wins). See the
-[Rule Annotations Documentation](../server/docs/rule-annotations.md) for their
+[Rule Annotations Documentation](../explorer/docs/rule-annotations.md) for their
 semantics.
 
 ---
@@ -144,7 +144,7 @@ Production references are always objects, never bare names:
 ### `TypeBridgeMatch` — the type pair behind a dep edge
 
 On `:upstream` and `:downstream` entries (see
-`clara.server.graph.api/TypeBridgeMatch`), `match` lists the concrete type
+`clara.explorer.server.api/TypeBridgeMatch`), `match` lists the concrete type
 pairs that link the two productions.  The shape and meaning are symmetric in
 both directions — context (upstream vs downstream) is what identifies which
 end produces:
@@ -577,7 +577,7 @@ membership and `:provenance` are library-internal and not exposed over HTTP.
 
 The server is given the layer *files* and folds them itself; it never reads a
 persisted merge. See
-[Persisted artifacts](../server/docs/persisted-artifacts.md).
+[Persisted artifacts](../explorer/docs/persisted-artifacts.md).
 
 **Response** `200`:
 ```json
@@ -611,7 +611,7 @@ persisted merge. See
 ```
 
 HTTP is read-only — all mutation goes through the in-memory
-`swap-session!` / `reload-annotations!` API in `clara.server.graph.server`.
+`swap-session!` / `reload-annotations!` API in `clara.explorer.server.serve`.
 
 ---
 
@@ -902,7 +902,7 @@ Annotations come in **layers** — one per source — folded together with spars
 | Generated | Auto-discovered via clj-kondo static analysis | Callsite discovery and resolution |
 | Curated | User-authored EDN files | Hand-resolved types, notes, overrides |
 
-For the complete schema, merge strategies, callsite identity format, and derivation modes, refer to the dedicated [Rule Annotations Documentation](../server/docs/rule-annotations.md).
+For the complete schema, merge strategies, callsite identity format, and derivation modes, refer to the dedicated [Rule Annotations Documentation](../explorer/docs/rule-annotations.md).
 
 ### Dynamic Callsite Status
 
@@ -948,9 +948,9 @@ name-based URL is not a supported addressing surface and 404s.
 
 | Module | Purpose |
 |--------|---------|
-| `clara.server.tools.graph.core` | Static rulebase analysis, dep graph, type-hierarchy indexes, summary building |
-| `clara.server.tools.graph.memory` | Working-memory memory-analysis, indices, per-memory-analysis id indexes |
-| `clara.server.tools.graph.serialize` | Kind-explicit type serialization (`resolve-type`), route ids (`route-id`), TypeReferences, match serialization |
-| `clara.server.tools.graph.annotations` | Layered annotations: format, merge, callsite identity, derivation, rebase, validation |
-| `clara.server.graph.api` | Reitit routes, Ring handlers, reverse indexes, Prismatic response schemas |
-| `clara.server.graph.server` | Jetty lifecycle (start/stop) |
+| `clara.explorer.core` | Static rulebase analysis, dep graph, type-hierarchy indexes, summary building |
+| `clara.explorer.memory` | Working-memory memory-analysis, indices, per-memory-analysis id indexes |
+| `clara.explorer.serialize` | Kind-explicit type serialization (`resolve-type`), route ids (`route-id`), TypeReferences, match serialization |
+| `clara.explorer.annotations` | Layered annotations: format, merge, callsite identity, derivation, rebase, validation |
+| `clara.explorer.server.api` | Reitit routes, Ring handlers, reverse indexes, Prismatic response schemas |
+| `clara.explorer.server.serve` | Jetty lifecycle (start/stop) |

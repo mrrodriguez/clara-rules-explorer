@@ -10,10 +10,10 @@ commands.
 | `neovim/`       | Neovim+Conjure | Lua       | `make test`                           |
 
 The shared Clojure-side contract lives in
-`server/src/clara/server/graph/navigate.clj` (the pure body) and
-`server/src/clara/server/graph/schema.clj` (the shapes). The editor
+`explorer/src/clara/explorer/server/navigate.clj` (the pure body) and
+`explorer/src/clara/explorer/server/schema.clj` (the shapes). The editor
 resolve-form template is a single source of truth at
-`server/resources/clara/server/graph/editor-resolve-form.clj`, symlinked beside
+`server/resources/clara/explorer/server/editor-resolve-form.clj`, symlinked beside
 each editor transport. Never hand-edit a symlinked copy; edit the resource and
 keep every copy byte-identical (a JVM sync test enforces this).
 
@@ -58,8 +58,8 @@ installed, say so rather than skipping silently.
 ## Working on the shared resolve form
 
 The editor resolve form is generated as a string by
-`clara.server.graph.tokens/editor-token-resolve-form`, which slurps the
-resource `clara/server/graph/editor-resolve-form.clj`. The Emacs/Neovim copies
-are repo-relative symlinks into `server/resources/...`. A package/plugin build
+`clara.explorer.server.tokens/editor-token-resolve-form`, which slurps the
+resource `clara/explorer/server/editor-resolve-form.clj`. The Emacs/Neovim copies
+are repo-relative symlinks into `explorer/resources/...`. A package/plugin build
 must materialize the symlinked file into the package-local directory before
 release.

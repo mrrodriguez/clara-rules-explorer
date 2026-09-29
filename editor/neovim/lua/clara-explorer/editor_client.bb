@@ -1,1 +1,1 @@
-../../../../server/bin/editor_client.bb
+../../../../explorer/bin/editor_client.bb

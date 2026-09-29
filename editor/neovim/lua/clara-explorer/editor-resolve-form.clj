@@ -1,1 +1,1 @@
-../../../../server/resources/clara/server/graph/editor-resolve-form.clj
+../../../../explorer/resources/clara/explorer/server/editor-resolve-form.clj

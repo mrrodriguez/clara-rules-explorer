@@ -1,0 +1,1876 @@
+(ns clara.explorer.analyze-test
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [clojure.string :as str]
+            [clara.rules :as r]
+            [matcher-combinators.test :refer [match?]]
+            [clara.explorer.annotations :as ann]
+            [clara.explorer.annotations.callsite :as ann.callsite]
+            [clara.explorer.analyze :as analyze]
+            [clara.explorer.conditions :as conditions]
+            [clara.explorer.analyze.synth :as synth]
+            [clara.explorer.memory :as memory]
+            [clara.explorer.test.rules.loan-doc-rules :as ldr]
+            [clara.explorer.test.rules.loan-app-rules]
+            [clara.explorer.test.rules.loan-app-facts :as laf]
+            [clara.explorer.test.rules.analyze-test-rules :as atr]
+            [clara.explorer.test-utils :as tu]
+            [schema.test :as st])
+  (:import [clara.explorer.test.rules.loan_app_facts
+            AllGivenDocuments
+            AllRequiredDocuments
+            DocumentCheck]
+           [clara.explorer.test.rules.loan_doc_rules
+            AllIdCardGivenDocuments
+            ComplianceReview
+            StaleDocumentNotice]
+           [clara.explorer.test.rules.analyze_test_rules
+            HiddenHelperRecord
+            LocalDummyRecord
+            MarkerRecord
+            QueryOnlyRecord
+            UnrelatedScanRecord]))
+
+;; ---------------------------------------------------------------------------
+;; Shared session fixtures (computed once, reused across deftests)
+;;
+;; The session is the source of truth: ->rule-source-analysis synthesizes
+;; per-namespace sources (real source + one snippet def per rule RHS) and
+;; prunes hook-emitted defrule/defquery constructs. ->annotations-from-rule-source-analysis
+;; defaults its rules filter to the session's rules (productions with an :rhs).
+;; ---------------------------------------------------------------------------
+
+(use-fixtures :once st/validate-schemas)
+
+(def ^:private rules-prefix "clara.explorer.test.rules")
+
+(def ^:private loan-doc-session
+  (r/mk-session 'clara.explorer.test.rules.loan-doc-rules))
+
+(def ^:private loan-doc-analysis
+  (analyze/->rule-source-analysis
+   {:session-or-rulebase loan-doc-session
+    :include-ns-prefixes [rules-prefix]}))
+
+(def ^:private loan-doc-annotations
+  "Annotations for the loan-doc rule suite (separate rule set from edge cases)."
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis loan-doc-analysis
+    :session-or-rulebase loan-doc-session}))
+
+(def ^:private edge-case-session
+  (r/mk-session 'clara.explorer.test.rules.analyze-test-rules))
+
+(def ^:private edge-case-analysis
+  (analyze/->rule-source-analysis
+   {:session-or-rulebase edge-case-session
+    :include-ns-prefixes [rules-prefix]}))
+
+(def ^:private edge-case-annotations
+  "Annotations for the analyze-test-rules suite (all edge-case rules)."
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
+    :session-or-rulebase edge-case-session}))
+
+(def ^:private edge-case-annotations-filtered
+  "Annotations for same rules but with a rules-filter that only keeps side-effect-only."
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
+    :session-or-rulebase edge-case-session
+    :rules-filter [`atr/rule-side-effect-only]}))
+
+;; ---------------------------------------------------------------------------
+;; Constructor-of-interest test helpers
+;; ---------------------------------------------------------------------------
+
+(def ^:private ->fact-sym
+  "The fully-qualified symbol for the ->fact constructor in analyze-test-rules."
+  'clara.explorer.test.rules.analyze-test-rules/->fact)
+
+(defn- ->fact-sym-match-fn
+  "Returns a match-fn that matches the given ->fact constructor symbol."
+  [ctor-sym]
+  (fn [sym]
+    (= ctor-sym sym)))
+
+(defn- ->fact-type-resolver
+  "Resolves fact types from ->fact callsites. The type is the first argument."
+  [{:keys [arg-form]}]
+  (when (and (seq? arg-form)
+             (= 3 (count arg-form)))
+    {:resolved-types [(second arg-form)]}))
+
+(defn- ->fact-literal-type-resolver
+  "Like `->fact-type-resolver`, but only resolves keyword literal types — a
+   parameterized type (a non-keyword first argument) is untypeable and nil."
+  [{:keys [arg-form]}]
+  (when (and (seq? arg-form)
+             (= 3 (count arg-form))
+             (keyword? (second arg-form)))
+    {:resolved-types [(second arg-form)]}))
+
+(def ^:private helpers->fact-sym
+  'clara.explorer.test.rules.helpers/->fact)
+
+(def ^:private edge-case-ctor-annotations
+  "Edge-case annotations with constructor-of-interest resolution enabled."
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
+    :session-or-rulebase edge-case-session
+    :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                         :type-resolver-fn ->fact-type-resolver}]}))
+
+(defn- ctor-annotations-with
+  "Edge-case annotations with ->fact constructor-of-interest resolution using
+   `type-resolver` (for the dropped-constructor / ambiguity scenarios)."
+  [type-resolver]
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
+    :session-or-rulebase edge-case-session
+    :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                         :type-resolver-fn type-resolver}]}))
+
+(def ^:private loan-doc-ctor-annotations
+  "Loan-doc annotations with constructor-of-interest resolution enabled.
+   Resolves :loan-doc-rules/document-check-input via the ->fact chain
+   (helpers/->fact → loan-doc-rules/->document-check-input → loan-doc-rules/insert-document-check-input! → collect-app-doc-check-input)."
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis loan-doc-analysis
+    :session-or-rulebase loan-doc-session
+    :fact-constructors [{:match-fn (->fact-sym-match-fn helpers->fact-sym)
+                         :type-resolver-fn ->fact-type-resolver}]}))
+
+(def ^:private edge-case-annotations-all-fallback
+  "Edge-case annotations with the heuristic fallback scoped to any resolvable
+   record-ctor type (pre-fix recall), no constructor-of-interest resolution."
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
+    :session-or-rulebase edge-case-session
+    :dynamic-type-fallback-resolution :all-resolvable-fact-types}))
+
+(def ^:private edge-case-ctor-annotations-all-fallback
+  "Ctor-of-interest annotations with unrestricted heuristic fallback recall —
+   exercises that caller-registered resolution still wins over the scan."
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
+    :session-or-rulebase edge-case-session
+    :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                         :type-resolver-fn ->fact-type-resolver}]
+    :dynamic-type-fallback-resolution :all-resolvable-fact-types}))
+
+(def ^:private edge-case-ctor-annotations-no-fallback
+  "Ctor-of-interest annotations with the heuristic fallback disabled (:none)."
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis edge-case-analysis
+    :session-or-rulebase edge-case-session
+    :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                         :type-resolver-fn ->fact-type-resolver}]
+    :dynamic-type-fallback-resolution :none}))
+
+;; ---------------------------------------------------------------------------
+;; Dynamic-detection expectation helpers (shared by insert/retract tests)
+;; ---------------------------------------------------------------------------
+
+(def ^:private edge-case-ns-sym
+  'clara.explorer.test.rules.analyze-test-rules)
+
+(def ^:private edge-case-filename
+  "clara/explorer/test/rules/analyze_test_rules.clj")
+
+(defn- resolved-detection
+  "Expected dynamic-detection matcher for a single resolved callsite. Asserts only the keys this
+  test cares about. Provenance (`:via`) and derived ids (`:callsite-id`) have their own focused
+  tests and are deliberately not pinned here."
+  [ns-sym filename source-str token]
+  {:callsites [{:source-str source-str
+                :ns-name-sym ns-sym
+                :filename filename
+                :status :full
+                :resolved-types [token]}]
+   :resolution :full})
+
+(defn- unresolved-detection
+  "Expected dynamic-detection matcher for a single unresolved callsite."
+  [ns-sym filename source-str]
+  {:callsites [{:source-str source-str
+                :ns-name-sym ns-sym
+                :filename filename
+                :status :none}]
+   :resolution :none})
+
+;; ---------------------------------------------------------------------------
+;; Static insert types (record constructors traced through RHS and helpers)
+;; ---------------------------------------------------------------------------
+
+(deftest test-static-insert-types
+  (testing "Loan-doc rules: Clojure record insert types resolved statically"
+    (let [ann loan-doc-annotations]
+      (is (some? (ann/get-annotation ann `ldr/collect-app-id-card-given-docs)))
+      (is (= [`AllIdCardGivenDocuments]
+             (:clara-rules/insert-types (ann/get-annotation ann `ldr/collect-app-id-card-given-docs))))
+
+      (is (some? (ann/get-annotation ann `ldr/collect-app-given-docs)))
+      (is (= [`AllGivenDocuments]
+             (:clara-rules/insert-types (ann/get-annotation ann `ldr/collect-app-given-docs))))
+
+      (is (some? (ann/get-annotation ann `ldr/collect-app-req-docs)))
+      (is (= [`AllRequiredDocuments]
+             (:clara-rules/insert-types (ann/get-annotation ann `ldr/collect-app-req-docs))))
+
+      (is (some? (ann/get-annotation ann `ldr/app-has-all-required-docs)))
+      (is (= [`DocumentCheck]
+             (:clara-rules/insert-types (ann/get-annotation ann `ldr/app-has-all-required-docs))))))
+
+  (testing "Edge cases: Clojure record constructors and helper tracing"
+    (let [ann edge-case-annotations]
+
+      ;; Rule A: standard Clojure record constructor — resolved through the
+      ;; boundary path (a real callsite), not the subtree scan.
+      (let [a (ann/get-annotation ann `atr/rule-record-constructor)]
+        (is (some? a))
+        (is (= [`LocalDummyRecord] (:clara-rules/insert-types a)))
+        (is (match? (resolved-detection edge-case-ns-sym edge-case-filename
+                                        "(map->LocalDummyRecord {:id ?app-id, :value \"standard\"})"
+                                        `LocalDummyRecord)
+                    (:clara-rules/dynamic-insert-types-detected a))
+            "direct record ctors at the boundary resolve via the ctor chain"))
+
+      ;; Rule H2: insert! with varargs
+      (is (= [`LocalDummyRecord]
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-varargs))))
+
+      ;; Rule H4: complex nested doseq loop
+      (is (= [`LocalDummyRecord]
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-complex-rhs-nested))))
+
+      ;; Rule H5: insert-all! with collection literal
+      (is (= [`LocalDummyRecord]
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-collection))))
+
+      ;; Rule H7: insert-all! with collection built by helper
+      (is (= [`LocalDummyRecord]
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-helper))))
+
+      ;; Rule H8: insert-all! heterogeneous — only LocalDummyRecord static, Java ctor deferred
+      (is (= [`LocalDummyRecord]
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-heterogeneous))))
+
+      ;; Rule H9: insert-unconditional!
+      (is (= [`LocalDummyRecord]
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-unconditional))))
+
+      ;; Rule H10: insert-all-unconditional!
+      (is (= [`LocalDummyRecord]
+             (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-unconditional)))))))
+
+;; ---------------------------------------------------------------------------
+;; Dynamic insert callsites — runtime resolution chain (analyze.callsite)
+;; ---------------------------------------------------------------------------
+
+(deftest test-dynamic-insert-types-detected
+  (let [ann edge-case-annotations
+        ns-sym 'clara.explorer.test.rules.analyze-test-rules
+        filename "clara/explorer/test/rules/analyze_test_rules.clj"]
+
+    (testing "Java constructor syntax variants → resolved and promoted to insert-types"
+      (doseq [[rule-sym source-str]
+              [[`atr/rule-java-constructor-dot "(DocumentCheck. ?app-id :pass \"dot-style\" nil nil)"]
+               [`atr/rule-java-constructor-new "(new clara.explorer.test.rules.loan_app_facts.DocumentCheck ?app-id :pass \"new-style\" nil nil)"]
+               [`atr/rule-java-constructor-fq-dot "(clara.explorer.test.rules.loan_app_facts.DocumentCheck. ?app-id :pass \"fq-dot-style\" nil nil)"]
+               [`atr/rule-java-constructor-short-new "(new DocumentCheck ?app-id :pass \"short-new-style\" nil nil)"]
+               [`atr/rule-java-constructor-short-modern "(DocumentCheck/new ?app-id :pass \"short-modern\" nil nil)"]
+               [`atr/rule-java-constructor-fq-modern "(clara.explorer.test.rules.loan_app_facts.DocumentCheck/new ?app-id :pass \"fq-modern\" nil nil)"]]]
+        (is (match? (resolved-detection ns-sym filename source-str `DocumentCheck)
+                    (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann rule-sym)))
+            (str rule-sym " callsite resolves via the ctor chain"))
+        (is (= [`DocumentCheck] (:clara-rules/insert-types (ann/get-annotation ann rule-sym)))
+            (str rule-sym " resolved type is promoted to :insert-types"))))
+
+    (testing "Java constructor inside a helper fn → callsite at the helper, resolved"
+      (is (match? (resolved-detection ns-sym filename
+                                      "(clara.explorer.test.rules.loan_app_facts.DocumentCheck/new app-id :pass \"helper-insert\" nil nil)"
+                                      `DocumentCheck)
+                  (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `atr/rule-helper-does-insert))))
+      (is (= [`DocumentCheck] (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-helper-does-insert)))))
+
+    (testing "Let-bound constructor local → traced to its init form and resolved"
+      (let [a (ann/get-annotation ann `atr/rule-let-bound-ctor)]
+        (is (match? (resolved-detection ns-sym filename "dc" `DocumentCheck)
+                    (:clara-rules/dynamic-insert-types-detected a))
+            "the callsite arg is the local symbol; resolution traces the binding's init form")
+        (is (= [`DocumentCheck] (:clara-rules/insert-types a)))))
+
+    (testing "multi-hop local chain → traced through intermediate locals to the ctor init"
+      (let [a (ann/get-annotation ann `atr/rule-local-multi-hop-ctor)]
+        (is (match? (resolved-detection ns-sym filename "outer" `DocumentCheck)
+                    (:clara-rules/dynamic-insert-types-detected a))
+            "each hop's local is resolved within the previous binding's init span")
+        (is (= [`DocumentCheck] (:clara-rules/insert-types a)))))
+
+    (testing "Helper call args are NOT automatically resolved (caller's business)"
+      (is (match? (unresolved-detection ns-sym filename "(make-java-document-check-nested ?app-id)")
+                  (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `atr/rule-nested-java-helper-call))))
+      (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-nested-java-helper-call)))))
+
+    (testing "with-meta map fact → unresolved (fact-type-fn honoring is the caller's business)"
+      (is (match? (unresolved-detection ns-sym filename
+                                        "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-map-type})")
+                  (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `atr/rule-metadata-map-fact))))
+      (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-metadata-map-fact)))))
+
+    (testing "constructor-NAMED helper (->fact) → unresolved (derived class does not load)"
+      (is (match? (unresolved-detection ns-sym filename
+                                        "(->fact :custom-fact-type {:app-id ?app-id, :status :pass})")
+                  (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `atr/rule-fact-builder-call))))
+      (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-fact-builder-call)))))
+
+    (testing "mixed varargs → :partial aggregate; resolved args still promoted"
+      (let [a (ann/get-annotation ann `atr/rule-insert-mixed-varargs)
+            dyn (:clara-rules/dynamic-insert-types-detected a)]
+        (is (= :partial (:resolution dyn)))
+        (is (= 2 (count (:callsites dyn))))
+        (is (= #{:full :none} (set (map :status (:callsites dyn)))))
+        (is (= [`DocumentCheck] (:clara-rules/insert-types a))
+            "only the ctor arg's type is promoted")))))
+
+;; ---------------------------------------------------------------------------
+;; Retract types
+;; ---------------------------------------------------------------------------
+
+(deftest test-retract-types
+  (let [ann edge-case-annotations
+        ns-sym 'clara.explorer.test.rules.analyze-test-rules
+        filename "clara/explorer/test/rules/analyze_test_rules.clj"]
+
+    (testing "Static retract types — record constructors"
+      ;; Rule H3: retract! with varargs — resolved through the boundary path
+      ;; (one callsite per argument), not the subtree scan.
+      (let [h3 (ann/get-annotation ann `atr/rule-retract-varargs)
+            dyn (:clara-rules/dynamic-retract-types-detected h3)]
+        (is (some? h3))
+        (is (= [`LocalDummyRecord] (:clara-rules/retract-types h3)))
+        (is (= :full (:resolution dyn)))
+        (is (= 2 (count (:callsites dyn))))
+        (is (every? #(= :full (:status %)) (:callsites dyn)))))
+
+    (testing "Dynamic retract types — Java constructors resolve and promote"
+      ;; Rule I1: short Class. constructor
+      (is (match? (resolved-detection ns-sym filename
+                                      "(DocumentCheck. ?app-id :pass \"dot-retract\" nil nil)"
+                                      `DocumentCheck)
+                  (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-java-dot))))
+      (is (= [`DocumentCheck] (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-java-dot))))
+
+      ;; Rule I2: new Class constructor
+      (is (match? (resolved-detection ns-sym filename
+                                      "(new clara.explorer.test.rules.loan_app_facts.DocumentCheck ?app-id :pass \"new-retract\" nil nil)"
+                                      `DocumentCheck)
+                  (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-java-new))))
+      (is (= [`DocumentCheck] (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-java-new))))
+
+      ;; Rule I3: modern Class/new constructor
+      (is (match? (resolved-detection ns-sym filename
+                                      "(clara.explorer.test.rules.loan_app_facts.DocumentCheck/new ?app-id :pass \"modern-retract\" nil nil)"
+                                      `DocumentCheck)
+                  (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-java-modern))))
+      (is (= [`DocumentCheck] (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-java-modern)))))
+
+    (testing "Dynamic retract types — metadata map facts and helpers"
+      ;; Rule I4: with-meta map fact (retract) — unresolved
+      (is (match? (unresolved-detection ns-sym filename
+                                        "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-retract-type})")
+                  (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-metadata-map))))
+      (is (nil? (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-metadata-map))))
+
+      ;; Rule I5: helper that does Java constructor + retract — resolved at the helper
+      (is (match? (resolved-detection ns-sym filename
+                                      "(clara.explorer.test.rules.loan_app_facts.DocumentCheck/new app-id :pass \"helper-retract\" nil nil)"
+                                      `DocumentCheck)
+                  (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-helper-call))))
+      (is (= [`DocumentCheck] (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-helper-call)))))))
+
+;; ---------------------------------------------------------------------------
+;; Macro-emitted rules: the session sees rules kondo hooks never could
+;; ---------------------------------------------------------------------------
+
+(deftest test-extract-doc-meta-rule-captured
+  (testing "def-fact-fn-emitted rule appears as a captured dynamic callsite"
+    (let [dyn (:clara-rules/dynamic-insert-types-detected
+               (ann/get-annotation loan-doc-annotations `ldr/extract-doc-meta-rule))]
+      (is (some? dyn)
+          "macro-emitted rule must be visible via the session (kondo hooks never see it)")
+      (is (= :none (:resolution dyn))
+          "the var-as-fact pattern is never automatically resolved (caller-guided)")
+      (is (= 1 (count (:callsites dyn))))
+      (is (nil? (:clara-rules/insert-types (ann/get-annotation loan-doc-annotations `ldr/extract-doc-meta-rule))))
+      (let [{:keys [source-str ns-name-sym filename status]}
+            (first (:callsites dyn))]
+        (is (re-matches #"resolved__\d+__auto__" source-str)
+            "arg is the macro's gensym'd local; assert the shape, never the exact gensym")
+        (is (= :none status))
+        (is (= 'clara.explorer.test.rules.loan-doc-rules ns-name-sym))
+        (is (= "clara/explorer/test/rules/loan_doc_rules.clj" filename)))))
+
+  (testing "loan-doc dynamic rules: helpers unresolved, direct Java ctor resolved"
+    (let [ann loan-doc-annotations
+          ns-sym 'clara.explorer.test.rules.loan-doc-rules
+          filename "clara/explorer/test/rules/loan_doc_rules.clj"]
+      (is (match? (unresolved-detection ns-sym filename "(build-compliance-review ?app-id)")
+                  (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `ldr/dynamic-insert-compliance-review))))
+      (is (match? (unresolved-detection ns-sym filename "(build-compliance-via-metadata ?app-id)")
+                  (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `ldr/dynamic-insert-compliance-metadata))))
+      (is (match? (unresolved-detection ns-sym filename "(build-audit-trail-entry ?app-id :doc-check-passed)")
+                  (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `ldr/dynamic-insert-audit-trail))))
+      (is (match? (unresolved-detection ns-sym filename
+                                        "(->document-check-input data)")
+                  (:clara-rules/dynamic-insert-types-detected (ann/get-annotation ann `ldr/collect-app-doc-check-input))))
+      (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `ldr/collect-app-doc-check-input))))
+      (is (match? (resolved-detection ns-sym filename
+                                      "(StaleDocumentNotice. ?app-id :paystub \"no-longer-needed\")"
+                                      `StaleDocumentNotice)
+                  (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `ldr/dynamic-retract-stale-notice))))
+      (is (= [`StaleDocumentNotice]
+             (:clara-rules/retract-types (ann/get-annotation ann `ldr/dynamic-retract-stale-notice)))))))
+
+;; ---------------------------------------------------------------------------
+;; :callsite-resolver-fn — the caller escape hatch
+;; ---------------------------------------------------------------------------
+
+(deftest test-callsite-resolver-fn
+  (testing "resolver resolves the var-as-fact callsite after locals tracing"
+    (let [resolver-calls (atom [])
+          resolver (fn [call-ctx]
+                     (swap! resolver-calls conj call-ctx)
+                     (let [{:keys [arg-form ns-name-sym]} call-ctx]
+                       (when (and (seq? arg-form)
+                                  (= 'var (first arg-form))
+                                  (symbol? (second arg-form)))
+                         (when-let [v (ns-resolve (the-ns ns-name-sym) (second arg-form))]
+                           (when-let [t (:type (meta v))]
+                             {:resolved-types [t]})))))
+          ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis loan-doc-analysis
+                :session-or-rulebase loan-doc-session
+                :callsite-resolver-fn resolver})
+          a (ann/get-annotation ann `ldr/extract-doc-meta-rule)
+          dyn (:clara-rules/dynamic-insert-types-detected a)]
+      (is (= :full (:resolution dyn)))
+      (is (= [:extract-doc-meta] (:clara-rules/insert-types a))
+          "resolver-provided fact type is promoted (arbitrary token shapes pass through)")
+      (let [{:keys [source-str status resolved-types]} (first (:callsites dyn))]
+        (is (= :full status))
+        (is (= [:extract-doc-meta] resolved-types))
+        (is (re-matches #"resolved__\d+__auto__" source-str)
+            "the callsite still shows the literal boundary arg (the gensym local)"))
+
+      (testing "resolver receives the full context, with locals traced"
+        (let [extract-call (first (filter #(= 'clara.explorer.test.rules.loan-doc-rules/extract-doc-meta-rule
+                                              (some-> % :rule :name symbol))
+                                          @resolver-calls))]
+          (is (some? extract-call) "resolver saw the extract-doc-meta-rule callsite")
+          (is (= '(var extract-doc-meta) (:arg-form extract-call))
+              "arg-form is the traced init form, not the gensym local")
+          (is (= :insert (:direction extract-call)))
+          (is (= 'clara.rules/insert! (:boundary-fn extract-call)))
+          (is (= 'clara.explorer.test.rules.loan-doc-rules (:ns-name-sym extract-call)))
+          (is (= "clara/explorer/test/rules/loan_doc_rules.clj" (:filename extract-call)))
+          (is (= "clara.explorer.test.rules.loan-doc-rules/extract-doc-meta-rule"
+                 (:name (:rule extract-call)))
+              "the full production is handed over")
+          (is (some? (:rhs (:rule extract-call))))
+          (is (some? (:lhs (:rule extract-call))))))))
+
+  (testing "throwing resolver degrades to unresolved capture"
+    (let [ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis loan-doc-analysis
+                :session-or-rulebase loan-doc-session
+                :callsite-resolver-fn (fn [_] (throw (ex-info "boom" {})))})]
+      (is (= loan-doc-annotations ann)
+          "a resolver that always throws yields the same annotations as no resolver"))))
+
+;; ---------------------------------------------------------------------------
+;; :fact-type-spec-fn — var-alias chains (caller-guided var-as-fact discovery)
+;; ---------------------------------------------------------------------------
+
+(deftest test-lhs-var-bindings
+  (testing "fact conditions: :fact-binding pairs with the condition's type"
+    (is (= [{:binding '?t :fact-type :widget-transform}]
+           (conditions/extract-var-bindings
+            (conditions/normalize-lhs
+             [{:type :widget-transform :constraints [] :fact-binding :?t}])))))
+  (testing "accumulator conditions: :result-binding pairs with the :from subtree's types"
+    (is (= [{:binding '?ts :fact-type :widget-transform}]
+           (conditions/extract-var-bindings
+            (conditions/normalize-lhs
+             [{:accumulator 'some-acc
+               :from {:type :widget-transform}
+               :result-binding :?ts}])))))
+  (testing "nested and/or compounds are walked"
+    (is (= [{:binding '?x :fact-type :a} {:binding '?y :fact-type :c}]
+           (conditions/extract-var-bindings
+            (conditions/normalize-lhs
+             [[:and {:type :a :fact-binding :?x}
+               [:or {:type :b} {:type :c :fact-binding :?y}]]])))))
+  (testing "unbound and test conditions contribute nothing"
+    (is (= [] (conditions/extract-var-bindings
+               (conditions/normalize-lhs [{:type :a} {:constraints []}]))))))
+
+(deftest test-fact-type-spec-fn
+  (let [spec-fn (fn [t]
+                  (when (= t :widget-transform)
+                    {:aliases-var `atr/widget-transform}))]
+
+    (testing "without a spec fn, nothing alias-derived appears"
+      (is (true? (:clara-rules/no-output-types
+                  (ann/get-annotation edge-case-annotations `atr/rule-consume-widget-transform)))
+          "the consumer's own RHS has no boundary calls; the var-fact's chain stays invisible")
+      (is (nil? (:clara-rules/dynamic-insert-types-detected
+                 (ann/get-annotation edge-case-annotations `atr/rule-consume-widget-transform)))))
+
+    (testing "with a spec fn, the aliased var's chain attaches to the consuming rule"
+      (let [ann (analyze/->annotations-from-rule-source-analysis
+                 {:rule-source-analysis edge-case-analysis
+                  :session-or-rulebase edge-case-session
+                  :fact-type-spec-fn spec-fn})
+            dyn (:clara-rules/dynamic-insert-types-detected
+                 (ann/get-annotation ann `atr/rule-consume-widget-transform))]
+        (is (= :none (:resolution dyn))
+            "alias-discovered callsites bypass the ctor chain — never automatically resolved")
+        (let [cs (first (:callsites dyn))]
+          (is (= 1 (count (:callsites dyn))) "exactly one alias-discovered callsite")
+          (is (= :none (:status cs)))
+          (is (= :widget-transform (:fact-type cs)))
+          (is (= {:aliases-var `atr/widget-transform} (:fact-type-spec cs)))
+          (is (= 'clara.rules/insert! (-> cs :via :boundary-var-name-sym)))
+          (is (= `atr/widget-transform (-> cs :via :boundary-in-var)))
+          (is (= [{:var-name-sym `atr/rule-consume-widget-transform}
+                  {:var-name-sym `atr/widget-transform}]
+                 (-> cs :via :rule-to-boundary-path)))
+          "alias callsite carries its alias context and rule-side provenance")
+        (is (nil? (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-consume-widget-transform))))
+
+        (testing "the producing side gains no alias context"
+          (let [callsites (:callsites (:clara-rules/dynamic-insert-types-detected
+                                       (ann/get-annotation ann `atr/rule-insert-widget-transform)))]
+            (is (some #(= "(var widget-transform)" (:source-str %)) callsites))
+            (is (every? #(and (not (contains? % :fact-type))
+                              (not (contains? % :fact-type-spec)))
+                        callsites)
+                "plain var references in the RHS explore the var's chain (pre-existing
+                 reachability), but only alias-derived callsites carry the context")))))
+
+    (testing "the resolver receives the alias context; resolved types promote"
+      (let [resolver-calls (atom [])
+            resolver (fn [call-ctx]
+                       (swap! resolver-calls conj call-ctx)
+                       (when (= :widget-transform (:fact-type call-ctx))
+                         {:resolved-types [:widget-output]}))
+            ann (analyze/->annotations-from-rule-source-analysis
+                 {:rule-source-analysis edge-case-analysis
+                  :session-or-rulebase edge-case-session
+                  :fact-type-spec-fn spec-fn
+                  :callsite-resolver-fn resolver})
+            dyn (:clara-rules/dynamic-insert-types-detected
+                 (ann/get-annotation ann `atr/rule-consume-widget-transform))]
+        (is (= :full (:resolution dyn)))
+        (let [cs (first (:callsites dyn))]
+          (is (= 1 (count (:callsites dyn))))
+          (is (= :full (:status cs)))
+          (is (= [:widget-output] (:resolved-types cs)))
+          (is (= :widget-transform (:fact-type cs)))
+          (is (= {:aliases-var `atr/widget-transform} (:fact-type-spec cs)))
+          (is (= 'clara.rules/insert! (-> cs :via :boundary-var-name-sym)))
+          (is (= `atr/widget-transform (-> cs :via :boundary-in-var)))
+          (is (= [{:var-name-sym `atr/rule-consume-widget-transform}
+                  {:var-name-sym `atr/widget-transform}]
+                 (-> cs :via :rule-to-boundary-path))))
+        (is (= [:widget-output]
+               (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-consume-widget-transform)))
+            "resolver-resolved alias callsites are promoted")
+        (testing "non-alias callsites carry no alias context keys"
+          (let [producer-call (first (filter #(= "(var widget-transform)" (:source-str %))
+                                             @resolver-calls))]
+            (is (some? producer-call) "the resolver still sees the producing side's callsite")
+            (is (not (contains? producer-call :fact-type)))
+            (is (not (contains? producer-call :fact-type-spec)))))))
+
+    (testing "a throwing spec fn degrades to no alias derivation"
+      (is (= edge-case-annotations
+             (analyze/->annotations-from-rule-source-analysis
+              {:rule-source-analysis edge-case-analysis
+               :session-or-rulebase edge-case-session
+               :fact-type-spec-fn (fn [_] (throw (ex-info "boom" {})))}))))))
+
+;; ---------------------------------------------------------------------------
+;; Queries, no-output rules, and machinery exclusion
+;; ---------------------------------------------------------------------------
+
+(deftest test-queries-produce-no-annotations
+  (testing "queries are not rules — the default session rules-filter excludes them"
+    (is (nil? (ann/get-annotation loan-doc-annotations `ldr/find-document-check))
+        "find-document-check is a defquery; it must not appear in rule annotations")))
+
+(deftest test-no-output-types-and-filter
+  (let [ann edge-case-annotations
+        ann-f edge-case-annotations-filtered]
+
+    (testing "Rule with no insert/retract → marked :no-output-types under the session filter"
+      (is (true? (:clara-rules/no-output-types (ann/get-annotation ann `atr/rule-side-effect-only))))
+      (is (true? (:clara-rules/no-output-types (ann/get-annotation loan-doc-annotations `ldr/collect-all-missing-required-docs)))))
+
+    (testing "Explicit rules-filter narrows the annotated set"
+      (is (= ["clara.explorer.test.rules.analyze-test-rules/rule-side-effect-only"]
+             (keys ann-f)))
+      (is (true? (:clara-rules/no-output-types (ann/get-annotation ann-f `atr/rule-side-effect-only)))))))
+
+(deftest test-generate-annotations--excludes-insert-retract-machinery
+  (testing "clara.rules insert!/retract! fns (and their non-! wrappers) never leak
+            in as their own empty annotation entries"
+    (let [ann edge-case-annotations
+          ;; The full set that used to leak: every insert/retract fn the analyzer
+          ;; recognizes, plus the non-! wrappers that reach them transitively.
+          machinery '#{clara.rules/insert clara.rules/insert!
+                       clara.rules/insert-unconditional clara.rules/insert-unconditional!
+                       clara.rules/insert-all clara.rules/insert-all!
+                       clara.rules/insert-all-unconditional!
+                       clara.rules/retract clara.rules/retract!
+                       clara.rules.engine/insert-facts!
+                       clara.rules.engine/rhs-retract-facts!}]
+      (is (empty? (filter #(contains? machinery (symbol %)) (keys ann)))
+          "insert/retract machinery fns must not appear as annotation keys")
+      (is (empty? (filter (fn [[_ v]] (and (map? v) (empty? v))) ann))
+          "no entry should be an empty {} annotation")
+      (is (every? #(str/starts-with? % "clara.explorer.test.rules.analyze-test-rules/")
+                  (keys ann))
+          "session-filtered annotations contain only the session's rule vars"))))
+
+;; ---------------------------------------------------------------------------
+;; Prune-and-replace evidence
+;; ---------------------------------------------------------------------------
+
+(deftest test-prune-and-replace--no-duplicates
+  (testing "each rule has exactly one var-definition, named after the production"
+    (doseq [[ns-sym analysis rule-names]
+            [['clara.explorer.test.rules.loan-doc-rules
+              loan-doc-analysis
+              '#{collect-doc-meta collect-app-id-card-given-docs collect-app-given-docs
+                 collect-app-req-docs collect-app-doc-check-input app-has-all-required-docs
+                 collect-all-missing-required-docs dynamic-insert-compliance-review
+                 dynamic-insert-compliance-metadata dynamic-retract-stale-notice
+                 dynamic-insert-audit-trail extract-doc-meta-rule}]
+             ['clara.explorer.test.rules.analyze-test-rules
+              edge-case-analysis
+              '#{rule-record-constructor rule-side-effect-only rule-retract-varargs}]]
+            :let [defs (filter #(= ns-sym (:ns %)) (:var-definitions analysis))
+                  def-counts (frequencies (map :name defs))]]
+      (is (every? (fn [[_ n]] (= 1 n)) def-counts)
+          (str "no duplicate var-definitions in " ns-sym))
+      (is (every? #(= 1 (get def-counts %)) rule-names)
+          "every production has exactly one def (snippet region is authoritative)")
+      (is (not-any? #(str/starts-with? (str %) "__clara_explorer_rule_")
+                    (map :name defs))
+          "snippet tags are renamed to production names, never leaked")))
+
+  (testing "query constructs produced by the bundled clara-rules hooks are pruned"
+    (let [defs (filter #(= 'clara.explorer.test.rules.loan-doc-rules (:ns %))
+                       (:var-definitions loan-doc-analysis))
+          def-names (set (map :name defs))]
+      (is (not (contains? def-names 'find-document-check))
+          "defquery hook output is pruned from the source region; queries get no snippet"))))
+
+;; ---------------------------------------------------------------------------
+;; Config robustness
+;; ---------------------------------------------------------------------------
+
+(deftest test-config-parity--empty-config
+  (testing "explicitly empty :config-dir yields identical annotations
+            (prune is a no-op; the snippets carry everything)"
+    (let [analysis-no-config
+          (analyze/->rule-source-analysis
+           {:session-or-rulebase loan-doc-session
+            :include-ns-prefixes [rules-prefix]
+            :config-dir "test-resources/clara/explorer/empty-kondo-config"})
+          annotations-no-config
+          (analyze/->annotations-from-rule-source-analysis
+           {:rule-source-analysis analysis-no-config
+            :session-or-rulebase loan-doc-session})]
+      (is (= loan-doc-annotations annotations-no-config)))))
+
+;; ---------------------------------------------------------------------------
+;; Session-scoped cache
+;; ---------------------------------------------------------------------------
+
+(deftest test-rule-source-analysis--cache-scoping
+  (testing "explicit :cache-atom is populated; default runs use a fresh cache per call"
+    (let [cache (atom {})]
+      (analyze/->rule-source-analysis
+       {:session-or-rulebase loan-doc-session
+        :include-ns-prefixes [rules-prefix]
+        :cache-atom cache})
+      (is (contains? @cache 'clara.explorer.test.rules.loan-doc-rules))
+      (is (contains? @cache 'clara.explorer.test.rules.loan-app-facts)
+          "dependencies transitively analyzed and cached"))
+    (is (= loan-doc-annotations
+           (analyze/->annotations-from-rule-source-analysis
+            {:rule-source-analysis (analyze/->rule-source-analysis
+                                    {:session-or-rulebase loan-doc-session
+                                     :include-ns-prefixes [rules-prefix]})
+             :session-or-rulebase loan-doc-session}))
+        "sequential runs with the default session-scoped cache produce identical annotations")))
+
+;; ---------------------------------------------------------------------------
+;; Reconstructed ns form (no source on the classpath)
+;; ---------------------------------------------------------------------------
+
+(deftest test-rule-source-analysis--reconstructed-ns-fallback
+  (testing "eval'd namespace (no classpath source): reconstructed ns form still yields annotations"
+    (let [ns-sym 'fake.eval-rules]
+      (create-ns ns-sym)
+      (binding [*ns* (the-ns ns-sym)]
+        (eval '(clojure.core/require '[clara.rules :as r]))
+        (eval '(r/defrule fake-eval-rule
+                 [java.lang.Object]
+                 =>
+                 (r/insert! {:fake true}))))
+      (let [session (r/mk-session ns-sym)
+            annotations (analyze/->annotations-from-rule-source-analysis
+                         {:rule-source-analysis (analyze/->rule-source-analysis
+                                                 {:session-or-rulebase session
+                                                  :include-ns-prefixes ["fake."]})
+                          :session-or-rulebase session})]
+        (is (match? (unresolved-detection ns-sym "fake/eval_rules.clj" "{:fake true}")
+                    (:clara-rules/dynamic-insert-types-detected
+                     (ann/get-annotation annotations 'fake.eval-rules/fake-eval-rule)))
+            "literal args are captured, not classified — classification defers to the caller")
+        (is (nil? (:clara-rules/insert-types (ann/get-annotation annotations 'fake.eval-rules/fake-eval-rule)))
+            "rule from a source-less namespace is analyzed via the reconstructed ns form"))))
+
+  (testing "reconstructed ns form with a :refer clause survives a round trip"
+    (let [ref-ns-sym 'fake.eval-refers]
+      (create-ns ref-ns-sym)
+      (binding [*ns* (the-ns ref-ns-sym)]
+        (clojure.core/refer-clojure)
+        (clojure.core/refer 'clojure.set :only '[union difference]))
+      (let [src (synth/reconstruct-ns-source ref-ns-sym)
+            _ (eval (read-string src))   ;; must not throw
+            evaled-nsobj (the-ns ref-ns-sym)]
+        (is (contains? (set (keys (ns-refers evaled-nsobj))) 'union)
+            "referred symbol union must be present after round-trip")
+        (is (contains? (set (keys (ns-refers evaled-nsobj))) 'difference)
+            "referred symbol difference must be present after round-trip")
+        (is (str/includes? src
+                           (str ":refer [" (str/join " " (sort ["difference" "union"])) "]"))
+            "source must contain a proper nested :refer clause with sorted symbols"))))
+
+  (testing ":refer-clojure clause is emitted as a list, not a vector"
+    (let [ex-ns-sym 'fake.eval-exclude]
+      (create-ns ex-ns-sym)
+      (binding [*ns* (the-ns ex-ns-sym)]
+        (clojure.core/refer-clojure :exclude '[read-string]))
+      (let [src (synth/reconstruct-ns-source ex-ns-sym)
+            _ (eval (read-string src))]  ;; must not throw
+        (is (re-find #"\(:refer-clojure" src)
+            ":refer-clojure clause must be a list form, not a vector")))))
+
+(testing "reconstructed ns source emits declare for interned helpers"
+  (let [ns-sym 'fake.eval-helpers]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/require '[clara.rules :as r]))
+      (eval '(clojure.core/defn ->fact [type data]
+               (clojure.core/with-meta data {:type type})))
+      (eval '(r/defrule fake-helper-rule
+               [java.lang.Object]
+               =>
+               (r/insert! (->fact :demo/alert {:id 1})))))
+    (let [synth-result (synth/synthesize-ns-source
+                        {:ns-sym ns-sym
+                         :productions [{:name 'fake-helper-rule
+                                        :rhs '((r/insert! (->fact :demo/alert {:id 1})))}]
+                         :base-source-fn (fn [_] nil)   ;; no classpath source
+                         :normalize-key-fn identity})
+          source (:source synth-result)]
+      (is (str/includes? source "(declare ->fact)")
+          "synthesized source must emit (declare ->fact) for the ns's own helper")
+      (is (str/includes? source "__clara_explorer_rule_0__")
+          "synthetic snippet def still present")
+        ;; verify the declare precedes snippets
+      (let [decl-pos (str/index-of source "(declare ->fact)")
+            snip-pos (str/index-of source "__clara_explorer_rule_0__")]
+        (is (< decl-pos snip-pos)
+            "(declare …) must appear before synthetic snippet defs")))))
+
+(testing "reconstructed ns: interned helper resolves via :fact-constructors"
+  (let [ns-sym 'fake.eval-helpers-2]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/require '[clara.rules :as r]))
+      (eval '(clojure.core/defn ->fact [type data]
+               (clojure.core/with-meta data {:type type})))
+      (eval '(r/defrule fake-helper-rule-2
+               [java.lang.Object]
+               =>
+               (r/insert! (->fact :demo/alert {:id 1})))))
+    (let [session (r/mk-session ns-sym)
+          annotations (analyze/->annotations-from-rule-source-analysis
+                       {:rule-source-analysis (analyze/->rule-source-analysis
+                                               {:session-or-rulebase session
+                                                :include-ns-prefixes ["fake."]})
+                        :session-or-rulebase session
+                        :fact-constructors
+                        [{:match-fn (fn [sym]
+                                      (= (name sym) "->fact"))
+                          :type-resolver-fn ->fact-type-resolver}]})
+          rule-key 'fake.eval-helpers-2/fake-helper-rule-2
+          detection (:clara-rules/dynamic-insert-types-detected
+                     (ann/get-annotation annotations rule-key))]
+      (is (some? detection)
+          "dynamic-insert-types-detected must be present")
+      (is (= :full (:resolution detection))
+          "resolution must be :full — ->fact callee must be attributed")
+      (let [callsites (:callsites detection)]
+        (is (= 1 (count callsites))
+            "single callsite expected")
+        (let [cs (first callsites)]
+          (is (:constructor-sym cs)
+              (str "callsite must have :constructor-sym, got: " (pr-str cs)))
+          (is (= :full (:status cs))
+              "callsite status must be :full")
+          (let [cid (:callsite-id cs)]
+            (is (str/includes? cid (str ns-sym ":->fact:"))
+                (str "callsite-id must contain the constructor segment, got: " cid)))
+          (is (= [:demo/alert] (:resolved-types cs))
+              "resolved-types must be [:demo/alert]"))))))
+
+;; ---------------------------------------------------------------------------
+;; Synthesized-namespace var-definition hook (:ns-var-defs-fn)
+;; ---------------------------------------------------------------------------
+
+(deftest test-synthesize-ns-source--var-defs-fn
+  (let [ns-sym 'fake.eval-var-defs]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/defn helper-a [x] (clojure.core/inc x)))
+      (eval '(clojure.core/defn helper-b [x] (clojure.core/dec x)))
+      (eval '(def helper-c 42)))
+    (let [result (synth/synthesize-ns-source
+                  {:ns-sym ns-sym
+                   :productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
+                   :base-source-fn (fn [_] nil)
+                   :normalize-key-fn identity
+                   :var-defs-fn (fn [_] [{:name 'helper-a
+                                          :form '(clojure.core/defn helper-a [x] (clojure.core/inc x))}
+                                         {:name 'helper-b
+                                          :form '(clojure.core/defn helper-b [x] (clojure.core/dec x))}])})
+          source (:source result)
+          lines (str/split-lines source)
+          line-of (fn [needle]
+                    (->> lines
+                         (keep-indexed (fn [i l] (when (str/includes? l needle) (inc i))))
+                         first))
+          helper-a-line (line-of "(clojure.core/defn helper-a")
+          helper-b-line (line-of "(clojure.core/defn helper-b")
+          snip-line (line-of "__clara_explorer_rule_0__")]
+      (testing "defs land in the source region (row <= offset), snippet region unchanged"
+        (is (some? helper-a-line))
+        (is (some? helper-b-line))
+        (is (<= helper-a-line helper-b-line (:offset result))
+            "both defs precede the end of the source region")
+        (is (= snip-line (+ 2 (:offset result)))
+            "snippet starts exactly one blank line after the def region"))
+      (testing "declare precedes var defs which precede snippets"
+        (let [decl-pos (str/index-of source "(declare ")
+              helper-a-pos (str/index-of source "(clojure.core/defn helper-a")
+              helper-b-pos (str/index-of source "(clojure.core/defn helper-b")
+              snip-pos (str/index-of source "__clara_explorer_rule_0__")]
+          (is (< decl-pos helper-a-pos helper-b-pos snip-pos))))
+      (testing ":tag->production is unaffected"
+        (is (= {'__clara_explorer_rule_0__ 'fake-rule-1}
+               (:tag->production result)))))))
+
+(deftest test-synthesize-ns-source--var-defs-production-collision
+  (let [ns-sym 'fake.eval-var-defs-collision]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/defn helper-a [x] (clojure.core/inc x))))
+    (let [result (synth/synthesize-ns-source
+                  {:ns-sym ns-sym
+                   :productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
+                   :base-source-fn (fn [_] nil)
+                   :normalize-key-fn identity
+                   :var-defs-fn (fn [_] [{:name 'fake-rule-1
+                                          :form '(def fake-rule-1 42)}
+                                         {:name 'helper-a
+                                          :form '(clojure.core/defn helper-a [x] (clojure.core/inc x))}])})
+          source (:source result)]
+      (is (not (str/includes? source "fake-rule-1 42"))
+          "a var def colliding with a production name is dropped")
+      (is (str/includes? source "(clojure.core/defn helper-a [x] (clojure.core/inc x))")))))
+
+(deftest test-synthesize-ns-source--var-defs-unreadable-skipped
+  (let [ns-sym 'fake.eval-var-defs-unreadable]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/defn helper-a [x] (clojure.core/inc x))))
+    (let [{:keys [result events]}
+          (tu/capture-taps
+           #(synth/synthesize-ns-source
+             {:ns-sym ns-sym
+              :productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
+              :base-source-fn (fn [_] nil)
+              :normalize-key-fn identity
+              :var-defs-fn (fn [_] [{:name 'helper-a
+                                     :form '(clojure.core/defn helper-a [x] (clojure.core/inc x))}
+                                    {:name 'helper-bad
+                                     :form (Object.)}])})
+           #(= :clara-rules/var-def-skipped (:event %)))
+          source (:source result)]
+      (is (str/includes? source "(clojure.core/defn helper-a [x] (clojure.core/inc x))"))
+      (is (not (str/includes? source "#object"))
+          "the unreadable form is skipped, so the rest of the namespace still analyzes")
+      (is (= [{:event :clara-rules/var-def-skipped
+               :ns ns-sym
+               :var 'helper-bad
+               :reason :unreadable}]
+             (mapv #(dissoc % :printed) events))))))
+
+(deftest test-synthesize-ns-source--var-defs-multiline-skipped
+  (let [ns-sym 'fake.eval-var-defs-multiline]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/defn helper-a [x] (clojure.core/inc x))))
+    (let [{:keys [result events]}
+          (tu/capture-taps
+           #(synth/synthesize-ns-source
+             {:ns-sym ns-sym
+              :productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
+              :base-source-fn (fn [_] nil)
+              :normalize-key-fn identity
+              :var-defs-fn (fn [_] [{:name 'helper-a
+                                     :form '(clojure.core/defn helper-a [x] (clojure.core/inc x))}
+                                    {:name 'helper-multiline
+                                     :form (symbol "a\nb")}])})
+           #(= :clara-rules/var-def-skipped (:event %)))
+          source (:source result)]
+      (is (str/includes? source "(clojure.core/defn helper-a [x] (clojure.core/inc x))"))
+      (is (not (str/includes? source "helper-multiline"))
+          "a form that prints across lines is skipped")
+      (is (= [:multiline] (mapv :reason events))))))
+
+(deftest test-synthesize-ns-source--no-var-defs-fn-identical
+  (let [ns-sym 'fake.eval-no-var-defs]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/defn helper-a [x] (clojure.core/inc x))))
+    (let [productions [{:name 'fake-rule-1 :rhs '((helper-a 1))}]
+          base-opts {:ns-sym ns-sym
+                     :productions productions
+                     :base-source-fn (fn [_] nil)
+                     :normalize-key-fn identity}
+          no-fn (synth/synthesize-ns-source (assoc base-opts :var-defs-fn nil))
+          nil-fn (synth/synthesize-ns-source (assoc base-opts :var-defs-fn (fn [_] nil)))
+          omitted (synth/synthesize-ns-source base-opts)]
+      (is (= no-fn nil-fn omitted)
+          "no hook, a hook returning nil, and an omitted hook produce identical results"))))
+
+(deftest test-ns-var-defs-fn--end-to-end
+  (let [ns-sym 'fake.eval-insert-helper
+        captured-defs {'parse-and-insert!
+                       '(clojure.core/defn parse-and-insert! [xs]
+                          (clojure.core/doseq [x xs]
+                            (r/insert! (->fact :demo/parsed {:id x}))))}]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/require '[clara.rules :as r]))
+      (eval '(clojure.core/defn ->fact [type data]
+               (clojure.core/with-meta data {:type type})))
+      (eval '(clojure.core/defn parse-and-insert! [xs]
+               (clojure.core/doseq [x xs]
+                 (r/insert! (->fact :demo/parsed {:id x})))))
+      (eval '(r/defrule fake-insert-rule
+               [java.lang.Object]
+               =>
+               (parse-and-insert! [1]))))
+    (let [session (r/mk-session ns-sym)
+          rule-key 'fake.eval-insert-helper/fake-insert-rule
+          analyze-opts {:session-or-rulebase session
+                        :include-ns-prefixes ["fake."]}
+          without (analyze/->annotations-from-rule-source-analysis
+                   {:rule-source-analysis (analyze/->rule-source-analysis analyze-opts)
+                    :session-or-rulebase session})]
+      (is (true? (:clara-rules/no-output-types (ann/get-annotation without rule-key)))
+          "without the hook the declared helper has no body → no insert detected")
+      (let [with (analyze/->annotations-from-rule-source-analysis
+                  {:rule-source-analysis (analyze/->rule-source-analysis
+                                          (assoc analyze-opts
+                                                 :ns-var-defs-fn
+                                                 (fn [_]
+                                                   (mapv (fn [[sym form]] {:name sym :form form})
+                                                         captured-defs))))
+                   :session-or-rulebase session
+                   :fact-constructors [{:match-fn (fn [sym] (= (name sym) "->fact"))
+                                        :type-resolver-fn ->fact-type-resolver}]})
+            annotation (ann/get-annotation with rule-key)
+            detection (:clara-rules/dynamic-insert-types-detected annotation)
+            callsites (:callsites detection)]
+        (is (= [:demo/parsed] (:clara-rules/insert-types annotation))
+            "with the hook the insert type resolves through the helper body")
+        (is (= :full (:resolution detection)))
+        (is (= 1 (count callsites)))
+        (let [cs (first callsites)]
+          (is (= :full (:status cs)))
+          (is (= [:demo/parsed] (:resolved-types cs)))
+          (is (= #{"parse-and-insert!" "->fact"}
+                 (set (map (comp name :var-name-sym) (:boundary-to-constructor-path (:via cs)))))
+              "the :via boundary-to-constructor-path names the helper and the constructor"))))))
+
+(deftest test-ns-var-defs-fn--two-hop-helper
+  (let [ns-sym 'fake.eval-two-hop
+        captured-defs {'inner-insert!
+                       '(def inner-insert!
+                          (fn inner-insert! [x]
+                            (r/insert! (->fact :demo/two-hop {:id x}))))
+                       'outer-helper
+                       '(def outer-helper
+                          (fn outer-helper [x]
+                            (inner-insert! x)))}]
+    (create-ns ns-sym)
+    (binding [*ns* (the-ns ns-sym)]
+      (eval '(clojure.core/require '[clara.rules :as r]))
+      (eval '(clojure.core/defn ->fact [type data]
+               (clojure.core/with-meta data {:type type})))
+      (eval '(def inner-insert!
+               (clojure.core/fn inner-insert! [x]
+                 (r/insert! (->fact :demo/two-hop {:id x})))))
+      (eval '(def outer-helper
+               (clojure.core/fn outer-helper [x]
+                 (inner-insert! x))))
+      (eval '(r/defrule fake-two-hop-rule
+               [java.lang.Object]
+               =>
+               (outer-helper 1))))
+    (let [session (r/mk-session ns-sym)
+          rule-key 'fake.eval-two-hop/fake-two-hop-rule
+          with (analyze/->annotations-from-rule-source-analysis
+                {:rule-source-analysis (analyze/->rule-source-analysis
+                                        {:session-or-rulebase session
+                                         :include-ns-prefixes ["fake."]
+                                         :ns-var-defs-fn (fn [_]
+                                                           (mapv (fn [[sym form]] {:name sym :form form})
+                                                                 captured-defs))})
+                 :session-or-rulebase session
+                 :fact-constructors [{:match-fn (fn [sym] (= (name sym) "->fact"))
+                                      :type-resolver-fn ->fact-type-resolver}]})
+          annotation (ann/get-annotation with rule-key)
+          detection (:clara-rules/dynamic-insert-types-detected annotation)
+          callsites (:callsites detection)]
+      (is (= [:demo/two-hop] (:clara-rules/insert-types annotation))
+          "the graph traverses both helper hops to resolve the insert type")
+      (is (= 1 (count callsites)))
+      (let [cs (first callsites)]
+        (is (= :full (:status cs)))
+        (is (= #{"inner-insert!" "->fact"}
+               (set (map (comp name :var-name-sym) (:boundary-to-constructor-path (:via cs)))))
+            "the :via boundary-to-constructor-path names the (def f (fn f …)) helper and constructor")))))
+
+;; ---------------------------------------------------------------------------
+;; Callsite identity edge cases
+;; ---------------------------------------------------------------------------
+
+(deftest test-assign-callsite-ids--empty
+  (is (= [] (ann.callsite/assign-callsite-ids []))
+      "empty callsite vector must return empty without crashing"))
+
+(deftest test-ns->resource-base
+  (is (= "clara/explorer/test/rules/analyze_test_rules"
+         (analyze/ns->resource-base 'clara.explorer.test.rules.analyze-test-rules))))
+
+(deftest test-find-ns-resource
+  (is (some? (analyze/find-ns-resource 'clara.explorer.test.rules.analyze-test-rules)))
+  (is (nil? (analyze/find-ns-resource 'non-existent-ns.fake))))
+
+;; ---------------------------------------------------------------------------
+;; ->rule-source-analysis-from-namespaces
+;; ---------------------------------------------------------------------------
+
+(deftest test-rule-source-analysis-from-namespaces--custom-cache
+  (let [cache (atom {})
+        merged (analyze/->rule-source-analysis-from-namespaces
+                {:starting-namespaces ['clara.explorer.test.rules.analyze-test-rules]
+                 :include-ns-prefixes [rules-prefix]
+                 :cache-atom cache})]
+    (is (contains? @cache 'clara.explorer.test.rules.analyze-test-rules))
+    (is (contains? @cache 'clara.explorer.test.rules.loan-app-facts)
+        "Dependencies transitively analyzed and cached")
+    (let [var-defs (set (map :name (:var-definitions merged)))]
+      (is (contains? var-defs 'make-document-check))
+      (is (contains? var-defs 'rule-record-constructor)))))
+
+;; ---------------------------------------------------------------------------
+;; ->annotations-from-rule-source-analysis (caller-built analysis + required session)
+;; ---------------------------------------------------------------------------
+
+(deftest test-annotations-from-rule-source-analysis--from-merged-analysis
+  (testing "works on a caller-built analysis (no ->rule-source-analysis synthesis)"
+    (let [merged-analysis (analyze/->rule-source-analysis-from-namespaces
+                           {:starting-namespaces ['clara.explorer.test.rules.analyze-test-rules]
+                            :include-ns-prefixes [rules-prefix]})
+          annotations (analyze/->annotations-from-rule-source-analysis
+                       {:rule-source-analysis merged-analysis
+                        :session-or-rulebase edge-case-session})]
+      (is (some? (ann/get-annotation annotations `atr/rule-record-constructor)))
+      (is (= [`LocalDummyRecord]
+             (:clara-rules/insert-types (ann/get-annotation annotations `atr/rule-record-constructor))))))
+  (testing ":session-or-rulebase is required"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (analyze/->annotations-from-rule-source-analysis
+                  {:rule-source-analysis {}})))))
+
+;; ---------------------------------------------------------------------------
+;; add-memory-derived-insert-type-detections
+;; ---------------------------------------------------------------------------
+
+(deftest test-add-memory-derived-insert-type-detections--base-case
+  (let [session (-> (r/mk-session 'clara.explorer.test.rules.loan-doc-rules
+                                  'clara.explorer.test.rules.loan-app-rules)
+                    (r/insert (laf/map->Application {:app-id "app-1"})
+                              (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                              (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
+                    (r/fire-rules))
+        memory-analysis (memory/->memory-analysis session)
+        enriched (analyze/add-memory-derived-insert-type-detections {} memory-analysis)]
+    (testing "Detects fact types from working memory"
+      (let [crd (get enriched "clara.explorer.test.rules.loan-doc-rules/collect-app-req-docs")]
+        (is (some? (:clara-rules/dynamic-insert-types-detected crd)))
+        (is (= {:fact-instance-derived-types
+                [AllRequiredDocuments]
+                :resolution :partial}
+               (:clara-rules/dynamic-insert-types-detected crd))))
+      ;; No insert-types added (that is merge-memory-derived-insert-types's job)
+      (is (nil? (:clara-rules/insert-types
+                 (get enriched "clara.explorer.test.rules.loan-doc-rules/collect-app-req-docs")))))
+
+    (testing "Does not add dynamic detection when annotation already covers the type"
+      (let [session (-> (r/mk-session 'clara.explorer.test.rules.loan-doc-rules
+                                      'clara.explorer.test.rules.loan-app-rules)
+                        (r/insert (laf/map->Application {:app-id "app-1"})
+                                  (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                                  (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
+                        (r/fire-rules))
+            memory-analysis (memory/->memory-analysis session)
+            existing-annos
+            {"clara.explorer.test.rules.loan-doc-rules/collect-app-req-docs"
+             {:clara-rules/insert-types
+              ['clara.explorer.test.rules.loan_app_facts.AllRequiredDocuments]}}
+            enriched (analyze/add-memory-derived-insert-type-detections existing-annos memory-analysis)
+            crd (get enriched "clara.explorer.test.rules.loan-doc-rules/collect-app-req-docs")]
+        (is (nil? (:clara-rules/dynamic-insert-types-detected crd))
+            "Should NOT add dynamic detection when annotation already has the type")))))
+
+;; ---------------------------------------------------------------------------
+;; merge-memory-derived-insert-types
+;; ---------------------------------------------------------------------------
+
+(deftest test-merge-memory-derived-insert-types--base-case
+  (let [session (-> (r/mk-session 'clara.explorer.test.rules.loan-doc-rules
+                                  'clara.explorer.test.rules.loan-app-rules)
+                    (r/insert (laf/map->Application {:app-id "app-1"})
+                              (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                              (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
+                    (r/fire-rules))
+        fe      (analyze/merge-memory-derived-insert-types {} session)]
+    (testing "Adds insert-types and dynamic detection for rules with session-derived facts"
+      (let [crd (get fe "clara.explorer.test.rules.loan-doc-rules/collect-app-req-docs")]
+        (is (= [AllRequiredDocuments]
+               (:clara-rules/insert-types crd))
+            "Should add the fact type to insert-types as the raw class — never a phantom string kind (\"...AllRequiredDocuments\" vs ...AllRequiredDocuments)")
+        (is (= {:fact-instance-derived-types
+                [AllRequiredDocuments]
+                :resolution :partial}
+               (:clara-rules/dynamic-insert-types-detected crd))
+            "Should add dynamic detection")))
+
+    (testing "Non-class (keyword) session-derived types stay raw objects through enrichment"
+      (let [dc (get fe "clara.explorer.test.rules.loan-doc-rules/collect-app-doc-check-input")]
+        (is (some #{:loan-doc-rules/document-check-input} (:clara-rules/insert-types dc))
+            "The keyword fact type merges as the keyword, not as a serialized string")
+        (is (contains? (set (:fact-instance-derived-types
+                             (:clara-rules/dynamic-insert-types-detected dc)))
+                       :loan-doc-rules/document-check-input)
+            "The derived-type display name is the keyword's serialized form")))
+
+    (testing "Does NOT add dynamic detection for rules whose types are already in :props"
+      (let [aop (get fe "clara.explorer.test.rules.loan-app-rules/app-outcome-pending?")]
+        (is (nil? (:clara-rules/dynamic-insert-types-detected aop))
+            "app-outcome-pending? has ApplicationOutcome in its :props")
+        ;; insert-types should NOT include the session-derived type (props covers it)
+        (is (nil? (:clara-rules/insert-types aop))
+            "Should not add insert-types when :props already covers it")))))
+
+(deftest test-merge-memory-derived-insert-types*--tuple
+  (let [session (-> (r/mk-session 'clara.explorer.test.rules.loan-doc-rules
+                                  'clara.explorer.test.rules.loan-app-rules)
+                    (r/insert (laf/map->Application {:app-id "app-1"}))
+                    (r/fire-rules))
+        result  (analyze/merge-memory-derived-insert-types* {} session)]
+    (testing "Returns the enriched annotations under :annotations"
+      (is (= (analyze/merge-memory-derived-insert-types {} session)
+             (:annotations result))
+          "annotations match the thin wrapper"))
+    (testing "Returns the memory-analysis under :memory-analysis"
+      (is (map? (:memory-analysis result)))
+      (is (= (memory/->memory-analysis session)
+             (:memory-analysis result))
+          "memory-analysis is the enrichment-phase memory-analysis"))))
+
+(deftest test-merge-memory-derived-insert-types--preserves-callsites
+  (let [session (-> (r/mk-session 'clara.explorer.test.rules.loan-doc-rules
+                                  'clara.explorer.test.rules.loan-app-rules)
+                    (r/insert (laf/map->Application {:app-id "app-1"})
+                              (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                              (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
+                    (r/fire-rules))
+        existing-annos
+        {"clara.explorer.test.rules.loan-doc-rules/collect-app-req-docs"
+         {:clara-rules/insert-types
+          ['clara.explorer.test.rules.loan_app_facts.AllRequiredDocuments]
+          :clara-rules/dynamic-insert-types-detected
+          {:callsites [{:source-str "(->fact ...)"
+                        :ns-name-sym 'some.ns
+                        :filename "some/ns.clj"
+                        :status :none}]
+           :resolution :full}}}
+        fe  (analyze/merge-memory-derived-insert-types existing-annos session)
+        crd (get fe "clara.explorer.test.rules.loan-doc-rules/collect-app-req-docs")]
+    (testing "Preserves pre-existing :callsites when no new types detected"
+      (let [dyn (:clara-rules/dynamic-insert-types-detected crd)]
+        (is (some? dyn))
+        (is (contains? dyn :callsites)
+            "Should preserve :callsites from original annotations")
+        (is (not (contains? dyn :fact-instance-derived-types))
+            "Should NOT add :fact-instance-derived-types (types already known)")
+        (is (= :full (:resolution dyn))
+            "Should keep original :resolution")))))
+
+(deftest test-merge-memory-derived-insert-types--preserves-callsites-with-new-types
+  "When session-derived fact types are found for a rule that already has
+   :callsites from static analysis, both :callsites and :fact-instance-derived-types
+   should be present in the enriched annotation."
+  (let [session (-> (r/mk-session 'clara.explorer.test.rules.loan-doc-rules
+                                  'clara.explorer.test.rules.loan-app-rules)
+                    ;; Insert a DocumentCheck with :status :pass to trigger
+                    ;; dynamic-insert-compliance-review which inserts ComplianceReview
+                    (r/insert (laf/map->Application {:app-id "app-1"})
+                              (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                              (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card})
+                              (laf/map->DocumentCheck {:app-id "app-1" :status :pass}))
+                    (r/fire-rules))
+        ;; String keys — matching the EDN sidecar format used by load-sidecar
+        existing-annos
+        {"clara.explorer.test.rules.loan-doc-rules/dynamic-insert-compliance-review"
+         {:clara-rules/dynamic-insert-types-detected
+          {:callsites [{:source-str "(build-compliance-review ?app-id)"
+                        :ns-name-sym 'clara.explorer.test.rules.loan-doc-rules
+                        :filename "clara/explorer/test/rules/loan_doc_rules.clj"
+                        :status :none}]
+           :resolution :none}
+          :clara-rules/notes "Compliance review inserted via helper call"}}
+        fe  (analyze/merge-memory-derived-insert-types existing-annos session)
+        crd (get fe "clara.explorer.test.rules.loan-doc-rules/dynamic-insert-compliance-review")]
+    (testing "Merges session-derived types with pre-existing :callsites"
+      (let [dyn (:clara-rules/dynamic-insert-types-detected crd)]
+        (is (some? dyn))
+        (is (contains? dyn :callsites)
+            "Should preserve :callsites from original annotations")
+        (is (contains? dyn :fact-instance-derived-types)
+            "Should add :fact-instance-derived-types from session")
+        (is (= :partial (:resolution dyn))
+            "Resolution should be :partial since session helped but callsites remain unresolved")
+        (is (contains? (set (:fact-instance-derived-types dyn))
+                       ComplianceReview)
+            "Should detect the ComplianceReview type")))))
+
+(deftest test-merge-memory-derived-insert-types--dedup-against-props
+  (testing "Session-derived types already in :props are not flagged as dynamic"
+    (let [session (-> (r/mk-session 'clara.explorer.test.rules.loan-doc-rules
+                                    'clara.explorer.test.rules.loan-app-rules)
+                      (r/insert (laf/map->Application {:app-id "app-1"})
+                                (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card})
+                                (laf/map->GivenDocument {:app-id "app-1" :doc-type :id-card}))
+                      (r/fire-rules))
+          fe      (analyze/merge-memory-derived-insert-types {} session)
+          aop     (get fe "clara.explorer.test.rules.loan-app-rules/app-outcome-pending?")]
+      (is (nil? (:clara-rules/dynamic-insert-types-detected aop))
+          "app-outcome-pending? declares ApplicationOutcome in its :props")
+      (is (nil? (:clara-rules/insert-types aop))
+          "No insert-types added since :props already covers them"))))
+
+;; ---------------------------------------------------------------------------
+;; Constructor-of-interest resolution
+;; ---------------------------------------------------------------------------
+
+(deftest test-fact-constructor-resolution
+  (let [ns-sym 'clara.explorer.test.rules.analyze-test-rules
+        filename "clara/explorer/test/rules/analyze_test_rules.clj"]
+
+    (testing "Constructor-of-interest reached transitively through helper"
+      (let [ann (ann/get-annotation edge-case-ctor-annotations
+                                    `atr/rule-ctor-of-interest-via-helper)
+            dyn (:clara-rules/dynamic-insert-types-detected ann)]
+        (is (= [:demo/tagged] (:clara-rules/insert-types ann))
+            "type is promoted from constructor callsite resolution")
+        (is (= :full (:resolution dyn)))
+        (is (= 1 (count (:callsites dyn))))
+        (let [cs (first (:callsites dyn))]
+          (is (= :full (:status cs)))
+          (is (= ->fact-sym (:constructor-sym cs)))
+          (is (= [:demo/tagged] (:resolved-types cs)))
+          (is (= "(->fact :demo/tagged {:id id})"
+                 (:source-str cs))
+              "source-str shows the constructor callsite form from the helper")
+          (is (= ns-sym (:ns-name-sym cs)))
+          (is (= filename (:filename cs)))
+          ;; :via chain
+          (let [{:keys [boundary-var-name-sym boundary-to-constructor-path]} (:via cs)]
+            (is (= 'clara.rules/insert-all! boundary-var-name-sym))
+            (is (= [`atr/rule-ctor-of-interest-via-helper
+                    `atr/make-tagged-facts
+                    ->fact-sym]
+                   (mapv :var-name-sym boundary-to-constructor-path))
+                "boundary-to-constructor-path: rule-var → make-tagged-facts → ->fact")))))
+
+    (testing "Direct ->fact call (no helper) still works but isn't resolved by default"
+      ;; Without match-fn, ->fact is just an unknown constructor-named function
+      (let [ann (ann/get-annotation edge-case-annotations
+                                    `atr/rule-fact-builder-call)
+            dyn (:clara-rules/dynamic-insert-types-detected ann)]
+        (is (= :none (:resolution dyn)))
+        (is (nil? (:clara-rules/insert-types ann)))))
+
+    (testing "Direct ->fact call WITH match-fn resolves correctly"
+      (let [ann (ann/get-annotation edge-case-ctor-annotations
+                                    `atr/rule-fact-builder-call)
+            dyn (:clara-rules/dynamic-insert-types-detected ann)]
+        (is (= :full (:resolution dyn)))
+        (is (= [:custom-fact-type] (:clara-rules/insert-types ann)))
+        (let [cs (first (:callsites dyn))]
+          (is (= :full (:status cs)))
+          (is (= ->fact-sym (:constructor-sym cs)))
+          (is (= [:custom-fact-type] (:resolved-types cs)))
+          (let [{:keys [boundary-var-name-sym boundary-to-constructor-path]} (:via cs)]
+            (is (= 'clara.rules/insert! boundary-var-name-sym))
+            ;; Direct call: the containing var IS the inserter var
+            (is (= [`atr/rule-fact-builder-call ->fact-sym]
+                   (mapv :var-name-sym boundary-to-constructor-path))
+                "boundary-to-constructor-path: boundary-caller → ->fact (direct, no helper)")))))))
+
+(deftest test-constructor-resolver-overrules-callsite-resolver
+  (testing "constructor path owns its callsite; generic resolver handles the rest"
+    (let [seen (atom [])
+          ;; A generic resolver that WOULD also resolve ->fact forms — the kind of
+          ;; overlap that used to double-report a callsite.
+          generic (fn [{:keys [arg-form]}]
+                    (swap! seen conj arg-form)
+                    (cond
+                      (and (seq? arg-form) (= '->fact (first arg-form)))
+                      {:resolved-types [(second arg-form)]}
+
+                      (and (seq? arg-form) (= 'with-meta (first arg-form)))
+                      {:resolved-types [(:type (nth arg-form 2))]}))
+          ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis edge-case-analysis
+                :session-or-rulebase edge-case-session
+                :callsite-resolver-fn generic
+                :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})
+          a (ann/get-annotation ann `atr/rule-ctor-and-opaque-inserts)
+          callsites (:callsites (:clara-rules/dynamic-insert-types-detected a))
+          by-type (into {} (map (juxt #(first (:resolved-types %)) identity)) callsites)]
+
+      (is (= [:demo/ctor-owned :demo/opaque]
+             (:clara-rules/insert-types a))
+          "both inserts contribute their type")
+
+      (is (= 2 (count callsites))
+          "one callsite per insert — the constructor insert is NOT double-reported")
+
+      (is (= 1 (count (filter :constructor-sym callsites)))
+          "exactly one callsite carries constructor provenance")
+
+      (testing "the constructor-built insert is owned by the constructor path"
+        (let [cs (by-type :demo/ctor-owned)]
+          (is (= :full (:status cs)))
+          (is (= ->fact-sym (:constructor-sym cs)))
+          (is (= 'clara.rules/insert! (:boundary-var-name-sym (:via cs))))
+          (is (= [`atr/rule-ctor-and-opaque-inserts ->fact-sym]
+                 (mapv :var-name-sym (:boundary-to-constructor-path (:via cs)))))))
+
+      (testing "the opaque insert still reaches :callsite-resolver-fn"
+        (let [cs (by-type :demo/opaque)]
+          (is (= :full (:status cs)))
+          (is (nil? (:constructor-sym cs)) "no constructor provenance — it has none")))
+
+      (is (empty? (filter #(and (seq? %) (= '->fact (first %))) @seen))
+          ":callsite-resolver-fn is never invoked for a form the constructor path owns")))
+
+  (testing "coverage follows the call chain, not just lexical nesting"
+    ;; `(insert! (middle-fn …))` — the constructor is NOT inside the insert! call.
+    ;; A generic resolver that *would* resolve the middle-fn call must never be
+    ;; asked, or the insert would be reported twice.
+    (doseq [[rule-sym arg-head fact-type chain]
+            [[`atr/rule-ctor-via-middle-fn 'make-middle-fact :demo/middle
+              [`atr/rule-ctor-via-middle-fn `atr/make-middle-fact ->fact-sym]]
+             [`atr/rule-ctor-via-two-hop-chain 'deep-outer-fact :demo/deep
+              [`atr/rule-ctor-via-two-hop-chain `atr/deep-outer-fact
+               `atr/deep-inner-fact ->fact-sym]]]]
+      (let [seen (atom [])
+            generic (fn [{:keys [arg-form]}]
+                      (swap! seen conj arg-form)
+                      (when (and (seq? arg-form) (= arg-head (first arg-form)))
+                        {:resolved-types [fact-type]}))
+            ann (analyze/->annotations-from-rule-source-analysis
+                 {:rule-source-analysis edge-case-analysis
+                  :session-or-rulebase edge-case-session
+                  :callsite-resolver-fn generic
+                  :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                       :type-resolver-fn ->fact-type-resolver}]})
+            a (ann/get-annotation ann rule-sym)
+            callsites (:callsites (:clara-rules/dynamic-insert-types-detected a))
+            cs (first callsites)]
+        (is (= [fact-type] (:clara-rules/insert-types a))
+            (str rule-sym " resolves through the chain"))
+        (is (= 1 (count callsites))
+            (str rule-sym " reports the insert exactly once"))
+        (is (= ->fact-sym (:constructor-sym cs))
+            (str rule-sym " keeps the constructor entry, not the boundary one"))
+        (is (= chain (mapv :var-name-sym (:boundary-to-constructor-path (:via cs))))
+            (str rule-sym " :via records the full chain"))
+        (is (empty? (filter #(and (seq? %) (= arg-head (first %))) @seen))
+            (str rule-sym ": :callsite-resolver-fn is not asked about the chained arg")))))
+
+  (testing "a constructor bound to a local outside the insert! is still owned once"
+    ;; `(let [f (->fact :t m)] (insert! f))` — the boundary arg is the bare local
+    ;; `f`, so neither lexical nesting nor the call chain identifies it. The
+    ;; constructor path finds the call anyway (it is a var-usage in the rule body),
+    ;; and the boundary path reaches the same form via locals tracing. The traced
+    ;; form is what joins them.
+    (let [seen (atom [])
+          generic (fn [{:keys [arg-form]}]
+                    (swap! seen conj arg-form)
+                    (when (and (seq? arg-form) (= '->fact (first arg-form)))
+                      {:resolved-types [(second arg-form)]}))
+          ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis edge-case-analysis
+                :session-or-rulebase edge-case-session
+                :callsite-resolver-fn generic
+                :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})
+          a (ann/get-annotation ann `atr/rule-ctor-bound-to-local)
+          callsites (:callsites (:clara-rules/dynamic-insert-types-detected a))]
+      (is (= [:demo/local-bound] (:clara-rules/insert-types a)))
+      (is (= 1 (count callsites))
+          "the local-bound constructor insert is reported exactly once")
+      (is (= ->fact-sym (:constructor-sym (first callsites)))
+          "the surviving entry is the constructor one, with provenance")
+      (is (empty? (filter #(and (seq? %) (= '->fact (first %))) @seen))
+          ":callsite-resolver-fn is not asked about the locals-traced constructor form"))))
+
+(deftest test-constructor-only-counts-on-an-insert-path
+  (let [ann (analyze/->annotations-from-rule-source-analysis
+             {:rule-source-analysis edge-case-analysis
+              :session-or-rulebase edge-case-session
+              :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                   :type-resolver-fn ->fact-type-resolver}]})]
+
+    (testing "several inserts, one of them a let-bound constructor"
+      (let [a (ann/get-annotation ann `atr/rule-ctor-local-plus-multiple-inserts)
+            dyn (:clara-rules/dynamic-insert-types-detected a)
+            by-src (into {} (map (juxt :source-str identity)) (:callsites dyn))]
+        (is (= [:demo/inline-y :demo/local-x] (:clara-rules/insert-types a)))
+        (is (= 3 (count (:callsites dyn)))
+            "one callsite per insert — no duplicates, nothing erased")
+        (is (= :partial (:resolution dyn))
+            "the opaque insert is unexplained, so resolution is not :full")
+        (testing "the let-bound constructor is attributed to the insert of the local,"
+          ;; …not to the *other* insert that happens to contain a different
+          ;; ->fact call. Only usage identity may match rule 1.
+          (is (= [:demo/local-x]
+                 (:resolved-types (by-src "(->fact :demo/local-x {:id ?app-id})")))))
+        (is (= :none (:status (by-src "(opaque-fact ?app-id)")))
+            "the third insert survives as an honest unknown")))
+
+    (testing "a constructor that is called but never inserted is not an insert"
+      (let [a (ann/get-annotation ann `atr/rule-ctor-local-never-inserted)
+            dyn (:clara-rules/dynamic-insert-types-detected a)]
+        (is (nil? (:clara-rules/insert-types a))
+            ":demo/never-inserted is not promoted — no insert reaches it")
+        (is (= 1 (count (:callsites dyn)))
+            "only the real insert is reported")
+        (is (nil? (:constructor-sym (first (:callsites dyn))))
+            "no constructor callsite, so no fabricated :via")
+        (is (= :none (:resolution dyn)))))))
+
+(deftest test-constructor-identical-forms-position-identity
+  (testing "two textually-identical ctor forms are attributed by position, not value"
+    (let [ann (ann/get-annotation edge-case-ctor-annotations
+                                  `atr/rule-ctor-identical-forms)
+          dyn (:clara-rules/dynamic-insert-types-detected ann)
+          callsites (:callsites dyn)]
+      (is (= [:demo/identical] (:clara-rules/insert-types ann)))
+      (is (= 2 (count callsites))
+          "one callsite per insert — the inline form is NOT also attributed to the let-bound insert")
+      (is (every? :constructor-sym callsites)
+          "both inserts are owned by the constructor path")
+      (is (= :full (:resolution dyn))
+          "nothing falls through to the boundary path unresolved"))))
+
+(deftest test-constructor-locals-expansion
+  (testing "let-bound locals reaching ctors through helpers and seq combinators"
+    (let [seen (atom [])
+          generic (fn [{:keys [arg-form]}]
+                    (swap! seen conj arg-form)
+                    nil)
+          ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis edge-case-analysis
+                :session-or-rulebase edge-case-session
+                :callsite-resolver-fn generic
+                :rules-filter [`atr/rule-ctor-locals-via-helpers
+                               `atr/rule-ctor-locals-concat-for
+                               `atr/rule-ctor-locals-unreached-stays-dropped
+                               `atr/rule-ctor-locals-shadowed-local]
+                :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})]
+      (testing "intermediate helper calls in binding inits (one callsite per insert)"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-locals-via-helpers)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              callsites (:callsites dyn)
+              by-type (into {} (map (juxt #(first (:resolved-types %)) identity)) callsites)]
+          (is (= #{:demo/looked-up-1 :demo/looked-up-2}
+                 (set (:clara-rules/insert-types a))))
+          (is (= 2 (count callsites))
+              "one callsite per insert-all! — no duplicates, no cross-attribution")
+          (is (= :full (:resolution dyn)))
+          (is (every? :constructor-sym callsites)
+              "both inserts are owned by the constructor path")
+          (is (= [`atr/rule-ctor-locals-via-helpers `atr/look-up-facts-1 ->fact-sym]
+                 (mapv :var-name-sym (:boundary-to-constructor-path (:via (by-type :demo/looked-up-1))))))
+          (is (= [`atr/rule-ctor-locals-via-helpers `atr/look-up-facts-2 ->fact-sym]
+                 (mapv :var-name-sym (:boundary-to-constructor-path (:via (by-type :demo/looked-up-2))))))))
+      (testing "concat/for closure over constructor calls (both types, one insert)"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-locals-concat-for)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              callsites (:callsites dyn)]
+          (is (= #{:demo/seq-a :demo/seq-b}
+                 (set (:clara-rules/insert-types a))))
+          (is (= 2 (count callsites))
+              "both for-body constructors own the single insert")
+          (is (= :full (:resolution dyn)))
+          (is (every? :constructor-sym callsites))))
+      (testing "a constructor that never flows into the insert stays dropped"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-locals-unreached-stays-dropped)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              callsites (:callsites dyn)]
+          (is (= [:demo/looked-up-1] (:clara-rules/insert-types a)))
+          (is (= 1 (count callsites)))
+          (is (= :full (:resolution dyn)))
+          (is (not-any? #(= [:demo/never-flowed] (:resolved-types %)) callsites)
+              ":demo/never-flowed is bound but never inserted — not promoted")))
+      (testing "a same-named shadowed local in a non-flowing branch stays dropped"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-locals-shadowed-local)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              callsites (:callsites dyn)]
+          (is (= [:demo/looked-up-1] (:clara-rules/insert-types a)))
+          (is (= 1 (count callsites)))
+          (is (= :full (:resolution dyn)))
+          (is (not-any? #(= [:demo/shadowed] (:resolved-types %)) callsites)
+              ":demo/shadowed is bound to a shadowed local but never inserted")))
+      (is (empty? @seen)
+          ":callsite-resolver-fn sees nothing — every arg is constructor-owned"))))
+
+(deftest test-constructor-options-validation
+  (testing "a :fact-constructors spec missing :type-resolver-fn fails schema validation"
+    (is (thrown? Exception
+                 (analyze/->annotations-from-rule-source-analysis
+                  {:rule-source-analysis edge-case-analysis
+                   :session-or-rulebase edge-case-session
+                   :fact-constructors [{:match-fn (constantly true)}]}))))
+
+  (testing "a :fact-constructors spec missing :match-fn fails schema validation"
+    (is (thrown? Exception
+                 (analyze/->annotations-from-rule-source-analysis
+                  {:rule-source-analysis edge-case-analysis
+                   :session-or-rulebase edge-case-session
+                   :fact-constructors [{:type-resolver-fn (constantly nil)}]})))))
+
+(deftest test-fact-constructors-vector
+  (testing "first matching spec in vector order wins"
+    (let [ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis edge-case-analysis
+                :session-or-rulebase edge-case-session
+                :fact-constructors [;; matches, and its resolver wins
+                                    {:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn (fn [_] {:resolved-types [:demo/first-wins]})}
+                                    ;; also matches — shadowed by the first
+                                    {:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})
+          a (ann/get-annotation ann `atr/rule-fact-builder-call)]
+      (is (= [:demo/first-wins] (:clara-rules/insert-types a))
+          "the first matching spec's resolver decided the type")))
+
+  (testing "a non-matching first spec falls through to the next"
+    (let [ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis edge-case-analysis
+                :session-or-rulebase edge-case-session
+                :fact-constructors [{:match-fn (fn [sym] (= 'no.such/ctor sym))
+                                     :type-resolver-fn (fn [_] {:resolved-types [:demo/never]})}
+                                    {:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})
+          a (ann/get-annotation ann `atr/rule-fact-builder-call)]
+      (is (= [:custom-fact-type] (:clara-rules/insert-types a))
+          "the second spec matched and resolved normally"))))
+
+(deftest test-loan-doc-ctor-resolution
+  (testing "collect-app-doc-check-input resolved via helpers/->fact chain"
+    (let [ann (ann/get-annotation loan-doc-ctor-annotations
+                                  `ldr/collect-app-doc-check-input)
+          dyn (:clara-rules/dynamic-insert-types-detected ann)]
+      (is (= [:loan-doc-rules/document-check-input]
+             (:clara-rules/insert-types ann))
+          "type resolved transitively through ->document-check-input → helpers/->fact")
+      (is (= :full (:resolution dyn)))
+      (is (= 1 (count (:callsites dyn))))
+      (let [cs (first (:callsites dyn))]
+        (is (= :full (:status cs)))
+        (is (= 'clara.explorer.test.rules.helpers/->fact
+               (:constructor-sym cs)))
+        (is (= [:loan-doc-rules/document-check-input]
+               (:resolved-types cs)))
+        (let [{:keys [boundary-var-name-sym boundary-in-var
+                      rule-to-boundary-path boundary-to-constructor-path]} (:via cs)]
+          (is (= 'clara.rules/insert! boundary-var-name-sym))
+          (is (= `ldr/insert-document-check-input! boundary-in-var))
+          (is (= [`ldr/collect-app-doc-check-input
+                  `ldr/insert-document-check-input!]
+                 (mapv :var-name-sym rule-to-boundary-path))
+              "rule-to-boundary-path: collect-app-doc-check-input → insert-document-check-input!")
+          (is (= [`ldr/insert-document-check-input!
+                  `ldr/->document-check-input
+                  'clara.explorer.test.rules.helpers/->fact]
+                 (mapv :var-name-sym boundary-to-constructor-path))
+              "boundary-to-constructor-path: insert-document-check-input! → ->document-check-input → helpers/->fact"))))))
+
+;; ---------------------------------------------------------------------------
+;; Callsite `:via` provenance — `:boundary-in-var` and `:rule-to-boundary-path`
+;; (see docs/planning/analyze-callsite-provenance-fixes-problem-statement.md)
+;; ---------------------------------------------------------------------------
+
+(deftest test-via-boundary-in-var-direct-rhs
+  (testing "a constructor callsite whose boundary call is in the rule's RHS"
+    (let [cs (-> (ann/get-annotation edge-case-ctor-annotations `atr/rule-fact-builder-call)
+                 :clara-rules/dynamic-insert-types-detected
+                 :callsites
+                 first)]
+      (is (= `atr/rule-fact-builder-call (-> cs :via :boundary-in-var)))
+      (is (nil? (-> cs :via :rule-to-boundary-path))
+          "no rule-to-boundary-path when the boundary call is in the rule's own RHS")
+      (is (= [`atr/rule-fact-builder-call ->fact-sym]
+             (mapv :var-name-sym (-> cs :via :boundary-to-constructor-path)))
+          ":boundary-to-constructor-path is unchanged")))
+
+  (testing "a boundary-path callsite (no constructor) in the rule's RHS"
+    (let [cs (-> (ann/get-annotation edge-case-annotations `atr/rule-record-constructor)
+                 :clara-rules/dynamic-insert-types-detected
+                 :callsites
+                 first)]
+      (is (= `atr/rule-record-constructor (-> cs :via :boundary-in-var)))
+      (is (= 'clara.rules/insert! (-> cs :via :boundary-var-name-sym)))
+      (is (nil? (-> cs :via :boundary-to-constructor-path)))
+      (is (nil? (-> cs :via :rule-to-boundary-path))))))
+
+(deftest test-via-rule-to-boundary-path-two-hops
+  (let [ann edge-case-ctor-annotations
+        cs (-> (ann/get-annotation ann `atr/rule-boundary-two-hops-above)
+               :clara-rules/dynamic-insert-types-detected
+               :callsites
+               first)]
+    (is (= [:demo/summary]
+           (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-boundary-two-hops-above))))
+    (is (= `atr/insert-summary! (-> cs :via :boundary-in-var)))
+    (is (= [`atr/rule-boundary-two-hops-above `atr/record-summary! `atr/insert-summary!]
+           (mapv :var-name-sym (-> cs :via :rule-to-boundary-path))))
+    (is (= [`atr/insert-summary! ->fact-sym]
+           (mapv :var-name-sym (-> cs :via :boundary-to-constructor-path)))
+        ":boundary-to-constructor-path still starts at the boundary-holding var")))
+
+(deftest test-via-dropped-ctor-provenance
+  (let [ann (ctor-annotations-with ->fact-literal-type-resolver)
+        dyn (:clara-rules/dynamic-insert-types-detected
+             (ann/get-annotation ann `atr/rule-ctor-unresolvable-parameter))]
+    (is (= :none (:resolution dyn)))
+    (is (= 1 (count (:callsites dyn))) "not reported twice")
+    (let [cs (first (:callsites dyn))]
+      (is (= :none (:status cs)))
+      (is (= ->fact-sym (:constructor-sym cs)))
+      (is (= `atr/insert-parameterized-fact! (-> cs :via :boundary-in-var)))
+      (is (= [`atr/rule-ctor-unresolvable-parameter `atr/insert-parameterized-fact!]
+             (mapv :var-name-sym (-> cs :via :rule-to-boundary-path))))
+      (is (= [`atr/insert-parameterized-fact! ->fact-sym]
+             (mapv :var-name-sym (-> cs :via :boundary-to-constructor-path)))))))
+
+(deftest test-via-boundary-no-constructor
+  (let [cs (-> (ann/get-annotation edge-case-annotations `atr/rule-insert-via-parameter)
+               :clara-rules/dynamic-insert-types-detected
+               :callsites
+               first)]
+    (is (= :none (:status cs)))
+    (is (nil? (:constructor-sym cs)))
+    (is (= "facts" (:source-str cs)))
+    (is (= `atr/insert-facts! (-> cs :via :boundary-in-var)))
+    (is (= [`atr/rule-insert-via-parameter `atr/insert-facts!]
+           (mapv :var-name-sym (-> cs :via :rule-to-boundary-path))))
+    (is (= 'clara.rules/insert-all! (-> cs :via :boundary-var-name-sym)))
+    (is (nil? (-> cs :via :boundary-to-constructor-path)))))
+
+(deftest test-via-dropped-ctor-ambiguity
+  (let [ann (ctor-annotations-with ->fact-literal-type-resolver)
+        dyn (:clara-rules/dynamic-insert-types-detected
+             (ann/get-annotation ann `atr/rule-two-constructors-one-arg))]
+    (is (= 1 (count (:callsites dyn))))
+    (let [cs (first (:callsites dyn))]
+      (is (= :none (:status cs)))
+      (is (nil? (:constructor-sym cs)) "ambiguous constructor identity — no ctor sym")
+      (is (= `atr/rule-two-constructors-one-arg (-> cs :via :boundary-in-var)))
+      (is (nil? (-> cs :via :boundary-to-constructor-path)))
+      (is (nil? (-> cs :via :rule-to-boundary-path))))))
+
+(deftest test-via-rule-to-boundary-path-determinism
+  (let [cs (-> (ann/get-annotation edge-case-ctor-annotations `atr/rule-two-paths-to-boundary)
+               :clara-rules/dynamic-insert-types-detected
+               :callsites
+               first)]
+    (is (= `atr/insert-shared! (-> cs :via :boundary-in-var)))
+    (is (= [`atr/rule-two-paths-to-boundary `atr/insert-via-a! `atr/insert-shared!]
+           (mapv :var-name-sym (-> cs :via :rule-to-boundary-path)))
+        "BFS sorted by str picks insert-via-a! over insert-via-b!")))
+
+;; ---------------------------------------------------------------------------
+;; Heuristic record-ctor scan fallback
+;; (defect: spurious record-ctor scan types outranking constructor-of-interest
+;; resolution — caller-driven resolution always wins; the scan is a labeled,
+;; rulebase-scoped, per-inserter-var fallback)
+;; ---------------------------------------------------------------------------
+
+(defn- heuristic-callsites
+  "The callsites in a dynamic-detection map labeled as heuristic scan output."
+  [dyn]
+  (filter (comp :source :via) (:callsites dyn)))
+
+(deftest test-scan-does-not-displace-constructor-of-interest
+  (testing "registered ->fact resolution wins; the spurious scan type is absent"
+    (let [a (ann/get-annotation edge-case-ctor-annotations `atr/rule-scan-must-not-displace-ctor)
+          dyn (:clara-rules/dynamic-insert-types-detected a)]
+      (is (= [:demo/scan-precedence] (:clara-rules/insert-types a)))
+      (is (= :full (:resolution dyn)))
+      (is (= 1 (count (:callsites dyn))))
+      (let [cs (first (:callsites dyn))]
+        (is (= :full (:status cs)))
+        (is (= ->fact-sym (:constructor-sym cs)))
+        (is (= [:demo/scan-precedence] (:resolved-types cs)))
+        (is (nil? (-> cs :via :source))
+            "traced ctor callsites carry a boundary-to-constructor-path, not a heuristic :source")
+        (is (seq (-> cs :via :boundary-to-constructor-path))))
+      (is (not (str/includes? (str a) "UnrelatedScanRecord"))
+          "the unrelated record ctor reachable in the subtree is never credited")))
+
+  (testing "precedence holds with unrestricted fallback recall (:all-resolvable-fact-types)"
+    (let [a (ann/get-annotation edge-case-ctor-annotations-all-fallback
+                                `atr/rule-scan-must-not-displace-ctor)]
+      (is (= [:demo/scan-precedence] (:clara-rules/insert-types a)))
+      (is (not (str/includes? (str a) "UnrelatedScanRecord"))))))
+
+(deftest test-heuristic-fallback-per-inserter-var
+  (testing "ctor-owned var and unhandled helper-inserter var are judged independently"
+    (let [a (ann/get-annotation edge-case-ctor-annotations `atr/rule-mixed-ctor-and-helper-insert)
+          dyn (:clara-rules/dynamic-insert-types-detected a)
+          heuristic (vec (heuristic-callsites dyn))]
+      (is (some #(= ->fact-sym (:constructor-sym %)) (:callsites dyn))
+          "the rule's own insert resolves via the registered constructor")
+      (is (= 1 (count heuristic)))
+      (let [cs (first heuristic)]
+        (is (= :record-ctor-scan (-> cs :via :source)))
+        (is (= 'clara.rules/insert! (-> cs :via :boundary-var-name-sym)))
+        (is (nil? (-> cs :via :boundary-to-constructor-path))
+            "heuristic entries have no traced boundary-to-constructor-path")
+        (is (= "map->HiddenHelperRecord" (:source-str cs)))
+        (is (= edge-case-ns-sym (:ns-name-sym cs)))
+        (is (= edge-case-filename (:filename cs)))
+        (is (= :full (:status cs)))
+        (is (= [`HiddenHelperRecord] (:resolved-types cs))))
+      (is (= [:demo/mixed-registered `HiddenHelperRecord]
+             (:clara-rules/insert-types a))
+          "both the ctor-resolved and fallback types are promoted"))))
+
+(deftest test-dynamic-type-fallback-resolution-modes
+  (testing "default :rulebase-fact-types-only"
+    (testing "helper-hidden record ctor with no consuming LHS is dropped"
+      (is (nil? (:clara-rules/insert-types
+                 (ann/get-annotation edge-case-annotations `atr/rule-nested-helper-call)))))
+    (testing "helper-hidden record ctor consumed by an LHS is admitted and labeled"
+      (let [a (ann/get-annotation edge-case-annotations `atr/rule-insert-all-helper)
+            heuristic (vec (heuristic-callsites
+                            (:clara-rules/dynamic-insert-types-detected a)))]
+        (is (= [`LocalDummyRecord] (:clara-rules/insert-types a)))
+        (is (seq heuristic))
+        (is (every? #(= :record-ctor-scan (-> % :via :source)) heuristic))))
+    (testing "subtype admitted via ancestors — an LHS matches its interface"
+      (let [a (ann/get-annotation edge-case-annotations `atr/rule-insert-marker-record)
+            heuristic (vec (heuristic-callsites
+                            (:clara-rules/dynamic-insert-types-detected a)))]
+        (is (= [`MarkerRecord] (:clara-rules/insert-types a)))
+        (is (= 1 (count heuristic)))
+        (is (= :record-ctor-scan (-> heuristic first :via :source)))))
+    (testing "type consumed only by a defquery's LHS is admitted"
+      (let [a (ann/get-annotation edge-case-annotations `atr/rule-insert-query-only-record)]
+        (is (= [`QueryOnlyRecord] (:clara-rules/insert-types a)))))
+    (testing "retract fallback symmetry"
+      (let [a (ann/get-annotation edge-case-annotations `atr/rule-retract-via-helper-fallback)
+            dyn (:clara-rules/dynamic-retract-types-detected a)]
+        (is (= [`HiddenHelperRecord] (:clara-rules/retract-types a)))
+        (is (some #(= :record-ctor-scan (-> % :via :source)) (:callsites dyn))))))
+
+  (testing ":all-resolvable-fact-types restores unfiltered recall"
+    (let [a (ann/get-annotation edge-case-annotations-all-fallback `atr/rule-nested-helper-call)
+          heuristic (vec (heuristic-callsites
+                          (:clara-rules/dynamic-insert-types-detected a)))]
+      (is (= [`DocumentCheck] (:clara-rules/insert-types a)))
+      (is (some #(= :record-ctor-scan (-> % :via :source)) heuristic))))
+
+  (testing ":none disables the fallback entirely"
+    (is (nil? (:clara-rules/insert-types
+               (ann/get-annotation edge-case-ctor-annotations-no-fallback `atr/rule-insert-marker-record))))
+    (is (= [:demo/mixed-registered]
+           (:clara-rules/insert-types
+            (ann/get-annotation edge-case-ctor-annotations-no-fallback `atr/rule-mixed-ctor-and-helper-insert)))
+        "caller-driven resolution is unaffected by :none")))
+
+(deftest test-type-fallback-skipped-tap
+  (testing "filtered types are reported via tap> with full context (off without a tap)"
+    (let [{:keys [events]}
+          (tu/capture-taps
+           #(analyze/->annotations-from-rule-source-analysis
+             {:rule-source-analysis edge-case-analysis
+              :session-or-rulebase edge-case-session})
+           #(= :clara-rules/type-fallback-skipped (:event %))
+           (fn [evs]
+             (and (some #(= `DocumentCheck (:skipped-type %)) evs)
+                  (some #(= `UnrelatedScanRecord (:skipped-type %)) evs))))]
+      (is (seq events))
+      (is (some #(and (= `DocumentCheck (:skipped-type %))
+                      (= `atr/rule-nested-helper-call (:inserter-var %))
+                      (= :insert (:boundary %))
+                      (= :rulebase-fact-types-only (:mode %))
+                      (= 'map->DocumentCheck (:ctor-name %))
+                      (= 'clara.explorer.test.rules.loan-app-facts (:ctor-ns %))
+                      (string? (:filename %)))
+                events)
+          "the skipped DocumentCheck scan hit carries the full tap context")
+      (is (some #(= `UnrelatedScanRecord (:skipped-type %)) events)))))

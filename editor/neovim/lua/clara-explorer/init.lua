@@ -168,7 +168,7 @@ function M.refresh()
       return
     end
     conjure.eval_edn({
-      code = "(do (require 'clara.server.graph.server)\n     (clara.server.graph.server/reload-annotations!))",
+      code = "(do (require 'clara.explorer.server.serve)\n     (clara.explorer.server.serve/reload-annotations!))",
       passive = true,
       on_value = function() vim.notify("clara-explorer: analysis refreshed", vim.log.levels.INFO) end,
       on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
@@ -180,11 +180,11 @@ local swap_opts_by_buf = {}
 
 --- Session-swap forms: balanced-paren templates filled via `:format`, so the
 -- parens stay inspectable instead of split across `..` concats.
-local SWAP_DEFAULT_FORM = [[(do (require 'clara.server.graph.client)
-     (clara.server.graph.client/swap-session!))]]
+local SWAP_DEFAULT_FORM = [[(do (require 'clara.explorer.server.client)
+     (clara.explorer.server.client/swap-session!))]]
 
-local SWAP_OPTS_FORM = [[(do (require 'clara.server.graph.client)
-     (clara.server.graph.client/swap-session! %s))]]
+local SWAP_OPTS_FORM = [[(do (require 'clara.explorer.server.client)
+     (clara.explorer.server.client/swap-session! %s))]]
 
 --- Eval a session-swap (or the registered default) and cache the last opts.
 function M.perform_swap(raw, bufnr)

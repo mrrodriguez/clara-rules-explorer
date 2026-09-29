@@ -1,0 +1,589 @@
+(ns clara.explorer.server.api
+  "Reitit routes and Ring handler for the Clara Rules Explorer API.
+
+   HTTP is read-only — mutation happens through the in-memory
+   `swap-session!` / `reload-annotations!` API in `clara.explorer.server.serve`.
+
+   The router derefs the single `state-atom` (an atom of
+   `clara.explorer.server.serve/ServerState`) once per request and passes the
+   pure state value to each handler, together with a `cache` cell.  Handlers
+   therefore have no access to the atom and cannot mutate server state; each
+   request sees one coherent snapshot."
+  (:require [reitit.ring :as ring]
+            [reitit.ring.middleware.muuntaja :as muuntaja]
+            [muuntaja.core :as m]
+            [jsonista.core :as j]
+            [schema.core :as s]
+            [clara.explorer.server.cache :as cache]
+            [clara.explorer.core :as core]
+            [clara.explorer.annotations.merge :as ann.merge]
+            [clara.explorer.fact-types :as ft]
+            [clara.explorer.memory :as memory]))
+
+(defn- json-mapper []
+  (j/object-mapper
+   {:encode-key-fn true
+    :decode-key-fn true}))
+
+;; ---------------------------------------------------------------------------
+;; Schema definitions for API response bodies
+;; ---------------------------------------------------------------------------
+
+(s/defschema RulebaseSummary
+  "Basic counts for the dashboard."
+  {:rule-count s/Int
+   :query-count s/Int
+   :fact-type-count s/Int
+   :working-memory-available s/Bool})
+
+(s/defschema TypeReference
+  "A fact-type reference: `name` is the kind-explicit serialized type string,
+   `id` the deterministic route id, and `known` marks whether the type
+   appears in the analysis fact-types map (`true`) or is a hierarchy ghost
+   that is only present as an ancestor/descendant of a referenced type
+   (`false`)."
+  {:name s/Str
+   :id s/Str
+   :known s/Bool})
+
+(s/defschema TypeBridgeMatch
+  "A single type pair linking two productions: `producer-type` is what the
+   producing rule inserts (or retracts), `consumer-type` is what the
+   consuming rule's LHS requires.  Identical shape and meaning on upstream
+   and downstream entries — direct matches (same type both ends) are
+   included.  `:via :retract` marks a pair whose producer-type is a retract
+   type of the producer (retraction coupling, distinct from production)."
+  {:producer-type TypeReference
+   :consumer-type TypeReference
+   (s/optional-key :via) (s/enum :retract)})
+
+(s/defschema ProductionDep
+  "A reference to another production (rule or query) in the dependency graph.
+   `id` is the deterministic route id for linkage.  `match` (when present)
+   lists the type pairs that link the two productions."
+  {:name s/Str
+   :id s/Str
+   :ns s/Str
+   :type s/Str
+   (s/optional-key :match) [TypeBridgeMatch]})
+
+(s/defschema AccumulatorInfo
+  "Details of an accumulator condition's `:accumulator` form, computed by the
+   conditions analysis pass.  `:form` is the rendered form string;
+   `:some-initial-value?` is true when the evaluated accumulator has a non-nil
+   `:initial-value`."
+  {:form s/Str
+   :some-initial-value? s/Bool})
+
+(s/defschema LhsBindingInfo
+  "Per-condition binding summary attached under `:bindings` on serialized LHS
+   leaves and groups alike (one vocabulary everywhere).  A group's `:bindings`
+   is the componentwise union of its children's — derived, not additional:
+   consumers aggregate over leaves *or* read group summaries, never both.
+   Values are keywords pre-JSON (the API validates the in-memory shape); the
+   UI receives strings after JSON encoding.
+   `:join-filter-join-bindings` is present only when the condition has
+   non-equality unifications that reference an upstream binding."
+  {:binding-keys [s/Keyword]
+   :new-bindings [s/Keyword]
+   (s/optional-key :join-filter-join-bindings) [s/Keyword]})
+
+(s/defschema LhsCondition
+  "A serialized LHS condition.  Leaf conditions carry :type / :constraints /
+   :args / :accumulator / :from / :result-binding / :fact-binding / :bindings
+   as applicable; group conditions carry :condition-type, :children, and their
+   own :bindings union.  Every node carries `:bindings`."
+  {(s/optional-key :type) TypeReference
+   (s/optional-key :constraints) s/Str
+   (s/optional-key :args) s/Str
+   (s/optional-key :accumulator) AccumulatorInfo
+   (s/optional-key :from) (s/recursive #'LhsCondition)
+   (s/optional-key :result-binding) s/Any
+   (s/optional-key :fact-binding) s/Any
+   (s/optional-key :bindings) LhsBindingInfo
+   (s/optional-key :condition-type) (s/enum :and :or :not :exists)
+   (s/optional-key :children) [(s/recursive #'LhsCondition)]})
+
+(s/defschema ViaEntry
+  "A single entry in a `:rule-to-boundary-path` / `:boundary-to-constructor-path` chain."
+  {:var-name-sym s/Str})
+
+(s/defschema ViaChain
+  "Provenance chain from a boundary fn to a constructor callsite.
+   `:boundary-in-var` is the var the boundary call is written in; `:rule-to-boundary-path`
+   is the rule→`:boundary-in-var` chain (omitted when the two are the same
+   var).  `:rule-to-boundary-path` and `:boundary-to-constructor-path` are shortest paths through a var-level
+   call graph, not observed runtime call paths.  `:source` marks heuristic
+   provenance — `:record-ctor-scan` when the callsite comes from the
+   subtree-wide record-ctor scan fallback rather than a traced call chain;
+   heuristic entries have no `:boundary-to-constructor-path`."
+  {(s/optional-key :boundary-var-name-sym) s/Str
+   (s/optional-key :boundary-in-var) s/Str
+   (s/optional-key :boundary-to-constructor-path) [ViaEntry]
+   (s/optional-key :rule-to-boundary-path) [ViaEntry]
+   (s/optional-key :source) s/Keyword})
+
+(s/defschema ProvenanceChainEntry
+  "One entry in a callsite's `:provenance-chain` — the display-ready chain the
+   server composes from the raw `:via` (see `serialize/provenance-chain`).
+   `:label` marks the hop's role; `:sym` is the fully-qualified var name."
+  {:label (s/enum :rule :caller :boundary :constructor)
+   :sym s/Str})
+
+(s/defschema DynamicCallsiteEntry
+  "A single dynamic-insert/retract callsite with source coordinates
+   and optional resolution info."
+  {:source-str s/Str
+   :ns s/Str
+   :filename s/Str
+   (s/optional-key :status) (s/enum :none :partial :full)
+   (s/optional-key :resolved-types) [TypeReference]
+   (s/optional-key :fact-type) TypeReference
+   (s/optional-key :constructor-sym) s/Str
+   (s/optional-key :via) ViaChain
+   (s/optional-key :provenance-chain) [ProvenanceChainEntry]})
+
+(s/defschema DynamicDetectionInfo
+  "Info about dynamic insert/retract callsites detected by the analyzer."
+  {(s/optional-key :callsites) [DynamicCallsiteEntry]
+   (s/optional-key :resolution) (s/enum :full :partial :none)
+   (s/optional-key :fact-instance-derived-types) [s/Str]})
+
+(s/defschema RuleListItem
+  "Lightweight rule summary (list endpoint)."
+  {:name          s/Str
+   :id            s/Str
+   :ns            s/Str
+   :doc           (s/maybe s/Str)
+   :lhs-types     [TypeReference]
+   :insert-types  [TypeReference]
+   :retract-types [TypeReference]
+   :source-rule   s/Bool
+   :sink-rule     s/Bool
+   (s/optional-key :unlinked-rule) (s/maybe {:downstream (s/enum :unknown)
+                                             :reason s/Str})
+   (s/optional-key :no-output-types) s/Bool
+   (s/optional-key :upstream)   [ProductionDep]
+   (s/optional-key :downstream) [ProductionDep]
+   (s/optional-key :dynamic-insert-types-detected) DynamicDetectionInfo
+   (s/optional-key :dynamic-retract-types-detected) DynamicDetectionInfo})
+
+(s/defschema Rule
+  "Full rule detail with LHS/RHS forms, props, and annotations."
+  (merge RuleListItem
+         {:props              {s/Str s/Any}
+          :lhs                [LhsCondition]
+          :lhs-form           s/Str
+          :rhs-form           s/Str
+          (s/optional-key :notes) (s/maybe s/Str)}))
+
+(s/defschema QueryListItem
+  "Lightweight query summary (list endpoint)."
+  {:name      s/Str
+   :id        s/Str
+   :ns        s/Str
+   :doc       (s/maybe s/Str)
+   :lhs-types [TypeReference]
+   :params    (s/maybe #{s/Str})
+   (s/optional-key :upstream)   [ProductionDep]
+   (s/optional-key :downstream) [ProductionDep]})
+
+(s/defschema Query
+  "Full query detail."
+  (merge QueryListItem
+         {:props              {s/Str s/Any}
+          :lhs                [LhsCondition]
+          :lhs-form           s/Str
+          (s/optional-key :notes) (s/maybe s/Str)}))
+
+(s/defschema FactTypeListItem
+  "Lightweight fact-type summary (list endpoint).  `:ancestors` is
+   detail-only."
+  {:name               s/Str
+   :id                 s/Str
+   :ns                 (s/maybe s/Str)
+   :used-by-rules      [ProductionDep]
+   :used-by-queries    [ProductionDep]
+   :inserted-by-rules  [ProductionDep]
+   :retracted-by-rules [ProductionDep]})
+
+(s/defschema FactTypeDetail
+  "Full fact-type summary (detail endpoint) — the list shape plus the
+   hierarchy-ordered `:ancestors` and `:descendants` (`TypeReference` entries;
+   `known: false` ghosts are not part of the rulebase's fact-types map)."
+  (merge FactTypeListItem
+         {:ancestors [TypeReference]
+          :descendants [TypeReference]}))
+
+(s/defschema SessionFactTypeItem
+  "A fact-type entry in the session fact-types summary."
+  {:name  s/Str
+   :id    s/Str
+   :ns    (s/maybe s/Str)
+   :count s/Int})
+
+(s/defschema SessionFact
+  "A single fact instance in working memory."
+  {:id            s/Int
+   :type          TypeReference
+   :ns            (s/maybe s/Str)
+   :data          s/Any
+   :is-root       s/Bool
+   :inserted-from [ProductionDep]
+   :used-by       [ProductionDep]})
+
+(s/defschema FactMatch
+  "A working-memory fact matched by a production, with every distinct set of
+   variable bindings it matched under.  One entry per fact — the fact appears
+   once no matter how many conditions or activations it satisfies.  `:fact`
+   carries the fact's own value in `:data`, as everywhere else; `:bindings`
+   holds the (pruned) binding maps, keyword-keyed by Clara variable names."
+  {:fact SessionFact
+   :bindings [{s/Keyword s/Any}]})
+
+(s/defschema ProductionActivity
+  "Unified activity view for a rule or query in the current session."
+  {:matches [FactMatch]
+   (s/optional-key :inserted-facts) [SessionFact]})
+
+(s/defschema FactTypeRoleGroup
+  "A grouping of fact instances by a production (rule/query) or root origin."
+  {:name  s/Str
+   :id    s/Str
+   :type  s/Str
+   :facts [SessionFact]
+   (s/optional-key :ns) s/Str})
+
+(s/defschema SessionFactTypeDetail
+  "Full detail for a single fact type in the session, including role groupings."
+  {:name          s/Str
+   :id            s/Str
+   :ns            (s/maybe s/Str)
+   :count         s/Int
+   :inserted-from [FactTypeRoleGroup]
+   :used-by       [FactTypeRoleGroup]
+   :ids           [s/Int]})
+
+;; Internal atom shape
+(s/defschema AnnotationsMap
+  "Either a `ann.merge/MergedAnnotations` value (keyword keys, mixed value
+   types) or a bare rule→annotation map (string keys, all values are maps)."
+  (s/pred (fn [m]
+            (and (map? m)
+                 (or (ann.merge/merged-annotations? m)
+                     (and (every? string? (keys m))
+                          (every? map? (vals m))))))
+          'annotations-map?))
+
+;; ---------------------------------------------------------------------------
+;; Handler helpers
+;; ---------------------------------------------------------------------------
+
+(def ^:private ring-error-body
+  {:error s/Str})
+
+;; ---------------------------------------------------------------------------
+;; Status predicates
+;; ---------------------------------------------------------------------------
+
+(defn- status-200? [resp]
+  (= 200 (:status resp)))
+
+(defn- status-404? [resp]
+  (= 404 (:status resp)))
+
+(defn- status-409? [resp]
+  (= 409 (:status resp)))
+
+(def ^:private no-working-memory-body
+  (assoc ring-error-body :reason s/Keyword))
+
+;; ---------------------------------------------------------------------------
+;; Response schemas
+;; ---------------------------------------------------------------------------
+
+(s/defschema GetRuleResponse
+  (s/conditional status-200? {:status (s/eq 200) :body Rule}
+                 status-404? {:status (s/eq 404) :body ring-error-body}))
+
+(s/defschema GetQueryResponse
+  (s/conditional status-200? {:status (s/eq 200) :body Query}
+                 status-404? {:status (s/eq 404) :body ring-error-body}))
+
+(s/defschema GetFactTypeResponse
+  (s/conditional status-200? {:status (s/eq 200) :body FactTypeDetail}
+                 status-404? {:status (s/eq 404) :body ring-error-body}))
+
+(s/defschema GetSessionFactTypeResponse
+  (s/conditional status-200? {:status (s/eq 200) :body SessionFactTypeDetail}
+                 status-404? {:status (s/eq 404) :body ring-error-body}
+                 status-409? {:status (s/eq 409) :body no-working-memory-body}))
+
+(s/defschema GetSessionFactResponse
+  (s/conditional status-200? {:status (s/eq 200) :body SessionFact}
+                 status-404? {:status (s/eq 404) :body ring-error-body}
+                 status-409? {:status (s/eq 409) :body no-working-memory-body}))
+
+(s/defschema GetSessionRuleResponse
+  (s/conditional status-200? {:status (s/eq 200) :body ProductionActivity}
+                 status-404? {:status (s/eq 404) :body ring-error-body}
+                 status-409? {:status (s/eq 409) :body no-working-memory-body}))
+
+(s/defschema GetSessionQueryResponse
+  (s/conditional status-200? {:status (s/eq 200) :body ProductionActivity}
+                 status-404? {:status (s/eq 404) :body ring-error-body}
+                 status-409? {:status (s/eq 409) :body no-working-memory-body}))
+
+(s/defschema GetSessionFactTypesResponse
+  (s/conditional status-200? {:status (s/eq 200) :body {:types [SessionFactTypeItem]
+                                                        :total-count s/Int}}
+                 status-409? {:status (s/eq 409) :body no-working-memory-body}))
+
+;; ---------------------------------------------------------------------------
+;; Handlers — pure functions of the per-request server-state value
+;; ---------------------------------------------------------------------------
+
+(s/defn handle-get-rulebase-summary :- {:status (s/eq 200) :body RulebaseSummary}
+  [state cache working-memory-enabled? _req]
+  (let [working-memory-available (boolean
+                                  (and working-memory-enabled?
+                                       (core/working-memory-available? (:session state))))]
+    {:status 200
+     :body (-> cache
+               (cache/get-rulebase-analysis state)
+               core/get-rulebase-counts
+               (assoc :working-memory-available working-memory-available))}))
+
+(defn- handle-get-rulebase-analysis
+  [state cache _req]
+  {:status 200
+   :body (-> cache
+             (cache/get-rulebase-analysis state)
+             core/get-rulebase-analysis-external-view)})
+
+(s/defn handle-get-rules :- {:status (s/eq 200) :body {:rules [RuleListItem]}}
+  [state cache _req]
+  {:status 200
+   :body {:rules (-> cache
+                     (cache/get-rulebase-analysis state)
+                     core/get-rules-list)}})
+
+(s/defn handle-get-rule :- GetRuleResponse
+  [state cache req]
+  (let [id (get-in req [:path-params :id])
+        analysis (cache/get-rulebase-analysis cache state)
+        name (get (:production-id-index analysis) id)
+        rule (get-in analysis [:rules name])]
+    (if rule
+      {:status 200 :body (core/get-production-external-view rule)}
+      {:status 404 :body {:error "Rule not found"}})))
+
+(s/defn handle-get-queries :- {:status (s/eq 200) :body {:queries [QueryListItem]}}
+  [state cache _req]
+  {:status 200
+   :body {:queries (-> cache
+                       (cache/get-rulebase-analysis state)
+                       core/get-queries-list)}})
+
+(s/defn handle-get-query :- GetQueryResponse
+  [state cache req]
+  (let [id (get-in req [:path-params :id])
+        analysis (cache/get-rulebase-analysis cache state)
+        name (get (:production-id-index analysis) id)
+        query (get-in analysis [:queries name])]
+    (if query
+      {:status 200 :body (core/get-production-external-view query)}
+      {:status 404 :body {:error "Query not found"}})))
+
+(s/defn handle-get-fact-types :- {:status (s/eq 200) :body {:fact-types [FactTypeListItem]}}
+  [state cache _req]
+  {:status 200
+   :body {:fact-types (-> cache
+                          (cache/get-rulebase-analysis state)
+                          ft/get-fact-types-list)}})
+
+(s/defn handle-get-fact-type :- GetFactTypeResponse
+  [state cache req]
+  (let [id (get-in req [:path-params :id])
+        analysis (cache/get-rulebase-analysis cache state)
+        name (get (:fact-type-id-index analysis) id)
+        fact-type (get-in analysis [:fact-types name])]
+    (if fact-type
+      {:status 200 :body fact-type}
+      {:status 404 :body {:error "Fact type not found"}})))
+
+(defn- no-working-memory-response
+  "Returns a 409 with a machine-readable `:reason` key.
+   `cause` is :rulebase-input, :disabled-by-config, or :no-session."
+  [cause]
+  (let [messages {:rulebase-input "No working memory: the server was started with a rulebase, not a session"
+                  :disabled-by-config "No working memory: disabled by configuration (:working-memory-enabled false)"
+                  :no-session "No working memory: the server is serving a registry selection, not a session"}]
+    {:status 409
+     :body {:error (get messages cause "No working memory")
+            :reason cause}}))
+
+(defn- with-memory-analysis
+  "Invokes `f` with the memory-analysis, or returns 409 when working memory is
+  unavailable.  Registry mode (`:rulebase-analysis` present) is 409
+  `:no-session`; a session that is a bare rulebase is 409 `:rulebase-input`.
+  Session capability is checked per request because the server state can be
+  hot-swapped at runtime; the static `:working-memory-enabled` config flag is
+  resolved once at router construction instead (see `router`)."
+  [state cache f]
+  (if (:rulebase-analysis state)
+    (no-working-memory-response :no-session)
+    (if-let [memory-analysis (cache/get-memory-analysis cache state)]
+      (f memory-analysis)
+      (no-working-memory-response :rulebase-input))))
+
+(s/defn handle-get-session-fact-types
+  :- GetSessionFactTypesResponse
+  [state cache _req]
+  (with-memory-analysis state cache
+    (fn [memory-analysis]
+      {:status 200
+       :body (ft/get-session-fact-types-summary memory-analysis)})))
+
+(s/defn handle-get-session-fact-type
+  :- GetSessionFactTypeResponse
+  [state cache req]
+  (with-memory-analysis state cache
+    (fn [memory-analysis]
+      (let [id (get-in req [:path-params :id])
+            name (get (:fact-type-id-index memory-analysis) id)
+            type-info (get (:fact-types memory-analysis) name)]
+        (if type-info
+          {:status 200 :body type-info}
+          {:status 404 :body {:error "Fact type not found in session"}})))))
+
+(s/defn handle-get-session-fact
+  :- GetSessionFactResponse
+  [state cache req]
+  (with-memory-analysis state cache
+    (fn [memory-analysis]
+      (let [id (Integer/parseInt (get-in req [:path-params :id]))
+            fact (get-in memory-analysis [:facts id])]
+        (if fact
+          {:status 200 :body fact}
+          {:status 404 :body {:error "Fact not found in session"}})))))
+
+(s/defn handle-get-session-rule
+  :- GetSessionRuleResponse
+  [state cache req]
+  (with-memory-analysis state cache
+    (fn [memory-analysis]
+      (let [id (get-in req [:path-params :id])
+            name (get (:rule-id-index memory-analysis) id)
+            rule-activity (memory/get-rule-activity memory-analysis name)]
+        (if rule-activity
+          {:status 200 :body rule-activity}
+          {:status 404 :body {:error "Rule matches not found"}})))))
+
+(s/defn handle-get-session-query
+  :- GetSessionQueryResponse
+  [state cache req]
+  (with-memory-analysis state cache
+    (fn [memory-analysis]
+      (let [id (get-in req [:path-params :id])
+            name (get (:query-id-index memory-analysis) id)
+            query-activity (memory/get-query-activity memory-analysis name)]
+        (if query-activity
+          {:status 200 :body query-activity}
+          {:status 404 :body {:error "Query matches not found"}})))))
+
+(defn- handle-get-memory-analysis
+  [state cache _req]
+  (with-memory-analysis state cache
+    (fn [memory-analysis]
+      {:status 200
+       :body (dissoc memory-analysis :fact-raw-types)})))
+
+(s/defn handle-get-annotations :- {:status (s/eq 200) :body AnnotationsMap}
+  [state _req]
+  {:status 200
+   :body (:annotations state)})
+
+(defn- deref-state
+  "Wraps `handler` so each request derefs `state-atom` once and passes the
+   pure state value as the handler's first argument, followed by `args` and
+   then the request.  The wrapped handler holds no reference to the atom and
+   therefore cannot mutate server state."
+  [state-atom handler & args]
+  (fn [req]
+    (apply handler @state-atom (concat args [req]))))
+
+(defn router
+  [state-atom cache working-memory-enabled?]
+  (let [route (fn [handler & args]
+                (apply deref-state state-atom handler args))
+        wm-disabled-handler (when-not working-memory-enabled?
+                              (fn [_req] (no-working-memory-response :disabled-by-config)))
+        wm-route (fn [handler & args]
+                   (or wm-disabled-handler
+                       (apply route handler args)))]
+    (ring/router
+     ["/v1"
+      ["/rulebase-summary"
+       {:get (route handle-get-rulebase-summary cache working-memory-enabled?)}]
+
+      ["/rulebase-analysis"
+       {:get (route handle-get-rulebase-analysis cache)}]
+
+      ["/rules"
+       [""
+        {:get (route handle-get-rules cache)}]
+       ["/:id"
+        {:get (route handle-get-rule cache)}]]
+
+      ["/queries"
+       [""
+        {:get (route handle-get-queries cache)}]
+       ["/:id"
+        {:get (route handle-get-query cache)}]]
+
+      ["/fact-types"
+       [""
+        {:get (route handle-get-fact-types cache)}]
+       ["/:id"
+        {:get (route handle-get-fact-type cache)}]]
+
+      ["/session"
+       ["/fact-types"
+        ["" {:get (wm-route handle-get-session-fact-types cache)}]
+        ["/:id" {:get (wm-route handle-get-session-fact-type cache)}]]
+       ["/facts/:id"
+        {:get (wm-route handle-get-session-fact cache)}]
+       ["/rules/:id"
+        {:get (wm-route handle-get-session-rule cache)}]
+       ["/queries/:id"
+        {:get (wm-route handle-get-session-query cache)}]]
+
+      ["/memory-analysis"
+       {:get (wm-route handle-get-memory-analysis cache)}]
+
+      ["/annotations"
+       [""
+        {:get (route handle-get-annotations)}]]]
+
+     {:data {:muuntaja (m/create
+                        (assoc-in m/default-options
+                                  [:formats "application/json" :encoder-opts]
+                                  {:mapper (json-mapper)}))
+             :middleware [muuntaja/format-middleware]}})))
+
+(defn app
+  "Returns {:keys [handler cache]}.
+   `state-atom` is a single atom holding the server state — see
+   `clara.explorer.server.serve/ServerState`.
+   `working-memory-enabled?` is the raw `:working-memory-enabled` config
+   flag (default true at the `start!` level).  When false, working-memory
+   routes are bound to a fixed 409 `:disabled-by-config` handler at router
+   construction.  A rulebase session is detected dynamically and yields 409
+   `:rulebase-input`."
+  [state-atom working-memory-enabled?]
+  (let [cache-atom (cache/->cache)]
+    {:handler (ring/ring-handler
+               (router state-atom cache-atom working-memory-enabled?)
+               (ring/create-default-handler))
+     :cache cache-atom}))

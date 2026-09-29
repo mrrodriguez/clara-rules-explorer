@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { ui } from '../support/ui';
 
-const LOAN_DOC_NS = 'clara.server.tools.graph.rules.loan-doc-rules';
-const LOAN_APP_NS = 'clara.server.tools.graph.rules.loan-app-rules';
+const LOAN_DOC_NS = 'clara.explorer.test.rules.loan-doc-rules';
+const LOAN_APP_NS = 'clara.explorer.test.rules.loan-app-rules';
 
 test.describe('GroupedFilterableNavList — Rules page', () => {
 	test.beforeEach(async ({ page }) => {

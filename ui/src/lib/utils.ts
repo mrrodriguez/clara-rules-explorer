@@ -29,7 +29,7 @@ export function factPath(id: string): `/fact-types/${string}` {
 
 /**
  * Extracts the short display name from a fully-qualified name.
- * e.g., "clara.server.tools.graph.rules.loan-app-rules/collect-app-given-docs" -> "collect-app-given-docs"
+ * e.g., "clara.explorer.test.rules.loan-app-rules/collect-app-given-docs" -> "collect-app-given-docs"
  */
 export function getShortName(fqName: string): string {
 	return fqName.split('/').pop() || fqName;

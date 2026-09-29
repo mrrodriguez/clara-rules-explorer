@@ -111,7 +111,7 @@ jobs:
           E2E_BUILD: 'true'
 
       - name: Prepare Demo Session
-        working-directory: server
+        working-directory: explorer
         run: clojure -M:demo-setup
 
       # Backends are started by Playwright's webServer config (one per e2e

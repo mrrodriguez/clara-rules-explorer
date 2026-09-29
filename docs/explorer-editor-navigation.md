@@ -20,7 +20,7 @@ The same feature ships as two clients over one shared contract:
 | Emacs  | CIDER  | [Editor Navigation — Emacs](./explorer-editor-navigation-emacs.md)   |
 | Neovim | Conjure | [Editor Navigation — Neovim](./explorer-editor-navigation-neovim.md) |
 
-All semantics live in `clara.server.graph.client/navigate` (Clojure) — pure
+All semantics live in `clara.explorer.server.client/navigate` (Clojure) — pure
 EDN in, EDN out, no HTTP, no transport-specific types. Each editor is thin
 structural navigation + transport + UX glue. No absolute paths or ports are
 hard-coded anywhere in the shipped files.
@@ -30,8 +30,8 @@ hard-coded anywhere in the shipped files.
 Start the server in your REPL and register it:
 
 ```clojure
-(require '[clara.server.graph.server :as server]
-         '[clara.server.graph.client :as client])
+(require '[clara.explorer.server.serve :as server]
+         '[clara.explorer.server.client :as client])
 
 (def explorer-system
   (server/start! {:session my-session :port 9999}))
@@ -88,10 +88,10 @@ before jumping so `C-o` returns.
 | -------------------------------------------------------- | -------------------------------------- |
 | Rule source on disk / annotations                        | refresh                                 |
 | Rules re-evaluated in the REPL (session stale)           | rebuild the session, then swap session |
-| `clara.server.graph.*` source changed (namespace stale)  | `(require 'clara.server.graph.client :reload)` in the REPL, or restart it |
+| `clara.explorer.server.*` source changed (namespace stale)  | `(require 'clara.explorer.server.client :reload)` in the REPL, or restart it |
 
 A plain `require` is a no-op for already-loaded namespaces, so after the
-`clara.server.graph.client` / `server` sources change, a running REPL must
+`clara.explorer.server.client` / `server` sources change, a running REPL must
 reload them (`:reload`) or be restarted — otherwise a freshly-evaluated form
 can fail to compile with a `CompilerException` ("No such var …") against the
 stale namespace.
@@ -100,14 +100,14 @@ stale namespace.
 
 The swap command hot-swaps a rebuilt session into the running server. It
 prompts for a single EDN **opts map** (the argument to
-`clara.server.graph.client/swap-session!`), e.g. `{:session s2}`. The simplest
+`clara.explorer.server.client/swap-session!`), e.g. `{:session s2}`. The simplest
 workflow: rebuild the session in the REPL and bind it to a var, then enter
 `{:session s2}` at the prompt.
 
 ```clojure
 ;; in the REPL, after re-evaluating the rules:
-(def s2 (clara.rules/mk-session 'clara.server.tools.graph.rules.loan-doc-rules
-                                'clara.server.tools.graph.rules.loan-app-rules))
+(def s2 (clara.rules/mk-session 'clara.explorer.test.rules.loan-doc-rules
+                                'clara.explorer.test.rules.loan-app-rules))
 ```
 
 The opts map is read as EDN in the REPL's current namespace, so a bare var

@@ -44,8 +44,8 @@ function M.edn_string(s) return ('"%s"'):format(s:gsub('[\\"\n\t\r]', ESC)) end
 --- Clojure `client/navigate` form: one `%s` slot for the EDN payload map.
 -- Kept as a single balanced-paren template (filled via `:format`) so the form
 -- stays inspectable instead of split across `..` concats.
-local NAVIGATE_FORM = [[(do (require 'clara.server.graph.client)
-     (clara.server.graph.client/navigate {%s}))]]
+local NAVIGATE_FORM = [[(do (require 'clara.explorer.server.client)
+     (clara.explorer.server.client/navigate {%s}))]]
 
 --- EDN `NavigateInput` map: one `%s` slot for the space-joined entries.
 local NAVIGATE_INPUT_TEMPLATE = "{%s}"
@@ -340,7 +340,7 @@ M.server_available_cache = nil
 function M.server_available(cb)
   M.debug_log("server-available probe")
   M.eval_edn({
-    code = "(try (some? ((requiring-resolve 'clara.server.graph.client/get-current-system))) (catch Throwable _ false))",
+    code = "(try (some? ((requiring-resolve 'clara.explorer.server.client/get-current-system))) (catch Throwable _ false))",
     passive = true,
     on_value = function(value)
       local ok, decoded = pcall(edn.decode, value)

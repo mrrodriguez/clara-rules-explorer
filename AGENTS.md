@@ -8,21 +8,21 @@ organized separately — do not mix tooling or conventions between them.
 
 | Directory        | Language              | Toolchain | Test runner      |
 | ---------------- | --------------------- | --------- | ---------------- |
-| `server/`        | Clojure (tools.deps)  | `make`    | `make test`      |
+| `explorer/`      | Clojure (tools.deps)  | `make`    | `make test`      |
 | `ui/`            | TypeScript + Svelte 5 | `pnpm`    | `pnpm run test`  |
 | `editor/emacs/`  | Emacs Lisp            | `make`    | `make test`      |
 | `editor/neovim/` | Lua (Neovim plugin)   | `make`    | `make test`      |
 
 ---
 
-## Server (`server/`)
+## Server (`explorer/`)
 
-The `server/Makefile` is the authoritative source for all quality commands.
+The `explorer/Makefile` is the authoritative source for all quality commands.
 **Always use the Makefile targets** rather than composing `clojure -M` alias
 combinations yourself:
 
 ```bash
-cd server
+cd explorer
 make test             # run the full test suite
 make format           # auto-format all source files (cljfmt)
 make format-check     # verify formatting is correct (for CI)
@@ -35,15 +35,15 @@ make clean            # remove target and .cpcache
   The Makefile correctly combines aliases: `clojure -M:test:run-tests`.
 - Clojure engineering standards are documented in the
   [clojure-engineering skill](.agents/skills/clojure-engineering/SKILL.md).
-- The server API is defined in `server/src/clara/server/graph/api.clj`.
-- Demo rules live under `server/test/clara/server/tools/graph/rules/`.
-- **Temporary files:** Write any scratch/tmp files to `server/target/` (e.g. `server/target/tmp/`) instead of the system `/tmp`. The sandbox may restrict `/tmp` access and `make clean` in `server/` automatically removes `target/` and `.cpcache`.
+- The server API is defined in `explorer/src/clara/explorer/server/api.clj`.
+- Demo rules live under `server/test/clara/explorer/rules/`.
+- **Temporary files:** Write any scratch/tmp files to `explorer/target/` (e.g. `explorer/target/tmp/`) instead of the system `/tmp`. The sandbox may restrict `/tmp` access and `make clean` in `explorer/` automatically removes `target/` and `.cpcache`.
 
 ### Annotation Key Normalization
 
 Annotation maps (loaded from EDN sidecar files, generated from kondo analysis,
 or enriched from session data) use **string keys** for rule names — never symbols.
-The normalization layer lives in `server/src/clara/server/tools/graph/annotations.clj`:
+The normalization layer lives in `explorer/src/clara/explorer/annotations.clj`:
 
 | Function                | Purpose                                                         |
 | ----------------------- | --------------------------------------------------------------- |
@@ -62,7 +62,7 @@ The normalization layer lives in `server/src/clara/server/tools/graph/annotation
    `productions-by-name`) uses symbols — conversion happens at the boundaries only.
 
 Writing annotations to disk, and everything about the artifact set around them,
-is [`server/docs/persisted-artifacts.md`](server/docs/persisted-artifacts.md).
+is [`explorer/docs/persisted-artifacts.md`](explorer/docs/persisted-artifacts.md).
 
 ---
 
@@ -106,7 +106,7 @@ or modify clara-rules source code, resolve it in this order:
    ```
 2. **Maven cache fallback** — if `CLARA_HOME` is unset, look in
    `~/.m2/repository` for clara-rules artifacts. This project depends on the
-   **gateless fork** (`com.github.gateless/clara-rules`, see `server/deps.edn`),
+   **gateless fork** (`com.github.gateless/clara-rules`, see `explorer/deps.edn`),
    so look under `~/.m2/repository/com/github/gateless/clara-rules*` — **not**
    upstream `com/cerner/clara-rules` (Cerner/Oracle).
 3. **Ask the user** — if neither is available, ask the user where their
@@ -123,4 +123,4 @@ When making changes that span both projects:
 3. If the API contract changes, update `docs/explorer-graph-api.md`.
 4. For editor transport changes, verify both editor suites (see
    [`editor/AGENTS.md`](editor/AGENTS.md)) and keep the shared
-   `server/resources/clara/server/graph/editor-resolve-form.clj` in sync.
+   `server/resources/clara/explorer/server/editor-resolve-form.clj` in sync.
