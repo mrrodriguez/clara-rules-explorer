@@ -63,11 +63,9 @@
     :fact-types {}
     :dep-graph {}
     :unresolved []
-    :slim {:written-by "clara.explorer.artifacts.slim"
+    :slim {:written-by 'clara.explorer.artifacts.slim/slim-rulebase-analysis
            :dropped dropped
-           :references "test"
-           :unknown-fact-types #{}
-           :recover {}}}))
+           :unknown-fact-types #{}}}))
 
 (defn- write-unit!
   "A complete minimal unit: manifest + analysis parts with the given slim shape."

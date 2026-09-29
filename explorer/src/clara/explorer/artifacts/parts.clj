@@ -36,8 +36,8 @@
   of them is \"the rest\", so `->parts` refuses one it cannot place rather than
   dropping it silently — the same posture as `->flat-productions` refusing a
   rule/query name collision. The fix is always a decision in `slim`: drop the
-  key deliberately, with a `:slim :recover` entry saying where to get it, or
-  give it a part here.
+  key deliberately (see its header comment for what answers it), or give it a
+  part here.
 
   `<-parts` is the exact inverse, and `artifacts.parts-test` pins the round
   trip."
@@ -132,17 +132,16 @@
 
   There are six files and none of them is a catch-all, so such a key is written
   nowhere and `<-parts` cannot give it back — which would make both this
-  namespace's round-trip claim and `slim`'s `:slim :dropped` / `:slim :recover`
-  promise untrue at the same time, silently. Failing at the first regeneration
-  instead is the whole point."
+  namespace's round-trip claim and `slim`'s `:slim :dropped` promise untrue at
+  the same time, silently. Failing at the first regeneration instead is the
+  whole point."
   [analysis]
   (let [unplaceable (into (sorted-set) (remove placeable-top-level-keys) (keys analysis))]
     (when (seq unplaceable)
       (throw (ex-info (str "Cannot split the analysis: no part holds "
                            (pr-str (vec unplaceable)) ". Every top-level key needs a file or a "
                            "deliberate drop — add it to "
-                           "clara.explorer.artifacts.slim/dropped-top-level-keys with a "
-                           "`recovery` entry, or give it a part here.")
+                           "clara.explorer.artifacts.slim/dropped-top-level-keys, or give it a part here.")
                       {:unplaceable-keys (vec unplaceable)
                        :placeable-keys (vec (sort placeable-top-level-keys))})))))
 

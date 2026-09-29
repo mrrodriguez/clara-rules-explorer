@@ -485,14 +485,10 @@
   `:rulebase-analysis-in-hand` is used in place of building one whenever it is
   `rulebase-analysis-of?` this same merge; with no `:session` it is the only way
   to get one at all. `:rulebase-analysis? false` writes the merged annotations
-  and leaves the analysis and digest files untouched.
-
-  `:session-hint` is appended to the digest's `:more` — see
-  `clara.explorer.artifacts.digest/->rulebase-analysis-digest`."
+  and leaves the analysis and digest files untouched."
   (assoc StackOpts
          (s/optional-key :rulebase-analysis-in-hand) RulebaseAnalysisInHand
-         (s/optional-key :rulebase-analysis?) s/Bool
-         (s/optional-key :session-hint) s/Str))
+         (s/optional-key :rulebase-analysis?) s/Bool))
 
 (s/defschema MergePersistedResult
   "What `clara.explorer.artifacts.flow/merge-persisted!` returns: the
@@ -517,8 +513,7 @@
    :flag-counts {s/Keyword s/Int}
    :unlinked-rules #{RuleName}
    :no-output-rules #{RuleName}
-   :unresolved [s/Any]
-   :more s/Str})
+   :unresolved [s/Any]})
 
 ;; ===========================================================================
 ;; the curated overlay

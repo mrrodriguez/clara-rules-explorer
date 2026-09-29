@@ -107,11 +107,9 @@
     :fact-types fact-types
     :dep-graph {}
     :unresolved []
-    :slim {:written-by "clara.explorer.artifacts.slim"
+    :slim {:written-by 'clara.explorer.artifacts.slim/slim-rulebase-analysis
            :dropped #{:nodes :id}
-           :references "test"
-           :unknown-fact-types #{}
-           :recover {}}}))
+           :unknown-fact-types #{}}}))
 
 (deftest query-fns-answer-over-the-index-test
   (let [index (->index)]
@@ -270,8 +268,7 @@
       (is (= 2 (get-in digest [:summary :unit-count])))
       (is (= 1 (get-in digest [:summary :unit-edge-count])))
       (is (= #{keyword-outcome}
-             (:via (get (:unit-edges digest) ["loan-app-ruleset" "loan-disposition-ruleset"]))))
-      (is (string? (:more digest))))
+             (:via (get (:unit-edges digest) ["loan-app-ruleset" "loan-disposition-ruleset"])))))
 
     (testing "persist! writes both files and they read back equal"
       (let [dir (temp-dir)]

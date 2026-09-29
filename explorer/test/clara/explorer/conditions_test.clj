@@ -492,7 +492,7 @@
         (is (contains? node :bindings) (str "node without :bindings: " (pr-str node)))))))
 
 (deftest test-augment-lhs--retains-internal-keys
-  (testing "augment-lhs keeps :raw-condition and :clara-rules-explorer/normalized for in-memory consumers"
+  (testing "augment-lhs keeps :raw-condition and :clara.explorer.internal/normalized for in-memory consumers"
     (let [lhs [{:accumulator '(clara.rules.accumulators/all)
                 :from {:type GivenDocument
                        :constraints '[(= ?app-id app-id)]}
@@ -501,7 +501,7 @@
                                             {:prod-ns prod-ns :env nil})
           acc-entry (first augmented)]
       (is (contains? acc-entry :raw-condition))
-      (is (true? (:clara-rules-explorer/normalized acc-entry)))
+      (is (true? (:clara.explorer.internal/normalized acc-entry)))
       (is (= '(clara.rules.accumulators/all)
              (get-in acc-entry [:raw-condition :accumulator]))))))
 

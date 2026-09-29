@@ -72,19 +72,19 @@
 
 (defn- normalized-node?
   "True when `condition` was already normalized by `normalize-condition` — it
-   carries the `:clara-rules-explorer/normalized` marker.  The marker is a
+   carries the `:clara.explorer.internal/normalized` marker.  The marker is a
    project-stable keyword (not a library-namespace keyword), so it cannot
    collide with raw Clara condition keys and never tracks a namespace rename."
   [condition]
-  (boolean (:clara-rules-explorer/normalized condition)))
+  (boolean (:clara.explorer.internal/normalized condition)))
 
 (defn- assert-normalized-condition
-  "Throws when `node` does not carry the `:clara-rules-explorer/normalized` marker added by
+  "Throws when `node` does not carry the `:clara.explorer.internal/normalized` marker added by
    `normalize-condition`.  Every normalized condition — group, accumulator,
    and leaf — is tagged, so a missing marker means raw (or malformed) input
    and fails loudly here instead of being silently mis-classified."
   [node]
-  (when-not (:clara-rules-explorer/normalized node)
+  (when-not (:clara.explorer.internal/normalized node)
     (throw (ex-info "Expected a normalized LHS condition (call conditions/normalize-lhs first)"
                     {:condition node}))))
 
@@ -92,7 +92,7 @@
   "Converts one raw Clara condition into the normalized homogeneous shape:
    boolean group vectors become `{:condition-type … :children […]}`; accumulator
    maps have their `:from` subtree normalized; leaf maps keep their raw fields.
-   Every normalized node is tagged with `:clara-rules-explorer/normalized`; group and accumulator
+   Every normalized node is tagged with `:clara.explorer.internal/normalized`; group and accumulator
    nodes additionally retain their raw form under `:raw-condition` (so the
    compiler-coupled binding walk can read it without a reverse conversion).
 
@@ -106,8 +106,8 @@
       (-> condition
           (update :from normalize-condition)
           (assoc :raw-condition condition
-                 :clara-rules-explorer/normalized true))
-      (assoc condition :clara-rules-explorer/normalized true))
+                 :clara.explorer.internal/normalized true))
+      (assoc condition :clara.explorer.internal/normalized true))
 
     (and (sequential? condition) (seq condition))
     (let [group-head (first condition)]
@@ -118,7 +118,7 @@
       {:condition-type (if (keyword? group-head) group-head (keyword (name group-head)))
        :children (mapv normalize-condition (rest condition))
        :raw-condition condition
-       :clara-rules-explorer/normalized true})
+       :clara.explorer.internal/normalized true})
 
     :else condition))
 
@@ -126,7 +126,7 @@
   "Normalizes a production's raw LHS conditions into the homogeneous shape
    used by the rest of the analysis: every entry is a map; group entries carry
    `:condition-type` + `:children`; leaf entries keep their raw fields.  Every
-   entry is tagged with `:clara-rules-explorer/normalized`; group and accumulator entries
+   entry is tagged with `:clara.explorer.internal/normalized`; group and accumulator entries
    additionally retain their raw form under `:raw-condition` (for the
    compiler-coupled binding walk).  The internal keys are kept through
    analysis and stripped at the serialization boundary (see
@@ -139,12 +139,12 @@
 (defn- get-raw-condition
   "Returns the raw Clara form retained on a normalized condition.  Group and
    accumulator nodes keep their original form under `:raw-condition`; leaf maps
-   are unchanged apart from the `:clara-rules-explorer/normalized` marker, which is stripped here
+   are unchanged apart from the `:clara.explorer.internal/normalized` marker, which is stripped here
    so the returned LHS is the pure raw form.  Raw (non-normalized) conditions
    pass through unchanged."
   [node]
   (or (:raw-condition node)
-      (cond-> node (map? node) (dissoc :clara-rules-explorer/normalized))))
+      (cond-> node (map? node) (dissoc :clara.explorer.internal/normalized))))
 
 (defn get-raw-lhs
   "Returns the raw Clara LHS retained on a normalized LHS (see
@@ -172,7 +172,7 @@
 (defn extract-lhs-fact-types
   "Returns the distinct fact types referenced by a normalized production LHS,
    in traversal order.  Throws when any entry is not normalized (missing the
-   `:clara-rules-explorer/normalized` marker)."
+   `:clara.explorer.internal/normalized` marker)."
   [lhs]
   (into []
         (comp (mapcat extract-condition-fact-types)
@@ -186,7 +186,7 @@
    (whose `:from` subtree supplies the fact types).  Returns
    `[{:binding ?sym :fact-type t} …]` with `:binding` as a symbol.
 
-   Throws when any condition is not normalized (missing the `:clara-rules-explorer/normalized`
+   Throws when any condition is not normalized (missing the `:clara.explorer.internal/normalized`
    marker)."
   [lhs]
   (letfn [(walk [condition]
@@ -246,12 +246,12 @@
      :some-initial-value? (some? (:initial-value evaluated))}))
 
 (defn strip-internal-keys
-  "Removes the internal analysis keys (`:raw-condition` and `:clara-rules-explorer/normalized`)
+  "Removes the internal analysis keys (`:raw-condition` and `:clara.explorer.internal/normalized`)
    from a serialized (or normalized/augmented) LHS tree.  The keys are
    serialized into the in-memory `:lhs` and removed here at the external-view
    boundary so they are not externalized via the API."
   [lhs]
-  (walk/prewalk (fn [x] (if (map? x) (dissoc x :raw-condition :clara-rules-explorer/normalized) x)) lhs))
+  (walk/prewalk (fn [x] (if (map? x) (dissoc x :raw-condition :clara.explorer.internal/normalized) x)) lhs))
 
 (defn- enrich-accumulators
   "Returns `lhs` with every accumulator condition's `:accumulator` replaced by
@@ -659,7 +659,7 @@
   "Walks the (normalized, accumulator-enriched) LHS tree, merging binding info
    into leaf and group maps by path.  Group maps keep their `:condition-type`
    and have their `:children` recursed before merging their own summary.  The
-   internal `:raw-condition` and `:clara-rules-explorer/normalized` keys are left intact for
+   internal `:raw-condition` and `:clara.explorer.internal/normalized` keys are left intact for
    in-memory consumers."
   [node path binding-index]
   (cond
@@ -693,7 +693,7 @@
    The caller is responsible for normalizing the raw LHS first (see
    `normalize-lhs`, which is idempotent); this function only enriches an
    already-normalized LHS.  The enriched LHS retains the internal
-   `:raw-condition` and `:clara-rules-explorer/normalized` keys for in-memory consumers;
+   `:raw-condition` and `:clara.explorer.internal/normalized` keys for in-memory consumers;
    `strip-internal-keys` removes them at the serialization boundary.
 
    `opts`:

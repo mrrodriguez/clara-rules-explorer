@@ -83,7 +83,7 @@
                                 slim/slim-rulebase-analysis
                                 rehydrate/rehydrate-analysis)
                             [:slim :dropped])
-            still-absent #{:nodes :lhs-form :raw-condition :clara-rules-explorer/normalized :ns-deps}]
+            still-absent #{:nodes :lhs-form :raw-condition :clara.explorer.internal/normalized :ns-deps}]
         (is (= still-absent (set/intersection dropped still-absent)))
         (is (not (contains? dropped :descendants)))
         (is (not (contains? dropped :used-by-rules)))

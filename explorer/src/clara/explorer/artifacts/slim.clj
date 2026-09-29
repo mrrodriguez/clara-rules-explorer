@@ -6,7 +6,7 @@
   every cross-reference to the name it points at. **It only ever removes
   information**: nothing is derived, re-indexed, or re-serialized, and there is
   no inverse — a reader who wants what is gone asks the running explorer or
-  inverts a key this file keeps, per `recovery`.
+  inverts a key this file keeps (see the header comment).
 
   `clara.explorer.artifacts.parts` then splits the result into the
   files a reader actually opens, and
@@ -36,13 +36,13 @@
 ;;          per-reference restatements of a record the same file carries once, and a direction of
 ;;          something kept that is read back out of it by pure inversion — `:inserted-by-rules`,
 ;;          `:retracted-by-rules`, `:used-by-rules`, `:used-by-queries`, `:descendants`, and
-;;          `:dep-graph`'s `:downstream`. Each one names where to get it instead, and that is
-;;          always the server, a sibling file, or an inversion of something this same file holds.
+;;          `:dep-graph`'s `:downstream`. Where to get each one instead is always the server, a
+;;          sibling file, or an inversion of something this same file holds — stated here, in
+;;          code, not restated into the artifact.
 ;;
-;; THE INVERSE PAIRS. **This comment is the one place these are explained.** `recovery` states each
-;; one tersely because it is written into the artifact for a reader with no classpath; every other
-;; mention — `clara.explorer.artifacts.digest`'s :more,
-;; docs/persisted-artifacts.md, the offline report script — points here
+;; THE INVERSE PAIRS. **This comment is the one place these are explained.** The artifact carries
+;; only the `:dropped` key set and `:written-by` (the writing function, resolvable at the manifest's
+;; sha); every other mention — docs/persisted-artifacts.md and the offline report script — point here
 ;; rather than restating, because five copies of a rule about closure direction is five chances to
 ;; get one of them backwards.
 ;;
@@ -76,10 +76,10 @@
 ;; into homogeneous maps and leaves two of its own keys on the result: `:raw-condition`, the raw
 ;; Clara condition a group or accumulator node was built from — retained so a
 ;; compiler-coupled walk can read the original structure without converting back — and
-;; `:clara-rules-explorer/normalized`, the marker saying a node has been through that pass. Both are the
+;; `:clara.explorer.internal/normalized`, the marker saying a node has been through that pass. Both are the
 ;; analysis talking to itself. The raw subtree is a duplicate of the node carrying it, and the
 ;; marker is true of every node in this file by construction, so neither distinguishes anything a
-;; reader can act on. Left in, they cost a 57-character namespaced key on every condition plus a
+;; reader can act on. Left in, they cost a namespaced key on every condition plus a
 ;; second copy of every group and accumulator.
 ;;
 ;; Dropped here rather than by calling
@@ -118,23 +118,23 @@
 ;; artifacts consumes it yet, and `:refers` is refer-all-expanded to every public var of each
 ;; required namespace, so on a real ruleset it is not a small key. Dropped *deliberately* rather
 ;; than by omission: whether to persist it is a live question, and an artifact that answers it by
-;; silently lacking the key answers it for everyone. See `recovery`.
+;; silently lacking the key answers it for everyone.
 ;; ===========================================================================
 
 (def dropped-top-level-keys
-  "Keys removed from the analysis map itself. See `recovery` for where each one
-  is answered instead."
+  "Keys removed from the analysis map itself. See the header comment for where
+  each one is answered instead."
   #{:nodes :fact-type-id-index :production-id-index :merged-annotations :ns-deps})
 
 (def dropped-production-keys
-  "Keys removed from every rule and query. See `recovery` for where each one is
-  answered instead."
+  "Keys removed from every rule and query. See the header comment for where
+  each one is answered instead."
   #{:id :lhs-form :upstream :downstream
     :dynamic-insert-types-detected :dynamic-retract-types-detected})
 
 (def dropped-fact-type-keys
-  "Keys removed from every entry of `:fact-types`. See `recovery` for where each
-  one is answered instead.
+  "Keys removed from every entry of `:fact-types`. See the header comment for
+  where each one is answered instead.
 
   Five of the six are one idea: a fact type's relationships to productions and
   to other types are stored here in *both* directions, and one direction is the
@@ -152,7 +152,7 @@
   #{:id :inserted-by-rules :retracted-by-rules :used-by-rules :used-by-queries :descendants})
 
 (def dropped-dep-graph-keys
-  "Keys removed from every entry of `:dep-graph`. See `recovery`.
+  "Keys removed from every entry of `:dep-graph`. See the header comment.
 
   `:downstream` is the transpose of `:upstream` across the same map: a node is
   downstream of exactly the nodes that list it upstream. The graph therefore
@@ -165,13 +165,12 @@
   "Keys removed from every node of a production's `:lhs`, **at any depth** —
   unlike the sets above, these sit inside a kept value rather than beside it.
   Both are the analysis's own normalization bookkeeping; see the header
-  comment for why this file drops them itself. `recovery` says where they are
-  answered instead.
+  comment for why this file drops them itself.
 
-  `:clara-rules-explorer/normalized` is a project-stable keyword (not a
-  library-namespace keyword) so it never tracks a namespace rename; it is
-  written as a literal for exactly that reason."
-  #{:raw-condition :clara-rules-explorer/normalized})
+  `:clara.explorer.internal/normalized` is an explicitly internal keyword — the
+  `internal` segment signals it is implementation detail, not consumer contract
+  — and is written as a literal for exactly that reason."
+  #{:raw-condition :clara.explorer.internal/normalized})
 
 (def ^:private cross-reference-keys
   "Every key the explorer puts on a cross-reference. This is a pointer to a production or fact type
@@ -242,110 +241,6 @@
                    analysis)
     @found))
 
-(def ^:private recovery
-  "Written into the artifact as `:slim :recover`, so a reader who opens the file
-  cold is told what is missing and who answers it — without this namespace
-  having to be on their classpath."
-  {:nodes
-   (str "the Rete node graph. Needs a live session: GET /v1/rulebase-analysis, or "
-        "clara.explorer.core/->rulebase-analysis at a REPL. Only the "
-        "explorer's Rete view consumes it.")
-   :id
-   (str "the explorer's URL-safe handle for a production or fact type. Every "
-        "map in this file is keyed by :name, which is kept, and every route "
-        "takes a name: GET /v1/rules/:fq-name.")
-   :fact-type-id-index
-   (str "a flat {id -> name} map the explorer added to rulebase-analysis. Every "
-        "entry is exactly the :id this file already drops paired with a :name "
-        "that is already a key in :fact-types, so it carries nothing this file "
-        "doesn't. GET /v1/fact-types/:fq-name if a caller does have an id to "
-        "resolve.")
-   :production-id-index
-   "as :fact-type-id-index, over :rules / :queries instead of :fact-types"
-   :merged-annotations
-   (str "the annotations the analysis was computed over, which the explorer "
-        "stamps onto its result so a caller can tell whether a cached analysis "
-        "is still current. merged-annotations.edn, beside this file, is the "
-        "same map under :annotations — with the layers and per-key provenance "
-        "that produced it, which this key does not carry. Read it through "
-        "clara.explorer.artifacts.store/read-merged-annotations: on "
-        "disk it points at the layer files rather than restating them, and that "
-        "reader resolves the references.")
-   :ns-deps
-   (str "the requires, aliases, imports and :refer-clojure of every rule-owning "
-        "namespace. Dropped deliberately rather than by omission: nothing "
-        "reading these artifacts consumes it yet, and its :refers is expanded "
-        "to every public var of each required namespace, so it is large. "
-        "GET /v1/rulebase-analysis serves it, or "
-        "clara.explorer.core/->rulebase-analysis at a REPL.")
-   :lhs-form
-   (str "a rendering of :lhs, which is kept and carries strictly more. "
-        "GET /v1/rules/:fq-name serves the same string.")
-   :raw-condition
-   (str "the raw Clara condition a normalized :lhs group or accumulator node "
-        "was built from, which the explorer retains for its "
-        "compiler-coupled binding walk. A duplicate of the node carrying it: "
-        ":condition-type + :children describe the same group and :from the same "
-        "accumulator source, both kept, and :lhs-form renders the same source. "
-        "Nothing serves it — GET /v1/rules/:fq-name strips it too — so "
-        "clara.explorer.core/->rulebase-analysis at a REPL is the only "
-        "place it survives.")
-   :clara-rules-explorer/normalized
-   (str "the explorer's marker that a :lhs node has been through "
-        "clara.explorer.conditions/normalize-lhs. True of every node "
-        "of every :lhs in this file by construction, so it distinguishes nothing "
-        "here. Same recovery as :raw-condition.")
-   :upstream "GET /v1/rules/:fq-name, or :dep-graph in this file, keyed by production name"
-   :downstream
-   (str "dropped at two levels, and answered differently at each. On a "
-        "production: :dep-graph in this file, keyed by production name, or GET "
-        "/v1/rules/:fq-name. On a :dep-graph entry: the transpose of :upstream "
-        "across that same map — a node is downstream of exactly the nodes "
-        "listing it upstream. Verified exact (3411 of 3411 nodes on a repo, "
-        "4768 of 4768 on a restored session, no drift).")
-   :inserted-by-rules
-   (str "the inverse of each rule's :insert-types, which is kept, closed over "
-        "the ANCESTORS in :ancestors, which is kept: a rule inserting T inserts "
-        "T and every ancestor of T, since the fact it makes is one of each. "
-        "GET /v1/fact-types serves it directly.")
-   :retracted-by-rules
-   "as :inserted-by-rules, over :retract-types rather than :insert-types"
-   :used-by-rules
-   (str "the inverse of each rule's :lhs-types, which is kept, closed over the "
-        "DESCENDANTS of each type — transpose the kept :ancestors to get them: "
-        "a rule matching T uses T and everything deriving from T. Note this "
-        "closure runs the OPPOSITE way from :inserted-by-rules'. The closure is "
-        "required: inverting :lhs-types alone matches only 2033 of the 3687. "
-        "Verified exact (3687 of 3687 fact types on a repo, 4764 of 4764 on a "
-        "restored session, no drift). GET /v1/fact-types/:fq-name serves it "
-        "directly.")
-   :used-by-queries
-   (str "as :used-by-rules, inverting :lhs-types over :queries rather than "
-        "over :rules. Verified exact (344 of 344 fact types on a repo, 493 of "
-        "493 on a restored session, no drift).")
-   :descendants
-   (str "the transpose of :ancestors, which is kept, over this same :fact-types "
-        "map: a type is a descendant of every name in its own :ancestors. Invert "
-        "it — the two carry one edge set between them, so holding both doubles "
-        "what the hierarchy costs here. GET /v1/fact-types/:fq-name serves it "
-        "directly, shallowest-first.")
-   :dynamic-insert-types-detected
-   (str "the annotation layers hold these callsites as authored (symbols, raw "
-        "type tokens) under :clara-rules/dynamic-insert-types-detected, and "
-        "merged-annotations.edn resolves to them. "
-        "GET /v1/rules/:fq-name serves the resolved/serialized form this file "
-        "omits.")
-   :dynamic-retract-types-detected
-   "as :dynamic-insert-types-detected, under :clara-rules/dynamic-retract-types-detected"})
-
-(def ^:private references-note
-  (str "Cross-references to a production or fact type are the bare :name "
-       "string, not the explorer's {:name :id :ns :type} / {:name :id :known} "
-       "record. Look the name up in :rules, :queries or :fact-types for the "
-       "rest; GET /v1/rules/:fq-name and GET /v1/fact-types serve the expanded "
-       "form. Names that carried :known false are listed once in "
-       ":unknown-fact-types."))
-
 (defn- update-present
   "Like `update`, but only when `m` already has `k`."
   [m k f]
@@ -369,7 +264,9 @@
 (s/defn slim-rulebase-analysis :- schema/RulebaseAnalysis
   "`analysis` with `dropped-top-level-keys`, `dropped-production-keys`, `dropped-fact-type-keys`,
   `dropped-dep-graph-keys` and `dropped-condition-keys` removed and every cross-reference collapsed
-  to the name it points at, plus a `:slim` marker recording what went and who answers it.
+  to the name it points at, plus a `:slim` marker recording what went
+  (`:dropped`), the surviving `:unknown-fact-types`, and the writing function
+  (`:written-by`).
 
   Idempotent — `dissoc` of an absent key is a no-op, and a collapsed reference is a string, which
   `cross-reference?` does not match. `:unknown-fact-types` is carried forward rather than
@@ -397,13 +294,11 @@
         (update-present :fact-types #(update-vals % (partial slim-record dropped-fact-type-keys)))
         (update-present :dep-graph #(update-vals % (partial slim-record dropped-dep-graph-keys)))
         (update-present :unresolved collapse-cross-references)
-        (assoc :slim {:written-by "clara.explorer.artifacts.slim"
+        (assoc :slim {:written-by 'clara.explorer.artifacts.slim/slim-rulebase-analysis
                       :dropped (into (sorted-set)
                                      (concat dropped-top-level-keys
                                              dropped-production-keys
                                              dropped-fact-type-keys
                                              dropped-dep-graph-keys
                                              dropped-condition-keys))
-                      :references references-note
-                      :unknown-fact-types unknown
-                      :recover recovery}))))
+                      :unknown-fact-types unknown}))))

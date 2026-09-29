@@ -690,8 +690,7 @@
   "An agent-readable reduction of the index: the scope it is of (units,
   namespaces, and the caller's `:label`), counts, the unit edge list, entry
   points, orphans, hierarchy conflicts, coverage gaps, and per-unit provenance.
-  A function on the index, so an answer never depends on the persistence step.
-  `:more` names what it omits, for a reader without the classpath."
+  A function on the index, so an answer never depends on the persistence step."
   [index]
   (let [{:keys [scope fact-types unit-edges entry-points orphans hierarchy coverage provenance]} index]
     {:summary {:unit-count (count (:units coverage))
@@ -706,11 +705,7 @@
      :orphans orphans
      :hierarchy-conflicts (:conflicts hierarchy)
      :coverage coverage
-     :provenance provenance
-     :more (str "The full registry index is registry-index.edn, beside this file. "
-                "Ask it with clara.explorer.artifacts.federate/impact-of, "
-                "producers-of, dependents-of, paths-between, unit-dependency-graph, "
-                "and coverage-report.")}))
+     :provenance provenance}))
 
 (defn persist!
   "Write `registry-index.edn` and `registry-digest.edn` to an explicit `:dir`.

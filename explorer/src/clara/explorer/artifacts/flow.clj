@@ -303,7 +303,7 @@
   `:rulebase-analysis? false` writes the merged annotations and leaves the analysis directory and
   digest file untouched — not a shortcut, but for a caller that can fold the layers yet cannot
   re-derive an analysis, where the existing files beat none."
-  [{:keys [rulebase-analysis? session-hint] :or {rulebase-analysis? true} :as opts}
+  [{:keys [rulebase-analysis?] :or {rulebase-analysis? true} :as opts}
    :- schema/MergePersistedOptions]
   (let [;; The stack is read once and used twice: folded, then used again as
         ;; what the fold is compacted against. Re-reading it would be the most
@@ -320,7 +320,7 @@
         ;; counts — so it is built from `analysis`, not from what goes to disk.
         (store/write-analysis-parts! opts (slim/slim-rulebase-analysis analysis))
         (edn-io/write-edn-file! digest-file
-                                (digest/->rulebase-analysis-digest analysis session-hint))))
+                                (digest/->rulebase-analysis-digest analysis))))
     (cond-> {:merged merged-file
              :layers (mapv :id (:layers merged))
              :rule-count (count (:annotations merged))}
@@ -409,7 +409,7 @@
    `<:root>/<:repo>`. `:root` is the source registry root (and default output
    root); `:repo` is the composed unit's registry-relative identity and default
    subdir."
-  [{:keys [root units analysis-run session-hint]
+  [{:keys [root units analysis-run]
     :as opts} :- schema/ComposePersistOptions]
   (let [reg (registry/->registry {:root root :units units})
         analysis (compose/->composed-analysis reg units)
@@ -427,7 +427,7 @@
       (store/write-analysis-parts! opts analysis)
       (edn-io/write-edn-file!
        digest-file
-       (digest/->rulebase-analysis-digest analysis session-hint))
+       (digest/->rulebase-analysis-digest analysis))
       (let [manifest-file (manifest/write-manifest!
                            (assoc opts
                                   :analysis-run (merge {:mode :compose

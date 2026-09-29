@@ -490,7 +490,7 @@
 
 (defn get-production-external-view
   "Returns a rule/query summary stripped of the internal LHS analysis keys
-   (`:raw-condition` / `:clara-rules-explorer/normalized`) so they are not externalized via the
+   (`:raw-condition` / `:clara.explorer.internal/normalized`) so they are not externalized via the
    API.  The in-memory summary's serialized `:lhs` retains them; this function
    removes them (recursively) from every LHS condition."
   [summary]

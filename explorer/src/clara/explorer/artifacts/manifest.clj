@@ -103,7 +103,7 @@
   `:method` / `:session-build` / `:scope` — none of which this namespace can
   know — without restating `:layer-ids` or `:clojure-version`."
   [{:keys [analysis-run] :as opts} :- schema/ManifestOptions]
-  (merge {:method "live-session (clara.explorer.analyze/->rule-source-analysis)"
+  (merge {:method "clara.explorer.analyze/->rule-source-analysis"
           :clojure-version (clojure-version)
           :layer-ids store/layer-artifacts
           :namespaces (get-analyzed-namespaces opts)}

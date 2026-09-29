@@ -1156,16 +1156,16 @@
           "insert match unflagged, retract match flagged"))))
 
 (deftest test-get-production-external-view-strips-internal-lhs-keys
-  (testing "external view removes :raw-condition and :clara-rules-explorer/normalized from the serialized :lhs"
+  (testing "external view removes :raw-condition and :clara.explorer.internal/normalized from the serialized :lhs"
     (let [summary {:lhs [{:condition-type :not
                           :children [{:type :type-a :constraints "[(= ?a 1)]"}]
                           :raw-condition "[:not {:type type-a :constraints [(= ?a 1)]}]"
-                          :clara-rules-explorer/normalized true}]}
+                          :clara.explorer.internal/normalized true}]}
           ext (core/get-production-external-view summary)
           lhs (first (:lhs ext))]
       (is (= :not (:condition-type lhs)))
       (is (not (contains? lhs :raw-condition)))
-      (is (not (contains? lhs :clara-rules-explorer/normalized))))))
+      (is (not (contains? lhs :clara.explorer.internal/normalized))))))
 
 (deftest test-rulebase-analysis-ns-deps
   (testing "->rulebase-analysis carries :ns-deps; the external view retains it JSON-safe"

@@ -18,7 +18,7 @@
   collapse is the thing most likely to break under an upstream shape change.
 
   Its `:lhs` is likewise the **post-normalization** shape clara-rules-explorer
-  emits now: every node carries `:clara-rules-explorer/normalized`, a boolean group is
+  emits now: every node carries `:clara.explorer.internal/normalized`, a boolean group is
   `{:condition-type :not :children […]}` rather than a raw `[:not …]` vector, an
   accumulator's `:accumulator` is `{:form … :some-initial-value? …}` rather than
   a raw form, group and accumulator nodes retain a `:raw-condition` duplicate,
@@ -59,7 +59,7 @@
      :ns "a.ns" :doc "produces two" :props {} :notes nil
      :lhs [{:type (type-ref "a/one") :constraints "[\n(= x ?x)\n]" :args "[\n{:keys [x]}\n]"
             :bindings {:binding-keys [] :new-bindings [:?x]}
-            :clara-rules-explorer/normalized true}]
+            :clara.explorer.internal/normalized true}]
      :lhs-types [(type-ref "a/one")]
      :lhs-form "[:a/one\n [{:keys [x]}]\n (= x ?x)]\n"
      :rhs-form "(insert! (->fact :b/two {:x ?x}))\n"
@@ -73,25 +73,25 @@
      :ns "b.ns" :doc nil :props {} :notes nil
      :lhs [{:type (type-ref "b/two") :constraints "[\n]" :args "[\n{:keys [x]}\n]"
             :bindings {:binding-keys [] :new-bindings [:?x]}
-            :clara-rules-explorer/normalized true}
+            :clara.explorer.internal/normalized true}
            ;; A simple negation. The group's :bindings is the union over its one
            ;; child, so here it is the child's.
            {:condition-type :not
             :children [{:type (type-ref "c/three") :constraints "[\n(= x ?x)\n]"
                         :bindings {:binding-keys [:?x] :new-bindings []}
-                        :clara-rules-explorer/normalized true}]
+                        :clara.explorer.internal/normalized true}]
             :bindings {:binding-keys [:?x] :new-bindings []}
             :raw-condition [:not {:type (type-ref "c/three") :constraints "[\n(= x ?x)\n]"}]
-            :clara-rules-explorer/normalized true}
+            :clara.explorer.internal/normalized true}
            {:accumulator {:form "(clara.rules.accumulators/all)" :some-initial-value? true}
             :from {:type (type-ref "a/one") :constraints "[\n]"
-                   :clara-rules-explorer/normalized true}
+                   :clara.explorer.internal/normalized true}
             :result-binding :?all
             :bindings {:binding-keys [] :new-bindings []}
             :raw-condition {:accumulator "(clara.rules.accumulators/all)"
                             :from {:type (type-ref "a/one") :constraints "[\n]"}
                             :result-binding :?all}
-            :clara-rules-explorer/normalized true}
+            :clara.explorer.internal/normalized true}
            ;; A non-equality unification. `(= ?x x)` is an equality join, so ?x
            ;; is a :binding-key; `(< ?n n)` is not, so the compiler moves it to
            ;; a join filter and ?n lands in the third, optional binding group.
@@ -100,7 +100,7 @@
            {:type (type-ref "b/two") :constraints "[\n(= ?x x)\n(< ?n n)\n]"
             :bindings {:binding-keys [:?x] :new-bindings []
                        :join-filter-join-bindings [:?n]}
-            :clara-rules-explorer/normalized true}
+            :clara.explorer.internal/normalized true}
            ;; An `:or` with asymmetric branches — one binds :?k, the other does
            ;; not. The group unions them, so a binding present on one branch
            ;; only still shows on the group. This is the case that makes a
@@ -109,25 +109,25 @@
            {:condition-type :or
             :children [{:type (type-ref "c/three") :constraints "[\n(= x ?x)\n(= k ?k)\n]"
                         :bindings {:binding-keys [:?x] :new-bindings [:?k]}
-                        :clara-rules-explorer/normalized true}
+                        :clara.explorer.internal/normalized true}
                        {:type (type-ref "a/one") :constraints "[\n(= x ?x)\n]"
                         :bindings {:binding-keys [:?x] :new-bindings []}
-                        :clara-rules-explorer/normalized true}]
+                        :clara.explorer.internal/normalized true}]
             :bindings {:binding-keys [:?x] :new-bindings [:?k]}
             :raw-condition [:or
                             {:type (type-ref "c/three") :constraints "[\n(= x ?x)\n(= k ?k)\n]"}
                             {:type (type-ref "a/one") :constraints "[\n(= x ?x)\n]"}]
-            :clara-rules-explorer/normalized true}
+            :clara.explorer.internal/normalized true}
            ;; An `:exists`. One child, so the group's bindings *are* the child's.
            ;; The synthetic `:?__exists__…` result-binding the analysis uses to
            ;; expand this into an accumulator is never surfaced.
            {:condition-type :exists
             :children [{:type (type-ref "c/three") :constraints "[\n(= x ?x)\n]"
                         :bindings {:binding-keys [:?x] :new-bindings []}
-                        :clara-rules-explorer/normalized true}]
+                        :clara.explorer.internal/normalized true}]
             :bindings {:binding-keys [:?x] :new-bindings []}
             :raw-condition [:exists {:type (type-ref "c/three") :constraints "[\n(= x ?x)\n]"}]
-            :clara-rules-explorer/normalized true}
+            :clara.explorer.internal/normalized true}
            ;; A compound negation — a `:not` over an `:and`, so groups nest.
            ;; Nothing bound inside a negation escapes it, which is why every
            ;; :new-bindings in here is empty.
@@ -135,20 +135,20 @@
             :children [{:condition-type :and
                         :children [{:type (type-ref "a/one") :constraints "[\n(= x ?x)\n]"
                                     :bindings {:binding-keys [:?x] :new-bindings []}
-                                    :clara-rules-explorer/normalized true}
+                                    :clara.explorer.internal/normalized true}
                                    {:type (type-ref "c/three") :constraints "[\n(= x ?x)\n]"
                                     :bindings {:binding-keys [:?x] :new-bindings []}
-                                    :clara-rules-explorer/normalized true}]
+                                    :clara.explorer.internal/normalized true}]
                         :bindings {:binding-keys [:?x] :new-bindings []}
                         :raw-condition [:and
                                         {:type (type-ref "a/one") :constraints "[\n(= x ?x)\n]"}
                                         {:type (type-ref "c/three") :constraints "[\n(= x ?x)\n]"}]
-                        :clara-rules-explorer/normalized true}]
+                        :clara.explorer.internal/normalized true}]
             :bindings {:binding-keys [:?x] :new-bindings []}
             :raw-condition [:not [:and
                                   {:type (type-ref "a/one") :constraints "[\n(= x ?x)\n]"}
                                   {:type (type-ref "c/three") :constraints "[\n(= x ?x)\n]"}]]
-            :clara-rules-explorer/normalized true}]
+            :clara.explorer.internal/normalized true}]
      ;; a vector type and a resolved symbol type — exactly what a bb-side
      ;; `serialize-fact-type` got wrong. They arrive wrapped in reference maps
      ;; and must come back out as these exact strings.
@@ -166,7 +166,7 @@
      :ns "c.ns" :doc nil :props {} :notes nil
      :lhs [{:type (type-ref "c/three") :constraints "[\n]"
             :bindings {:binding-keys [] :new-bindings []}
-            :clara-rules-explorer/normalized true}]
+            :clara.explorer.internal/normalized true}]
      :lhs-types [(type-ref "c/three")] :lhs-form "[:c/three]\n" :rhs-form "(println :x)\n"
      :insert-types [] :retract-types []
      :source-rule true :sink-rule false :unlinked-rule true :no-output-types true}}
@@ -177,7 +177,7 @@
      :ns "q.ns" :doc nil :props {} :notes nil :params #{}
      :lhs [{:type (type-ref "b/two") :constraints "[\n]" :fact-binding :?output
             :bindings {:binding-keys [] :new-bindings []}
-            :clara-rules-explorer/normalized true}]
+            :clara.explorer.internal/normalized true}]
      :lhs-types [(type-ref "b/two")] :lhs-form "[:?output <- :b/two]\n"}}
 
    ;; Both directions on every node, the way the explorer emits it: :downstream
@@ -313,10 +313,11 @@
              (:dep-graph slim)))
       (is (= (:unresolved analysis) (:unresolved slim))))
 
-    (testing ":slim tells a cold reader where each dropped key is answered"
-      (is (= (get-in slim [:slim :dropped])
-             (set (keys (get-in slim [:slim :recover])))))
-      (is (string? (get-in slim [:slim :references]))))
+    (testing ":slim records the dropped keys, the surviving unknowns, and the writer"
+      (is (= #{:written-by :dropped :unknown-fact-types}
+             (set (keys (get-in slim [:slim])))))
+      (is (= 'clara.explorer.artifacts.slim/slim-rulebase-analysis
+             (get-in slim [:slim :written-by]))))
 
     (testing "idempotent — an absent key dissocs to nothing and a collapsed
               reference is a string, which nothing re-collapses"
@@ -325,7 +326,7 @@
 (deftest condition-internal-keys-never-reach-disk-test
   (let [slim (slim/slim-rulebase-analysis analysis)
         lhs (get-in slim [:rules "b.ns/consumer" :lhs])]
-    (testing "not one :raw-condition or :clara-rules-explorer/normalized survives, at any depth, in
+    (testing "not one :raw-condition or :clara.explorer.internal/normalized survives, at any depth, in
               any production — they are clara-rules-explorer's normalization
               bookkeeping and say nothing to a reader of this file"
       (let [found (volatile! [])]
@@ -597,7 +598,7 @@
 
       (testing "inverting :lhs-types WITHOUT the closure is not enough — the
                 naive inverse misses every ancestor-matched rule, which is why
-                `recovery` names :ancestors as part of the reconstruction"
+                the header comment names :ancestors as part of the reconstruction"
         (is (not= (stated :used-by-rules)
                   (on-known-types (->closure-inverse (:rules slim) {} :lhs-types)))))
 

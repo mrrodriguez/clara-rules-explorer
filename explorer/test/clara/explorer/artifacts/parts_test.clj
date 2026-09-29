@@ -62,7 +62,7 @@
     "b.ns/consumer" {:upstream #{"a.ns/producer"}}}
 
    :unresolved [{:rule "c.ns/bare" :reason :no-detections}]
-   :slim {:written-by "clara.explorer.artifacts.slim"
+   :slim {:written-by 'clara.explorer.artifacts.slim/slim-rulebase-analysis
           :dropped #{:nodes :downstream}}})
 
 (deftest split-round-trips-exactly-test

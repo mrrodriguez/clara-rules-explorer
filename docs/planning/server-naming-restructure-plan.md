@@ -26,7 +26,7 @@ a separate doc once this plan is approved.
 
 This is a **rename**, not a behavioral change. No function signatures, HTTP
 routes, or artifact schemas change; only namespace strings, namespace-derived
-paths, and the one deliberate `:clara-rules-explorer/normalized` marker change
+paths, and the one deliberate `:clara.explorer.internal/normalized` marker change
 (§7.3) change.
 
 ---
@@ -256,9 +256,10 @@ its **contents** are regenerated — see [§7](#7-persisted-artifacts-and-annota
    in `dev/`. The exception is `user`, which stays `user` (REPL convention).
    The demo/hierarchy runners stay `clara.explorer.server.*` because they run
    servers.
-7. **`::conditions/normalized` → `:clara-rules-explorer/normalized`.** The
-   internal LHS-normalization marker becomes a project-stable keyword so a
-   library namespace keyword never leaks into `:slim :dropped` again. The
+7. **`::conditions/normalized` → `:clara.explorer.internal/normalized`.** The
+   internal LHS-normalization marker becomes an explicitly internal,
+   namespace-independent keyword so a library namespace keyword never leaks
+   into `:slim :dropped` again. The
    migration guide (§8) must tell consumers how to handle the one-time
    `:dropped` key change across old/new artifact sets.
 8. **`artifacts.serve` stays.** Both `clara.explorer.server.serve` (Jetty
@@ -398,9 +399,9 @@ artifacts.
 | `merged-rulebase-analysis/production-conditions.edn` | map keys (fq production names); `:lhs` forms embedding fq fact-type symbols                                                                                                                           |
 | `merged-rulebase-analysis/fact-types.edn`            | map keys (ns-qualified record/class fact-type names); `:ns` value; `:ancestors` / related type names                                                                                                  |
 | `merged-rulebase-analysis/dep-graph.edn`             | map keys (fq production names); `:upstream` values (fq production names)                                                                                                                              |
-| `merged-rulebase-analysis/meta.edn`                  | `:unresolved` fq names; `:slim :written-by`; `:slim :dropped` (contains `:clara.server.tools.graph.conditions/normalized`); `:slim :recover` prose referencing library ns                                                                                                                                                                     |
+| `merged-rulebase-analysis/meta.edn`                  | `:unresolved` fq names; `:slim :written-by` (producing fn symbol); `:slim :dropped` (contains `:clara.explorer.internal/normalized`)                                                                                                                                                                     |
 | `rulebase-analysis-digest.edn`                       | per-namespace count keys; unlinked rule fq names; `:more` prose referencing `clara.server.tools.graph.artifacts.store/read-merged-annotations`                                                                                                                                                      |
-| `rules-inspect-manifest.edn`                         | `:namespaces` list; `:analysis-run :method` string (`"live-session (clara.server.tools.graph.analyze/->rule-source-analysis)"`); any `:analysis-run :units` / `:blocks` strings holding namespaces                                                                                                      |
+| `rules-inspect-manifest.edn`                         | `:namespaces` list; `:analysis-run :method` string (`"clara.explorer.analyze/->rule-source-analysis"`); any `:analysis-run :units` / `:blocks` strings holding namespaces                                                                                                      |
 | `registry-index.edn` / `registry-digest.edn`         | fact-type keys, production names, `:unit-edges`, entry-point/orphan names where ns-qualified                                                                                                          |
 
 ### 7.2 Annotations format specifics
@@ -427,11 +428,10 @@ artifact values, not just the example rule namespaces. Verified in the checked-i
 
 | Value | Where | Kind |
 |---|---|---|
-| `"clara.server.tools.graph.artifacts.slim"` | `meta.edn` `:slim :written-by` | provenance string |
-| `:clara.server.tools.graph.conditions/normalized` (→ `:clara-rules-explorer/normalized`) | `meta.edn` `:slim :dropped` | **namespaced keyword (data key)** |
-| `clara.server.tools.graph.core/->rulebase-analysis`, `…conditions/normalize-lhs`, `…artifacts.store/read-merged-annotations` | `meta.edn` `:slim :recover` | prose |
+| `clara.explorer.artifacts.slim/slim-rulebase-analysis` | `meta.edn` `:slim :written-by` | fq var symbol (resolvable at manifest sha) |
+| `:clara.server.tools.graph.conditions/normalized` (→ `:clara.explorer.internal/normalized`) | `meta.edn` `:slim :dropped` | **namespaced keyword (data key)** |
 | `clara.server.tools.graph.artifacts.store/read-merged-annotations` | `rulebase-analysis-digest.edn` `:more` | prose |
-| `"live-session (clara.server.tools.graph.analyze/->rule-source-analysis)"` | `rules-inspect-manifest.edn` `:analysis-run :method` | provenance string |
+| `"clara.explorer.analyze/->rule-source-analysis"` | `rules-inspect-manifest.edn` `:analysis-run :method` | provenance string |
 
 Everything else in the artifacts (`:name`, `:ns`, fact-type names, callsite
 fields, `:filename`) derives from the **consumer's own rule namespaces**, which
@@ -445,7 +445,7 @@ Consequence for the single consumer:
   and prose, not read-time lookup keys.
 - **The one structural exception** is the `:slim :dropped` namespaced keyword
   `:clara.server.tools.graph.conditions/normalized`. This release changes it to
-  the project-stable `:clara-rules-explorer/normalized` (see §5.7), so it stops
+  the explicitly-internal `:clara.explorer.internal/normalized` (see §5.7), so it stops
   tracking a library namespace entirely. `registry/compatibility-report` and
   `assert-compatible!` compare the `:dropped` **key set** across units, so
   **mixing pre- and post-change units in one registry selection is
@@ -461,8 +461,8 @@ Consequence for the single consumer:
 - Top-level keys and their meaning.
 - The `:name`-as-handle rule (the handle itself changes value, not shape).
 - The `slim` drop-list *shape*: the set of dropped keys is stable going forward;
-  the one `::conditions/normalized` keyword changes once, to the project-stable
-  `:clara-rules-explorer/normalized`.
+  the one `::conditions/normalized` keyword changes once, to the
+  explicitly-internal `:clara.explorer.internal/normalized`.
 - `rebase-layer`'s mechanism (it already exists for exactly this class of
   change).
 
@@ -518,10 +518,10 @@ for external callers. Outline:
 4. **Persisted artifacts** — regeneration vs. migration split from §7.5, with a
    concrete `rebase-layer` invocation for `agent-annotations.edn`, plus the
    old-vs-new `:slim :dropped` shape-skew caveat from §7.3.
-5. **The `:clara-rules-explorer/normalized` marker change** — explain that the
+5. **The `:clara.explorer.internal/normalized` marker change** — explain that the
    dropped-key keyword changes once from
    `:clara.server.tools.graph.conditions/normalized` to
-   `:clara-rules-explorer/normalized`; consumers must regenerate derived
+   `:clara.explorer.internal/normalized`; consumers must regenerate derived
    artifacts (or avoid mixing old/new units in one registry selection).
 6. **Annotation sidecars** — string-key rule names, `:ns-name-sym`, and callsite
    `:filename` values change; the format is otherwise unchanged.
@@ -578,6 +578,6 @@ check targets must pass.
   because `git grep` sees the target, not the link; verify with `find -type l`.
 - **Docs drift** — every doc is migrated to current (no historical copies); the
   only interim exception is the consumer migration guide.
-- **`::conditions/normalized` → `:clara-rules-explorer/normalized`** — the one
+- **`::conditions/normalized` → `:clara.explorer.internal/normalized`** — the one
   library namespace keyword persisted as data is being made stable (§5.7);
   consumers must be told about the one-time `:dropped` key change (§8).

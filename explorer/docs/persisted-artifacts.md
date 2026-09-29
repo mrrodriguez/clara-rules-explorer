@@ -40,7 +40,8 @@ The label is the caller's, not git's.
 **Start with `rulebase-analysis-digest.edn`.** It is the only artifact meant to
 be read whole: counts, per-namespace rule and query totals, the
 source/sink/unlinked tallies, the unlinked rule names, and the `:unresolved` work
-list. Its `:more` key tells you where to go next.
+list. That is the starting point; the parts it points at are where a question
+lives.
 
 ## Writing a set
 
@@ -131,9 +132,10 @@ every run and a reader never branches on which files exist.
 
 ## What is not on disk, and why
 
-`meta.edn`'s `:slim` key is self-describing: `:dropped` is the exact set of keys
-removed and `:recover` maps each one to a sentence naming who answers it instead.
-**Read that before concluding something is missing.**
+`meta.edn`'s `:slim` key records `:dropped` — the exact set of keys removed —
+plus `:written-by` (the writing function, resolvable at the manifest's sha) and
+the `:unknown-fact-types` the cross-reference collapse had to hoist. **Read that
+before concluding something is missing.**
 
 The pattern behind the list: **every relationship is written once, in the
 direction the production states it.** So a fact type says nothing about which
@@ -146,19 +148,17 @@ serves all four production directions ready-made, and `bb … edges <rule>` give
 you both sides of the dep-graph. Reconstructing one by hand means walking the
 hierarchy, and the walk goes a different way per key — a production *matching* a
 type also matches its descendants, where one *inserting* a type affects its
-ancestors. If you have to, `:slim :recover` in `meta.edn` names the
-reconstruction for each, and
-[`artifacts/slim.clj`](../src/clara/explorer/artifacts/slim.clj)'s
+ancestors. [`artifacts/slim.clj`](../src/clara/explorer/artifacts/slim.clj)'s
 header comment is the reasoning behind all of them.
 
 Also gone: the Rete `:nodes` graph, `:lhs-form`, the id indexes, `:ns-deps`, and
-the analysis's own `:raw-condition` / `::normalized` normalization bookkeeping.
-All of them need a live session — serve the analysis and `GET /v1/…`.
+the analysis's own `:raw-condition` / `:clara.explorer.internal/normalized`
+normalization bookkeeping. All of them need a live session — serve the analysis
+and `GET /v1/…`.
 
 Nothing is dropped by omission. A top-level key `artifacts.parts` has no file for
 is **refused**, not silently discarded, so the only way a key leaves these
-artifacts is a deliberate entry in `slim/dropped-top-level-keys` with a
-`:recover` sentence beside it.
+artifacts is a deliberate entry in `slim/dropped-top-level-keys`.
 
 ## `merged-annotations.edn` is stored by reference
 

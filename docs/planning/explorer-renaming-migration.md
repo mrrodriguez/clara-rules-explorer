@@ -12,7 +12,7 @@ Every namespace that started with `clara.server.` now starts with
 are gone. There is no behavior change: no function signatures, HTTP routes, or
 artifact schemas changed. Only namespace strings, namespace-derived file paths,
 resource lookup strings, the layer-`:id` keywords (§5.2), and the
-`:clara-rules-explorer/normalized` marker (§5.1) changed. If you `require` this
+`:clara.explorer.internal/normalized` marker (§5.1) changed. If you `require` this
 library, merge its artifacts, or speak its editor protocol, remap as below and
 regenerate your derived data once.
 
@@ -104,6 +104,18 @@ merged as if they were the same namespace.
 ids. There is deliberately no `rebase-analysis` helper: derived analysis,
 digests, and manifests are regenerated, not rebased.
 
+**`meta.edn`'s `:slim` block is smaller too.** It is now
+`{:written-by <fn symbol>, :dropped <key set>, :unknown-fact-types <set>}`. The
+old `:references` prose and `:recover` key→sentence map are gone — their
+reasoning lives in `clara.explorer.artifacts.slim`'s source, resolvable at the
+manifest sha — and `:written-by` is the producing function's fully-qualified
+var symbol rather than a bare namespace string. Two more artifact values shed
+prose: `rulebase-analysis-digest.edn` / `registry-digest.edn` no longer carry a
+`:more` orientation paragraph, and `rules-inspect-manifest.edn`'s
+`:analysis-run :method` is now the bare
+`"clara.explorer.analyze/->rule-source-analysis"` (no `"live-session (…)"`
+prefix).
+
 **Shape-skew caveat.** `registry/compatibility-report` and
 `assert-compatible!` compare the `:slim :dropped` key set across units. The
 marker change in §5 alters that set once, so mixing pre- and post-upgrade
@@ -113,14 +125,15 @@ after upgrading and the old key disappears everywhere.
 
 ## 5. Data keywords
 
-### 5.1 The `:clara-rules-explorer/normalized` marker
+### 5.1 The `:clara.explorer.internal/normalized` marker
 
 The internal LHS-normalization marker used to be the library-namespace keyword
 `:clara.server.tools.graph.conditions/normalized` (written into
 `meta.edn` → `:slim :dropped` and every normalized `:lhs` node before slimming).
-It is now the project-stable `:clara-rules-explorer/normalized`, which never
-tracks a namespace again. If you snapshot or assert on `:dropped` key sets,
-update that one keyword; otherwise just regenerate (§4).
+It is now `:clara.explorer.internal/normalized` — an explicitly internal,
+namespace-independent keyword, so a consumer can see at a glance it is
+implementation detail rather than contract. If you snapshot or assert on
+`:dropped` key sets, update that one keyword; otherwise just regenerate (§4).
 
 ### 5.2 Layer-`:id` keywords renamed
 
@@ -140,11 +153,10 @@ curated `:id` and is unaffected.
 
 ### 5.3 Other `:clara-rules-explorer/*` and `:clara-rules/*` keywords
 
-- The `:clara-rules-explorer/` prefix has exactly two members:
-  `:clara-rules-explorer/normalized` (§5.1, persisted) and
-  `:clara-rules-explorer/bb-loaded` (a namespace-metadata marker on `ns` forms,
-  never persisted — `make bb-smoke-test` uses it to discover babashka-loadable
-  namespaces).
+- `:clara-rules-explorer/bb-loaded` is the sole `:clara-rules-explorer/` keyword
+  now: a namespace-metadata marker on `ns` forms, never persisted — `make
+  bb-smoke-test` uses it to discover babashka-loadable namespaces. The persisted
+  normalization marker moved to `:clara.explorer.internal/normalized` (§5.1).
 - The annotation-schema keys under `:clara-rules/*` (`insert-types`,
   `retract-types`, `no-output-types`, `notes`, `dynamic-insert-types-detected`,
   `dynamic-retract-types-detected`, `merge-props`) are project-owned annotation

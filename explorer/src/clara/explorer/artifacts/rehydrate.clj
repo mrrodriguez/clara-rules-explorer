@@ -13,7 +13,7 @@
     (rehydrate-analysis analysis {:annotations …}) ; also :merged-annotations + authored dynamic detections
 
   Left absent, and still declared in a narrowed `:slim` block: `:nodes`,
-  `:lhs-form`, `:raw-condition`, `:clara-rules-explorer/normalized`, and `:ns-deps`.
+  `:lhs-form`, `:raw-condition`, `:clara.explorer.internal/normalized`, and `:ns-deps`.
   `:lhs-form` looks recoverable and is not — it renders from the raw Clara LHS,
   which `:raw-condition` carried and `slim` drops; a re-render from the
   serialized `:lhs` would produce a similar string that is not the same string."
@@ -26,10 +26,10 @@
 
 (def ^:private always-absent
   "Keys rehydrate can never put back — they need the live rulebase, not what
-  `slim` kept. `:raw-condition` / `:clara-rules-explorer/normalized` are condition-node
+  `slim` kept. `:raw-condition` / `:clara.explorer.internal/normalized` are condition-node
   keys inside a kept `:lhs`, not top-level keys, but they are part of the
   `:slim :dropped` vocabulary and stay named there."
-  #{:nodes :lhs-form :raw-condition :clara-rules-explorer/normalized :ns-deps})
+  #{:nodes :lhs-form :raw-condition :clara.explorer.internal/normalized :ns-deps})
 
 (def ^:private annotation-restored
   "Keys restored only when the caller hands over the merged annotations the
@@ -71,11 +71,7 @@
   [analysis annotations?]
   (let [dropped (set/union always-absent
                            (when-not annotations? annotation-restored))]
-    (update analysis :slim
-            (fn [slim-block]
-              (-> slim-block
-                  (assoc :dropped dropped)
-                  (update :recover #(select-keys % dropped)))))))
+    (update analysis :slim assoc :dropped dropped)))
 
 (defn rehydrate-analysis
   "`analysis` with every direction `slim` dropped because it is recomputable put

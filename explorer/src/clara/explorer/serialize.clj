@@ -269,7 +269,7 @@
    types are still Classes/keywords when `serialize-condition` converts them
    to `clara.explorer.server.api/TypeReference` maps.
 
-   Internal analysis keys (`:raw-condition` / `:clara-rules-explorer/normalized`) are serialized
+   Internal analysis keys (`:raw-condition` / `:clara.explorer.internal/normalized`) are serialized
    along with the rest of the LHS and removed at the external-view boundary.
 
    Form printing is controlled by the dynamic var `*form-printer*`."

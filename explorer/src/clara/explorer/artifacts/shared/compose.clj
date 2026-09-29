@@ -131,13 +131,10 @@
 
 (defn- ->composed-slim
   [analyses]
-  {:written-by "clara.explorer.artifacts.compose"
+  {:written-by 'clara.explorer.artifacts.compose/->composed-analysis
    :dropped (set/union #{:nodes}
                        (apply set/union (map #(get-in % [:slim :dropped]) analyses)))
-   :references (str "Composed analysis: every unit's slim drop set unioned, "
-                    "plus :nodes (the composition never compiled).")
-   :unknown-fact-types (apply set/union (map #(get-in % [:slim :unknown-fact-types]) analyses))
-   :recover (into {} (mapcat #(get-in % [:slim :recover])) analyses)})
+   :unknown-fact-types (apply set/union (map #(get-in % [:slim :unknown-fact-types]) analyses))})
 
 (defn ->composed-analysis
   "One slim `clara.explorer.artifacts.schema/RulebaseAnalysis` over the selected units, which the caller asserts

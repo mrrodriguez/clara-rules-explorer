@@ -457,7 +457,7 @@
 
   Only `:upstream` is on disk. `:downstream` is its exact transpose — a node is
   downstream of exactly the nodes listing it upstream — so it is inverted here
-  over the whole graph rather than stored twice. See `:slim :recover`."
+  over the whole graph rather than stored twice (see `clara.explorer.artifacts.slim`'s header comment)."
   [g name*]
   (let [g (or g {})]
     (when-let [node (find-key-name g name*)]

@@ -244,11 +244,11 @@
       (is (string? (:constraints (second serialized)))))))
 
 (deftest test-serialize-lhs--serializes-internal-keys
-  (testing "serialize-lhs serializes :raw-condition recursively and keeps :clara-rules-explorer/normalized"
+  (testing "serialize-lhs serializes :raw-condition recursively and keeps :clara.explorer.internal/normalized"
     (let [lhs [{:condition-type :not
                 :children [{:type :type-a :constraints '[(= ?a 1)]}]
                 :raw-condition [:not {:type :type-a :constraints '[(= ?a 1)]}]
-                :clara-rules-explorer/normalized true}]
+                :clara.explorer.internal/normalized true}]
           serialized (s/serialize-lhs lhs nil #{})
           raw (get-in serialized [0 :raw-condition])]
       (is (= :not (get-in serialized [0 :condition-type])))
@@ -256,7 +256,7 @@
       (is (= :not (first raw)))
       (is (string? (get-in raw [1 :constraints])))
       (is (string? (get-in raw [1 :type :name])))
-      (is (true? (get-in serialized [0 :clara-rules-explorer/normalized]))))))
+      (is (true? (get-in serialized [0 :clara.explorer.internal/normalized]))))))
 
 (deftest test-serialize-condition--raw-accumulator
   (testing "a raw accumulator :raw-condition serializes its raw accumulator form to a string"

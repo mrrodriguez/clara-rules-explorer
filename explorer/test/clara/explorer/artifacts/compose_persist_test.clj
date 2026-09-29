@@ -9,7 +9,6 @@
     :refer [*artifact-opts*]]
    [clara.explorer.edn-io :as edn-io]
    [clojure.java.io :as io]
-   [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [schema.test :as st]))
 
@@ -67,7 +66,8 @@
         (is (= "loan-disposition-ruleset" (get-in index [:rules notice-approved :unit])))
         (is (contains? (get-in meta [:slim :dropped]) :nodes)
             "the composition still declares its absent Rete network")
-        (is (str/includes? (get-in meta [:slim :references]) "Composed analysis"))))
+        (is (= 'clara.explorer.artifacts.compose/->composed-analysis
+               (get-in meta [:slim :written-by])))))
 
     (testing "the manifest records the composition"
       (let [manifest (edn-io/read-edn-file (store/get-artifact-file :manifest opts))

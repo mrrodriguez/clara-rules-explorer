@@ -20,7 +20,7 @@ Tracker lives alongside the plan; consumer migration guide will land as
 - [x] Follow-up (owner): `user` back to `dev/user.clj` (classpath root — `user` never nests); demo/setup/hierarchy runners → `clara.explorer.dev.server.*` at `dev/clara/explorer/dev/server/` (dev-side only); `deps.edn` main-opts + `integration_test` updated; lint + 409 tests green
 - [x] Deleted empty `tools/graph/shared/` + `test_crazy_ns_$_name/`; fixed `empty-kondo-config` fixture layout
 - [x] `(ns …)` + requires rewritten longest-prefix-first (319+706+317+113+2 refs)
-- [x] `::conditions/normalized` → `:clara-rules-explorer/normalized` (§5.7); dropped now-unused `conditions` aliases
+- [x] `::conditions/normalized` → `:clara.explorer.internal/normalized` (§5.7); dropped now-unused `conditions` aliases
 - [x] `deps.edn`, `Makefile`, `check-reflection.sh`, kondo config, `bin/*.bb` (§6.1–§6.3)
 - [x] Follow-ups: rules path-strings `clara/explorer/rules/` → `clara/explorer/test/rules/`; `client_test` `repo-root` → `explorer/`; editor symlinks retargeted
 - [x] Docstrings/comments (§6) — code comments + `explorer/docs/*` + root docs + `ui/README.md` migrated (§6.6; a few stragglers corrected in §8)
@@ -60,6 +60,16 @@ Tracker lives alongside the plan; consumer migration guide will land as
 - [x] Fixed missed `server/`/`clara.server`/`tools.graph` refs: `explorer/docs/analyze-clj-kondo-notes.md`, `internal-analysis-models.md`, `persisted-artifacts.md`, `explorer/README.md` tree, `utils.clj` docstring, root `README.md`/`AGENTS.md`, `editor/AGENTS.md`, `ui/README.md`, `ui/docs/ui-preamble.md`, root `.gitignore`
 - [x] Cleaned stale regenerables: root `test-resources/` `.cache`, root `.clj-kondo/.cache`, `explorer/.clj-kondo/.cache`, root `target/`, root `.lsp/`, `explorer/.lsp/`, `explorer/.cpcache`
 
+## 9. Follow-up — internal marker + slim block simplification
+- [x] Renamed `:clara-rules-explorer/normalized` → `:clara.explorer.internal/normalized` (explicitly internal, namespace-independent); fixtures + artifacts regenerated
+- [x] `slim`'s `:slim` block reduced to `{:written-by <fn sym>, :dropped <set>, :unknown-fact-types <set>}` — removed the `:references` prose and the `:recover` map; `:written-by` is now the producing function's fq var symbol (resolvable at the manifest sha)
+- [x] Updated `rehydrate`, `shared.compose`, `parts`, `digest` `:more`, `annotations_report.bb`, tests, `persisted-artifacts.md`, migration guide, plan
+
+## 10. Follow-up — drop digest `:more` + simplify `:method`
+- [x] Removed `:more` orientation prose from `rulebase-analysis-digest.edn` (`digest.clj` `more-note` + `session-hint`) and `registry-digest.edn` (`federate.clj`) — structure outline belongs in docs/agent files, not artifacts
+- [x] `rules-inspect-manifest.edn` `:analysis-run :method` is now `"clara.explorer.analyze/->rule-source-analysis"` (dropped the `"live-session (…)"` prefix)
+- [x] Fixtures + artifacts regenerated; tests, lint, reflection-check, format-check, bb-smoke-test green
+
 ## Verification gate (§9)
 - [x] `grep -r clara\.server` clean except plan/progress/migration history + gitignored build outputs
 - [x] `make test` (explorer) 409/2562 green; lint, reflection-check, format-check, bb-smoke-test green
@@ -73,3 +83,5 @@ Tracker lives alongside the plan; consumer migration guide will land as
 - 2026-09-29: owner follow-up — `user` → `dev/user.clj`, demo runners → `clara.explorer.dev.server.*` (deviates from plan §4.3, which kept them in `server.*`); referencers updated; lint + suite green again.
 - 2026-09-29: suite green (409/2562, 0F/0E). Fixed along the way: serve_test filename, rules path-strings + prefix, stale kondo .cache, synth ordering expectation, client-test *ns* binding. Running lint/reflection/format/bb gates.
 - 2026-09-29: follow-up — layer-id keywords renamed (reverses §7.2 stable-id decision); missed doc refs fixed; stale kondo/lsp/target/cpcache cleaned; migration guide §5 expanded.
+- 2026-09-29: follow-up — `:clara-rules-explorer/normalized` → `:clara.explorer.internal/normalized`; `:slim` block reduced to `{:written-by <fn sym> :dropped <set> :unknown-fact-types <set>}` (recovery/references prose removed, `:written-by` is a fq var symbol). Suite still 409/2562 green.
+- 2026-09-29: follow-up — digest `:more` removed (rulebase-analysis-digest + registry-digest) and `session-hint` option dropped; `:analysis-run :method` simplified to `"clara.explorer.analyze/->rule-source-analysis"`. Suite 409/2561 green (one `:more` assertion removed).
