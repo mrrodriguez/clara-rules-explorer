@@ -142,8 +142,8 @@ test.describe('Reveal button', () => {
 		await ui.groupedNav.namespaceFilterButton(page).click();
 		await expect(ui.groupedNav.namespaceFilterDropdown(page)).toBeVisible();
 
-		const LOAN_DOC_NS = 'clara.server.tools.graph.rules.loan-doc-rules';
-		const LOAN_APP_NS = 'clara.server.tools.graph.rules.loan-app-rules';
+		const LOAN_DOC_NS = 'clara.explorer.test.rules.loan-doc-rules';
+		const LOAN_APP_NS = 'clara.explorer.test.rules.loan-app-rules';
 
 		// First click: exclusive select loan-app-rules (hides loan-doc-rules).
 		await ui.groupedNav.namespaceToggle(page, LOAN_APP_NS).click();

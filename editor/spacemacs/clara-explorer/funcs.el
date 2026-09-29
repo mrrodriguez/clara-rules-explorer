@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 ;;; Layer-local helper functions.  The navigation semantics live in
-;;; clara-explorer.el and clara.server.graph.client; keep anything added here
+;;; clara-explorer.el and clara.explorer.server.client; keep anything added here
 ;;; presentation-only.
 
 ;;; Code:

@@ -1,0 +1,36 @@
+{:slim {:written-by clara.explorer.artifacts.compose/->composed-analysis,
+  :dropped #{:downstream
+   :fact-type-id-index
+   :dynamic-insert-types-detected
+   :retracted-by-rules
+   :lhs-form
+   :used-by-queries
+   :ns-deps
+   :used-by-rules
+   :clara.explorer.internal/normalized
+   :descendants
+   :raw-condition
+   :production-id-index
+   :nodes
+   :id
+   :dynamic-retract-types-detected
+   :upstream
+   :merged-annotations
+   :inserted-by-rules},
+  :unknown-fact-types #{"clojure.lang.IKeywordLookup"
+   "clojure.lang.IPersistentCollection"
+   "clojure.lang.Counted"
+   "clojure.lang.IMeta"
+   "java.lang.Iterable"
+   "clojure.lang.IHashEq"
+   "java.lang.Object"
+   "clojure.lang.Seqable"
+   "clojure.lang.IPersistentMap"
+   "clojure.lang.IRecord"
+   "java.io.Serializable"
+   "clojure.lang.Associative"
+   "clojure.lang.ILookup"
+   "clojure.lang.IObj"
+   "java.util.Map"
+   ":loan-app/application-outcome"}},
+ :unresolved []}

@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { ui } from '../support/ui';
 
-const NS = 'clara.server.tools.graph.rules.loan-hierarchy-rules';
-const INSERT = `clara.server.tools.graph.rules.loan-hierarchy-rules/insert-income-document`;
-const REVIEW = `clara.server.tools.graph.rules.loan-hierarchy-rules/review-supporting-document`;
+const NS = 'clara.explorer.test.rules.loan-hierarchy-rules';
+const INSERT = `clara.explorer.test.rules.loan-hierarchy-rules/insert-income-document`;
+const REVIEW = `clara.explorer.test.rules.loan-hierarchy-rules/review-supporting-document`;
 const INCOME = `:${NS}/income-document`;
 const SUPPORTING = `:${NS}/supporting-document`;
 

@@ -1,0 +1,4 @@
+{"clara.explorer.test.rules.loan-outcome-notices/find-approval-notices" {:upstream #{"clara.explorer.test.rules.loan-outcome-notices/notice-approved-app"}},
+ "clara.explorer.test.rules.loan-outcome-notices/find-denial-notices" {:upstream #{"clara.explorer.test.rules.loan-outcome-notices/notice-denied-app"}},
+ "clara.explorer.test.rules.loan-outcome-notices/notice-approved-app" {},
+ "clara.explorer.test.rules.loan-outcome-notices/notice-denied-app" {}}

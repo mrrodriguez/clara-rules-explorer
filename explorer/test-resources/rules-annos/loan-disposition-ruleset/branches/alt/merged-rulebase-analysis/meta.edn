@@ -1,0 +1,35 @@
+{:slim {:written-by clara.explorer.artifacts.slim/slim-rulebase-analysis,
+  :dropped #{:descendants
+   :downstream
+   :dynamic-insert-types-detected
+   :dynamic-retract-types-detected
+   :fact-type-id-index
+   :id
+   :inserted-by-rules
+   :lhs-form
+   :merged-annotations
+   :nodes
+   :ns-deps
+   :production-id-index
+   :raw-condition
+   :retracted-by-rules
+   :upstream
+   :used-by-queries
+   :used-by-rules
+   :clara.explorer.internal/normalized},
+  :unknown-fact-types #{"clojure.lang.Associative"
+   "clojure.lang.Counted"
+   "clojure.lang.IHashEq"
+   "clojure.lang.IKeywordLookup"
+   "clojure.lang.ILookup"
+   "clojure.lang.IMeta"
+   "clojure.lang.IObj"
+   "clojure.lang.IPersistentCollection"
+   "clojure.lang.IPersistentMap"
+   "clojure.lang.IRecord"
+   "clojure.lang.Seqable"
+   "java.io.Serializable"
+   "java.lang.Iterable"
+   "java.lang.Object"
+   "java.util.Map"}},
+ :unresolved []}

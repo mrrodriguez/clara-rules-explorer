@@ -3,7 +3,7 @@ import { ui } from '../support/ui';
 
 // `pairwise` joins one Config with each of three Items, so the Config fact
 // appears in :matches once with three distinct binding sets.
-const PAIRWISE = 'clara.server.tools.graph.rules.match-uniqueness-test-rules/pairwise';
+const PAIRWISE = 'clara.explorer.test.rules.match-uniqueness-test-rules/pairwise';
 
 async function openPairwiseFullView(page: Page) {
 	await ui.sidebar.navigateTo(page, 'Rules');

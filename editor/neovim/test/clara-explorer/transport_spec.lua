@@ -26,8 +26,8 @@ describe("conjure.navigate_code", function()
       token = "map->X",
     })
     assert.are.same(
-      [[(do (require 'clara.server.graph.client)
-     (clara.server.graph.client/navigate {:production "ns/rule" :side :rhs :caller-ns "ns" :token "map->X"}))]],
+      [[(do (require 'clara.explorer.server.client)
+     (clara.explorer.server.client/navigate {:production "ns/rule" :side :rhs :caller-ns "ns" :token "map->X"}))]],
       code
     )
   end)
@@ -90,7 +90,7 @@ describe("conjure.eval_edn", function()
 
   it("ignores stderr-only messages and waits for the value", function()
     stub_eval(function(opts)
-      opts.cb({ err = "2026-09-28 INFO [nREPL-session] clara.server.graph.client - navigate" })
+      opts.cb({ err = "2026-09-28 INFO [nREPL-session] clara.explorer.server.client - navigate" })
       opts["on-result"]('{:direction :producer :type "X" :targets []}')
     end)
     local value_seen

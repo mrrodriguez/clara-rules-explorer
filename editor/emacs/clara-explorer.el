@@ -14,7 +14,7 @@
 ;; (LHS) or consumer (RHS), using the dependency graph the server has already
 ;; computed.
 ;;
-;; All semantics live in `clara.server.graph.client/navigate` (Clojure); this
+;; All semantics live in `clara.explorer.server.client/navigate` (Clojure); this
 ;; file is structural navigation + transport + UX glue.  No machine-specific
 ;; paths, home directories, or ports are hard-coded anywhere.
 ;;
@@ -182,15 +182,15 @@ comment to end of line, repeatedly until point stops moving.  Uses
 
 (defconst clara-explorer--server-probe-code
   (concat "(try (some? ((requiring-resolve"
-          " 'clara.server.graph.client/get-current-system)))"
+          " 'clara.explorer.server.client/get-current-system)))"
           " (catch Throwable _ false))")
   "Form evaluating to `true' when the connected repl has an explorer system.")
 
 (defun clara-explorer--server-available-p (&optional conn)
   "Non-nil when the connected CIDER session has a running explorer system.
-Probes `clara.server.graph.client/get-current-system' via `requiring-resolve';
-a repl without the explorer on its classpath (or no registered system)
-resolves to nil."
+Probes `clara.explorer.server.client/get-current-system' via
+`requiring-resolve'; a repl without the explorer on its classpath (or no
+registered system) resolves to nil."
   (let ((conn (or conn (and (cider-connected-p)
                             (cider-current-repl 'infer 'ensure)))))
     (when conn
@@ -762,7 +762,7 @@ Used for RHS and global cases where LHS-structure is not applicable."
    Uses `requiring-resolve` so the namespace is loaded at runtime rather than
    resolved at compile time (which would fail if the namespace is not yet
    loaded in the REPL)."
-  (format "((requiring-resolve 'clara.server.graph.client/navigate) %s)"
+  (format "((requiring-resolve 'clara.explorer.server.client/navigate) %s)"
           (clara-explorer--edn-map
            (list :production production
                  :side side
@@ -771,7 +771,7 @@ Used for RHS and global cases where LHS-structure is not applicable."
 
 (defun clara-explorer--resolve-template-file ()
   "Absolute path of the canonical resolve-form template shipped beside this
-file (a symlink to the `clara.server.graph.tokens` canonical text)."
+file (a symlink to the `clara.explorer.server.tokens` canonical text)."
   (unless clara-explorer--directory
     (error "clara-explorer: cannot locate resolve template (eval'd from a non-file buffer?)"))
   (expand-file-name "editor-resolve-form.clj" clara-explorer--directory))
@@ -979,14 +979,14 @@ CIDER session has a running explorer system, otherwise bb."
       (message "clara-explorer: refresh is a no-op in bb mode (re-persist the artifacts to pick up changes)")
     (unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))
     (clara-explorer--eval-edn
-     "(do (require 'clara.server.graph.server)\n     (clara.server.graph.server/reload-annotations!))"
+     "(do (require 'clara.explorer.server.serve)\n     (clara.explorer.server.serve/reload-annotations!))"
      (cider-current-repl 'infer 'ensure))
     (message "clara-explorer: analysis refreshed")))
 
 (defvar clara-explorer--swap-session-exprs (make-hash-table :test 'eq)
   "Map of CIDER connection -> last swap opts expression.
 Each value is the raw EDN string the user entered for
-`clara.server.graph.client/swap-session!` (the full opts map,
+`clara.explorer.server.client/swap-session!` (the full opts map,
 not just the session form).  Used to repeat the last swap without
 re-prompting.  When `client/register-session-swap-opts-fn` is set,
 calling with no opts delegates to that fn via the 0-arity.")
@@ -1021,8 +1021,8 @@ means use the registered default (0-arity)."
         (puthash conn trimmed clara-explorer--swap-session-exprs))
       (clara-explorer--eval-edn
        (if use-default
-           "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/swap-session!))"
-         (format "(do (require 'clara.server.graph.client)\n     (clara.server.graph.client/swap-session! %s))"
+           "(do (require 'clara.explorer.server.client)\n     (clara.explorer.server.client/swap-session!))"
+         (format "(do (require 'clara.explorer.server.client)\n     (clara.explorer.server.client/swap-session! %s))"
                  trimmed))
        conn)
       (message "clara-explorer: session swapped"))))

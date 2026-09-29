@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { ui } from '../support/ui';
 
-const NS = 'clara.server.tools.graph.rules.loan-hierarchy-rules';
+const NS = 'clara.explorer.test.rules.loan-hierarchy-rules';
 const BASE = `:${NS}/base-document`;
 const LOAN = `:${NS}/loan-document`;
 const SUPPORTING = `:${NS}/supporting-document`;

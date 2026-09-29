@@ -44,8 +44,8 @@ function M.edn_string(s) return ('"%s"'):format(s:gsub('[\\"\n\t\r]', ESC)) end
 --- Clojure `client/navigate` form: one `%s` slot for the EDN payload map.
 -- Kept as a single balanced-paren template (filled via `:format`) so the form
 -- stays inspectable instead of split across `..` concats.
-local NAVIGATE_FORM = [[(do (require 'clara.server.graph.client)
-     (clara.server.graph.client/navigate {%s}))]]
+local NAVIGATE_FORM = [[(do (require 'clara.explorer.server.client)
+     (clara.explorer.server.client/navigate {%s}))]]
 
 --- EDN `NavigateInput` map: one `%s` slot for the space-joined entries.
 local NAVIGATE_INPUT_TEMPLATE = "{%s}"
@@ -55,13 +55,9 @@ local NAVIGATE_INPUT_TEMPLATE = "{%s}"
 -- `clara-explorer--navigate-code`).
 local function navigate_entries(payload)
   local parts = {}
-  if payload.production then
-    parts[#parts + 1] = (":production %s"):format(M.edn_string(payload.production))
-  end
+  if payload.production then parts[#parts + 1] = (":production %s"):format(M.edn_string(payload.production)) end
   if payload.side then parts[#parts + 1] = (":side :%s"):format(payload.side) end
-  if payload.caller_ns then
-    parts[#parts + 1] = (":caller-ns %s"):format(M.edn_string(payload.caller_ns))
-  end
+  if payload.caller_ns then parts[#parts + 1] = (":caller-ns %s"):format(M.edn_string(payload.caller_ns)) end
   parts[#parts + 1] = (":token %s"):format(M.edn_string(payload.token))
   return table.concat(parts, " ")
 end
@@ -169,9 +165,11 @@ function M.record_error(e)
   end
   local ok, append_err = pcall(log.append, lines, { ["break?"] = true })
   if not ok then
-    vim.schedule(function()
-      vim.notify("clara-explorer: failed to append to Conjure log: " .. tostring(append_err), vim.log.levels.WARN)
-    end)
+    vim.schedule(
+      function()
+        vim.notify("clara-explorer: failed to append to Conjure log: " .. tostring(append_err), vim.log.levels.WARN)
+      end
+    )
   end
 end
 
@@ -179,9 +177,7 @@ end
 function M.show_scratch(name, lines, filetype)
   local existing = vim.fn.bufnr(name)
   local buf = existing ~= -1 and existing or vim.api.nvim_create_buf(false, true)
-  if existing == -1 then
-    vim.api.nvim_buf_set_name(buf, name)
-  end
+  if existing == -1 then vim.api.nvim_buf_set_name(buf, name) end
   vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
@@ -194,17 +190,13 @@ end
 -- line to the `clara-explorer://debug-log` scratch buffer — a persistent,
 -- non-truncated window (unlike `vim.notify`), mirroring Emacs'
 -- `clara-explorer-debug` + `clara-explorer--log` (which writes to *Messages*).
-function M.debug_enabled()
-  return vim.g.clara_explorer_debug == true or vim.g.clara_explorer_debug == 1
-end
+function M.debug_enabled() return vim.g.clara_explorer_debug == true or vim.g.clara_explorer_debug == 1 end
 
 local function debug_buf()
   local name = "clara-explorer://debug-log"
   local existing = vim.fn.bufnr(name)
   local buf = existing ~= -1 and existing or vim.api.nvim_create_buf(false, true)
-  if existing == -1 then
-    vim.api.nvim_buf_set_name(buf, name)
-  end
+  if existing == -1 then vim.api.nvim_buf_set_name(buf, name) end
   vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
   vim.api.nvim_set_option_value("filetype", "clojure", { buf = buf })
   return buf
@@ -231,9 +223,7 @@ function M.debug_log(...)
 end
 
 --- Open the debug log buffer in a split.
-function M.show_debug_log()
-  vim.cmd("sbuffer " .. debug_buf())
-end
+function M.show_debug_log() vim.cmd("sbuffer " .. debug_buf()) end
 
 --- Toggle `g:clara_explorer_debug` and report the new state.
 function M.toggle_debug()
@@ -314,7 +304,9 @@ function M.eval_edn(opts)
       M.record_error({ code = opts.code, err = err or "", ex = ex or "eval failed", summary = summary })
       finish(
         opts.on_error or function() end,
-        "clara-explorer: " .. (ex or "eval failed") .. (summary ~= "" and (" — " .. summary) or "")
+        "clara-explorer: "
+          .. (ex or "eval failed")
+          .. (summary ~= "" and (" — " .. summary) or "")
           .. " (see :ClaraExplorerLastError)",
         bufnr,
         win
@@ -340,7 +332,7 @@ M.server_available_cache = nil
 function M.server_available(cb)
   M.debug_log("server-available probe")
   M.eval_edn({
-    code = "(try (some? ((requiring-resolve 'clara.server.graph.client/get-current-system))) (catch Throwable _ false))",
+    code = "(try (some? ((requiring-resolve 'clara.explorer.server.client/get-current-system))) (catch Throwable _ false))",
     passive = true,
     on_value = function(value)
       local ok, decoded = pcall(edn.decode, value)
@@ -447,9 +439,7 @@ local function unit_edn(unit_key)
   else
     repo = unit_key
   end
-  if branch then
-    return string.format("{:repo %s :branch %s}", M.edn_string(repo), M.edn_string(branch))
-  end
+  if branch then return string.format("{:repo %s :branch %s}", M.edn_string(repo), M.edn_string(branch)) end
   return string.format("{:repo %s}", M.edn_string(repo))
 end
 
@@ -516,7 +506,14 @@ function M.bb_eval(selection_edn, input_edn, cb)
   end
   local function on_exit(out)
     vim.schedule(function()
-      M.debug_log("bb-eval exit=" .. tostring(out.code) .. " stdout=" .. tostring(out.stdout) .. " stderr=" .. tostring(out.stderr))
+      M.debug_log(
+        "bb-eval exit="
+          .. tostring(out.code)
+          .. " stdout="
+          .. tostring(out.stdout)
+          .. " stderr="
+          .. tostring(out.stderr)
+      )
       if out.code ~= 0 then
         local msg
         if out.code then

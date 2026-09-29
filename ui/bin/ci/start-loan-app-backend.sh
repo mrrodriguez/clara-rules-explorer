@@ -9,6 +9,6 @@ if [ -n "${E2E_PID_FILE:-}" ]; then
 	echo $$ > "$E2E_PID_FILE"
 fi
 
-cd "$(dirname "$0")/../../../server"
+cd "$(dirname "$0")/../../../explorer"
 
-exec clojure -M:demo-run -p 9101 -s demo-data/session.bin -l test-resources/clara/server/tools/graph/annotations/loan-doc-rules-annotations.edn
+exec clojure -M:demo-run -p 9101 -s demo-data/session.bin -l test-resources/clara/explorer/annotations/loan-doc-rules-annotations.edn

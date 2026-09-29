@@ -1,0 +1,2 @@
+{:exclude-files "src/clara/explorer/vendor/.*"
+ :lint-as {clara.explorer.test.rules.helpers/def-fact-fn clojure.core/defn}}

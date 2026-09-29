@@ -44,7 +44,7 @@ project with `make demo-run`.
 ### Quality & Testing
 
 We enforce strict linting and type-checking.  All quality and test commands
-are exposed through the project Makefile (mirroring `server/Makefile`), which
+are exposed through the project Makefile (mirroring `explorer/Makefile`), which
 handles cross-project prerequisites automatically:
 
 ```bash
@@ -78,14 +78,14 @@ Two things must be in place before a bare `pnpm test:e2e` will pass —
 `make test-e2e` (or `make test`) handles both automatically:
 
 1. **Serialized demo session.**  The `loan-app` backend serves
-   `server/demo-data/session.bin` (+ `.facts`), a serialized
+   `explorer/demo-data/session.bin` (+ `.facts`), a serialized
    loan-doc-rules + loan-app-rules session.  That directory is gitignored, so
    a fresh clone has no session file and the backend exits immediately with
    `Error: session file not found` — the reason bare `pnpm test:e2e` fails.
    Generate it with the server's `make demo-setup` (or `make demo-setup` in
    `ui/`, which delegates):
    ```bash
-   make -C ../server demo-setup
+   make -C ../explorer demo-setup
    ```
 2. **Installed dependencies + Playwright browsers.**  `pnpm install` (the
    Makefile's `node_modules` target) and, once per machine,

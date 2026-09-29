@@ -44,9 +44,9 @@ describe('utils', () => {
 
 	describe('getShortName', () => {
 		it('should extract short name from fully-qualified name', () => {
-			expect(
-				getShortName('clara.server.tools.graph.rules.loan-app-rules/collect-app-given-docs')
-			).toBe('collect-app-given-docs');
+			expect(getShortName('clara.explorer.test.rules.loan-app-rules/collect-app-given-docs')).toBe(
+				'collect-app-given-docs'
+			);
 		});
 
 		it('returns the name unchanged for kind-explicit keyword types', () => {

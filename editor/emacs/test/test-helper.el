@@ -11,7 +11,7 @@
 ;;            and the new `*-real-*` tests exercise them.
 ;;   Tier 3 — live server + nREPL integration: deferred (see
 ;;            `docs/planning/explorer-server-emacs-testing.md`). Requires a
-;;            running `clara.server.graph` JVM + `cider-connect-clj`.
+;;            running `clara.explorer.server` JVM + `cider-connect-clj`.
 ;;
 ;; Real deps are preferred when present; stubs exist only for the
 ;; bare-batch fallback and for `editor/emacs/bin/ci/check-elisp.sh` byte-compile.

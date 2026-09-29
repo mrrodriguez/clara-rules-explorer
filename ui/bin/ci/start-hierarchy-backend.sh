@@ -9,6 +9,6 @@ if [ -n "${E2E_PID_FILE:-}" ]; then
 	echo $$ > "$E2E_PID_FILE"
 fi
 
-cd "$(dirname "$0")/../../../server"
+cd "$(dirname "$0")/../../../explorer"
 
 exec clojure -M:hierarchy-run 9201

@@ -906,7 +906,7 @@ Tier-1 stub path fast."
     (should-not (string-match-p "%s" code))))
 
 (ert-deftest resolve-form-matches-canonical-template ()
-  "Guard against drift from `clara.server.graph.tokens/editor-token-resolve-form`: the
+  "Guard against drift from `clara.explorer.server.tokens/editor-token-resolve-form`: the
    canonical template's shape markers must all be present."
   (let ((code (clara-explorer--resolve-form "ns" "tok")))
     (dolist (frag '("(find-ns ns-sym)"

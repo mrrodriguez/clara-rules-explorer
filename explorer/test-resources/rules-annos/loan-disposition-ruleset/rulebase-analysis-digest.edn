@@ -1,0 +1,7 @@
+{:summary {:rule-count 2, :query-count 2, :fact-type-count 18},
+ :counts {:node-count 12, :dep-edge-count 2, :unresolved-count 0},
+ :namespaces {"clara.explorer.test.rules.loan-outcome-notices" {:rules 2, :queries 2}},
+ :flag-counts {:no-output-types 0, :sink-rule 2, :source-rule 2, :unlinked-rule 0},
+ :unlinked-rules #{},
+ :no-output-rules #{},
+ :unresolved []}

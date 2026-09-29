@@ -35,7 +35,7 @@ independent sub-projects:
 
 | Directory | Description |
 |-----------|-------------|
-| [`server/`](./server/) | Clojure HTTP server — graph analysis engine and REST API. See [server/README.md](./server/README.md). |
+| [`explorer/`](./explorer/) | Clojure HTTP server — graph analysis engine and REST API. See [explorer/README.md](./explorer/README.md). |
 | [`ui/`](./ui/) | SvelteKit 2 + Svelte 5 web interface. See [ui/README.md](./ui/README.md). |
 | [`editor/`](./editor/) | Editor clients (Emacs/CIDER and neovim/Conjure) for in-editor navigation. See [Editor Navigation](./docs/explorer-editor-navigation.md). |
 | [`docs/`](./docs/) | Cross-cutting documentation — API reference, demo setup, CI. |
@@ -44,7 +44,7 @@ independent sub-projects:
 
 See the sub-project READMEs for detailed prerequisites and instructions:
 
-- **[Server Quick Start](./server/README.md#quick-start)** — generate a demo
+- **[Server Quick Start](./explorer/README.md#quick-start)** — generate a demo
   session and start the API server.
 - **[UI Quick Start](./ui/README.md#getting-started)** — install dependencies
   and launch the dev server.
@@ -62,10 +62,10 @@ See the sub-project READMEs for detailed prerequisites and instructions:
 - [GitHub Actions Setup](./docs/gha-setup.md) — CI workflow configuration.
 - [UI Architecture](./ui/docs/app-arch.md) — UI component architecture and
   design decisions.
-- [Persisted Artifacts](./server/docs/persisted-artifacts.md) — writing an
+- [Persisted Artifacts](./explorer/docs/persisted-artifacts.md) — writing an
   analysis to disk, reading it back, and the artifact registry
   (discover / merge / serve many sets) with no session, no classpath and no JVM.
-- Server internals: see [`server/docs/`](./server/docs/) for rule annotations,
+- Server internals: see [`explorer/docs/`](./explorer/docs/) for rule annotations,
   internal models, and analysis notes.
 
 ## License
