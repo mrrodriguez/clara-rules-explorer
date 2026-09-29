@@ -72,7 +72,7 @@ The dependency graph represents potential fact flow.
 
 **Relationship to `fact_graph`**:
 - `clara.tools.fact-graph`: Provides a **dynamic** trace of facts in a *specific session* after they have fired. Instance-based.
-- `clara.explorer.tools.graph`: Provides a **static** model of what *could* happen based on rule definitions. Type-based.
+- `clara.explorer.core`: Provides a **static** model of what *could* happen based on rule definitions. Type-based.
 
 ### 3. Reachability & Path Analysis
 

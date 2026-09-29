@@ -16,7 +16,7 @@
 
 (use-fixtures :once st/validate-schemas)
 
-(def ^:private generated :clara.tools.graph.analyze/generated)
+(def ^:private generated :clara.explorer.analyze/generated)
 
 (defn- callsite
   [id extra]

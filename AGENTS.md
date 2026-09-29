@@ -123,4 +123,4 @@ When making changes that span both projects:
 3. If the API contract changes, update `docs/explorer-graph-api.md`.
 4. For editor transport changes, verify both editor suites (see
    [`editor/AGENTS.md`](editor/AGENTS.md)) and keep the shared
-   `server/resources/clara/explorer/server/editor-resolve-form.clj` in sync.
+   `explorer/resources/clara/explorer/server/editor-resolve-form.clj` in sync.

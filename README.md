@@ -35,7 +35,7 @@ independent sub-projects:
 
 | Directory | Description |
 |-----------|-------------|
-| [`server/`](./server/) | Clojure HTTP server — graph analysis engine and REST API. See [server/README.md](./explorer/README.md). |
+| [`explorer/`](./explorer/) | Clojure HTTP server — graph analysis engine and REST API. See [explorer/README.md](./explorer/README.md). |
 | [`ui/`](./ui/) | SvelteKit 2 + Svelte 5 web interface. See [ui/README.md](./ui/README.md). |
 | [`editor/`](./editor/) | Editor clients (Emacs/CIDER and neovim/Conjure) for in-editor navigation. See [Editor Navigation](./docs/explorer-editor-navigation.md). |
 | [`docs/`](./docs/) | Cross-cutting documentation — API reference, demo setup, CI. |

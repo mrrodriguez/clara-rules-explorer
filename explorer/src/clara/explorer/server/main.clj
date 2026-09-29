@@ -239,7 +239,7 @@
                   :session-or-rulebase loaded-session})))
 
             generated-layer (ann.merge/->layer
-                             {:id :clara.tools.graph.analyze/generated
+                             {:id :clara.explorer.analyze/generated
                               :source {:generated-from (str session)}
                               :annotations generated})
 

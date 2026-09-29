@@ -69,7 +69,7 @@ manifest, that outlives the process. A library has no standing to guess it.
 
 ### The checked-in example
 
-`clara.explorer.artifacts.regen-example/example-out-dir` (relative to `server/`) is a
+`clara.explorer.artifacts.regen-example/example-out-dir` (relative to `explorer/`) is a
 committed example of the whole registry, holding two named ruleset bundles under the `rules-annos/`
 root — the layout a rules registry keeps for more than one ruleset:
 
@@ -81,7 +81,7 @@ root — the layout a rules registry keeps for more than one ruleset:
   downstream consume/produce contract with no memory-derived layer.
 
 The example is there so a change to any generation step shows up as a reviewable diff rather than a
-silent format drift. Regenerate it (from `server/`) with `make regen-artifacts`, which runs
+silent format drift. Regenerate it (from `explorer/`) with `make regen-artifacts`, which runs
 `dev/regen_artifacts.clj`; a regeneration is byte-identical when nothing has changed, and anything
 that did change is exactly what the diff should be read for. The golden test
 `clara.explorer.artifacts.regen-example-test` regenerates the whole registry into a temp

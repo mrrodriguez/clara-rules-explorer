@@ -234,7 +234,7 @@
 
   `analyze/->memory-layer` is the equivalent one level down and computes the
   identical delta; it is not used because it stamps the analyzer's own
-  `:clara.tools.graph.analyze/memory` id, and these layer ids name the artifact
+  `:clara.explorer.analyze/memory` id, and these layer ids name the artifact
   files they round-trip through (`store/layer-artifacts`)."
   [opts :- schema/MemoryLayerOptions]
   ;; `MemoryEnrichmentOptions` is closed, so the provenance is dropped on the way

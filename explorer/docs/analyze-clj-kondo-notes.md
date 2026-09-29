@@ -1,6 +1,6 @@
 # clj-kondo interaction notes for `analyze.clj`
 
-This document captures the mechanics of how `clara.server.tools.graph.analyze`
+This document captures the mechanics of how `clara.explorer.analyze`
 interacts with clj-kondo, why it uses `with-in-str` + `:lint ["-"]` +
 `:filename`, and how the session-based analysis pipeline
 (`->rule-source-analysis`) synthesizes sources and prunes hook output.
@@ -61,7 +61,7 @@ The extension matters:
 | `.clj`    | `:clj` |
 | `.cljc`   | `:cljc` |
 
-The resource path (e.g. `clara/server/tools/graph/rules/loan_doc_rules.clj`)
+The resource path (e.g. `clara/explorer/test/rules/loan_doc_rules.clj`)
 carries the correct extension even when the source string was synthesized by
 `->rule-source-analysis` rather than slurped from a classpath resource.
 

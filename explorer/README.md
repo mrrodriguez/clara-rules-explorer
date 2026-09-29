@@ -161,24 +161,34 @@ For iterative development, you can run targeted tests or use an nREPL-based work
 ## Project Structure
 
 ```
-server/
+explorer/
 ├── deps.edn                         # Dependencies (Ring, Reitit, Jetty, JSON)
-├── dev/clara/explorer/server/
-│   ├── demo_setup.clj               # Demo session serialization
-│   ├── demo_run.clj                 # Demo server entry point (loan-app rules)
-│   └── hierarchy_run.clj            # Hierarchy rules server entry point
+├── dev/clara/explorer/dev/
+│   ├── server/
+│   │   ├── demo_setup.clj           # Demo session serialization
+│   │   ├── demo_run.clj             # Demo server entry point (loan-app rules)
+│   │   └── hierarchy_run.clj        # Hierarchy rules server entry point
+│   ├── regen_artifacts.clj          # Regenerate the rules-annos example registry
+│   ├── regen_fixture.clj            # Regenerate the annotation layer fixture
+│   └── kondo_config_sync.clj        # clj-kondo config sync tooling
 ├── src/clara/explorer/
-│   ├── graph/                       # API and Server logic
-│   └── tools/graph/                 # Core analysis engine
+│   ├── server/                      # HTTP server + API (serve, navigate, schema, …)
+│   ├── artifacts/                   # Artifact read/write, registry, compose, …
+│   ├── analyze/                     # clj-kondo analysis (index, callsite, synth, …)
+│   ├── annotations/                 # Annotation layers, merge, rebase, report
+│   ├── vendor/                      # Vendored tooling
+│   └── *.clj                        # core, memory, conditions, serialize, nodes, …
 ├── test/clara/explorer/
-│   ├── graph/                       # API and Integration tests
-│   └── tools/graph/                 # Analysis engine tests
-└── test-resources/                  # Test data (annotations, etc.)
+│   ├── server/                      # Server + API tests
+│   ├── artifacts/                   # Artifact tests
+│   ├── analyze/                     # Analysis tests
+│   └── test/rules/                  # Demo/test rule namespaces
+└── test-resources/                  # Test data (annotations, rules-annos, etc.)
 ```
 
 ### Demo & Test Rules
 
-The rule definitions used for demos and tests (e.g., `loan_app_rules.clj`, `loan_doc_rules.clj`) are located in `test/clara/explorer/rules/`. These provide a self-contained environment for exploring the API's capabilities.
+The rule definitions used for demos and tests (e.g., `loan_app_rules.clj`, `loan_doc_rules.clj`) are located in `test/clara/explorer/test/rules/`. These provide a self-contained environment for exploring the API's capabilities.
 
 ## Key Dependencies
 

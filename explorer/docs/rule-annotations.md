@@ -206,7 +206,7 @@ The library is split into a namespace group under
 
 Layers produced by `clara.explorer.server.main --generate-analysis` (and by the
 fixture generator, `make regen-fixture`) carry the distinguished id
-`:clara.tools.graph.analyze/generated`; nothing in the library privileges
+`:clara.explorer.analyze/generated`; nothing in the library privileges
 that id — it is a marker for humans and tooling.
 
 **Dangling references.** Only the analyzer *discovers* callsites; every other

@@ -167,8 +167,8 @@
           result (server/swap-session! {:annotations {:source [l1] :enrichment :none}})]
       (is (contains? result "my.rule/c"))
       (is (= "c" (get-in result ["my.rule/c" :clara-rules/notes])))))
-  (testing "vector with :clara.tools.graph.analyze/generated id preserves id and skips live generation"
-    (let [gen-layer (ann.merge/->layer {:id :clara.tools.graph.analyze/generated
+  (testing "vector with :clara.explorer.analyze/generated id preserves id and skips live generation"
+    (let [gen-layer (ann.merge/->layer {:id :clara.explorer.analyze/generated
                                         :annotations {"my.gen/rule" {:clara-rules/notes "gen"}}})
           result (server/swap-session! {:session (->test-session)
                                         :annotations {:source [gen-layer]

@@ -41,7 +41,7 @@
         result (flow/compose-persist! opts)]
     (testing "the result reports the unit-shaped dir and the layers that folded"
       (is (= (store/get-out-dir opts) (:dir result)))
-      (is (= [:clara.tools.graph.analyze/generated :memory] (:layers result)))
+      (is (= [:clara.explorer.analyze/generated :memory] (:layers result)))
       (is (pos? (:rule-count result))))
 
     (testing "the three derived artifacts exist as a normal unit"

@@ -1070,7 +1070,7 @@
   "Builds a working-memory annotation `ann.merge/Layer` from `enriched` (the
    result of merging memory-derived insert types into `base`): the delta of
    what the merge added over `base`, wrapped as a validated `ann.merge/Layer`
-   with id `:clara.tools.graph.analyze/memory`.
+   with id `:clara.explorer.analyze/memory`.
 
   Returns nil when the session contributed nothing new — the honest result
   for an unfired session, rather than a layer restating the base."
@@ -1078,7 +1078,7 @@
   (let [delta (ann/annotations-delta base enriched)]
     (when (seq delta)
       (ann.merge/annotations-delta->layer
-       :clara.tools.graph.analyze/memory
+       :clara.explorer.analyze/memory
        {:generated-by "clara-rules-explorer"
         :derived-from "session working memory"
         :rule-count (count delta)}

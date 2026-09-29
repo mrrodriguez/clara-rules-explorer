@@ -1,5 +1,5 @@
 (ns clara.explorer.utils
-  "Small utilities shared across the tools.graph namespaces.  Depends on
+  "Small utilities shared across the clara.explorer namespaces.  Depends on
    clara-rules and nothing else in this library, so every namespace here can
    require it without risking a cycle."
   (:require [clara.rules.engine :as eng]))

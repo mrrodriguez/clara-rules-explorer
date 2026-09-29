@@ -13,7 +13,6 @@ target
 **/.eldev/
 .eldev
 /editor/emacs/dist/
-/server/demo-data/
 .direnv
 .envrc.local
 docs/internal

@@ -238,7 +238,7 @@
    `:from-layer` attribution instead of flattening all files into one
    `:id :source` layer.
 
-   When a source layer already carries :id :clara.tools.graph.analyze/generated
+   When a source layer already carries :id :clara.explorer.analyze/generated
    (e.g. a pre-computed kondo analysis saved as a static sidecar), the
    live-generated layer is skipped — the explicit source takes precedence.
 
@@ -250,12 +250,12 @@
                              (if (vector? source) source [source])))
         source-ids (into #{} (map :id) source-layers)
         generated-layer (when (and (#{:auto-detect-from-rulebase :auto-detect} enrichment)
-                                   (not (contains? source-ids :clara.tools.graph.analyze/generated)))
+                                   (not (contains? source-ids :clara.explorer.analyze/generated)))
                           (let [analysis (analyze/->rule-source-analysis
                                           {:session-or-rulebase session
                                            :cache-atom analyze-cache-atom})]
                             (ann.merge/->layer
-                             {:id :clara.tools.graph.analyze/generated
+                             {:id :clara.explorer.analyze/generated
                               :annotations (analyze/->annotations-from-rule-source-analysis
                                             (merge {:rule-source-analysis analysis
                                                     :session-or-rulebase session}

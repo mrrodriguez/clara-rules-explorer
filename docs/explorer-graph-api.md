@@ -75,7 +75,7 @@ forwarded to the generated analysis layer:
 - `:callsite-resolver-fn` — the boundary-callsite escape hatch fn.
 
 Both hooks only take effect when the *generated* analysis layer actually runs: a
-pre-generated sidecar layer carrying `:id :clara.tools.graph.analyze/generated`
+pre-generated sidecar layer carrying `:id :clara.explorer.analyze/generated`
 suppresses live generation (the explicit source wins). See the
 [Rule Annotations Documentation](../explorer/docs/rule-annotations.md) for their
 semantics.

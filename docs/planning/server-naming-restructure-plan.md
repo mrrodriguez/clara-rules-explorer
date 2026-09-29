@@ -413,10 +413,11 @@ artifacts.
   `clara.server.tools.graph.rules.loan-doc-rules` to
   `clara.explorer.test.rules.loan-doc-rules`.
 - Layer `:id` values are namespaced keywords (e.g.
-  `:clara.tools.graph.analyze/generated`). These are **stable identifiers**, not
-  code namespaces. **Decision:** keep them stable across the rename so old and
-  new layers can still be correlated by id; renaming them would break provenance
-  matching for no benefit.
+  `:clara.tools.graph.analyze/generated` → `:clara.explorer.analyze/generated`,
+  plus `/memory` and `/unknown-fact-type`). **Decision (revised):** rename them
+  with the namespace — the old `clara.tools.graph.analyze` prefix no longer
+  resolves to any namespace, so the keywords are dead references. Old and new
+  layers must not be merged as if their ids matched. See the migration guide.
 
 ### 7.3 Library namespaces already embedded in artifacts (upstream impact)
 
@@ -493,9 +494,10 @@ Consequence for the single consumer:
 > same top-level keys, same string-key normalization), but the
 > **namespace-bearing values are a breaking change**: rule names, production
 > names, fact-type names, `:ns`/`:ns-name-sym` fields, derived `:id`s, manifest
-> namespace lists, and the library-authored `:slim`/`:method`/`:more` strings all
-> move from `clara.server.*` to `clara.explorer.*`. Old and new artifacts must
-> not be merged as if they were the same namespace.
+> namespace lists, the layer `:id` keywords (`:clara.tools.graph.analyze/*` →
+> `:clara.explorer.analyze/*`), and the library-authored `:slim`/`:method`/`:more`
+> strings all move from `clara.server.*` to `clara.explorer.*`. Old and new
+> artifacts must not be merged as if they were the same namespace.
 
 ---
 

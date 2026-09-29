@@ -164,7 +164,7 @@
    - :fact-constructors — optional vector of `analyze/FactConstructorSpec` maps
      forwarded to the generated analysis layer (see `compliance-metadata-fact-constructor`
      in the rich comment).  Only effective when live generation runs: the default
-     loan-doc sidecar carries :id :clara.tools.graph.analyze/generated, which
+     loan-doc sidecar carries :id :clara.explorer.analyze/generated, which
      suppresses live generation, so pair this with `:layers []`.
    - :callsite-resolver-fn — optional boundary-callsite escape-hatch fn,
      forwarded to the generated analysis layer (same :layers caveat)."
@@ -600,7 +600,7 @@
   ;; Passing a :fact-constructors spec (optional) resolves the builder to
   ;; :compliance-review-result — start-server! forwards it to the analyzer.
   ;; NOTE: the default loan-doc sidecar carries :id
-  ;; :clara.tools.graph.analyze/generated, which suppresses live generation —
+  ;; :clara.explorer.analyze/generated, which suppresses live generation —
   ;; hence :layers [] here (see start-server!'s docstring).
   (start-server! {:session-opts {:with-facts? false}
                   :layers []

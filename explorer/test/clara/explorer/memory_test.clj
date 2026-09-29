@@ -558,7 +558,7 @@
       ;; The fact should get the unknown-fact-type sentinel
       (is (every? (fn [[_id f]]
                     (= (get-in f [:type :name])
-                       ":clara.tools.graph.analyze/unknown-fact-type"))
+                       ":clara.explorer.analyze/unknown-fact-type"))
                   facts)
           "All facts should have unknown-fact-type since fact-type-fn returns nil")
 

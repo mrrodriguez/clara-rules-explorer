@@ -13,7 +13,7 @@ The shared Clojure-side contract lives in
 `explorer/src/clara/explorer/server/navigate.clj` (the pure body) and
 `explorer/src/clara/explorer/server/schema.clj` (the shapes). The editor
 resolve-form template is a single source of truth at
-`server/resources/clara/explorer/server/editor-resolve-form.clj`, symlinked beside
+`explorer/resources/clara/explorer/server/editor-resolve-form.clj`, symlinked beside
 each editor transport. Never hand-edit a symlinked copy; edit the resource and
 keep every copy byte-identical (a JVM sync test enforces this).
 

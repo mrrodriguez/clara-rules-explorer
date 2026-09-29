@@ -47,9 +47,9 @@
                                          (unit "loan-disposition-ruleset")])]
     (testing "the fold spans both units' file layers, ids qualified per unit"
       (let [ids (set (map :id (:layers folded)))]
-        (is (contains? ids "loan-app-ruleset/:clara.tools.graph.analyze/generated"))
+        (is (contains? ids "loan-app-ruleset/:clara.explorer.analyze/generated"))
         (is (contains? ids "loan-app-ruleset/:memory"))
-        (is (contains? ids "loan-disposition-ruleset/:clara.tools.graph.analyze/generated"))))
+        (is (contains? ids "loan-disposition-ruleset/:clara.explorer.analyze/generated"))))
     (testing "the merged annotations cover rules from both units"
       (let [names (set (keys (:annotations folded)))]
         (is (contains? names app-approved))
@@ -61,7 +61,7 @@
                                                     (unit "loan-disposition-ruleset")])]
     (testing "one standard layer per role, in fold order, absent roles omitted"
       (is (= [:auto :memory] (vec (keys layers))))
-      (is (= :clara.tools.graph.analyze/generated (get-in layers [:auto :id])))
+      (is (= :clara.explorer.analyze/generated (get-in layers [:auto :id])))
       (is (= :memory (get-in layers [:memory :id]))))
     (testing "the auto layer folds both units' generated layers"
       (let [names (set (keys (get-in layers [:auto :annotations])))]

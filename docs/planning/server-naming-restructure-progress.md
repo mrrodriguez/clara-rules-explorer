@@ -23,20 +23,7 @@ Tracker lives alongside the plan; consumer migration guide will land as
 - [x] `::conditions/normalized` → `:clara-rules-explorer/normalized` (§5.7); dropped now-unused `conditions` aliases
 - [x] `deps.edn`, `Makefile`, `check-reflection.sh`, kondo config, `bin/*.bb` (§6.1–§6.3)
 - [x] Follow-ups: rules path-strings `clara/explorer/rules/` → `clara/explorer/test/rules/`; `client_test` `repo-root` → `explorer/`; editor symlinks retargeted
-- [~] Docstrings/comments (§6) — code comments done; `explorer/docs/*` + root docs pending §6.6
-- [ ] Move package paths `explorer/{src,test,dev,resources}/clara/server/…` → `explorer/{src,test,dev,resources}/clara/explorer/…` per §4.1–§4.4 bucket map
-  - [ ] HTTP bucket: `graph/*` → `server/*`, `server.clj` → `serve.clj` (§5.1)
-  - [ ] Artifacts bucket: `tools/graph/artifacts/**` → `artifacts/**` (§4.1)
-  - [ ] Analysis bucket: `tools/graph/*` → top-level `explorer/*`, no `graph` segment (§5.5)
-  - [ ] Vendor: `vendor/tools/inspect.clj` (§4.1)
-  - [ ] Test mirror + `rules.*` → `test.rules.*` (§4.2)
-  - [ ] Dev: demo/setup/hierarchy → `server.*`, kondo-sync + regen/compose scripts → `dev.*`, `user` stays (§4.3)
-  - [ ] Resources + test-resources paths (§4.4)
-  - [ ] Delete empty `tools/graph/shared/` + `test_crazy_ns_$_name/` (§2, §6.7)
-- [ ] Rewrite `(ns …)` + require/refer/alias symbols (longest-prefix-first)
-- [ ] `::conditions/normalized` → `:clara-rules-explorer/normalized` (§5.7, §7.3)
-- [ ] Docstrings/comments (§6)
-- [ ] `deps.edn`, `Makefile`, `bin/ci/check-reflection.sh`, `.clj-kondo/config.edn`, `bin/*.bb`, symlinks, CI working-dirs (§6.1–§6.3)
+- [x] Docstrings/comments (§6) — code comments + `explorer/docs/*` + root docs + `ui/README.md` migrated (§6.6; a few stragglers corrected in §8)
 
 ## 2. Regenerate derived data (§9.2, §7.5)
 - [x] `make regen-fixture` + `make regen-artifacts`
@@ -58,7 +45,7 @@ Tracker lives alongside the plan; consumer migration guide will land as
 - [ ] `test-e2e`: no local Playwright browsers — specs updated, demo data fresh, CI runs them
 
 ## 6. Docs + CI (§9.6)
-- [x] Root `README.md`/`AGENTS.md`, `docs/explorer-*.md`, `explorer/docs/*`, `explorer/README`+`AGENTS.md`, `editor/AGENTS.md`, `ui/docs/ui-preamble.md` migrated
+- [x] Root `README.md`/`AGENTS.md`, `docs/explorer-*.md`, `explorer/docs/*`, `explorer/README`+`AGENTS.md`, `editor/AGENTS.md`, `ui/docs/ui-preamble.md` migrated (a few misses corrected in §8)
 - [x] `.github/workflows/server.yml` → `explorer.yml` ("Explorer CI"); `ui.yml` working-dirs → `explorer/`
 - [x] `explorer/.gitignore` gains `demo-data/` (matches long-standing "gitignored" claim)
 - [ ] Plan doc itself intentionally untouched: its old→new tables ARE the rename record
@@ -66,6 +53,12 @@ Tracker lives alongside the plan; consumer migration guide will land as
 ## 7. Migration guide (§8)
 - [x] `docs/planning/explorer-renaming-migration.md`: summary, require table, entry points, regen-vs-rebase + `rebase-layer` example + skew caveat, marker change, sidecars, editors, checklist
 - [x] No in-repo `agent-annotations.edn` (checked) — curated-rebase applies to consumers only
+
+## 8. Follow-up — layer-id keywords + missed doc refs
+- [x] Renamed layer `:id` keywords `:clara.tools.graph.analyze/{generated,memory,unknown-fact-type}` → `:clara.explorer.analyze/*` (reverses plan §7.2 "keep stable"); fixtures + artifacts regenerated
+- [x] Migration guide §5 expanded (layer-id rename; `:clara-rules-explorer/{normalized,bb-loaded}`; `:clara-rules/*` annotation keys)
+- [x] Fixed missed `server/`/`clara.server`/`tools.graph` refs: `explorer/docs/analyze-clj-kondo-notes.md`, `internal-analysis-models.md`, `persisted-artifacts.md`, `explorer/README.md` tree, `utils.clj` docstring, root `README.md`/`AGENTS.md`, `editor/AGENTS.md`, `ui/README.md`, `ui/docs/ui-preamble.md`, root `.gitignore`
+- [x] Cleaned stale regenerables: root `test-resources/` `.cache`, root `.clj-kondo/.cache`, `explorer/.clj-kondo/.cache`, root `target/`, root `.lsp/`, `explorer/.lsp/`, `explorer/.cpcache`
 
 ## Verification gate (§9)
 - [x] `grep -r clara\.server` clean except plan/progress/migration history + gitignored build outputs
@@ -79,3 +72,4 @@ Tracker lives alongside the plan; consumer migration guide will land as
 - 2026-09-29: suite green (409/2562, 0F/0E). All sections done except e2e-local. Stray demo backend on :9001 needs killing outside sandbox (`lsof -ti:9001 | xargs kill`).
 - 2026-09-29: owner follow-up — `user` → `dev/user.clj`, demo runners → `clara.explorer.dev.server.*` (deviates from plan §4.3, which kept them in `server.*`); referencers updated; lint + suite green again.
 - 2026-09-29: suite green (409/2562, 0F/0E). Fixed along the way: serve_test filename, rules path-strings + prefix, stale kondo .cache, synth ordering expectation, client-test *ns* binding. Running lint/reflection/format/bb gates.
+- 2026-09-29: follow-up — layer-id keywords renamed (reverses §7.2 stable-id decision); missed doc refs fixed; stale kondo/lsp/target/cpcache cleaned; migration guide §5 expanded.

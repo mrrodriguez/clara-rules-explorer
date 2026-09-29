@@ -175,11 +175,11 @@
                                      (let [rule-names (into #{}
                                                             (keep :name)
                                                             (get origin-map id []))]
-                                       (log/warnf "fact-type-fn returned nil for fact %s — inserted by rules: %s — substituting :clara.tools.graph.analyze/unknown-fact-type"
+                                       (log/warnf "fact-type-fn returned nil for fact %s — inserted by rules: %s — substituting :clara.explorer.analyze/unknown-fact-type"
                                                   (pr-str (prune-fn fact))
                                                   (pr-str rule-names))))
                                  type-name (->> (or raw-type
-                                                    :clara.tools.graph.analyze/unknown-fact-type)
+                                                    :clara.explorer.analyze/unknown-fact-type)
                                                 (serialize/serialize-fact-type nil))]
                              [id {:id id
                                   :type {:name type-name

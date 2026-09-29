@@ -11,9 +11,9 @@ Every namespace that started with `clara.server.` now starts with
 `clara.explorer.`, and the meaningless `graph` / `tools.graph` middle segments
 are gone. There is no behavior change: no function signatures, HTTP routes, or
 artifact schemas changed. Only namespace strings, namespace-derived file paths,
-resource lookup strings, and one deliberate data keyword
-(`:clara-rules-explorer/normalized`, §5) changed. If you `require` this library,
-merge its artifacts, or speak its editor protocol, remap as below and
+resource lookup strings, the layer-`:id` keywords (§5.2), and the
+`:clara-rules-explorer/normalized` marker (§5.1) changed. If you `require` this
+library, merge its artifacts, or speak its editor protocol, remap as below and
 regenerate your derived data once.
 
 ## 2. Require table (namespaces a caller may use)
@@ -111,7 +111,9 @@ units in one registry selection is flagged/refused as shape skew even though
 the shape is semantically identical. Regenerate all of your artifact sets once
 after upgrading and the old key disappears everywhere.
 
-## 5. The `:clara-rules-explorer/normalized` marker
+## 5. Data keywords
+
+### 5.1 The `:clara-rules-explorer/normalized` marker
 
 The internal LHS-normalization marker used to be the library-namespace keyword
 `:clara.server.tools.graph.conditions/normalized` (written into
@@ -119,6 +121,35 @@ The internal LHS-normalization marker used to be the library-namespace keyword
 It is now the project-stable `:clara-rules-explorer/normalized`, which never
 tracks a namespace again. If you snapshot or assert on `:dropped` key sets,
 update that one keyword; otherwise just regenerate (§4).
+
+### 5.2 Layer-`:id` keywords renamed
+
+The annotation-layer `:id` values used to carry the old analysis-namespace
+prefix and now track the real one:
+
+| Old | New | Where it appears |
+| --- | --- | --- |
+| `:clara.tools.graph.analyze/generated` | `:clara.explorer.analyze/generated` | auto-generated annotation layer `:id`; `rules-inspect-manifest.edn` → `:layer-ids :auto` |
+| `:clara.tools.graph.analyze/memory` | `:clara.explorer.analyze/memory` | live-session working-memory layer `:id` (`analyze/->memory-layer`; the artifact `store` path uses the plain `:memory` id, unchanged) |
+| `:clara.tools.graph.analyze/unknown-fact-type` | `:clara.explorer.analyze/unknown-fact-type` | fallback fact-type name substituted when a session fact's type is missing from the analysis |
+
+These are structural values in persisted artifacts (layer `:id`s and a
+fact-type name), so regenerating derived artifacts (§4) picks them up — there
+is no hand-migration. A curated `agent-annotations.edn` layer carries its own
+curated `:id` and is unaffected.
+
+### 5.3 Other `:clara-rules-explorer/*` and `:clara-rules/*` keywords
+
+- The `:clara-rules-explorer/` prefix has exactly two members:
+  `:clara-rules-explorer/normalized` (§5.1, persisted) and
+  `:clara-rules-explorer/bb-loaded` (a namespace-metadata marker on `ns` forms,
+  never persisted — `make bb-smoke-test` uses it to discover babashka-loadable
+  namespaces).
+- The annotation-schema keys under `:clara-rules/*` (`insert-types`,
+  `retract-types`, `no-output-types`, `notes`, `dynamic-insert-types-detected`,
+  `dynamic-retract-types-detected`, `merge-props`) are project-owned annotation
+  provenance keys, never tied to the `clara.server.*` namespaces — unchanged by
+  this rename.
 
 ## 6. Annotation sidecars
 
@@ -146,8 +177,10 @@ only for the bundled demo/test rules
 
 1. `grep -r "clara\.server" src test resources` returns nothing in your code.
 2. `grep -r "clara/server/"` returns nothing in your resource strings.
-3. All derived artifacts regenerated (§4); curated `agent-annotations.edn`
+3. `grep -r "clara\.tools\.graph\.analyze/"` returns nothing (layer `:id`
+   keywords migrated, §5.2).
+4. All derived artifacts regenerated (§4); curated `agent-annotations.edn`
    rebased via `rebase-layer`.
-4. No pre/post-upgrade units mixed in one registry selection
+5. No pre/post-upgrade units mixed in one registry selection
    (`compatibility-report` clean).
-5. Editor snippets + vendored resolve-form updated (§7).
+6. Editor snippets + vendored resolve-form updated (§7).

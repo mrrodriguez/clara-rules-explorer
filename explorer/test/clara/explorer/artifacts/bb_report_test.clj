@@ -184,7 +184,7 @@
 
       (testing "layers reports the flattened standard layers"
         (let [out (run "layers")]
-          (is (str/includes? out ":clara.tools.graph.analyze/generated"))
+          (is (str/includes? out ":clara.explorer.analyze/generated"))
           (is (str/includes? out ":memory"))))
 
       (testing "producers closes over descendants and labels them via-descendant"

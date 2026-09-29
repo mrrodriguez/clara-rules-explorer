@@ -1,4 +1,4 @@
-{:id :clara.tools.graph.analyze/generated,
+{:id :clara.explorer.analyze/generated,
  :source {:generated-by "clara-rules-explorer", :rule-count 18},
  :annotations {"clara.explorer.test.rules.loan-app-rules/app-outcome-approved-args-demo" {:clara-rules/no-output-types true},
   "clara.explorer.test.rules.loan-app-rules/app-outcome-approved?" {:clara-rules/insert-types [clara.explorer.test.rules.loan_app_rules.ApplicationOutcome],

@@ -77,7 +77,7 @@
   honest statement of provenance: everything in that file came out of
   `clara.explorer.analyze`. Nothing in the library privileges the id —
   it is a marker for humans and tooling."
-  :clara.tools.graph.analyze/generated)
+  :clara.explorer.analyze/generated)
 
 (def memory-layer-id
   "`:id` of the memory-derived layer: fact types observed in a fired session's
@@ -86,7 +86,7 @@
   runtime* versus read out of source.
 
   `:memory` rather than `:working-memory` to match the explorer's own
-  `clara.tools.graph.analyze/memory`, the artifact role key, and
+  `clara.explorer.analyze/memory`, the artifact role key, and
   `memory-annotations.edn` — one word for the channel, everywhere."
   :memory)
 
