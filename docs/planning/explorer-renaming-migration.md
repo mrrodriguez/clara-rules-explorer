@@ -65,6 +65,9 @@ Note the two intentional collisions, disambiguated by bucket:
 
 - JVM main: `clara.server.graph.main/-main` → `clara.explorer.server.main/-main`
   (`clojure -M:demo-run`, `:demo-setup`, `:hierarchy-run` aliases unchanged).
+- Dev-only demo/hierarchy runners (dev classpath, not library API):
+  `clara.explorer.server.demo-setup/demo-run/hierarchy-run` →
+  `clara.explorer.dev.server.demo-setup/demo-run/hierarchy-run`.
 - Resource lookups: `clara/server/graph/editor-resolve-form.clj` →
   `clara/explorer/server/editor-resolve-form.clj`;
   `clara/server/tools/graph/kondo-config` → `clara/explorer/kondo-config`.

@@ -1,4 +1,4 @@
-(ns clara.explorer.server.hierarchy-run
+(ns clara.explorer.dev.server.hierarchy-run
   "Starts the explorer server over the loan-hierarchy-rules session (keyword
    derive hierarchy, vector-tuple fact types, a record fact type) for e2e
    testing of hierarchy-specific features.

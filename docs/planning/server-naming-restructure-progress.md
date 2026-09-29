@@ -16,7 +16,8 @@ Tracker lives alongside the plan; consumer migration guide will land as
 ## 1. Mechanical rename (§9.1) — DONE 2026-09-29
 - [x] `git mv server explorer` + package paths per §4.1–§4.4 (src 53, test 49, dev 9, resources)
 - [x] HTTP bucket `graph/*` → `server/*`, `server.clj` → `serve.clj`; test `server_test.clj` → `serve_test.clj` (§5.1)
-- [x] Artifacts / analysis / vendor buckets; test `rules.*` → `test.rules.*`; dev runners → `server.*`, scripts → `dev.*`, `user` stays
+- [x] Artifacts / analysis / vendor buckets; test `rules.*` → `test.rules.*`; scripts → `dev.*`
+- [x] Follow-up (owner): `user` back to `dev/user.clj` (classpath root — `user` never nests); demo/setup/hierarchy runners → `clara.explorer.dev.server.*` at `dev/clara/explorer/dev/server/` (dev-side only); `deps.edn` main-opts + `integration_test` updated; lint + 409 tests green
 - [x] Deleted empty `tools/graph/shared/` + `test_crazy_ns_$_name/`; fixed `empty-kondo-config` fixture layout
 - [x] `(ns …)` + requires rewritten longest-prefix-first (319+706+317+113+2 refs)
 - [x] `::conditions/normalized` → `:clara-rules-explorer/normalized` (§5.7); dropped now-unused `conditions` aliases
@@ -76,4 +77,5 @@ Tracker lives alongside the plan; consumer migration guide will land as
 - 2026-09-29: tracker created; baseline done; §9.1 `git mv` started.
 - 2026-09-29: §9.1 code moves + ns rewrite + marker change done; API compiles; fixtures + artifacts regenerated. Suite 409 tests 34F+9E → fixed path-strings, repo-root, symlinks; re-running.
 - 2026-09-29: suite green (409/2562, 0F/0E). All sections done except e2e-local. Stray demo backend on :9001 needs killing outside sandbox (`lsof -ti:9001 | xargs kill`).
+- 2026-09-29: owner follow-up — `user` → `dev/user.clj`, demo runners → `clara.explorer.dev.server.*` (deviates from plan §4.3, which kept them in `server.*`); referencers updated; lint + suite green again.
 - 2026-09-29: suite green (409/2562, 0F/0E). Fixed along the way: serve_test filename, rules path-strings + prefix, stale kondo .cache, synth ordering expectation, client-test *ns* binding. Running lint/reflection/format/bb gates.

@@ -44,15 +44,15 @@
 
   :demo-setup {:extra-paths ["dev" "test" "test-resources"]
                :extra-deps {ch.qos.logback/logback-classic {:mvn/version "1.6.2"}}
-               :main-opts ["-m" "clara.explorer.server.demo-setup"]}
+               :main-opts ["-m" "clara.explorer.dev.server.demo-setup"]}
 
   :demo-run {:extra-paths ["dev" "test" "test-resources"]
              :extra-deps {ch.qos.logback/logback-classic {:mvn/version "1.6.2"}}
-             :main-opts ["-m" "clara.explorer.server.demo-run"]}
+             :main-opts ["-m" "clara.explorer.dev.server.demo-run"]}
 
   :hierarchy-run {:extra-paths ["dev" "test" "test-resources"]
                   :extra-deps {ch.qos.logback/logback-classic {:mvn/version "1.6.2"}}
-                  :main-opts ["-m" "clara.explorer.server.hierarchy-run"]}
+                  :main-opts ["-m" "clara.explorer.dev.server.hierarchy-run"]}
 
   :nrepl {:extra-deps {nrepl/nrepl {:mvn/version "1.7.0"}
                        cider/cider-nrepl {:mvn/version "0.62.2"}}

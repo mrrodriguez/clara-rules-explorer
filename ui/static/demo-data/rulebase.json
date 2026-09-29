@@ -4266,7 +4266,7 @@
 			"ns": "clara.explorer.test.rules.loan-doc-rules",
 			"props": {},
 			"retract-types": [],
-			"rhs-form": "(do\n (clojure.core/let\n  [resolved__25925__auto__ #'extract-doc-meta]\n  (clara.rules/insert! resolved__25925__auto__)))\n",
+			"rhs-form": "(do\n (clojure.core/let\n  [resolved__25945__auto__ #'extract-doc-meta]\n  (clara.rules/insert! resolved__25945__auto__)))\n",
 			"sink-rule": false,
 			"source-rule": true
 		},

@@ -1,4 +1,4 @@
-(ns clara.explorer.server.demo-run
+(ns clara.explorer.dev.server.demo-run
   "Pre-loads demo rule namespaces and delegates to clara.explorer.server.main/-main
    with the demo annotations file included and WM enrichment enabled by default."
   (:require [clara.explorer.test.rules.loan-app-facts]

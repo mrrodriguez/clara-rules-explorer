@@ -1,4 +1,4 @@
-(ns clara.explorer.server.demo-setup
+(ns clara.explorer.dev.server.demo-setup
   "Serializes a demo Clara session (loan application rules + working memory)
    to disk for use with clara.explorer.server.main."
   (:require [clara.rules :as r]
@@ -81,7 +81,7 @@
 
 (defn -main
   "Serializes a demo Clara session to disk.
-   Usage: clojure -M -m clara.explorer.server.demo-setup [output-dir]
+   Usage: clojure -M -m clara.explorer.dev.server.demo-setup [output-dir]
    Default output-dir: demo-data"
   [& args]
   (let [output-dir (first args)]

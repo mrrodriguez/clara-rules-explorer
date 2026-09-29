@@ -24,7 +24,7 @@
             [clojure.string :as str]
             [jsonista.core :as json]
             [clojure.test :refer [deftest is testing use-fixtures]]
-            [clara.explorer.server.demo-setup :as demo]
+            [clara.explorer.dev.server.demo-setup :as demo]
             [clara.explorer.server.main :as main]
             [clara.explorer.server.serve :as server]
             [clara.explorer.memory :as memory]
