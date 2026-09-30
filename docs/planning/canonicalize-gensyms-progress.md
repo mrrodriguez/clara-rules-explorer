@@ -10,6 +10,7 @@ Tracks execution of `canonicalize-gensyms-plan.md`. Keep in sync as work lands.
 - [x] Route `*form-printer*` call sites through `serialize/print-form`
 - [x] Unit tests for `canonicalize-gensyms`
 - [x] Counter-independence regression tests
+- [x] In-memory ↔ persisted callsite-id alignment test
 - [x] Update pinned printed-form expectations (none needed beyond existing regex)
 - [x] `make test lint reflection-check format-check` green
 - [x] Consumer-impact note in `explorer-renaming-migration.md`
@@ -36,6 +37,13 @@ Instead, canonicalization happens at callsite emission in
 positions and local-binding lookups stay valid; persisted text is canonical at
 the one place it becomes a string.
 
+Callsite ids stay aligned with persistence because canonicalization happens
+*before* `ann.callsite/assign-callsite-ids` runs in `analyze/extract-insert-types`:
+the in-memory `:source-str` is already canonical when the id is hashed, and the
+same canonical `:source-str` is what `ann.merge/->layer` writes (and what
+`derive-callsite-ids` re-hashes on read). Locked in by
+`canonicalized-source-str-id-aligns-on-read` in `annotations_merge_test.clj`.
+
 ## Notes
 
 - Confirmed reader outputs (probe in `explorer/target/tmp/gensym_probe.clj`):
@@ -51,7 +59,7 @@ the one place it becomes a string.
 
 ## Verification
 
-- `make test` — 415 tests, 2586 assertions, 0 failures/errors.
+- `make test` — 416 tests, 2588 assertions, 0 failures/errors.
 - `make lint` — 0 warnings.
 - `make reflection-check` — passed.
 - `make format-check` — clean.

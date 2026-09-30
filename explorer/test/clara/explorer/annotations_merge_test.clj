@@ -9,6 +9,7 @@
             [clara.explorer.annotations.merge :as ann]
             [clara.explorer.annotations.rebase :as ann.rebase]
             [clara.explorer.annotations.report :as ann.report]
+            [clara.explorer.utils :as utils]
             [schema.test :as st]))
 
 (use-fixtures :once st/validate-schemas)
@@ -477,6 +478,32 @@
           cs (get-in (ann/annotations (ann/merge-layers [layer] {:on-dangling :keep}))
                      ["rule/a" :clara-rules/dynamic-insert-types-detected :callsites 0])]
       (is (= "kept:id:deadbeef:0" (:callsite-id cs))))))
+
+(deftest canonicalized-source-str-id-aligns-on-read
+  (testing "a canonicalized gensym source-str derives the same id in memory and from a persisted layer"
+    (let [source-str (->  "#(= (:type %1) \"C\")"
+                          read-string
+                          utils/canonicalize-gensyms
+                          pr-str)
+          cs {:source-str source-str
+              :ns-name-sym 'acme.pricing
+              :constructor-sym 'acme.facts/make-fact
+              :status :full}
+          {in-memory-id :callsite-id} (-> [cs]
+                                          ann.callsite/assign-callsite-ids
+                                          first)
+          ;; `->layer` is what persistence wraps the generated annotations in;
+          ;; a read-back entry re-derives its id from the same canonical
+          ;; :source-str basis.
+          layer (ann/->layer {:id :generated
+                              :annotations
+                              {"rule/a" {:clara-rules/dynamic-insert-types-detected {:callsites [cs]}}}})
+          read-back (get-in (ann/annotations (ann/merge-layers [layer]))
+                            ["rule/a" :clara-rules/dynamic-insert-types-detected :callsites 0])]
+      (is (re-find #"p1__0#" source-str)
+          "sanity: the source-str carries a canonical positional gensym")
+      (is (= in-memory-id (:callsite-id read-back))
+          "in-memory id and read-back id share the canonical source-str basis"))))
 
 ;; ---------------------------------------------------------------------------
 ;; §5.6 — dangling references (phase 3)
