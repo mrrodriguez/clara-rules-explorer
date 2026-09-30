@@ -138,6 +138,28 @@
                 stored inline — all four are there, three of them by reference"
         (is (str/includes? (run-report "summary") "rules: 4")))
 
+      (testing "`help` lists the subcommands and their signatures"
+        (let [out (run-report "help")]
+          (is (str/includes? out "usage: bb annotations_report.bb"))
+          (doseq [sub ["summary" "gaps" "types" "producers" "consumers"
+                       "hierarchy" "rule" "edges" "curated" "layers" "help"]]
+            (is (str/includes? out sub)))
+          (is (str/includes? out "<type>"))
+          (is (str/includes? out "<fq-name>"))
+          (is (str/includes? out "--file auto|agent|merged"))))
+
+      (testing "`producers` groups a multi-type match into per-type blocks"
+        (let [out (run-report "producers" "a/")]
+          (is (str/includes? out "Resolved a/ to 2 fact types:"))
+          (is (str/includes? out ":a/one"))
+          (is (str/includes? out ":a/two"))
+          (is (str/includes? out "a.ns/full-rule"))
+          (is (str/includes? out "(no matches)"))))
+
+      (testing "`hierarchy` blank-lines between the resolved list and the first type"
+        (let [out (run-report "hierarchy" "a/")]
+          (is (str/includes? out "  :a/two\n\n:a/one"))))
+
       (testing "`gaps` reads the generated layer directly, so it never touches
                 the merge or the analysis"
         (is (str/includes? (run-report "gaps") "a.ns/gap-rule"))))))
@@ -196,6 +218,17 @@
                      "clara.explorer.test.rules.loan-app-rules/app-outcome-denied?"
                      "clara.explorer.test.rules.loan-app-rules/app-outcome-pending?"]]
             (is (str/includes? out p)))))
+
+      (testing "a multi-type match groups via rules under the type they descend from"
+        (let [out (run "producers" "loan")]
+          (is (str/includes?
+               out
+               (str ":loan-app/application-outcome\n"
+                    "  via descendant clara.explorer.test.rules.loan_app_rules.ApplicationOutcome")))
+          (is (str/includes?
+               out
+               (str "clara.explorer.test.rules.loan_app_rules.ApplicationOutcome\n"
+                    "  exact")))))
 
       (testing "consumers closes over ancestors, labels via-ancestor, and prints :unit"
         (let [out (run "consumers" "clara.explorer.test.rules.loan_app_rules.ApplicationOutcome")]
