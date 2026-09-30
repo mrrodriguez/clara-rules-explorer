@@ -1,7 +1,7 @@
 # Unit provenance: detached checkouts and a `status` report
 
 Status: **proposal**. Scope: `explorer/` manifest provenance and the offline bb
-report. Additive manifest keys; one new `annotations_report.bb` subcommand.
+report. No new manifest keys; one new `annotations_report.bb` subcommand.
 
 ## 1. Problem
 
@@ -28,8 +28,16 @@ without reimplementing the comparison itself:
 
 ### 2.1 Resolution
 
+`:source :branch` names the branch the analyzed commit belongs to. For an
+attached checkout, that is the branch checked out, pushed or not: someone
+analyzing work on a local branch should see that branch named. For a detached
+checkout, it is the branch on the remote (the one recorded in `:source :remote`)
+that the commit was synced against. Whether the checkout was detached, or was a
+worktree, is a fact about one machine. It is noise to anyone reading the manifest
+from a shared registry, so it isn't recorded.
+
 In `get-git-info`, when `rev-parse --abbrev-ref HEAD` returns `HEAD`, resolve a
-branch that points at the commit, in this order:
+remote branch that points at the commit, in this order:
 
 1. The remote's default branch, if it points at `HEAD`:
    `git symbolic-ref --short refs/remotes/origin/HEAD` gives e.g. `origin/main`,
@@ -37,38 +45,27 @@ branch that points at the commit, in this order:
 2. Any other remote-tracking ref on `origin` pointing at `HEAD`:
    `git for-each-ref --points-at HEAD --format='%(refname:short)' refs/remotes/origin/`,
    sorted, first.
-3. Any local branch pointing at `HEAD`:
-   `git for-each-ref --points-at HEAD --format='%(refname:short)' refs/heads/`,
-   sorted, first.
 
-The recorded shape:
+The recorded `:branch` is the remote branch name with the local remote alias
+stripped (`origin/main` becomes `main`). If nothing resolves, `:branch` is nil.
+`HEAD` is not a branch. A local branch that happens to point at a detached commit
+isn't one anyone checked out, so it says nothing about what the commit was
+synced against.
 
 ```clojure
-;; attached (unchanged)
+;; attached, or detached at origin/main: the same record
 {:sha "…" :branch "main" :working-tree "clean" …}
 
-;; detached, resolved through origin/main
-{:sha "…" :branch "main" :detached true :ref "origin/main" :working-tree "clean" …}
-
-;; detached, nothing points at the commit
-{:sha "…" :branch nil :detached true :working-tree "clean" …}
+;; detached, no remote branch points at the commit
+{:sha "…" :branch nil :working-tree "clean" …}
 ```
 
-`:branch` has its remote prefix stripped, so a reader comparing branches doesn't
-need to know whether the checkout was detached. `:ref` says where the name came
-from. When nothing resolves, `:branch` is nil rather than `"HEAD"`: `HEAD` is not a
-branch, and `:detached true` says why the branch is missing.
-
 The sorted-first tie-break makes the choice deterministic, so the same checkout
-always gets the same record. It is still a guess when several branches share a
-commit, which is why `:ref` is recorded alongside it.
+always gets the same record.
 
 ### 2.2 Schema
 
-`schema/GitInfo` gains `(s/optional-key :detached) s/Bool` and
-`(s/optional-key :ref) s/Str`. Both keys appear only on a detached checkout. As
-with the manifest's top-level `:branch`, a missing key means the ordinary case.
-
+No change: `schema/GitInfo` already allows a nil `:branch`, and no key is added.
 The manifest's top-level `:branch` is the artifact-dir label a branch run chose,
 and is unaffected.
 
@@ -183,24 +180,24 @@ positional args. Each subcommand rejects flags it doesn't use. `subcommands` and
 
 | File | Change |
 |---|---|
-| `explorer/src/clara/explorer/artifacts/shared/git.clj` | new: git reads with detached resolution (§2.1) |
+| `explorer/src/clara/explorer/artifacts/shared/git.clj` | new: git reads with remote-branch resolution for detached checkouts (§2.1) |
 | `explorer/src/clara/explorer/artifacts/manifest.clj` | `get-git-info` delegates to `shared.git` |
-| `explorer/src/clara/explorer/artifacts/schema.clj` | `GitInfo` gains optional `:detached`, `:ref` |
 | `explorer/src/clara/explorer/artifacts/shared/status.clj` | new: `unit-status` (§3.2–3.4) |
 | `explorer/src/clara/explorer/artifacts/layout.cljc` | unit → directory mapping, if not already shared |
 | `explorer/bin/annotations_report.bb` | flag table; `status` subcommand and help row |
-| `explorer/docs/persisted-artifacts.md` | Provenance section: `:detached` / `:ref`; how to check a unit with `status` |
+| `explorer/docs/persisted-artifacts.md` | Provenance section: `:source :branch` is the remote branch, nil when none points at the commit; how to check a unit with `status` |
 
 ## 5. Tests
 
 - **Detached resolution** (temp git repo; no network): make a commit, point
   `refs/remotes/origin/main` at it with `git update-ref`, set
   `refs/remotes/origin/HEAD` to it with `git symbolic-ref`, then:
-  - `checkout --detach` gives `:branch "main" :detached true :ref "origin/main"`;
+  - `checkout --detach` gives `:branch "main"`;
   - a `git worktree add --detach` worktree gives the same;
-  - a commit that only a local branch points at resolves through step 3;
-  - a commit nothing points at gives `:branch nil :detached true`;
-  - an attached checkout carries neither key.
+  - a detached and an attached checkout of the same commit produce equal
+    `:source` maps;
+  - a commit that only a local branch points at gives `:branch nil`;
+  - a commit nothing points at gives `:branch nil`.
 - **`unit-status`**, over the existing `test-resources/rules-annos` fixtures plus
   temp copies whose manifests are edited:
   - a source unit against a checkout at its sha is `:current`; with one extra
@@ -216,7 +213,7 @@ positional args. Each subcommand rejects flags it doesn't use. `subcommands` and
 ## 6. Consumer impact
 
 - Manifests written from a detached checkout change once: `:branch "HEAD"`
-  becomes the resolved branch (or nil) plus `:detached` / `:ref`. Existing
+  becomes the resolved remote branch, or nil. Existing
   manifests are corrected the next time their unit is regenerated.
 - A reader that special-cased `"HEAD"` can drop that case.
 - No change to any artifact other than the manifest.
