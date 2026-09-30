@@ -1,65 +1,19 @@
 #!/usr/bin/env bb
-;; Triage the persisted clara-rules-explorer artifacts WITHOUT reading them into
-;; an LLM context window. A layer file is ~150KB and the analysis
-;; runs from ~10KB to 20MB (a restored 18-ruleset session) — never `cat` them.
-;;
-;; This is the ANNOTATION-side tool: layers, callsites, resolution, curation,
-;; provenance. Five of the ten subcommands never open the analysis at all.
-;; `producers`, `consumers`, and `hierarchy` read the fact-type hierarchy in
-;; fact-types.edn; `consumers` and `edges` read production-index.edn and
-;; dep-graph.edn; `rule` reads production-index.edn for `:unit` attribution.
-;; For anything structural the analysis does not hold — the Rete graph, :lhs-form,
-;; working memory — start the explorer server and query /v1.
+;; Offline triage of the persisted annotation artifacts — the ANNOTATION-side
+;; reader: layers, callsites, resolution, curation, provenance. Each subcommand
+;; reads only the artifact parts it needs.
 ;;
 ;;   bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|agent|merged]
 ;;
-;; <dir> is one run's artifact directory, holding the two
-;; annotation LAYERS plus merged-annotations.edn and merged-rulebase-analysis/.
+;; The subcommand menu, signatures, and options are enumerated by the
+;; `subcommands` and `usage-line` vars below, and printed by the `help`
+;; subcommand. The on-disk layout those subcommands read (fact-types.edn,
+;; production-index.edn, merged-annotations references) is documented in
+;; docs/persisted-artifacts.md.
 ;;
-;; merged-rulebase-analysis/ is a DIRECTORY split by access pattern, so a scan
-;; opens production-index.edn (~1.9MB) instead of the whole ~12MB value:
-;;   production-index.edn       :name :ns :lhs-types :insert-types + flags
-;;   production-conditions.edn  :lhs
-;;   production-details.edn     :rhs-form :doc :props :notes :params
-;;   fact-types.edn / dep-graph.edn / meta.edn
-;; merged-annotations.edn is stored by REFERENCE to the layers: ~99% of rules
-;; have a merged annotation identical to one layer's, so the file names that
-;; layer instead of restating the value, and is ~78KB rather than 5.6MB. Only
-;; rules the fold genuinely combined are written out. The references are resolved
-;; for you, so every subcommand sees whole annotations with whole callsites —
-;; :via and :source-str included.
+;; For anything structural the annotation artifacts don't hold — the Rete graph,
+;; :lhs-form, working memory — start the explorer server and query /v1.
 ;;
-;; Envelopes are unwrapped for you: a layer file is {:id … :annotations {…}} and
-;; the merge is {:verbatim … :annotations … :layers … :provenance …}; every
-;; subcommand below works on the inner rule->annotation map either way.
-;;
-;; Subcommands:
-;;   summary              (default) counts + resolution tallies
-;;   gaps                 rules whose :resolution is not :full, with the
-;;                        unresolved callsites to go read. Reads the AUTO layer —
-;;                        the deterministic baseline is the real work list
-;;   types                every resolved insert-type, with producer count
-;;   producers <type>     rules inserting <type> or a descendant  (annotations + fact-types.edn)
-;;   consumers <type>     rules with <type> or an ancestor on LHS  (production-index + fact-types.edn)
-;;   hierarchy <type>     that type's ancestors and descendants     (fact-types.edn)
-;;   rule <fq-name>       one rule's full annotation        (annotations; :unit from production-index)
-;;   edges <fq-name>      dep-graph upstream/downstream     (dep-graph; downstream inverted)
-;;   curated              what the agent overlay changed vs the auto-gen baseline
-;;   layers               the fold: which layers contributed, and per-key
-;;                        provenance (add a <fq-name> for one rule's)
-;;
-;; --file picks which annotations file the annotation-reading subcommands use:
-;; auto (the generated layer), agent (the curated overlay alone), or merged (the
-;; fold). Default is merged, except `gaps`, which defaults to auto.
-;;
-;; <type> may be written :foo/bar or foo/bar. producers/consumers/hierarchy
-;; resolve it against the known fact-type names in fact-types.edn — exact first,
-;; then substring. producers then reach descendants, consumers reach ancestors,
-;; the two opposite closures; hierarchy shows both. <fq-name> likewise falls
-;; back to substring search.
-;;
-;; Callsite :status and dimension :resolution share one vocabulary:
-;; :full / :partial / :none.
 
 (require '[babashka.fs :as fs]
          '[clojure.edn :as edn]
@@ -570,10 +524,8 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private usage-line
-  (str "usage: bb annotations_report.bb <dir|file.edn> "
-       "[summary|gaps|types|producers <t>|consumers <t>|hierarchy <t>|rule <n>|edges <n>|curated"
-       "|layers [<n>]|help] "
-       "[--file auto|agent|merged]"))
+  "The invocation skeleton, printed first by `help`."
+  "usage: bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|agent|merged]")
 
 (def ^:private subcommands
   "The subcommand menu as `[name signature description]`, in dispatch order;
@@ -610,7 +562,7 @@
   (cond
     (or (= "help" target) (= "help" cmd)) (help)
 
-    (nil? target) (die usage-line)
+    (nil? target) (help)
 
     :else
     (let [cmd (or cmd "summary")
