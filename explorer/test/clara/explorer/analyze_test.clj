@@ -205,13 +205,13 @@
           get-lines (fn [_ns _filename] [line])
           usage {:row 1 :col 1 :end-row 1 :end-col (inc (count line))
                  :from 'demo.rules :filename "demo/rules.clj"}
-          read-arg #(first (kondo/read-boundary-args usage get-lines))
+          read-arg #(-> usage (kondo/read-boundary-args get-lines) first)
           arg1 (read-arg)
           _ (dotimes [_ 1000] (gensym))
           arg2 (read-arg)
           ;; Mirrors the emission canonicalization in
           ;; `clara.explorer.analyze.callsite/resolve-boundary-callsites`.
-          source-str #(pr-str (utils/canonicalize-gensyms %))
+          source-str #(-> % utils/canonicalize-gensyms pr-str)
           cs1 {:ns-name-sym 'demo.rules
                :constructor-sym 'demo/->fact
                :source-str (source-str arg1)}

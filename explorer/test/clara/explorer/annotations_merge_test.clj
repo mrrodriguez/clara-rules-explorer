@@ -34,24 +34,24 @@
     :source {:generated-from "acme.pricing"}
     :annotations
     {"acme.pricing/discount-rule"
-     #:clara-rules{:dynamic-insert-types-detected
-                   {:callsites [generated-callsite]
-                    :resolution :none}}}}))
+     {:clara-rules/dynamic-insert-types-detected
+      {:callsites [generated-callsite]
+       :resolution :none}}}}))
 
 (def ^:private curated-layer
   (ann/->layer
    {:id :curated
     :annotations
     {"acme.pricing/discount-rule"
-     #:clara-rules{:dynamic-insert-types-detected
-                   {:callsites
-                    [{:callsite-id "acme.pricing:make-fact:a3f19c2b:0"
-                      :source-str "(f/make-fact (tier->type ?tier) {:total ?total})"
-                      :status :full
-                      :resolved-types [:acme.pricing/gold-discount
-                                       :acme.pricing/std-discount]
-                      :resolution-evidence
-                      {:note "closed map tier->type; both values enumerated"}}]}}}}))
+     {:clara-rules/dynamic-insert-types-detected
+      {:callsites
+       [{:callsite-id "acme.pricing:make-fact:a3f19c2b:0"
+         :source-str "(f/make-fact (tier->type ?tier) {:total ?total})"
+         :status :full
+         :resolved-types [:acme.pricing/gold-discount
+                          :acme.pricing/std-discount]
+         :resolution-evidence
+         {:note "closed map tier->type; both values enumerated"}}]}}}}))
 
 ;; ---------------------------------------------------------------------------
 ;; F1 — sparse layers: omission means "no opinion"
@@ -62,7 +62,7 @@
     (let [overlay (ann/->layer {:id :overlay
                                 :annotations
                                 {"acme.pricing/discount-rule"
-                                 #:clara-rules{:notes "reviewed"}}})
+                                 {:clara-rules/notes "reviewed"}}})
           merged (ann/merge-layers [generated-layer overlay])
           rule (get (ann/annotations merged) "acme.pricing/discount-rule")]
       (is (some? (:clara-rules/dynamic-insert-types-detected rule)))
@@ -132,11 +132,11 @@
 
   (testing "a later layer may re-establish an erased key"
     (let [base (ann/->layer {:id :base
-                             :annotations {"rule/a" #:clara-rules{:insert-types [:x]}}})
+                             :annotations {"rule/a" {:clara-rules/insert-types [:x]}}})
           erase (ann/->layer {:id :erase
-                              :annotations {"rule/a" #:clara-rules{:insert-types nil}}})
+                              :annotations {"rule/a" {:clara-rules/insert-types nil}}})
           readd (ann/->layer {:id :readd
-                              :annotations {"rule/a" #:clara-rules{:insert-types [:z]}}})
+                              :annotations {"rule/a" {:clara-rules/insert-types [:z]}}})
           rule (get (ann/annotations (ann/merge-layers [base erase readd])) "rule/a")]
       (is (= [:z] (:clara-rules/insert-types rule)))))
 
@@ -188,12 +188,12 @@
                     :source-str "(insert! c)")
         base (ann/->layer {:id :base
                            :annotations
-                           {"rule/a" #:clara-rules{:dynamic-insert-types-detected
-                                                   {:callsites [generated-callsite cs-b]}}}})
+                           {"rule/a" {:clara-rules/dynamic-insert-types-detected
+                                      {:callsites [generated-callsite cs-b]}}}})
         overlay (ann/->layer {:id :overlay
                               :annotations
-                              {"rule/a" #:clara-rules{:dynamic-insert-types-detected
-                                                      {:callsites [cs-c]}}}})
+                              {"rule/a" {:clara-rules/dynamic-insert-types-detected
+                                         {:callsites [cs-c]}}}})
         dm (get-in (ann/annotations (ann/merge-layers [base overlay]))
                    ["rule/a" :clara-rules/dynamic-insert-types-detected])]
     (testing "id-keyed union keeps a's order, appends b-only entries"
@@ -212,9 +212,9 @@
   (testing "a contradictory authored :resolution is ignored (F4)"
     (let [lying (ann/->layer {:id :lying
                               :annotations
-                              {"rule/a" #:clara-rules{:dynamic-insert-types-detected
-                                                      {:callsites [generated-callsite]
-                                                       :resolution :full}}}})
+                              {"rule/a" {:clara-rules/dynamic-insert-types-detected
+                                         {:callsites [generated-callsite]
+                                          :resolution :full}}}})
           dm (get-in (ann/annotations (ann/merge-layers [lying]))
                      ["rule/a" :clara-rules/dynamic-insert-types-detected])]
       (is (= :none (:resolution dm))))))
@@ -225,11 +225,11 @@
         dm-for (fn [& statuses]
                  (let [layer (ann/->layer {:id :l
                                            :annotations
-                                           {"rule/a" #:clara-rules{:dynamic-insert-types-detected
-                                                                   {:callsites
-                                                                    (map-indexed (fn [i st]
-                                                                                   (cs (str "id:" i) st))
-                                                                                 statuses)}}}})]
+                                           {"rule/a" {:clara-rules/dynamic-insert-types-detected
+                                                      {:callsites
+                                                       (map-indexed (fn [i st]
+                                                                      (cs (str "id:" i) st))
+                                                                    statuses)}}}})]
                    (get-in (ann/annotations (ann/merge-layers [layer]))
                            ["rule/a" :clara-rules/dynamic-insert-types-detected
                             :resolution])))]
@@ -248,16 +248,16 @@
 (deftest merge-props-precedence
   (let [base (ann/->layer {:id :base
                            :annotations
-                           {"rule/a" #:clara-rules{:insert-types [:a]}
-                            "rule/b" #:clara-rules{:insert-types [:a]}
-                            "rule/c" #:clara-rules{:insert-types [:a]}}})
+                           {"rule/a" {:clara-rules/insert-types [:a]}
+                            "rule/b" {:clara-rules/insert-types [:a]}
+                            "rule/c" {:clara-rules/insert-types [:a]}}})
         overlay (ann/->layer {:id :overlay
                               :merge-props {:insert-types :replace}
                               :annotations
-                              {"rule/a" #:clara-rules{:insert-types [:b]}
+                              {"rule/a" {:clara-rules/insert-types [:b]}
                                "rule/b" #:clara-rules{:insert-types [:b]
                                                       :merge-props {:insert-types :union}}
-                               "rule/c" #:clara-rules{:insert-types [:b]}}})
+                               "rule/c" {:clara-rules/insert-types [:b]}}})
         rules (ann/annotations (ann/merge-layers [base overlay]))]
     (testing "layer-level merge-props is the default for rules it touches"
       (is (= [:b] (:clara-rules/insert-types (get rules "rule/a")))))
@@ -269,17 +269,17 @@
 
   (testing "default strategy is union, a first, distinct"
     (let [base (ann/->layer {:id :base
-                             :annotations {"rule/a" #:clara-rules{:insert-types [:x :y]}}})
+                             :annotations {"rule/a" {:clara-rules/insert-types [:x :y]}}})
           overlay (ann/->layer {:id :overlay
-                                :annotations {"rule/a" #:clara-rules{:insert-types [:y :z]}}})
+                                :annotations {"rule/a" {:clara-rules/insert-types [:y :z]}}})
           rule (get (ann/annotations (ann/merge-layers [base overlay])) "rule/a")]
       (is (= [:x :y :z] (:clara-rules/insert-types rule)))))
 
   (testing "deduplicates across representations: Class vs Symbol for same logical type"
     (let [base (ann/->layer {:id :base
-                             :annotations {"clojure.core/rule-a" #:clara-rules{:insert-types [java.lang.String]}}})
+                             :annotations {"clojure.core/rule-a" {:clara-rules/insert-types [java.lang.String]}}})
           overlay (ann/->layer {:id :overlay
-                                :annotations {"clojure.core/rule-a" #:clara-rules{:insert-types ['java.lang.String]}}})
+                                :annotations {"clojure.core/rule-a" {:clara-rules/insert-types ['java.lang.String]}}})
           rule (get (ann/annotations (ann/merge-layers [base overlay])) "clojure.core/rule-a")]
       (is (= 1 (count (:clara-rules/insert-types rule)))
           "Class from props and Symbol from sidecar should merge to one")
@@ -288,16 +288,16 @@
 
   (testing "kind discrimination: String and Symbol are distinct fact types (no conflation)"
     (let [base (ann/->layer {:id :base
-                             :annotations {"clojure.core/rule-a" #:clara-rules{:insert-types ["java.lang.String"]}}})
+                             :annotations {"clojure.core/rule-a" {:clara-rules/insert-types ["java.lang.String"]}}})
           overlay (ann/->layer {:id :overlay
-                                :annotations {"clojure.core/rule-a" #:clara-rules{:insert-types ['java.lang.String]}}})
+                                :annotations {"clojure.core/rule-a" {:clara-rules/insert-types ['java.lang.String]}}})
           rule (get (ann/annotations (ann/merge-layers [base overlay])) "clojure.core/rule-a")]
       (is (= 2 (count (:clara-rules/insert-types rule)))
           "String literal and class-name Symbol are distinct fact-type kinds"))))
 
 (deftest notes-append-strategy
   (let [base (ann/->layer {:id :base
-                           :annotations {"rule/a" #:clara-rules{:notes "first"}}})
+                           :annotations {"rule/a" {:clara-rules/notes "first"}}})
         overlay (ann/->layer {:id :overlay
                               :annotations
                               {"rule/a" #:clara-rules{:notes "second"
@@ -314,7 +314,7 @@
                             :annotations {"rule/a" #:clara-rules{:insert-types [:p]
                                                                  :notes "from props"}}})
         generated (ann/->layer {:id :generated
-                                :annotations {"rule/a" #:clara-rules{:insert-types [:g]}}})
+                                :annotations {"rule/a" {:clara-rules/insert-types [:g]}}})
         reviewed (ann/->layer {:id :reviewed
                                :annotations {"rule/a" #:clara-rules{:insert-types [:r]
                                                                     :notes "final word"}}})
@@ -332,7 +332,7 @@
 (deftest fold-associativity
   (let [l1 (ann/->layer {:id :l1 :annotations {"rule/a" #:clara-rules{:insert-types [:a]
                                                                       :notes "n1"}}})
-        l2 (ann/->layer {:id :l2 :annotations {"rule/a" #:clara-rules{:insert-types [:b]}}})
+        l2 (ann/->layer {:id :l2 :annotations {"rule/a" {:clara-rules/insert-types [:b]}}})
         l3 (ann/->layer {:id :l3 :annotations {"rule/a" #:clara-rules{:insert-types [:c]
                                                                       :notes "n3"}}})
         one-pass (ann/annotations (ann/merge-layers [l1 l2 l3]))
@@ -359,14 +359,14 @@
       (let [layer (ann/->layer {:id :curated
                                 :annotations
                                 {"acme.pricing/discount-rule"
-                                 #:clara-rules{:dynamic-insert-types-detected
-                                               {:callsites
-                                                [{:callsite-id "acme.pricing:make-fact:a3f19c2b:0"
-                                                  :source-str "(f/make-fact x)"
-                                                  :ns-name-sym (with-meta 'acme.pricing
-                                                                 {:row 1 :col 5})
-                                                  :status :full
-                                                  :resolved-types [:t]}]}}}})
+                                 {:clara-rules/dynamic-insert-types-detected
+                                  {:callsites
+                                   [{:callsite-id "acme.pricing:make-fact:a3f19c2b:0"
+                                     :source-str "(f/make-fact x)"
+                                     :ns-name-sym (with-meta 'acme.pricing
+                                                    {:row 1 :col 5})
+                                     :status :full
+                                     :resolved-types [:t]}]}}}})
             _ (ann/write-layer! path layer)
             written (slurp path)
             reread (ann/->layer path)]
@@ -458,23 +458,23 @@
   (testing "hand-written layers need not compute hashes when they supply the basis"
     (let [layer (ann/->layer {:id :curated
                               :annotations
-                              {"rule/a" #:clara-rules{:dynamic-insert-types-detected
-                                                      {:callsites
-                                                       [{:source-str "(f/make-fact x)"
-                                                         :ns-name-sym 'acme.pricing
-                                                         :constructor-sym 'acme.facts/make-fact
-                                                         :status :full
-                                                         :resolved-types [:t]}]}}}})
+                              {"rule/a" {:clara-rules/dynamic-insert-types-detected
+                                         {:callsites
+                                          [{:source-str "(f/make-fact x)"
+                                            :ns-name-sym 'acme.pricing
+                                            :constructor-sym 'acme.facts/make-fact
+                                            :status :full
+                                            :resolved-types [:t]}]}}}})
           cs (get-in (ann/annotations (ann/merge-layers [layer]))
                      ["rule/a" :clara-rules/dynamic-insert-types-detected :callsites 0])]
       (is (string? (:callsite-id cs)))))
   (testing "an entry carrying an id keeps it"
     (let [layer (ann/->layer {:id :curated
                               :annotations
-                              {"rule/a" #:clara-rules{:dynamic-insert-types-detected
-                                                      {:callsites
-                                                       [{:callsite-id "kept:id:deadbeef:0"
-                                                         :status :none}]}}}})
+                              {"rule/a" {:clara-rules/dynamic-insert-types-detected
+                                         {:callsites
+                                          [{:callsite-id "kept:id:deadbeef:0"
+                                            :status :none}]}}}})
           cs (get-in (ann/annotations (ann/merge-layers [layer] {:on-dangling :keep}))
                      ["rule/a" :clara-rules/dynamic-insert-types-detected :callsites 0])]
       (is (= "kept:id:deadbeef:0" (:callsite-id cs))))))
@@ -498,8 +498,10 @@
           layer (ann/->layer {:id :generated
                               :annotations
                               {"rule/a" {:clara-rules/dynamic-insert-types-detected {:callsites [cs]}}}})
-          read-back (get-in (ann/annotations (ann/merge-layers [layer]))
-                            ["rule/a" :clara-rules/dynamic-insert-types-detected :callsites 0])]
+          read-back (-> [layer]
+                        ann/merge-layers
+                        ann/annotations
+                        (get-in ["rule/a" :clara-rules/dynamic-insert-types-detected :callsites 0]))]
       (is (re-find #"p1__0#" source-str)
           "sanity: the source-str carries a canonical positional gensym")
       (is (= in-memory-id (:callsite-id read-back))
@@ -515,12 +517,12 @@
   (ann/->layer {:id :curated
                 :annotations
                 {"acme.pricing/discount-rule"
-                 #:clara-rules{:dynamic-insert-types-detected
-                               {:callsites
-                                [{:callsite-id "acme.pricing:make-fact:7d10e4aa:0"
-                                  :status :full
-                                  :resolved-types [:acme.pricing/gold-discount]
-                                  :resolution-evidence {:note "was the old form"}}]}}}}))
+                 {:clara-rules/dynamic-insert-types-detected
+                  {:callsites
+                   [{:callsite-id "acme.pricing:make-fact:7d10e4aa:0"
+                     :status :full
+                     :resolved-types [:acme.pricing/gold-discount]
+                     :resolution-evidence {:note "was the old form"}}]}}}}))
 
 (deftest dangling-quarantine
   (let [merged (ann/merge-layers [generated-layer dangling-curated-layer])
@@ -558,13 +560,13 @@
     (let [introduced (ann/->layer {:id :curated
                                    :annotations
                                    {"acme.pricing/discount-rule"
-                                    #:clara-rules{:dynamic-insert-types-detected
-                                                  {:callsites
-                                                   [{:source-str "(f/make-fact :extra {})"
-                                                     :ns-name-sym 'acme.pricing
-                                                     :constructor-sym 'acme.facts/make-fact
-                                                     :status :full
-                                                     :resolved-types [:acme.pricing/extra]}]}}}})
+                                    {:clara-rules/dynamic-insert-types-detected
+                                     {:callsites
+                                      [{:source-str "(f/make-fact :extra {})"
+                                        :ns-name-sym 'acme.pricing
+                                        :constructor-sym 'acme.facts/make-fact
+                                        :status :full
+                                        :resolved-types [:acme.pricing/extra]}]}}}})
           merged (ann/merge-layers [generated-layer introduced])
           dm (get-in (ann/annotations merged)
                      ["acme.pricing/discount-rule" :clara-rules/dynamic-insert-types-detected])]
@@ -591,10 +593,10 @@
         richer (ann/->layer {:id :generated2
                              :annotations
                              {"acme.pricing/discount-rule"
-                              #:clara-rules{:dynamic-insert-types-detected
-                                            {:callsites [generated-callsite resolved-cs partial-cs]}}
+                              {:clara-rules/dynamic-insert-types-detected
+                               {:callsites [generated-callsite resolved-cs partial-cs]}}
                               "acme.pricing/other-rule"
-                              #:clara-rules{:insert-types [:t]}}})
+                              {:clara-rules/insert-types [:t]}}})
         report (ann.report/unresolved-report (ann/merge-layers [richer]))]
     (testing "summary counts rules and callsites needing work, by status"
       (is (= {:rules 1 :callsites 2 :by-resolution {:none 1 :partial 1} :dangling 0}
@@ -632,8 +634,8 @@
 
 (deftest validate-unknown-rule
   (let [layer (ann/->layer {:id :curated
-                            :annotations {"acme.pricing/discount-rule" #:clara-rules{:notes "ok"}
-                                          "acme.pricing/nope-rule" #:clara-rules{:notes "typo"}}})
+                            :annotations {"acme.pricing/discount-rule" {:clara-rules/notes "ok"}
+                                          "acme.pricing/nope-rule" {:clara-rules/notes "typo"}}})
         findings (ann.report/validate-layers [layer] {:known-rule-names #{"acme.pricing/discount-rule"}})
         unknown (:unknown-rule (findings-by-type findings))]
     (is (= 1 (count unknown)))
@@ -645,11 +647,11 @@
 (deftest validate-resolved-without-types
   (let [layer (ann/->layer {:id :curated
                             :annotations
-                            {"rule/a" #:clara-rules{:dynamic-insert-types-detected
-                                                    {:callsites
-                                                     [{:callsite-id "id:1"
-                                                       :source-str "(x)"
-                                                       :status :full}]}}}})
+                            {"rule/a" {:clara-rules/dynamic-insert-types-detected
+                                       {:callsites
+                                        [{:callsite-id "id:1"
+                                          :source-str "(x)"
+                                          :status :full}]}}}})
         findings (:resolved-without-types (findings-by-type (ann.report/validate-layers [layer])))]
     (is (= 1 (count findings)))
     (is (= :error (:severity (first findings))))
@@ -658,14 +660,14 @@
 (deftest validate-authored-derived-fields
   (let [layer (ann/->layer {:id :curated
                             :annotations
-                            {"rule/a" #:clara-rules{:dynamic-insert-types-detected
-                                                    {:callsites
-                                                     [{:callsite-id "id:1"
-                                                       :source-str "(x)"
-                                                       :status :none
-                                                       :from-layer :curated
-                                                       :dangling? true}]
-                                                     :resolution :none}}}})
+                            {"rule/a" {:clara-rules/dynamic-insert-types-detected
+                                       {:callsites
+                                        [{:callsite-id "id:1"
+                                          :source-str "(x)"
+                                          :status :none
+                                          :from-layer :curated
+                                          :dangling? true}]
+                                        :resolution :none}}}})
         findings (:authored-derived-field (findings-by-type (ann.report/validate-layers [layer])))]
     (testing ":resolution, :from-layer, and :dangling? are all flagged"
       (is (= 3 (count findings))))
@@ -688,18 +690,18 @@
              :status :none}
         generated (ann/->layer {:id :generated
                                 :annotations
-                                {"rule/a" #:clara-rules{:dynamic-insert-types-detected
-                                                        {:callsites [dup dup]}}}})
+                                {"rule/a" {:clara-rules/dynamic-insert-types-detected
+                                           {:callsites [dup dup]}}}})
         [id0 _] (mapv :callsite-id
                       (:callsites (:clara-rules/dynamic-insert-types-detected
                                    (get (:annotations generated) "rule/a"))))
         curator (ann/->layer {:id :curated
                               :annotations
-                              {"rule/a" #:clara-rules{:dynamic-insert-types-detected
-                                                      {:callsites
-                                                       [{:callsite-id id0
-                                                         :status :full
-                                                         :resolved-types [:t]}]}}}})
+                              {"rule/a" {:clara-rules/dynamic-insert-types-detected
+                                         {:callsites
+                                          [{:callsite-id id0
+                                            :status :full
+                                            :resolved-types [:t]}]}}}})
         findings (:ambiguous-callsite-reference
                   (findings-by-type (ann.report/validate-layers [generated curator])))]
     (testing "a curator referencing a multi-member group id is warned"
@@ -710,11 +712,11 @@
 
 (deftest validate-no-op-entry
   (let [base (ann/->layer {:id :base
-                           :annotations {"rule/a" #:clara-rules{:insert-types [:x]}}})
+                           :annotations {"rule/a" {:clara-rules/insert-types [:x]}}})
         noop (ann/->layer {:id :noop
-                           :annotations {"rule/a" #:clara-rules{:insert-types [:x]}}})
+                           :annotations {"rule/a" {:clara-rules/insert-types [:x]}}})
         real (ann/->layer {:id :real
-                           :annotations {"rule/a" #:clara-rules{:insert-types [:y]}}})
+                           :annotations {"rule/a" {:clara-rules/insert-types [:y]}}})
         findings (:no-op-entry
                   (findings-by-type (ann.report/validate-layers [base noop real])))]
     (testing "restating the merged value beneath is flagged; adding to it is not"
@@ -733,19 +735,19 @@
              :status :none}
         generated (ann/->layer {:id :generated
                                 :annotations
-                                {"rule/a" #:clara-rules{:dynamic-insert-types-detected
-                                                        {:callsites [src]}}
-                                 "rule/b" #:clara-rules{:dynamic-insert-types-detected
-                                                        {:callsites [src]}}}})
+                                {"rule/a" {:clara-rules/dynamic-insert-types-detected
+                                           {:callsites [src]}}
+                                 "rule/b" {:clara-rules/dynamic-insert-types-detected
+                                           {:callsites [src]}}}})
         id-a (:callsite-id (first (:callsites (:clara-rules/dynamic-insert-types-detected
                                                (get (:annotations generated) "rule/a")))))
         curator (ann/->layer {:id :curated
                               :annotations
-                              {"rule/a" #:clara-rules{:dynamic-insert-types-detected
-                                                      {:callsites
-                                                       [{:callsite-id id-a
-                                                         :status :full
-                                                         :resolved-types [:t]}]}}}})
+                              {"rule/a" {:clara-rules/dynamic-insert-types-detected
+                                         {:callsites
+                                          [{:callsite-id id-a
+                                            :status :full
+                                            :resolved-types [:t]}]}}}})
         findings (ann.report/validate-layers [generated curator])]
     (testing "no false positive when two rules share a source form — each has only one callsite"
       (is (empty? (:ambiguous-callsite-reference (findings-by-type findings)))))
@@ -795,7 +797,7 @@
                                               :status :full
                                               :resolved-types [:derived/t]}]}}
                              "rule/b"
-                             #:clara-rules{:insert-types [:authored/only]}
+                             {:clara-rules/insert-types [:authored/only]}
                              "rule/c"
                              #:clara-rules{:insert-types [:authored/unsupported]
                                            :dynamic-insert-types-detected
@@ -849,13 +851,13 @@
         downgrade (ann/->layer {:id :curated
                                 :annotations
                                 {"rule/a"
-                                 #:clara-rules{:dynamic-insert-types-detected
-                                               {:callsites
-                                                [{:callsite-id "id:1"
-                                                  :status :none
-                                                  :resolved-types nil
-                                                  :resolution-evidence
-                                                  {:note "analyzer mis-resolved; type is opaque"}}]}}}})]
+                                 {:clara-rules/dynamic-insert-types-detected
+                                  {:callsites
+                                   [{:callsite-id "id:1"
+                                     :status :none
+                                     :resolved-types nil
+                                     :resolution-evidence
+                                     {:note "analyzer mis-resolved; type is opaque"}}]}}}})]
     (testing ":additive cannot remove the type — the generated layer authored it rule-level"
       (let [rule (get (ann/annotations (ann/merge-layers [generated downgrade]))
                       "rule/a")]
@@ -869,7 +871,7 @@
 
 (deftest derivation-does-not-resurrect
   (let [props (ann/->layer {:id :props
-                            :annotations {"rule/a" #:clara-rules{:insert-types [:mistaken/t]}}})]
+                            :annotations {"rule/a" {:clara-rules/insert-types [:mistaken/t]}}})]
     (testing "a type overruled by :replace stays gone in both modes"
       (let [fix (ann/->layer {:id :curated
                               :annotations
@@ -882,7 +884,7 @@
                        "rule/a")))))))
     (testing "a tombstoned type stays gone in both modes"
       (let [erase (ann/->layer {:id :curated
-                                :annotations {"rule/a" #:clara-rules{:insert-types nil}}})]
+                                :annotations {"rule/a" {:clara-rules/insert-types nil}}})]
         (doseq [mode [:additive :from-callsites]]
           (is (not (contains? (get (ann/annotations (ann/merge-layers [props erase]
                                                                       {:type-derivation mode}))
@@ -901,15 +903,15 @@
   (let [generated (ann/->layer {:id :generated
                                 :annotations
                                 {"rule/a"
-                                 #:clara-rules{:dynamic-insert-types-detected
-                                               {:callsites
-                                                [{:callsite-id "id:1"
-                                                  :source-str "(x)"
-                                                  :ns-name-sym 'some.ns
-                                                  :filename "some/ns.clj"
-                                                  :status :none}]}}}})
+                                 {:clara-rules/dynamic-insert-types-detected
+                                  {:callsites
+                                   [{:callsite-id "id:1"
+                                     :source-str "(x)"
+                                     :ns-name-sym 'some.ns
+                                     :filename "some/ns.clj"
+                                     :status :none}]}}}})
         props (ann/->layer {:id :props
-                            :annotations {"rule/a" #:clara-rules{:insert-types [:props/t]}}})
+                            :annotations {"rule/a" {:clara-rules/insert-types [:props/t]}}})
         findings (:derivation-dropped-authored-type
                   (findings-by-type
                    (ann.report/validate-layers [props generated]
@@ -931,22 +933,22 @@
   (let [curated (ann/->layer {:id :curated
                               :annotations
                               {"acme.pricing/discount-rule"
-                               #:clara-rules{:dynamic-insert-types-detected
-                                             {:callsites
-                                              [{:source-str "(f/make-fact (tier->type ?tier) {:total ?total})"
-                                                :ns-name-sym 'acme.pricing
-                                                :filename "acme/pricing.clj"
-                                                :constructor-sym 'acme.facts/make-fact
-                                                :status :full
-                                                :resolved-types [:acme.pricing/gold-discount]
-                                                :resolution-evidence {:note "closed map"}}]}}
+                               {:clara-rules/dynamic-insert-types-detected
+                                {:callsites
+                                 [{:source-str "(f/make-fact (tier->type ?tier) {:total ?total})"
+                                   :ns-name-sym 'acme.pricing
+                                   :filename "acme/pricing.clj"
+                                   :constructor-sym 'acme.facts/make-fact
+                                   :status :full
+                                   :resolved-types [:acme.pricing/gold-discount]
+                                   :resolution-evidence {:note "closed map"}}]}}
                                "other.ns/rule"
-                               #:clara-rules{:dynamic-insert-types-detected
-                                             {:callsites
-                                              [{:source-str "(insert! x)"
-                                                :ns-name-sym 'other.ns
-                                                :filename "other/ns.clj"
-                                                :status :none}]}}}})
+                               {:clara-rules/dynamic-insert-types-detected
+                                {:callsites
+                                 [{:source-str "(insert! x)"
+                                   :ns-name-sym 'other.ns
+                                   :filename "other/ns.clj"
+                                   :status :none}]}}}})
         rebased (ann.rebase/rebase-layer curated '{acme.pricing acme.billing
                                                    acme.facts acme.facts-v2})]
     (testing "rule-name keys are remapped"
@@ -971,13 +973,13 @@
       (let [new-discovery (ann/->layer {:id :generated
                                         :annotations
                                         {"acme.billing/discount-rule"
-                                         #:clara-rules{:dynamic-insert-types-detected
-                                                       {:callsites
-                                                        [{:source-str "(f/make-fact (tier->type ?tier) {:total ?total})"
-                                                          :ns-name-sym 'acme.billing
-                                                          :filename "acme/billing.clj"
-                                                          :constructor-sym 'acme.facts-v2/make-fact
-                                                          :status :none}]}}}})
+                                         {:clara-rules/dynamic-insert-types-detected
+                                          {:callsites
+                                           [{:source-str "(f/make-fact (tier->type ?tier) {:total ?total})"
+                                             :ns-name-sym 'acme.billing
+                                             :filename "acme/billing.clj"
+                                             :constructor-sym 'acme.facts-v2/make-fact
+                                             :status :none}]}}}})
             merged (ann/merge-layers [new-discovery rebased])
             dm (get-in (ann/annotations merged)
                        ["acme.billing/discount-rule" :clara-rules/dynamic-insert-types-detected])]
@@ -994,8 +996,8 @@
         layer (ann/->layer {:id :curated
                             :annotations
                             {"acme.pricing/rule"
-                             #:clara-rules{:dynamic-insert-types-detected
-                                           {:callsites [dup dup]}}}})
+                             {:clara-rules/dynamic-insert-types-detected
+                              {:callsites [dup dup]}}}})
         rebased (ann.rebase/rebase-layer layer '{acme.pricing acme.billing})
         ids (mapv :callsite-id
                   (get-in rebased [:annotations "acme.billing/rule"
@@ -1020,8 +1022,8 @@
         layer (ann/->layer {:id :curated
                             :annotations
                             {"acme.pricing/rule"
-                             #:clara-rules{:dynamic-insert-types-detected
-                                           {:callsites [cs]}}}})
+                             {:clara-rules/dynamic-insert-types-detected
+                              {:callsites [cs]}}}})
         rebased (ann.rebase/rebase-layer layer '{acme.pricing acme.billing
                                                  acme.facts acme.facts-v2})
         via (get-in rebased [:annotations "acme.billing/rule"

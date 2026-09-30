@@ -82,11 +82,11 @@
                   (if (and (symbol? x) (nil? (namespace x)))
                     (let [n (name x)]
                       (if-let [canonical (get @renames n)]
-                        (with-meta (symbol canonical) (meta x))
+                        (-> canonical symbol (with-meta (meta x)))
                         (if-let [canonical (reader-gensym-name n @counter)]
                           (do (vswap! renames assoc n canonical)
                               (vswap! counter inc)
-                              (with-meta (symbol canonical) (meta x)))
+                              (-> canonical symbol (with-meta (meta x))))
                           x)))
                     x))
                 form)]

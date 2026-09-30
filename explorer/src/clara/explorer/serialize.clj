@@ -28,7 +28,7 @@
    reader state into persisted output.  `*form-printer*` stays rebindable;
    canonicalization is not something a caller can bind away."
   [form]
-  (*form-printer* (utils/canonicalize-gensyms form)))
+  (-> form utils/canonicalize-gensyms *form-printer*))
 
 (defn resolve-type
   "Resolves a raw fact type (Class, keyword, symbol, string, tuple, map, ...) to its

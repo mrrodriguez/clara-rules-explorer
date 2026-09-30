@@ -449,7 +449,7 @@
                            (let [ctx' (assoc ctx :usage usage :alias-context alias-context)
                                  tokens (resolve-traced-arg traced ctx' (:from usage))
                                  dropped (get dropped-ctor-provenance idx)
-                                 entry (cond-> {:source-str (pr-str (utils/canonicalize-gensyms arg))
+                                 entry (cond-> {:source-str (-> arg utils/canonicalize-gensyms pr-str)
                                                 :ns-name-sym (:from usage)
                                                 :filename (:filename usage)
                                                 :status (if (empty? tokens) :none :full)

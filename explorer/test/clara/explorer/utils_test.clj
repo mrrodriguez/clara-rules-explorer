@@ -5,46 +5,46 @@
 
 (deftest test-canonicalize-gensyms--patterns
   (testing "positional #() args keep their positional index"
-    (is (= 'p2__0# (utils/canonicalize-gensyms (symbol "p2__999#"))))
-    (is (= 'p1__0# (utils/canonicalize-gensyms (symbol "p1__7#")))))
+    (is (= 'p2__0# (-> "p2__999#" symbol utils/canonicalize-gensyms)))
+    (is (= 'p1__0# (-> "p1__7#" symbol utils/canonicalize-gensyms))))
 
   (testing "#() rest arg"
-    (is (= 'rest__0# (utils/canonicalize-gensyms (symbol "rest__42#")))))
+    (is (= 'rest__0# (-> "rest__42#" symbol utils/canonicalize-gensyms))))
 
   (testing "syntax-quote auto-gensym keeps its user-written prefix"
-    (is (= 'foo__0__auto__ (utils/canonicalize-gensyms (symbol "foo__42__auto__")))))
+    (is (= 'foo__0__auto__ (-> "foo__42__auto__" symbol utils/canonicalize-gensyms))))
 
   (testing "(gensym) default"
-    (is (= 'G__0 (utils/canonicalize-gensyms (symbol "G__42")))))
+    (is (= 'G__0 (-> "G__42" symbol utils/canonicalize-gensyms))))
 
   (testing "one shared ordinal counter across all shapes"
     (is (= '(p1__0# rest__1# foo__2__auto__ G__3)
-           (utils/canonicalize-gensyms
-            [(symbol "p1__9#")
-             (symbol "rest__9#")
-             (symbol "foo__9__auto__")
-             (symbol "G__9")])))))
+           (-> [(symbol "p1__9#")
+                (symbol "rest__9#")
+                (symbol "foo__9__auto__")
+                (symbol "G__9")]
+               utils/canonicalize-gensyms)))))
 
 (deftest test-canonicalize-gensyms--read-forms
   (testing "positional #() args"
     (is (= '(fn* [p1__0# p2__1#] (do p1__0# p2__1#))
-           (utils/canonicalize-gensyms (read-string "#(do %1 %2)")))))
+           (-> "#(do %1 %2)" read-string utils/canonicalize-gensyms))))
 
   (testing "rest arg in #()"
     (is (= '(fn* [& rest__0#] (apply + rest__0#))
-           (utils/canonicalize-gensyms (read-string "#(apply + %&)")))))
+           (-> "#(apply + %&)" read-string utils/canonicalize-gensyms))))
 
   (testing "nested #() inside a fn"
     (is (= '(fn [x] ((fn* [p1__0#] (inc p1__0#)) x))
-           (utils/canonicalize-gensyms (read-string "(fn [x] (#(inc %) x))")))))
+           (-> "(fn [x] (#(inc %) x))" read-string utils/canonicalize-gensyms))))
 
   (testing "two #() literals in one form get distinct ordinals"
-    (let [out (utils/canonicalize-gensyms (read-string "(do #(inc %) #(dec %))"))]
-      (is (str/includes? (pr-str out) "p1__0#"))
-      (is (str/includes? (pr-str out) "p1__1#"))))
+    (let [out (-> "(do #(inc %) #(dec %))" read-string utils/canonicalize-gensyms)]
+      (is (-> out pr-str (str/includes? "p1__0#")))
+      (is (-> out pr-str (str/includes? "p1__1#")))))
 
   (testing "canonicalization is idempotent in value"
-    (let [once (utils/canonicalize-gensyms (read-string "#(do %1 %2)"))]
+    (let [once (-> "#(do %1 %2)" read-string utils/canonicalize-gensyms)]
       (is (= once (utils/canonicalize-gensyms once))))))
 
 (deftest test-canonicalize-gensyms--no-gensym-forms
@@ -64,7 +64,7 @@
 
 (deftest test-canonicalize-gensyms--metadata
   (testing "metadata on a renamed symbol is preserved"
-    (let [sym (with-meta (symbol "p1__999#") {:line 3 :column 4})
+    (let [sym (-> "p1__999#" symbol (with-meta {:line 3 :column 4}))
           out (utils/canonicalize-gensyms [sym])]
       (is (= 'p1__0# (first out)))
-      (is (= {:line 3 :column 4} (meta (first out)))))))
+      (is (= {:line 3 :column 4} (-> out first meta))))))

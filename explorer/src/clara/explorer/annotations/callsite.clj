@@ -143,6 +143,25 @@
   [{:keys [ns-name-sym source-str]}]
   (boolean (and ns-name-sym source-str)))
 
+(defn- derive-callsite-ids-step
+  "One reduce step for `derive-callsite-ids`: folds `c` into `[out q]`, where
+   `out` is the derived vector and `q` the queue of precomputed ids for
+   basis-carrying entries.  Entries without an id basis pass through; entries
+   carrying an id keep it; the rest take the next id off the queue."
+  [[out q] c]
+  (cond
+    (not (has-id-basis? c))
+    [(conj out c) q]
+
+    (:callsite-id c)
+    [(conj out c) (pop q)]
+
+    :else
+    (let [with-id (->> q
+                       peek
+                       (assoc c :callsite-id))]
+      [(conj out with-id) (pop q)])))
+
 (defn derive-callsite-ids
   "Derives ids for entries that omit one (hand-written layers need not
    compute hashes as long as they supply enough of the basis).  Entries
@@ -151,16 +170,13 @@
   [callsites]
   (if (every? :callsite-id callsites)
     callsites
-    (let [new-ids (into clojure.lang.PersistentQueue/EMPTY
-                        (map :callsite-id)
-                        (assign-callsite-ids (filterv has-id-basis? callsites)))]
-      (first (reduce (fn [[out q] c]
-                       (cond
-                         (not (has-id-basis? c)) [(conj out c) q]
-                         (:callsite-id c) [(conj out c) (pop q)]
-                         :else [(conj out (assoc c :callsite-id (peek q))) (pop q)]))
-                     [[] new-ids]
-                     callsites)))))
+    (let [new-ids (->> callsites
+                       (filterv has-id-basis?)
+                       assign-callsite-ids
+                       (into clojure.lang.PersistentQueue/EMPTY (map :callsite-id)))]
+      (->> callsites
+           (reduce derive-callsite-ids-step [[] new-ids])
+           first))))
 
 (defn derive-ids-in-rule-annotation
   "Derives callsite ids for both detection dimensions of one rule annotation."

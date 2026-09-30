@@ -467,8 +467,8 @@
       (is (= (s/serialize-rhs-form a)
              (s/serialize-rhs-form b))
           ":rhs-form is byte-stable across reads")
-      (is (= (:constraints (s/serialize-condition {:type :t :constraints [a]} nil #{}))
-             (:constraints (s/serialize-condition {:type :t :constraints [b]} nil #{})))
+      (is (= (-> {:type :t :constraints [a]} (s/serialize-condition nil #{}) :constraints)
+             (-> {:type :t :constraints [b]} (s/serialize-condition nil #{}) :constraints))
           ":constraints is byte-stable across reads"))))
 
 (deftest test-serialize-dynamic-callsite-via
