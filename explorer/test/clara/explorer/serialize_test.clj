@@ -456,6 +456,21 @@
       (is (= "(do (println :done))" pr-str-result)
           "pr-str returns the form on one line"))))
 
+(deftest test-reader-gensym-counter-independence
+  (testing "printed forms and constraints do not leak the JVM reader counter"
+    (let [source "#(= (:type %1) \"C\")"
+          a (read-string source)
+          _ (dotimes [_ 1000] (gensym))
+          b (read-string source)]
+      (is (not= a b)
+          "sanity: two fresh reads mint different gensym numbers")
+      (is (= (s/serialize-rhs-form a)
+             (s/serialize-rhs-form b))
+          ":rhs-form is byte-stable across reads")
+      (is (= (:constraints (s/serialize-condition {:type :t :constraints [a]} nil #{}))
+             (:constraints (s/serialize-condition {:type :t :constraints [b]} nil #{})))
+          ":constraints is byte-stable across reads"))))
+
 (deftest test-serialize-dynamic-callsite-via
   (testing ":via stringifies :boundary-in-var and :rule-to-boundary-path like :boundary-to-constructor-path"
     (let [cs {:source-str "(->fact :x m)"

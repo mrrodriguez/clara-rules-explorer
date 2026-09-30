@@ -51,7 +51,8 @@
             [clara.explorer.analyze.utils :as u]
             [clara.explorer.analyze.kondo :as kondo]
             [clara.explorer.analyze.ctor :as ctor]
-            [clara.explorer.analyze.index :as index]))
+            [clara.explorer.analyze.index :as index]
+            [clara.explorer.utils :as utils]))
 
 (def ^:private max-resolution-depth 8)
 
@@ -133,14 +134,15 @@
   (`:fact-type`/`:fact-type-spec`) are present only for callsites discovered through a var-alias
   chain (`:fact-type-spec-fn`)."
   [{:keys [rule direction usage alias-context]} arg-form]
-  (cond-> {:rule rule
-           :ns-name-sym (:from usage)
-           :direction direction
-           :boundary-fn (symbol (str (:to usage)) (str (:name usage)))
-           :arg-form arg-form
-           :source-str (pr-str arg-form)
-           :filename (:filename usage)}
-    alias-context (merge (select-keys alias-context [:fact-type :fact-type-spec]))))
+  (let [arg-form (utils/canonicalize-gensyms arg-form)]
+    (cond-> {:rule rule
+             :ns-name-sym (:from usage)
+             :direction direction
+             :boundary-fn (symbol (str (:to usage)) (str (:name usage)))
+             :arg-form arg-form
+             :source-str (pr-str arg-form)
+             :filename (:filename usage)}
+      alias-context (merge (select-keys alias-context [:fact-type :fact-type-spec])))))
 
 (defn- invoke-callsite-resolver
   "Invokes the caller's `:callsite-resolver-fn`; exceptions are contained
@@ -447,7 +449,7 @@
                            (let [ctx' (assoc ctx :usage usage :alias-context alias-context)
                                  tokens (resolve-traced-arg traced ctx' (:from usage))
                                  dropped (get dropped-ctor-provenance idx)
-                                 entry (cond-> {:source-str (pr-str arg)
+                                 entry (cond-> {:source-str (pr-str (utils/canonicalize-gensyms arg))
                                                 :ns-name-sym (:from usage)
                                                 :filename (:filename usage)
                                                 :status (if (empty? tokens) :none :full)
@@ -606,7 +608,7 @@
               (assoc (->boundary-via boundary-fn-sym (first call-path) rule-to-boundary-path-for)
                      :boundary-to-constructor-path (conj (mapv (fn [v] {:var-name-sym v}) call-path)
                                                          {:var-name-sym ctor-sym})))
-        arg-form ctor-form
+        arg-form (utils/canonicalize-gensyms ctor-form)
         resolver-ctx (cond-> {:constructor-sym ctor-sym
                               :arg-form arg-form
                               :ns-name-sym (:from ctor-usage)

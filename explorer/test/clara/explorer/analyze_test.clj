@@ -6,7 +6,9 @@
             [clara.explorer.annotations :as ann]
             [clara.explorer.annotations.callsite :as ann.callsite]
             [clara.explorer.analyze :as analyze]
+            [clara.explorer.analyze.kondo :as kondo]
             [clara.explorer.conditions :as conditions]
+            [clara.explorer.utils :as utils]
             [clara.explorer.analyze.synth :as synth]
             [clara.explorer.memory :as memory]
             [clara.explorer.test.rules.loan-doc-rules :as ldr]
@@ -196,6 +198,33 @@
                 :filename filename
                 :status :none}]
    :resolution :none})
+
+(deftest test-reader-gensym-counter-independence
+  (testing "reading the same boundary source twice in one JVM yields stable :source-str and :callsite-id"
+    (let [line "(insert! #(= (:type %1) \"C\"))"
+          get-lines (fn [_ns _filename] [line])
+          usage {:row 1 :col 1 :end-row 1 :end-col (inc (count line))
+                 :from 'demo.rules :filename "demo/rules.clj"}
+          read-arg #(first (kondo/read-boundary-args usage get-lines))
+          arg1 (read-arg)
+          _ (dotimes [_ 1000] (gensym))
+          arg2 (read-arg)
+          ;; Mirrors the emission canonicalization in
+          ;; `clara.explorer.analyze.callsite/resolve-boundary-callsites`.
+          source-str #(pr-str (utils/canonicalize-gensyms %))
+          cs1 {:ns-name-sym 'demo.rules
+               :constructor-sym 'demo/->fact
+               :source-str (source-str arg1)}
+          cs2 {:ns-name-sym 'demo.rules
+               :constructor-sym 'demo/->fact
+               :source-str (source-str arg2)}]
+      (is (some? arg1))
+      (is (not= arg1 arg2)
+          "sanity: raw reads differ before canonicalization")
+      (is (= (:source-str cs1) (:source-str cs2)))
+      (is (= (ann.callsite/callsite-id cs1)
+             (ann.callsite/callsite-id cs2))
+          "callsite-id is stable when its source-str carries a reader gensym"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Static insert types (record constructors traced through RHS and helpers)

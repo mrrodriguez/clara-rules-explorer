@@ -128,6 +128,15 @@ units in one registry selection is flagged/refused as shape skew even though
 the shape is semantically identical. Regenerate all of your artifact sets once
 after upgrading and the old key disappears everywhere.
 
+**Reader-gensym canonicalization.** `#(…)` positional/rest args,
+syntax-quote auto-gensyms, and `(gensym)` defaults inside persisted forms are
+now canonicalized by order of appearance, so every `:source-str`, `:callsite-id`,
+`:rhs-form`, `:constraints`, and accumulator `:form` value that contains one
+changes once. Regenerate derived artifacts as above; a curated
+`agent-annotations.edn` entry keyed by such a callsite id dangles once (this was
+already going to happen on the next regeneration) and must be re-curated —
+`rebase-layer` cannot remap it because the id's hash input changed.
+
 ## 5. Data keywords
 
 ### 5.1 The `:clara.explorer.internal/normalized` marker
