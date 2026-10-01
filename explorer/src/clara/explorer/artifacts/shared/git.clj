@@ -6,9 +6,8 @@
   `clara.explorer.artifacts.manifest/get-git-info` delegates to `get-git-info`
   here, so the detached-checkout resolution has a single implementation.
 
-  bb-safe by construction: `clojure.java.shell` and `clojure.string` only, no
-  schema, no `clojure.java.io`. A missing dir or a non-repo surfaces as nil —
-  `git rev-parse` exits non-zero there — so no filesystem checks are needed."
+  A missing dir or a non-repo surfaces as nil — `git rev-parse` exits non-zero
+  there — so no filesystem checks are needed."
   (:require
    [clojure.java.shell :as sh]
    [clojure.string :as str]))

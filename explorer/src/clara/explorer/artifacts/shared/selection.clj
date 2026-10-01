@@ -4,8 +4,7 @@
   the unioned, re-closed hierarchy and the namespace coverage — once, for every merge mode.
 
   Registry I/O is injected through the capabilities map so this namespace stays free of
-  `clara.explorer.artifacts.registry`, which bb cannot load (it transitively pulls
-  `clara.explorer.serialize` → `clara.rules.schema`). `:read-analysis` reads one unit's
+  `clara.explorer.artifacts.registry`. `:read-analysis` reads one unit's
   slim analysis, `:assert-compatible!` refuses shape skew. The pure per-unit helpers live in
   `clara.explorer.artifacts.shared.registry`.
 

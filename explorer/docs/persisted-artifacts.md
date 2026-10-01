@@ -218,16 +218,12 @@ rule names fall back to substring matching the same way.
 subcommands use. Default is `merged`, except `gaps`, which defaults to `auto`
 because the deterministic baseline is the real work list.
 
-It is babashka, so it cannot `require` the namespaces that wrote the files —
-with one deliberate exception: `clara.explorer.artifacts.layout` and the
-`shared.*` namespaces, which are pure Clojure and carry the
-`:clara-rules-explorer/bb-loaded true` ns metadata that marks them bb-compatible.
-The script `require`s those through `bin/bootstrap.bb`, which puts `explorer/src`
-(and the pinned `schema` dep) on the bb classpath — one definition of every
-filename, the layer fold order, and the `merged-annotations.edn` decode, shared
-with the JVM rather than restated. `make bb-smoke-test` fails if any marked
-namespace pulls in something bb cannot load. Run the script from a checkout, not
-from a detached copy of the file alone.
+It is babashka, so it cannot `require` the namespaces that wrote the files. The
+one definition it shares with the JVM — every filename, the layer fold order,
+and the `merged-annotations.edn` decode — lives in namespaces marked
+`:clara-rules-explorer/bb-loaded true` on their ns form, which is what makes
+them safe for bb to `require`. Run the script from a checkout, not from a
+detached copy of the file alone.
 
 ## Navigating offline: `editor_client.bb`
 
@@ -268,8 +264,7 @@ Open the one part your question lives in. On the JVM:
 
 From babashka or anything else, `clojure.edn/read-string` over the one file is
 enough — the artifacts are plain EDN with no tagged literals, and
-`clara.explorer.artifacts.layout` gives you the filenames without any of the
-dependencies around it.
+`clara.explorer.artifacts.layout` gives you the filenames.
 
 Two things not to do:
 

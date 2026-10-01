@@ -2,18 +2,12 @@
   "What the persisted artifacts are called, and how to read back the one of them
   that is not stored literally.
 
-  **This namespace has no dependencies, and that is its whole reason to exist.**
-  The babashka scripts (`bin/annotations_report.bb`, `bin/editor_client.bb`)
-  `require` it — `bin/bootstrap.bb` puts `explorer/src` on their classpath — and
-  the `:clara-rules-explorer/bb-loaded true` ns metadata marks it bb-compatible,
-  so `make bb-smoke-test` catches any dependency that would break them. It cannot
-  load `schema.core`, clara, or anything else the namespaces around here pull
-  in, but it has to agree with them on every filename, on the layer fold order,
-  and on how `merged-annotations.edn` decodes.
-
-  So what belongs here is narrow: a name or a pure function that **both** the JVM
-  code and the babashka tooling need, in plain Clojure with no reader
-  conditionals. Schema validation, IO, and anything touching a session stay in
+  The one definition every reader shares: the JVM artifact namespaces and the
+  babashka report load this namespace rather than restating its contents, so a
+  filename, the layer fold order, or the `merged-annotations.edn` decode cannot
+  drift between the two. What belongs here is narrow — a name or a pure function
+  both sides need, in plain Clojure. Schema validation, IO, and anything touching
+  a session stay in
   `clara.explorer.artifacts.store` /
   `clara.explorer.artifacts.compact` /
   `clara.explorer.artifacts.parts`, which wrap what is here.

@@ -5,12 +5,7 @@
   A host that persists extra inputs through `:blocks` (tool versions, its own
   configuration slices) calls `unit-status` and appends its own `:reasons`
   before rendering — host-specific staleness without the explorer knowing those
-  inputs exist.
-
-  bb-safe by construction: `layout`, `shared.git`, `shared.registry`,
-  `clojure.edn`, `clojure.string`, and `java.time` only. Manifest reads are
-  plain `slurp`; git reads go through `clara.explorer.artifacts.shared.git`,
-  so bb and the JVM resolve refs the same way."
+  inputs exist."
   (:require
    [clara.explorer.artifacts.layout :as layout]
    [clara.explorer.artifacts.shared.git :as git]
