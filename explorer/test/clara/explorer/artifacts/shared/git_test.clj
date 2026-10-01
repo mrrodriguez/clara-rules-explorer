@@ -151,6 +151,12 @@
       (testing "a missing dir is nil"
         (is (nil? (git/get-git-info "/no/such/dir/clara-git-test"))))
 
+      (testing "a nil or blank dir is nil, not the working directory's checkout"
+        (is (nil? (git/get-git-info nil)))
+        (is (nil? (git/get-git-info "")))
+        (is (nil? (git/ref-sha nil "HEAD")))
+        (is (nil? (git/remote-url ""))))
+
       (testing "a non-repo dir is nil"
         (let [dir (make-temp-dir "clara-git-test")]
           (try

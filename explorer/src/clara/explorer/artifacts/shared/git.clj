@@ -7,7 +7,8 @@
   here, so the detached-checkout resolution has a single implementation.
 
   A missing dir or a non-repo surfaces as nil — `git rev-parse` exits non-zero
-  there — so no filesystem checks are needed."
+  there — so no filesystem checks are needed. A nil or blank dir is nil too,
+  rather than the working directory's checkout."
   (:require
    [clojure.java.shell :as sh]
    [clojure.string :as str]))
@@ -20,11 +21,13 @@
 
 (defn- git
   "Trimmed stdout of `git -C dir args`, or nil when git exits non-zero
-  (missing dir, not a repo, unknown ref)."
+  (missing dir, not a repo, unknown ref) or `dir` is blank. git reads an empty
+  `-C` as the working directory, so a blank dir never reaches it."
   [dir & args]
-  (let [{:keys [exit out]} (apply sh/sh "git" "-C" (str dir) args)]
-    (when (zero? exit)
-      (str/trim (str out)))))
+  (when-not (str/blank? (str dir))
+    (let [{:keys [exit out]} (apply sh/sh "git" "-C" (str dir) args)]
+      (when (zero? exit)
+        (str/trim (str out))))))
 
 ;; ===========================================================================
 ;; checkout reads — the seam `clara.explorer.artifacts.shared.status` compares
