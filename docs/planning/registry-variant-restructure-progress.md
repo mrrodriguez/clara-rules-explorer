@@ -13,10 +13,10 @@ changes (§8).
   treated as already complete (a reader reconstructing a known unit, or a host
   that has already decided its unit's identity). This keeps registry reads and
   the bb report free of git subprocesses.
-- **`store/write-variant` is the single mainline rule.** Both `store/get-out-dir`
-  and `manifest/->manifest` derive the full `:variant` (host axes + `[:ref …]`)
-  through it, so the directory placement and the manifest's top-level `:variant`
-  cannot disagree.
+- **`layout/write-variant` is the single mainline rule** (bb-portable; `store`
+  re-exports it). Both `store/get-out-dir` and `manifest/->manifest` derive the
+  full `:variant` (host axes + `[:ref …]`) through it, so the directory placement
+  and the manifest's top-level `:variant` cannot disagree.
 - **The checked-in example uses the read-path form** for both mainline and
   variant units, so the golden test stays deterministic. The variant ref is a
   hand-placed placeholder (`ref=feature/new-tax`, exercising `/` encoding). The

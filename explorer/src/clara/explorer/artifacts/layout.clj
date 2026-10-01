@@ -254,6 +254,21 @@
                         (decode-value (subs segment (inc i)))]))))
         (str/split (str path) #"/")))
 
+(defn write-variant
+  "The full decoded `:variant` for a write: the caller's host axes plus the
+  derived `[:ref …]` pair, or nil when the run is mainline (`canonical?` and the
+  ref is the remote's default branch). `git-info` is the analyzed checkout's git
+  info, as `clara.explorer.artifacts.shared.git/get-git-info` returns it; the
+  ref is its `:branch`, else its `:sha-short`. Throws when there is no checkout
+  to read a ref from — a run with no repo names an explicit `:dir` instead."
+  [host-variant canonical? git-info]
+  (when-not git-info
+    (throw (ex-info "Cannot derive a variant from a non-git checkout: pass :dir"
+                    {:canonical? canonical?})))
+  (let [ref (or (:branch git-info) (:sha-short git-info))]
+    (when-not (and canonical? (= ref (:default-branch git-info)))
+      (into (vec host-variant) [[:ref ref]]))))
+
 (defn- strip-trailing-slashes
   "`s` with trailing `/`s removed, so joining never doubles a separator."
   [s]

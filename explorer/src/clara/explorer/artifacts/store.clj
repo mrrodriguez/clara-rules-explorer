@@ -188,21 +188,6 @@
         (throw (ex-info (format "Bad variant value for %s: %s" axis-name (pr-str value))
                         {:axis axis-name :value value}))))))
 
-(defn write-variant
-  "The full decoded `:variant` for a write: the caller's host axes plus the
-  derived `[:ref …]` pair, or nil when the run is mainline (`canonical?` and the
-  ref is the remote's default branch). `git-info` is `shared-git/get-git-info`
-  of the analyzed checkout; the ref is its `:branch`, else its `:sha-short`.
-  Throws when there is no checkout to read a ref from — a run with no repo names
-  an explicit `:dir` instead."
-  [host-variant canonical? {:keys [sha-short branch default-branch] :as git-info}]
-  (when-not git-info
-    (throw (ex-info "Cannot derive a variant from a non-git checkout: pass :dir"
-                    {:canonical? canonical?})))
-  (let [ref (or branch sha-short)]
-    (when-not (and canonical? (= ref default-branch))
-      (conj (vec host-variant) [:ref ref]))))
-
 (s/defn get-out-dir :- s/Str
   "Persistence dir for a run.
 
@@ -241,7 +226,7 @@
                       (->> (System/getProperty "user.dir")
                            (or repo-path)
                            shared-git/get-git-info
-                           (write-variant variant canonical?)))
+                           (layout/write-variant variant canonical?)))
                     variant)]
       (layout/->unit-dir {:root root :repo repo :variant variant}))))
 

@@ -30,6 +30,32 @@
   (testing "a segment without '=' is refused"
     (is (thrown? clojure.lang.ExceptionInfo (layout/path->variant "nope")))))
 
+(deftest write-variant-test
+  (testing "mainline is nil only when canonical and on the default branch"
+    (is (nil? (layout/write-variant [] true
+                                    {:branch "main" :sha-short "abc1234"
+                                     :default-branch "main"})))
+    (is (= [[:ref "feature"]]
+           (layout/write-variant [] true
+                                 {:branch "feature" :sha-short "abc1234"
+                                  :default-branch "main"})))
+    (is (= [[:ref "main"]]
+           (layout/write-variant [] false
+                                 {:branch "main" :sha-short "abc1234"
+                                  :default-branch "main"}))))
+  (testing "a nil branch falls back to the short sha"
+    (is (= [[:ref "abc1234"]]
+           (layout/write-variant [] false
+                                 {:branch nil :sha-short "abc1234"
+                                  :default-branch "main"}))))
+  (testing "host axes prefix the ref"
+    (is (= [[:region "eu"] [:ref "feature"]]
+           (layout/write-variant [[:region "eu"]] false
+                                 {:branch "feature" :sha-short "abc1234"
+                                  :default-branch "main"}))))
+  (testing "a missing checkout is refused"
+    (is (thrown? clojure.lang.ExceptionInfo (layout/write-variant [] false nil)))))
+
 (deftest ->unit-dir-test
   (testing "explicit :dir wins outright; a variant nests under _variants/<repo>/"
     (is (= "/r/loan-app"

@@ -25,6 +25,7 @@
   `clara.explorer.artifacts.store/artifact-files`."
   (:require
    [clara.explorer.analyze :as analyze]
+   [clara.explorer.artifacts.layout :as layout]
    [clara.explorer.artifacts.schema :as schema]
    [clara.explorer.artifacts.shared.git :as shared-git]
    [clara.explorer.artifacts.store :as store]
@@ -134,7 +135,7 @@
   (let [today (str (java.time.LocalDate/now))
         git (get-git-info (or repo-path (System/getProperty "user.dir")))
         variant (if (contains? opts :canonical?)
-                  (store/write-variant variant canonical? git)
+                  (layout/write-variant variant canonical? git)
                   variant)]
     (cond-> (merge
              {:repo repo
