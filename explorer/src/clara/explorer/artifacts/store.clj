@@ -169,24 +169,41 @@
   "A host axis name: `[a-z0-9][a-z0-9-]*`. `ref` is reserved and refused below."
   #"[a-z0-9][a-z0-9-]*")
 
+(defn- validate-repo!
+  "Refuse a `:repo` path that cannot round-trip through discovery or that would
+  escape the root: a blank segment, a `.` or `..` segment, or an `=` in any
+  segment (discovery reads the first `=` segment as the start of a variant)."
+  [repo]
+  (doseq [seg (str/split (str repo) #"/")]
+    (when (or (str/blank? seg)
+              (contains? #{"." ".."} seg)
+              (str/includes? seg "="))
+      (throw (ex-info (format "Bad repo path: %s" (str repo))
+                      {:repo (str repo) :segment seg})))))
+
 (defn- validate-variant!
-  "Refuse a caller-supplied host `:variant` (no `ref` pair): an axis name outside
-  `[a-z0-9][a-z0-9-]*` or named `ref`, a non-string value, a blank value, or a
-  value that encodes to `.` or `..` (which would climb out of the variant dir)."
+  "Refuse a caller-supplied host `:variant` (no `ref` pair): a non-keyword or
+  namespaced axis, an axis name outside `[a-z0-9][a-z0-9-]*` or named `ref`, a
+  non-string value, a blank value, or a value that encodes to `.` or `..`
+  (which would climb out of the variant dir)."
   [variant]
-  (doseq [[axis value] variant
-          :let [axis-name (name axis)]]
-    (when (or (= "ref" axis-name)
-              (not (re-matches axis-name-re axis-name)))
-      (throw (ex-info (format "Bad variant axis name: %s" axis-name)
-                      {:axis axis-name})))
-    (when-not (string? value)
-      (throw (ex-info (format "Bad variant value for %s: %s" axis-name (pr-str value))
-                      {:axis axis-name :value value})))
-    (let [encoded (layout/encode-value value)]
-      (when (or (str/blank? encoded) (contains? #{"." ".."} encoded))
-        (throw (ex-info (format "Bad variant value for %s: %s" axis-name (pr-str value))
-                        {:axis axis-name :value value}))))))
+  (doseq [[axis value] variant]
+    (let [valid-axis? (and (keyword? axis)
+                           (nil? (namespace axis))
+                           (let [n (name axis)]
+                             (and (not= "ref" n)
+                                  (boolean (re-matches axis-name-re (str n))))))]
+      (when-not valid-axis?
+        (throw (ex-info (format "Bad variant axis: %s" (pr-str axis))
+                        {:axis (pr-str axis)})))
+      (let [axis-name (name axis)]
+        (when-not (string? value)
+          (throw (ex-info (format "Bad variant value for %s: %s" axis-name (pr-str value))
+                          {:axis axis-name :value value})))
+        (let [encoded (layout/encode-value value)]
+          (when (or (str/blank? encoded) (contains? #{"." ".."} encoded))
+            (throw (ex-info (format "Bad variant value for %s: %s" axis-name (pr-str value))
+                            {:axis axis-name :value value}))))))))
 
 (s/defn get-out-dir :- s/Str
   "Persistence dir for a run.
@@ -218,15 +235,16 @@
     (throw (ex-info "No output dir: pass :root (an artifact root) or :dir" {})))
   (when (and (str/blank? dir) (str/blank? repo))
     (throw (ex-info "Pass :repo (subdir) or an explicit :dir" {})))
+  (when (and (str/blank? dir) (some? repo))
+    (validate-repo! repo))
   (if-not (str/blank? dir)
     (str dir)
     (let [variant (if (contains? opts :canonical?)
                     (do
                       (validate-variant! variant)
-                      (->> (System/getProperty "user.dir")
-                           (or repo-path)
-                           shared-git/get-git-info
-                           (layout/write-variant variant canonical?)))
+                      (let [git-dir (or repo-path (System/getProperty "user.dir"))]
+                        (layout/write-variant variant canonical?
+                                              (shared-git/get-git-info git-dir))))
                     variant)]
       (layout/->unit-dir {:root root :repo repo :variant variant}))))
 

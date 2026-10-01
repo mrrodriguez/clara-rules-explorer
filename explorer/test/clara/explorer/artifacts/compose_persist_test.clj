@@ -86,3 +86,25 @@
                  (set (keys (get-in manifest [:staleness :sources])))))
           (is (= (get-in units [0 :sha])
                  (get-in manifest [:staleness :sources "loan-app-ruleset" :sha]))))))))
+
+(deftest compose-persist-carries-variant-sources-test
+  (let [opts (assoc *artifact-opts*
+                    :root (registry-root)
+                    :repo "composed/demo-variant-mix"
+                    :units [{:repo "loan-app-ruleset"}
+                            {:repo "loan-disposition-ruleset" :variant [[:ref "feature/new-tax"]]}])
+        _ (flow/compose-persist! opts)
+        manifest (edn-io/read-edn-file (store/get-artifact-file :manifest opts))
+        units (get-in manifest [:analysis-run :units])]
+    (testing "the variant source is read from _variants/, so its rules are present"
+      (let [index (store/read-analysis-part :index opts)]
+        (is (contains? (set (keys (:rules index))) notice-approved))))
+    (testing "the manifest's :analysis-run :units carry :variant for variant sources"
+      (is (= ["loan-app-ruleset" "loan-disposition-ruleset"] (mapv :repo units)))
+      (is (= [[:ref "feature/new-tax"]] (get-in units [1 :variant])))
+      (is (not (contains? (nth units 0) :variant))))
+    (testing "per-source staleness keys the variant source by repo@variant path"
+      (let [sources (get-in manifest [:staleness :sources])]
+        (is (contains? sources "loan-disposition-ruleset@ref=feature%2Fnew-tax"))
+        (is (= [[:ref "feature/new-tax"]]
+               (get-in sources ["loan-disposition-ruleset@ref=feature%2Fnew-tax" :variant])))))))

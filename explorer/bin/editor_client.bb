@@ -54,34 +54,28 @@
 
 (defn- ->unit-key
   "A unit's registry-relative path segments → its unit-key string
-  (`repo[@variant path]`), mirroring
-  `clara.explorer.artifacts.registry/->unit-ref` +
-  `clara.explorer.artifacts.shared.registry/unit-key`."
+  (`repo[@variant path]`), or nil for a path that does not parse as a unit.
+  The split is `layout/segments->unit-ref` — the same function the JVM
+  `clara.explorer.artifacts.registry` walk uses — so the two runtimes cannot
+  drift on how `_variants/` is read."
   [segments]
-  (if (= layout/variants-subdir (first segments))
-    (let [rest (subvec segments 1)
-          vi (first (keep-indexed (fn [i seg] (when (str/includes? seg "=") i)) rest))]
-      (if vi
-        (shared-registry/unit-key
-         {:repo (str/join "/" (subvec rest 0 vi))
-          :variant (layout/path->variant (str/join "/" (subvec rest vi)))})
-        (str/join "/" rest)))
-    (str/join "/" segments)))
+  (some-> (layout/segments->unit-ref segments) shared-registry/unit-key))
 
 (defn- list-unit-repos
   "Every unit under `root`, as unit-key strings (`repo` or `repo@variant path`), sorted. Discovery is the
   directory walk the editors previously did themselves: find every
   `rules-inspect-manifest.edn` and name the unit by its directory relative to the root. The
-  registry layout therefore has one owner (this script), and the editors only prompt over the
+  registry split has one owner (`layout/segments->unit-ref`, shared with the JVM walk); this
+  script supplies only the babashka directory walk, and the editors only prompt over the
   returned list."
   [root]
   (let [root-file (fs/canonicalize root)]
     (when-not (fs/directory? root-file)
       (throw (ex-info (format "Registry root is not a directory: %s" root) {:root root})))
     (->> (fs/glob root-file "**/rules-inspect-manifest.edn")
-         (map (fn [manifest]
-                (let [rel (fs/unixify (fs/relativize root-file (fs/parent manifest)))]
-                  (->unit-key (str/split rel #"/")))))
+         (keep (fn [manifest]
+                 (let [rel (fs/unixify (fs/relativize root-file (fs/parent manifest)))]
+                   (->unit-key (str/split rel #"/")))))
          sort
          vec)))
 

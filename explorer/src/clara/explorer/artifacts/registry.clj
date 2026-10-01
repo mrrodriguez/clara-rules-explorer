@@ -114,25 +114,12 @@
   [^File dir]
   (.isFile (manifest-file dir)))
 
-(defn- ->unit-ref
-  "Segments → `UnitRef`. A path starting with the `_variants/` holder splits
-  into a repo (every segment before the first `<axis>=…` segment) and a variant
-  (that segment and everything after); any other path is a mainline unit whose
-  repo is the whole path."
-  [segments]
-  (if (= store/variants-subdir (first segments))
-    (let [rest (subvec segments 1)
-          vi (first (keep-indexed (fn [i seg] (when (str/includes? seg "=") i)) rest))]
-      (if vi
-        {:repo (str/join "/" (subvec rest 0 vi))
-         :variant (layout/path->variant (str/join "/" (subvec rest vi)))}
-        {:repo (str/join "/" rest)}))
-    {:repo (str/join "/" segments)}))
-
 (defn- discover-unit-refs
   "Every unit under `root`, mainline and `_variants/` variants alike, as refs.
   Directories are walked arbitrarily deep, so a host groups its units however it
-  likes."
+  likes. The split is `layout/segments->unit-ref` — shared with the babashka
+  editor client — and a path it cannot parse (a directory renamed or created
+  outside the `<axis>=<value>` scheme) is skipped rather than thrown."
   [root]
   (let [root-file (io/file root)]
     (when-not (.isDirectory root-file)
@@ -140,7 +127,7 @@
     (->> (file-seq root-file)
          (filter #(.isDirectory ^File %))
          (filter unit-dir?)
-         (keep #(some-> (relative-segments root %) ->unit-ref))
+         (keep #(some-> (relative-segments root %) layout/segments->unit-ref))
          (sort-by shared-registry/unit-key)
          vec)))
 
@@ -158,14 +145,19 @@
                                  (:rulebase-analysis layout/artifact-files)
                                  (:meta parts/part-files))))
 
-(defn- ->unit-info
+(s/defn ^:private ->unit-info :- schema/UnitInfo
   "What `discover` records per unit: the ref, the resolved dir, present
   artifacts, the slim `:dropped` shape, the manifest's layer ids, the
   manifest head (`:created`, `:sha`, `:history` head), and — when the manifest
   claims an aggregate — its `:analysis-run :mode` (as `:mode`) and the units it
-  was composed from (`:analysis-run :units`, as `:composed-from`). Absence of
-  `:mode` is what marks a source unit."
-  [root ref]
+  was composed from (`:analysis-run :units`, as `:composed-from`). A variant
+  whose directory disagrees with its manifest's `:variant` is recorded as
+  `:variant-mismatch`. Absence of `:mode` is what marks a source unit.
+
+  Validated against `schema/UnitInfo` so the recorded shape cannot drift from
+  the schema that documents it."
+  [root :- s/Str
+   ref :- schema/UnitRef]
   (let [dir (store/get-out-dir (assoc ref :root root))
         present (into #{}
                       (keep (fn [[k filename]]

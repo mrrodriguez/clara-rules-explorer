@@ -176,7 +176,9 @@
   ;; same directory as the layers it describes rather than at the mainline base.
   (let [dir (store/get-out-dir opts)
         _ (.mkdirs (io/file dir))
-        file (store/get-artifact-file :manifest opts)
+        ;; Built from `dir` rather than `store/get-artifact-file`, which would
+        ;; re-derive the directory (and re-read git on the write path).
+        file (io/file dir (:manifest store/artifact-files))
         fresh (->manifest (assoc opts :out-dir dir))
         existing (read-existing file)
         manifest (if existing

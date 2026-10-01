@@ -127,6 +127,26 @@
                  (remove :variant refs))
               "a mainline unit ref has no :variant key"))))))
 
+(deftest discover-skips-malformed-variant-dirs-test
+  (with-temp-root
+    (fn [root]
+      (write-unit! root "a" #{:nodes :id})
+      ;; a variant dir with a trailing segment that is not <axis>=<value>
+      (let [bad1 (io/file root "_variants" "a" "ref=main" "extra")
+            mf1 (io/file bad1 (:manifest layout/artifact-files))]
+        (io/make-parents mf1)
+        (edn-io/write-edn-file! mf1 (manifest {:repo "a"})))
+      ;; a dir under _variants/ with no <axis>=<value> segment at all
+      (let [bad2 (io/file root "_variants" "b" "nolabel")
+            mf2 (io/file bad2 (:manifest layout/artifact-files))]
+        (io/make-parents mf2)
+        (edn-io/write-edn-file! mf2 (manifest {:repo "b"})))
+
+      (let [reg (registry/discover {:root root})]
+        (is (= #{"a"}
+               (set (map shared-registry/unit-key (registry/units reg))))
+            "a malformed variant dir is skipped, not thrown or misread")))))
+
 (deftest ->registry-takes-explicit-units
   (with-temp-root
     (fn [root]

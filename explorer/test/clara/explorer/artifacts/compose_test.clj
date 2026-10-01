@@ -55,6 +55,17 @@
         (is (contains? names app-approved))
         (is (contains? names notice-approved))))))
 
+(deftest fold-layers-qualifies-variant-layer-ids-test
+  (let [reg (->registry)
+        folded (compose/fold-layers reg [{:repo "loan-disposition-ruleset"}
+                                         {:repo "loan-disposition-ruleset"
+                                          :variant [[:ref "feature/new-tax"]]}])]
+    (testing "a variant source is read from _variants/ and its layer id encodes the variant"
+      (let [ids (set (map :id (:layers folded)))]
+        (is (contains? ids "loan-disposition-ruleset/:clara.explorer.analyze/generated"))
+        (is (contains? ids
+                       "loan-disposition-ruleset@ref=feature%2Fnew-tax/:clara.explorer.analyze/generated"))))))
+
 (deftest standard-role-layers-flatten-and-strip-test
   (let [reg (->registry)
         layers (compose/->standard-role-layers reg [(unit "loan-app-ruleset")

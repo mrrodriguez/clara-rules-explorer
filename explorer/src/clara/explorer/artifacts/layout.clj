@@ -198,6 +198,11 @@
 ;; (public) so a host building its own paths from values — e.g. a composed
 ;; unit's directory name — uses the same escaping rather than inventing its own.
 ;; Nothing outside this namespace decodes a path.
+;;
+;; The discovery split — registry-relative path segments → `{:repo :variant}` —
+;; also lives here (`segments->unit-ref`), shared by the JVM registry walk and
+;; the babashka editor client, so the two cannot drift on how `_variants/` is
+;; read.
 ;; ===========================================================================
 
 (def variants-subdir
@@ -253,6 +258,30 @@
                        [(keyword (subs segment 0 i))
                         (decode-value (subs segment (inc i)))]))))
         (str/split (str path) #"/")))
+
+(defn segments->unit-ref
+  "Registry-relative path segments → `{:repo …}` or `{:repo … :variant …}`, or
+  nil when the path is under `_variants/` but does not parse as repo + variant.
+
+  A path starting with `_variants/` splits into a repo (every segment before the
+  first `<axis>=…` segment) and a variant (that segment and everything after),
+  and every variant segment must contain `=`. Any other path is a mainline unit
+  whose repo is the whole path; a mainline segment containing `=` is refused
+  (nil), since discovery would otherwise read it as the start of a variant.
+
+  Shared by `clara.explorer.artifacts.registry`'s walk and the babashka editor
+  client's `--list-units`, so the two runtimes cannot drift on the split."
+  [segments]
+  (if (= variants-subdir (first segments))
+    (let [rest (subvec segments 1)
+          vi (first (keep-indexed (fn [i seg] (when (str/includes? seg "=") i)) rest))]
+      (when (and vi
+                 (seq (subvec rest 0 vi))
+                 (every? #(str/includes? % "=") (subvec rest vi)))
+        {:repo (str/join "/" (subvec rest 0 vi))
+         :variant (path->variant (str/join "/" (subvec rest vi)))}))
+    (when-not (some #(str/includes? % "=") segments)
+      {:repo (str/join "/" segments)})))
 
 (defn write-variant
   "The full decoded `:variant` for a write: the caller's host axes plus the

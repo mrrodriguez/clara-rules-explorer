@@ -716,6 +716,14 @@
    :rulebase-analysis-digest s/Str
    :manifest s/Str})
 
+(s/defschema VariantMismatch
+  "A variant unit whose decoded directory path disagrees with its manifest's
+  `:variant` — e.g. a directory renamed by hand. `:path` is the directory's
+  decoded `:variant` (nil for a mainline dir), `:manifest` the manifest's.
+  Consumed by `clara.explorer.artifacts.registry/get-variant-mismatches`."
+  {:path (s/maybe Variant)
+   :manifest (s/maybe Variant)})
+
 (s/defschema UnitInfo
   "What
   `clara.explorer.artifacts.registry/discover` records per unit: its
@@ -723,16 +731,22 @@
   `:dropped` key set (the merge's shape), the layer ids the manifest records,
   the manifest's `:created` / `:sha` / `:history` head, and — for an aggregate
   unit — the manifest's `:analysis-run :mode` and the units it was composed
-  from (`:analysis-run :units`). Absence of `:mode` marks a source unit; the
-  `:mode` value is host-set and open."
+  from (`:analysis-run :units`). A variant whose directory disagrees with its
+  manifest's `:variant` carries a `:variant-mismatch`. Absence of `:mode`
+  marks a source unit; the `:mode` value is host-set and open.
+
+  Validated at build time by `clara.explorer.artifacts.registry/->unit-info`,
+  so a key the walk records but this schema omits fails the test suite rather
+  than drifting silently."
   (merge UnitRef
          {:dir s/Str
           :artifacts #{ArtifactKey}
           (s/optional-key :slim-dropped) (s/maybe #{s/Keyword})
-          (s/optional-key :layer-ids) {s/Keyword s/Any}
+          (s/optional-key :layer-ids) (s/maybe {s/Keyword s/Any})
           (s/optional-key :manifest-head) {s/Keyword s/Any}
           (s/optional-key :mode) s/Any
-          (s/optional-key :composed-from) [UnitRef]}))
+          (s/optional-key :composed-from) [UnitRef]
+          (s/optional-key :variant-mismatch) VariantMismatch}))
 
 (s/defschema CompatibilityReport
   "What

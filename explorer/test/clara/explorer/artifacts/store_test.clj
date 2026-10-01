@@ -74,7 +74,7 @@
 
 (deftest out-dir-variant-validation-test
   (testing "bad axis names are refused before any git read"
-    (doseq [axis [:ref :Bad-axis :-bad :a_b]]
+    (doseq [axis [:ref :Bad-axis :-bad :a_b :region/eu]]
       (is (thrown? clojure.lang.ExceptionInfo
                    (store/get-out-dir {:root "/r" :repo "x"
                                        :variant [[axis "v"]] :canonical? false}))
@@ -88,6 +88,16 @@
       (is (thrown? clojure.lang.ExceptionInfo
                    (store/get-out-dir {:root "/r" :repo "x"
                                        :variant [[:region v]] :canonical? false}))))))
+
+(deftest out-dir-repo-validation-test
+  (testing "a repo path that cannot round-trip through discovery is refused"
+    (doseq [repo ["a=b" "a/../b" "a//b" "a/./b"]]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (store/get-out-dir {:root "/r" :repo repo}))
+          (str "expected a throw for repo " (pr-str repo)))))
+  (testing "an explicit :dir wins, so a bad repo beside it is irrelevant"
+    (is (= "/tmp/annos" (store/get-out-dir {:dir "/tmp/annos" :repo "a=b"})))))
+
 (deftest artifact-path-test
   (testing "every artifact resolves under the variant dir when one is set"
     (let [opts {:root "/r" :repo "x" :variant [[:ref "spike"]]}]

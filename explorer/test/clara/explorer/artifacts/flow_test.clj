@@ -17,6 +17,8 @@
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [clara.explorer.artifacts.flow :as ann]
+   [clara.explorer.artifacts.manifest :as manifest]
+   [clara.explorer.artifacts.shared.git :as shared-git]
    [clara.explorer.artifacts.store :as store]
    [clara.explorer.artifacts.test-fixtures :as fixtures
     :refer [*artifact-opts* generated-annotations merged-insert-types
@@ -382,6 +384,52 @@
       (is (= 1 (count (get-in entry [:clara-rules/dynamic-insert-types-detected :callsites])))))
     (testing "the tombstone erases the stale claim"
       (is (not (contains? entry :clara-rules/no-output-types))))))
+
+;; ===========================================================================
+;; the :canonical? write path
+;; ===========================================================================
+
+(defn- delete-tree [dir]
+  (doseq [f (reverse (file-seq (io/file dir)))]
+    (io/delete-file f true)))
+
+(defn- stub-git-info
+  [{:keys [branch default-branch]}]
+  {:remote "https://example.com/x.git"
+   :sha "abc1234deadbeef"
+   :sha-short "abc1234"
+   :branch branch
+   :default-branch default-branch
+   :working-tree "clean"})
+
+(deftest canonical-write-path-places-and-manifests-the-variant-test
+  (let [root (str (java.nio.file.Files/createTempDirectory
+                   "clara-flow-canonical"
+                   (into-array java.nio.file.attribute.FileAttribute [])))]
+    (try
+      (testing "canonical on the default branch is mainline: base dir, no :variant"
+        (with-redefs [shared-git/get-git-info (fn [_] (stub-git-info {:branch "main" :default-branch "main"}))
+                      core/->rulebase-analysis (fn [_ _ _] {:rules {}})]
+          (let [opts {:root root :repo "x" :variant [] :canonical? true
+                      :generated-by "flow-test" :session stub-rulebase :repo-path root}
+                dir (ann/persist! {:layer (store/->generated-layer opts generated-annotations)} opts)
+                m (edn-io/read-edn-file (io/file (manifest/write-manifest! opts)))]
+            (is (= (str root "/x") dir))
+            (is (not (contains? m :variant)))
+            (is (.isFile (io/file dir "auto-gen-annotations.edn"))))))
+
+      (testing "non-canonical writes _variants/ and records the full variant"
+        (with-redefs [shared-git/get-git-info (fn [_] (stub-git-info {:branch "main" :default-branch "main"}))
+                      core/->rulebase-analysis (fn [_ _ _] {:rules {}})]
+          (let [opts {:root root :repo "x" :variant [[:region "eu"]] :canonical? false
+                      :generated-by "flow-test" :session stub-rulebase :repo-path root}
+                dir (ann/persist! {:layer (store/->generated-layer opts generated-annotations)} opts)
+                m (edn-io/read-edn-file (io/file (manifest/write-manifest! opts)))]
+            (is (= (str root "/_variants/x/region=eu/ref=main") dir))
+            (is (= [[:region "eu"] [:ref "main"]] (:variant m)))
+            (is (.isFile (io/file dir "rules-inspect-manifest.edn"))))))
+      (finally
+        (delete-tree root)))))
 
 (deftest memory-layer-is-nil-when-nothing-was-observed-test
   (testing "an empty delta yields no layer, so `:layers` in the merged artifact
