@@ -524,6 +524,47 @@
 
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; aligned text output
+;; ---------------------------------------------------------------------------
+
+(def ^:private field-width
+  "Label-column width for `print-field`. Single owner so callers never
+  hand-count padding spaces."
+  10)
+
+(defn- print-field
+  "Print one `label  value` row, padding `label` to `field-width`. Pass an
+  empty label for continuation rows."
+  [label value]
+  (println (format (str "%-" field-width "s %s") label value)))
+
+(def ^:private status-usage-rows
+  "The `status` flag rows as `[syntax desc-first & desc-rest]`. Continuation
+  lines align under the description column via `print-flag-row`, so a longer
+  flag never means recounting spaces."
+  [["status --checkout PATH [--ref REF]"
+    "compare a source unit against"
+    "the checkout at PATH (REF defaults"
+    "to HEAD)"]
+   ["status --root PATH"
+    "registry root a composed unit's"
+    "sources are read from (default:"
+    "stripped from the unit dir)"]
+   ["status --edn"
+    "print the result map, not the text"
+    "report"]])
+
+(defn- print-flag-row
+  "Print one `[syntax desc-first & desc-rest]` row: syntax plus the first
+  description line together, remaining lines aligned under the description."
+  [syntax desc-first & desc-rest]
+  (let [head (str "  " syntax "  ")
+        pad (apply str (repeat (count head) " "))]
+    (println (str head desc-first))
+    (doseq [line desc-rest]
+      (println (str pad line)))))
+
 (def ^:private usage-line
   "The invocation skeleton, printed first by `help`."
   "usage: bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|agent|merged] [--checkout PATH [--ref REF]] [--root PATH] [--edn]")
@@ -560,14 +601,8 @@
   (println)
   (println "status checks one unit directory (a source, branch, or composed unit)")
   (println "reading only its rules-inspect-manifest.edn:")
-  (println "  status --checkout PATH [--ref REF]  compare a source unit against")
-  (println "                                    the checkout at PATH (REF defaults")
-  (println "                                    to HEAD)")
-  (println "  status --root PATH                registry root a composed unit's")
-  (println "                                    sources are read from (default:")
-  (println "                                    stripped from the unit dir)")
-  (println "  status --edn                      print the result map, not the text")
-  (println "                                    report"))
+  (doseq [row status-usage-rows]
+    (apply print-flag-row row)))
 
 ;; ---------------------------------------------------------------------------
 ;; status — is this unit current?
@@ -632,28 +667,28 @@
     (str check)))
 
 (defn- print-status
-  "The §3.3 result map as aligned lines."
+  "The `shared-status/unit-status` result map as aligned `label  value` lines."
   [{:keys [repo label kind mode source updated staleness verdict reasons sources]}]
-  (println "unit      " (str repo (when label (str "/branches/" label))))
-  (println "kind      " (str (name kind) " unit"
-                               (when label (str " (label " label ")"))
-                               (when mode (str " (mode " mode ")"))))
-  (println "source    " (format "%s (%s, %s)   updated %s"
-                                    (short-sha (:sha source))
-                                    (or (:branch source) "no branch")
-                                    (:working-tree source)
-                                    updated))
-  (println "policy    " (str (:policy staleness)
+  (print-field "unit" (str repo (when label (str "/branches/" label))))
+  (print-field "kind" (str (name kind) " unit"
+                             (when label (str " (label " label ")"))
+                             (when mode (str " (mode " mode ")"))))
+  (print-field "source" (format "%s (%s, %s)   updated %s"
+                                  (short-sha (:sha source))
+                                  (or (:branch source) "no branch")
+                                  (:working-tree source)
+                                  updated))
+  (print-field "policy" (str (:policy staleness)
                                (when-let [d (:max-age-days staleness)]
                                  (format " (max %s days)" d))))
   (doseq [[i {:keys [source recorded current verdict]}] (map-indexed vector sources)]
-    (println (str (if (zero? i) "sources   " "          ")
-                      source ": " (name verdict)
-                      (when (= :sha-drift verdict)
-                        (format " %s -> %s" (short-sha recorded) (short-sha current))))))
-  (println "verdict   " (str (name verdict)
-                               (when (seq reasons)
-                                 (str " | " (str/join "; " (map reason-summary reasons)))))))
+    (print-field (if (zero? i) "sources" "")
+                  (str source ": " (name verdict)
+                       (when (= :sha-drift verdict)
+                         (format " %s -> %s" (short-sha recorded) (short-sha current))))))
+  (print-field "verdict" (str (name verdict)
+                                (when (seq reasons)
+                                  (str " | " (str/join "; " (map reason-summary reasons)))))))
 
 (defn- status
   "`status [--checkout PATH [--ref REF]] [--root PATH] [--edn]` over unit dir

@@ -325,6 +325,12 @@
     (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
     out))
 
+(defn- collapse-whitespace
+  "Collapse every whitespace run in the report to a single space, so assertions
+  pin words — not the report's column padding."
+  [s]
+  (str/replace s #"\s+" " "))
+
 (deftest bb-report-status-test
   (if-not (runnable?)
     (println "SKIPPING bb-report-status-test — babashka is not on PATH, or the script moved:"
@@ -333,12 +339,12 @@
           unit (write-status-manifest! (str (io/file root "demo-ruleset"))
                                        (status-source-manifest))]
       (testing "text report: kind, source provenance, and a verdict"
-        (let [out (run-status unit)]
-          (is (str/includes? out "unit       demo-ruleset"))
-          (is (str/includes? out "kind       source unit"))
+        (let [out (collapse-whitespace (run-status unit))]
+          (is (str/includes? out "unit demo-ruleset"))
+          (is (str/includes? out "kind source unit"))
           (is (str/includes? out "ac51808 (feature-x, clean)"))
           (is (str/includes? out "review-when-sha-drifts"))
-          (is (str/includes? out "verdict    unknown | sha not compared"))))
+          (is (str/includes? out "verdict unknown | sha not compared"))))
 
       (testing "--edn prints the result map"
         (let [result (edn/read-string (run-status unit "--edn"))]
@@ -350,8 +356,8 @@
       (testing "--checkout against a foreign remote is remote-mismatch"
         ;; The runner's own checkout is a real repo whose origin cannot be
         ;; example.com, whatever its branch or tree state — hermetic verdict.
-        (let [out (run-status unit "--checkout" (System/getProperty "user.dir"))]
-          (is (str/includes? out "verdict    stale | remote-mismatch"))))
+        (let [out (collapse-whitespace (run-status unit "--checkout" (System/getProperty "user.dir")))]
+          (is (str/includes? out "verdict stale | remote-mismatch"))))
 
       (testing "a composed unit is current, then stale, then missing"
         (let [root (str (io/file (:dir *artifact-opts*) "status-composed"))
@@ -373,21 +379,21 @@
               _ (write-src "111aaaa" "222bbbb")
               dir (write-status-manifest! (str (io/file root "demo-composed"))
                                           (status-composed-manifest))]
-          (let [out (run-status dir)]
-            (is (str/includes? out "kind       aggregate unit (mode :compose)"))
+          (let [out (collapse-whitespace (run-status dir))]
+            (is (str/includes? out "kind aggregate unit (mode :compose)"))
             (is (str/includes? out "demo-a: current"))
             (is (str/includes? out "demo-b@x: current"))
-            (is (str/includes? out "verdict    current")))
+            (is (str/includes? out "verdict current")))
           (write-src "111aaaa" "9999999")
-          (let [out (run-status dir)]
+          (let [out (collapse-whitespace (run-status dir))]
             (is (str/includes? out "demo-b@x: sha-drift 222bbbb -> 9999999"))
-            (is (str/includes? out "verdict    stale")))
+            (is (str/includes? out "verdict stale")))
           (write-src "111aaaa" nil)
           (let [dir-file (io/file root "demo-b")]
             (doseq [f (reverse (file-seq dir-file))] (io/delete-file f true)))
-          (let [out (run-status dir)]
+          (let [out (collapse-whitespace (run-status dir))]
             (is (str/includes? out "demo-b@x: missing"))
-            (is (str/includes? out "verdict    stale"))))
+            (is (str/includes? out "verdict stale"))))
 
         (testing "--checkout on a composed unit fails"
           (let [dir (write-status-manifest! (str (io/file root "demo-composed"))

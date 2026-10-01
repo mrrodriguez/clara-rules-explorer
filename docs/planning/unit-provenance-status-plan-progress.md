@@ -82,6 +82,12 @@ Scope: `explorer/` manifest provenance + offline bb report. No new manifest keys
 - Gates, final: `make test` 427 tests / 2785 assertions / 0 failures; `lint` 0 errors 0 warnings; `reflection-check` pass; `format-check` pass; `bb-smoke-test` pass (incl. new `shared.git`/`shared.status`).
 - Acceptance (§7): worktree-detach case asserts `:branch "main"` (in-suite); live CLI demo — source unit `current`+policy line against own checkout, composed `current`→`sha-drift` after editing one source manifest, `--root` defaulted in both.
 
+## Follow-up: whitespace-robust tests + owned column width (2026-10-01)
+
+- `bb-report-status-test` no longer pins column padding: new `collapse-whitespace` helper folds every whitespace run to one space, assertions pin words (`"verdict stale | remote-mismatch"`, `"kind source unit"`). `--edn` assertions were already structural (parsed map) and are unchanged.
+- `annotations_report.bb` column spacing now has a single owner: `field-width` + `print-field` (`format "%-10s %s"`, per the `format`-over-`str` standard) for `status` rows — output byte-identical — and data-driven `status-usage-rows` + `print-flag-row` (computed hanging indent) for `help`, replacing hand-counted continuation spaces. Fixed a self-inflicted `""`-inside-docstring reader break while there.
+- Gates re-run: `bb-report-test` ns 3 tests / 125 assertions pass; full `make test` 427 / 2785 pass; `lint` 0/0; `format-check` pass; live `status`/`--edn`/`help` render verified.
+
 ## Session log
 - 2026-10-01: progress file created; starting P1. Audited `manifest.clj` (`get-git-info`), `schema/GitInfo` (already nil-able `:branch`), `store/get-out-dir` (JVM-only, schema+io), `annotations_report.bb` arg parsing (positional + `--file`), `bootstrap.bb` (bb classpath = `src` + schema), shared-ns bb-safe pattern (`:clara-rules-explorer/bb-loaded` + stdlib-only).
 - 2026-10-01: P5 done — verified live: source `unknown` (no checkout) / `current`+informational checkout-dirty against own repo; `--edn`; composed current→drift via `--root` defaulting; rejections (`--file` on status, `--checkout` on summary, `--ref` w/o `--checkout`, unknown flag/subcommand); `help` row. Plan example output shape reproduced.
