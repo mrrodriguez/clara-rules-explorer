@@ -35,6 +35,24 @@
     (catch Exception _
       nil)))
 
+(defn- read-string-in-ns
+  "Reads a single form from source text `s` with `*ns*` bound to the live
+   namespace named by `ns-sym`, so `::keyword` and `::alias/keyword` read in
+   the callsite's own namespace (through its `:as` aliases) instead of the
+   analysis thread's `*ns*`.
+
+   Only `::` keywords resolve at read time; every other form reads the same
+   whether or not `*ns*` is bound, so a missing namespace only matters for
+   `::`.  When `ns-sym` names no loaded namespace and `s` contains `::`,
+   returns nil (the caller treats the form as unresolved) rather than
+   resolving the keyword against the wrong namespace."
+  [ns-sym s]
+  (let [the-ns (when ns-sym (find-ns ns-sym))]
+    (if (and (nil? the-ns) (str/includes? s "::"))
+      nil
+      (binding [*ns* (or the-ns *ns*)]
+        (try (read-string s) (catch Exception _ nil))))))
+
 (defn read-boundary-args
   "Reads the argument forms of the boundary call (`insert!`/`retract!`/…) described
    by a kondo `:var-usage`.  Returns a (possibly empty) sequence of forms."
@@ -46,9 +64,7 @@
                                  end-row
                                  end-col)]
     (if call-str
-      (try
-        (rest (read-string call-str))
-        (catch Exception _ nil))
+      (some-> (read-string-in-ns from call-str) rest)
       nil)))
 
 (defn read-init-form
@@ -61,7 +77,7 @@
       (when (and row end-col)
         (let [line (nth lines (dec row))
               tail (str/join "\n" (cons (subs line (dec end-col)) (drop row lines)))]
-          (read-string tail))))
+          (read-string-in-ns ns-sym tail))))
     (catch Throwable _
       nil)))
 
@@ -96,52 +112,57 @@
 (defn- read-one-form-char-count
   "Reads a single form from the head of string `s`, returning the number of
    chars consumed (trailing whitespace/comments excluded). Nil when no
-   complete form reads."
-  [^String s]
-  (try
-    (let [consumed (atom 0)
-          rdr (proxy [java.io.PushbackReader] [(java.io.StringReader. s)]
-                (read
-                  ([]
-                   (let [c (proxy-super read)]
-                     (when-not (= -1 c)
-                       (swap! consumed inc))
-                     c))
-                  ([cbuf]
-                   (let [^chars buf cbuf
-                         n (proxy-super read buf)]
-                     (when (pos? n)
-                       (swap! consumed + n))
-                     n))
-                  ([cbuf off len]
-                   (let [^chars buf cbuf
-                         o (int off)
-                         l (int len)
-                         n (proxy-super read buf o l)]
-                     (when (pos? n)
-                       (swap! consumed + n))
-                     n)))
-                (unread
-                  ([c-or-buf]
-                   (if (number? c-or-buf)
-                     (do (proxy-super unread (int c-or-buf))
-                         (swap! consumed dec))
-                     (let [^chars buf c-or-buf]
-                       (proxy-super unread buf)
-                       (swap! consumed - (alength buf))))
-                   nil)
-                  ([cbuf off len]
-                   (let [^chars buf cbuf
-                         o (int off)
-                         l (int len)]
-                     (proxy-super unread buf o l)
-                     (swap! consumed - l)
-                     nil))))]
-      (clojure.lang.LispReader/read rdr nil)
-      @consumed)
-    (catch Throwable
-           _
-      nil)))
+   complete form reads.  `ns-sym` is the namespace `::` keywords resolve
+   against (see `read-string-in-ns`)."
+  [ns-sym ^String s]
+  (let [the-ns (when ns-sym (find-ns ns-sym))]
+    (if (and (nil? the-ns) (str/includes? s "::"))
+      nil
+      (try
+        (let [consumed (atom 0)
+              rdr (proxy [java.io.PushbackReader] [(java.io.StringReader. s)]
+                    (read
+                      ([]
+                       (let [c (proxy-super read)]
+                         (when-not (= -1 c)
+                           (swap! consumed inc))
+                         c))
+                      ([cbuf]
+                       (let [^chars buf cbuf
+                             n (proxy-super read buf)]
+                         (when (pos? n)
+                           (swap! consumed + n))
+                         n))
+                      ([cbuf off len]
+                       (let [^chars buf cbuf
+                             o (int off)
+                             l (int len)
+                             n (proxy-super read buf o l)]
+                         (when (pos? n)
+                           (swap! consumed + n))
+                         n)))
+                    (unread
+                      ([c-or-buf]
+                       (if (number? c-or-buf)
+                         (do (proxy-super unread (int c-or-buf))
+                             (swap! consumed dec))
+                         (let [^chars buf c-or-buf]
+                           (proxy-super unread buf)
+                           (swap! consumed - (alength buf))))
+                       nil)
+                      ([cbuf off len]
+                       (let [^chars buf cbuf
+                             o (int off)
+                             l (int len)]
+                         (proxy-super unread buf o l)
+                         (swap! consumed - l)
+                         nil))))]
+          (binding [*ns* (or the-ns *ns*)]
+            (clojure.lang.LispReader/read rdr nil))
+          @consumed)
+        (catch Throwable
+               _
+          nil)))))
 
 (defn- advance-pos-by-count
   "Advances a 1-indexed `[row col]` forward by `n` chars of string `s`."
@@ -165,7 +186,7 @@
               line (nth lines (dec sr) nil)
               tail (when line
                      (str/join "\n" (cons (subs line (dec sc)) (drop sr lines))))]
-          (when-let [n (and tail (read-one-form-char-count tail))]
+          (when-let [n (and tail (read-one-form-char-count ns-sym tail))]
             {:filename filename
              :start start
              :end (advance-pos-by-count start tail n)})))
@@ -180,4 +201,4 @@
     (when-let [call-str (source-text-at lines
                                         (:row ctor-usage) (:col ctor-usage)
                                         (:end-row ctor-usage) (:end-col ctor-usage))]
-      (try (read-string call-str) (catch Exception _ nil)))))
+      (read-string-in-ns (:from ctor-usage) call-str))))

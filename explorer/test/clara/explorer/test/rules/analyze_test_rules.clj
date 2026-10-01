@@ -633,3 +633,35 @@
     (r/insert-all! f)
     (let [f (->fact :demo/shadowed {:id ?app-id})]
       (count f))))
+
+;; ---------------------------------------------------------------------------
+;; ::auto-resolved keyword fixtures
+
+(r/defrule rule-insert-local-auto-resolved-keyword
+  "The boundary arg's ::local-doc must auto-resolve in this ns, not the
+   analysis thread's *ns*."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (with-meta {:app-id ?app-id} {:type ::local-doc})))
+
+(r/defrule rule-insert-aliased-auto-resolved-keyword
+  "::laf/document-check must resolve through this ns's :as alias to
+   :clara.explorer.test.rules.loan-app-facts/document-check."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (with-meta {:app-id ?app-id} {:type ::laf/document-check})))
+
+(r/defrule rule-insert-local-keyword-via-let
+  "A let-bound ::keyword fact — read-init-form must resolve it in this ns
+   during locals tracing."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [f (with-meta {:app-id ?app-id} {:type ::local-doc})]
+    (r/insert! f)))
+
+(r/defrule rule-insert-keyword-typed-ctor
+  "The ::keyword is the type argument to the registered ->fact constructor —
+   the ctor-form reader must resolve it in this ns."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (->fact ::local-doc {:app-id ?app-id})))
