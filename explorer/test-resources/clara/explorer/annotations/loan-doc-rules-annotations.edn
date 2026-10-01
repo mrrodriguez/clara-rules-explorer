@@ -315,7 +315,7 @@
   "clara.explorer.test.rules.loan-doc-rules/extract-doc-meta-rule"
   #:clara-rules{:dynamic-insert-types-detected
                 {:callsites
-                 [{:source-str "resolved__44987__auto__",
+                 [{:source-str "resolved__0__auto__",
                    :ns-name-sym
                    clara.explorer.test.rules.loan-doc-rules,
                    :filename
@@ -326,5 +326,5 @@
                     :boundary-in-var
                     clara.explorer.test.rules.loan-doc-rules/extract-doc-meta-rule},
                    :callsite-id
-                   "clara.explorer.test.rules.loan-doc-rules:-:032ed471:0"}],
+                   "clara.explorer.test.rules.loan-doc-rules:-:8a786e23:0"}],
                  :resolution :none}}}}

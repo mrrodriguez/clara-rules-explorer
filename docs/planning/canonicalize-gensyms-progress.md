@@ -63,3 +63,35 @@ same canonical `:source-str` is what `ann.merge/->layer` writes (and what
 - `make lint` — 0 warnings.
 - `make reflection-check` — passed.
 - `make format-check` — clean.
+
+## Follow-up: stale checked-in fixtures (2026-09-30)
+
+Symptom: the UI rule-full view showed a raw gensym in "Dynamic Insert
+Callsites" (`resolved__44987__auto__`) next to a canonical `:rhs-form`
+(`resolved__0__auto__`) for
+`loan-doc-rules/extract-doc-meta-rule`. This was not a summary-vs-full
+divergence — both fields come from one `GET /v1/rules/:id` response.
+It was stale-layer vs live-form in that response:
+
+- `:rhs-form` is serialized live from the Clara production through
+  `serialize/print-form` (canonical).
+- The demo backend (`make demo-run -l …loan-doc-rules-annotations.edn`)
+  serves that fixture as its `:clara.rules.analyze/generated` layer, and
+  `serve/->static-layers` skips live generation when a source layer
+  already carries that id — so the served `:source-str` was 100% the
+  fixture's pre-canonicalization snapshot (`resolved__44987__auto__`,
+  old callsite-id `…032ed471:0`).
+- The `test-resources/rules-annos/` examples had the same staleness
+  (`resolved__49087__auto__` in both `:rhs-form` and `:source-str` —
+  consistently old, but raw).
+
+Fix (no code change — the documented one-time churn from plan §6):
+`make regen-fixture` + `make regen-artifacts`. Both now emit
+`resolved__0__auto__` with the stable callsite-id `…8a786e23:0`
+(identical across the two regens, confirming counter-independence).
+After regen the demo composition serves a single canonical callsite,
+consistent with `:rhs-form` (verified by merging props + fixture and
+serving through `core/->rulebase-analysis`).
+
+- `make test` — 417 tests, 2624 assertions, 0 failures/errors.
+- `make lint` / `make reflection-check` / `make format-check` — clean.

@@ -4239,7 +4239,7 @@
 								"sym": "clara.rules/insert!"
 							}
 						],
-						"source-str": "resolved__44987__auto__",
+						"source-str": "resolved__0__auto__",
 						"status": "none",
 						"via": {
 							"boundary-in-var": "clara.explorer.test.rules.loan-doc-rules/extract-doc-meta-rule",
