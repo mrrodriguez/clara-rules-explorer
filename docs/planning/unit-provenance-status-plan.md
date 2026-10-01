@@ -165,7 +165,7 @@ inputs exist.
 
 Finding a composed unit's sources needs the unit → directory mapping
 (`<root>/<repo>` or `<root>/<repo>/branches/<branch>`) that registry discovery
-inverts. If that mapping lives only in JVM code today, lift it into `layout.cljc`
+inverts. If that mapping lives only in JVM code today, lift it into `clara.explorer.artifacts.layout`
 so discovery and `status` share it.
 
 ### 3.5 CLI parsing
@@ -183,7 +183,7 @@ positional args. Each subcommand rejects flags it doesn't use. `subcommands` and
 | `explorer/src/clara/explorer/artifacts/shared/git.clj` | new: git reads with remote-branch resolution for detached checkouts (§2.1) |
 | `explorer/src/clara/explorer/artifacts/manifest.clj` | `get-git-info` delegates to `shared.git` |
 | `explorer/src/clara/explorer/artifacts/shared/status.clj` | new: `unit-status` (§3.2–3.4) |
-| `explorer/src/clara/explorer/artifacts/layout.cljc` | unit → directory mapping, if not already shared |
+| `clara.explorer.artifacts.layout` | unit → directory mapping, if not already shared |
 | `explorer/bin/annotations_report.bb` | flag table; `status` subcommand and help row |
 | `explorer/docs/persisted-artifacts.md` | Provenance section: `:source :branch` is the remote branch, nil when none points at the commit; how to check a unit with `status` |
 

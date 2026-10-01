@@ -9,58 +9,58 @@ Scope: `explorer/` manifest provenance + offline bb report. No new manifest keys
 - [x] **P1 — `shared.git`** (`explorer/src/clara/explorer/artifacts/shared/git.clj`, new): git reads with remote-branch resolution for detached checkouts (plan §2.1)
 - [x] **P2 — `manifest.clj` delegates**: `get-git-info` keeps schema-checked signature, delegates to `shared.git` (plan §2.3)
 - [x] **P3 — `shared.status`** (`explorer/src/clara/explorer/artifacts/shared/status.clj`, new): `unit-status` returning the §3.3 map (source / composed / aggregate-by-kind cases)
-- [x] **P4 — `layout.cljc` mapping**: lift unit → directory mapping if not already shared (plan §3.4); `store/get-out-dir` inversion + `--root` default stripping
+- [x] **P4 — `clara.explorer.artifacts.layout` mapping**: lift unit → directory mapping if not already shared (plan §3.4); `store/get-out-dir` inversion + `--root` default stripping
 - [x] **P5 — bb `status` subcommand**: flag table (`--file`, `--checkout`, `--ref`, `--root`, `--edn`); `status` row in `subcommands`/`help`; per-subcommand flag rejection (plan §3.1, §3.5)
-- [ ] **P6 — docs**: `explorer/docs/persisted-artifacts.md` provenance section (`:source :branch` semantics + `status` usage)
+- [x] **P6 — docs**: `explorer/docs/persisted-artifacts.md` provenance section (`:source :branch` semantics + `status` usage)
 - [x] **P7 — tests**: detached resolution (temp git repo, no network); `unit-status` over fixtures + temp edited copies; bb report `status` text/`--edn`/`help` cases
 - [x] **P8 — acceptance + quality gates**: worktree-detach records `:branch "main"`; `status` verdict matches manifest policy; `make test lint reflection-check format-check`
 
 ## Detailed checklist
 
 ### P1 `shared.git`
-- [ ] `git` helper (dir + args → trimmed stdout or nil on non-zero exit), bb-safe (`clojure.java.shell` only)
-- [ ] `get-git-info` equivalent returning `{:remote :sha :sha-short :branch :working-tree}` with detached resolution:
-  - [ ] attached → checkout branch as today
-  - [ ] detached + `refs/remotes/origin/HEAD` points at HEAD → that branch sans `origin/`
-  - [ ] else first sorted `for-each-ref --points-at HEAD` under `refs/remotes/origin/` sans `origin/`
-  - [ ] else nil (never `"HEAD"`; local branches ignored)
-- [ ] nil for missing dir / non-repo (sha read fails)
-- [ ] `*warn-on-reflection* true`; no schema dep (bb-safe)
+- [x] `git` helper (dir + args → trimmed stdout or nil on non-zero exit), bb-safe (`clojure.java.shell` only)
+- [x] `get-git-info` equivalent returning `{:remote :sha :sha-short :branch :working-tree}` with detached resolution:
+  - [x] attached → checkout branch as today
+  - [x] detached + `refs/remotes/origin/HEAD` points at HEAD → that branch sans `origin/`
+  - [x] else first sorted `for-each-ref --points-at HEAD` under `refs/remotes/origin/` sans `origin/`
+  - [x] else nil (never `"HEAD"`; local branches ignored)
+- [x] nil for missing dir / non-repo (sha read fails)
+- [x] `*warn-on-reflection* true`; no schema dep (bb-safe)
 
 ### P2 manifest delegation
-- [ ] `manifest/get-git-info` delegates, same `schema/GitInfo` signature and docstring guarantees
-- [ ] existing manifest tests still pass
+- [x] `manifest/get-git-info` delegates, same `schema/GitInfo` signature and docstring guarantees
+- [x] existing manifest tests still pass
 
 ### P3 `shared.status`
-- [ ] manifest read is caller's job (bb reads file, JVM passes map); `unit-status` takes `{manifest, checkout-sha?, ...}` — decide exact opts shape
-- [ ] source-unit checks: `remote-mismatch` (normalized remote compare, skips sha), `sha-drift`, `generated-dirty`, `checkout-dirty` (informational), `age-exceeded` (`:updated` vs `:max-age-days`)
-- [ ] no-`--checkout` path: sha-dependent checks skipped, report notes sha not compared
-- [ ] composed-unit: per-source compare against source manifests under `--root`; `current` / `sha-drift` / `missing`; unit current iff all sources current; `--checkout` rejected
-- [ ] aggregate without `:staleness :sources`: kind + source provenance, no verdict
-- [ ] result map exactly per §3.3 (`:dir :repo :label :kind :source :updated :staleness :compared :verdict :reasons :sources`)
-- [ ] host seam: pure fn returning map; host appends `:reasons` before rendering
-- [ ] remote normalization: scheme, `.git` suffix, trailing slash
-- [ ] date handling: `:updated "YYYY-MM-DD"` vs policy `:max-age-days`
+- [x] manifest read is caller's job (bb reads file, JVM passes map); `unit-status` takes `{manifest, checkout-sha?, ...}` — decide exact opts shape
+- [x] source-unit checks: `remote-mismatch` (normalized remote compare, skips sha), `sha-drift`, `generated-dirty`, `checkout-dirty` (informational), `age-exceeded` (`:updated` vs `:max-age-days`)
+- [x] no-`--checkout` path: sha-dependent checks skipped, report notes sha not compared
+- [x] composed-unit: per-source compare against source manifests under `--root`; `current` / `sha-drift` / `missing`; unit current iff all sources current; `--checkout` rejected
+- [x] aggregate without `:staleness :sources`: kind + source provenance, no verdict
+- [x] result map exactly per §3.3 (`:dir :repo :label :kind :source :updated :staleness :compared :verdict :reasons :sources`)
+- [x] host seam: pure fn returning map; host appends `:reasons` before rendering
+- [x] remote normalization: scheme, `.git` suffix, trailing slash
+- [x] date handling: `:updated "YYYY-MM-DD"` vs policy `:max-age-days`
 
 ### P4 layout mapping
-- [ ] audit: does unit → directory mapping live only in JVM (`store/get-out-dir`) today? (yes — uses `schema`, `io/file`)
-- [ ] lift pure path-join + inverse (strip `:repo` / `branches/<label>`) into `layout.cljc` with no deps
-- [ ] `store` + `status` + discovery share it
+- [x] audit: does unit → directory mapping live only in JVM (`store/get-out-dir`) today? (yes — uses `schema`, `io/file`)
+- [x] lift pure path-join + inverse (strip `:repo` / `branches/<label>`) into `clara.explorer.artifacts.layout`
+- [x] `store` + `status` + discovery share it
 
 ### P5 bb subcommand
-- [ ] flag-table parsing replacing positional `[target cmd arg]` + `--file`; strip known flags + values first
-- [ ] `status [--checkout PATH [--ref REF]] [--root PATH] [--edn]`; reads `rules-inspect-manifest.edn` only
-- [ ] text report: aligned lines from result map (unit/kind/source/verdict per §3.3 example)
-- [ ] `--edn` prints result map; `help`/`subcommands` gain `status` row + flags
+- [x] flag-table parsing replacing positional `[target cmd arg]` + `--file`; strip known flags + values first
+- [x] `status [--checkout PATH [--ref REF]] [--root PATH] [--edn]`; reads `rules-inspect-manifest.edn` only
+- [x] text report: aligned lines from result map (unit/kind/source/verdict per §3.3 example)
+- [x] `--edn` prints result map; `help`/`subcommands` gain `status` row + flags
 
 ### P6 docs
-- [ ] `:source :branch` = remote branch, nil when none points at commit; manifest top-level `:branch` unaffected (artifact-dir label)
-- [ ] how to check a unit with `status`
+- [x] `:source :branch` = remote branch, nil when none points at commit; manifest top-level `:branch` unaffected (artifact-dir label)
+- [x] how to check a unit with `status`
 
 ### P7 tests
-- [ ] detached resolution: commit + `update-ref refs/remotes/origin/main` + `symbolic-ref refs/remotes/origin/HEAD`; `checkout --detach` → `"main"`; worktree `--detach` → same; detached == attached `:source` maps; local-only branch → nil; nothing points → nil
-- [ ] `unit-status`: source current at sha / `sha-drift` +1 commit / `remote-mismatch`; composed current / one source edited → `sha-drift` / one source removed → `missing`; `--root` default stripping; `--checkout` on composed rejected
-- [ ] bb: `status` text + `--edn` + `help` row
+- [x] detached resolution: commit + `update-ref refs/remotes/origin/main` + `symbolic-ref refs/remotes/origin/HEAD`; `checkout --detach` → `"main"`; worktree `--detach` → same; detached == attached `:source` maps; local-only branch → nil; nothing points → nil
+- [x] `unit-status`: source current at sha / `sha-drift` +1 commit / `remote-mismatch`; composed current / one source edited → `sha-drift` / one source removed → `missing`; `--root` default stripping; `--checkout` on composed rejected
+- [x] bb: `status` text + `--edn` + `help` row
 
 ## Decisions log
 - `shared.git` exposes `ref-sha` / `remote-url` / `clean-tree?` as the comparison seam `status` uses (bb + JVM resolve refs one way). Missing dir / non-repo → nil via git exit code, no `io` needed (keeps bb-safe).
@@ -79,16 +79,17 @@ Scope: `explorer/` manifest provenance + offline bb report. No new manifest keys
 - `bb-report-test` (incl. new `bb-report-status-test` + `help` row): 99 assertions pass (JVM drives bb; hermetic manifests + one live-remote-mismatch case).
 - `store-test` + `schema-test` + `registry-test` + `compose-persist-test`: 119 assertions pass — `store/get-out-dir` delegation behavior-identical.
 - `shared.git-test`: 2 tests / 56 assertions pass (JVM, real temp repos — incl. `worktree add --detach` → `"main"`, sorted-first tie-break, local-only→nil, nothing→nil, never-`HEAD`, missing/non-repo→nil, own-checkout≠`HEAD`). Temp dirs come from the system temp dir, where `.git` writes work (only project-scoped `.git` writes are sandbox-denied). A `repo-fixture-works?` probe skips loudly where repos can't be created at all.
-- Gates, final: `make test` 427 tests / 2785 assertions / 0 failures; `lint` 0 errors 0 warnings; `reflection-check` pass; `format-check` pass; `bb-smoke-test` pass (incl. new `shared.git`/`shared.status`).
+- Gates, final: `make test` 427 tests / 2786 assertions / 0 failures; `lint` 0 errors 0 warnings; `reflection-check` pass; `format-check` pass; `bb-smoke-test` pass (incl. new `shared.git`/`shared.status`).
 - Acceptance (§7): worktree-detach case asserts `:branch "main"` (in-suite); live CLI demo — source unit `current`+policy line against own checkout, composed `current`→`sha-drift` after editing one source manifest, `--root` defaulted in both.
 
 ## Follow-up: whitespace-robust tests + owned column width (2026-10-01)
 
 - `bb-report-status-test` no longer pins column padding: new `collapse-whitespace` helper folds every whitespace run to one space, assertions pin words (`"verdict stale | remote-mismatch"`, `"kind source unit"`). `--edn` assertions were already structural (parsed map) and are unchanged.
 - `annotations_report.bb` column spacing now has a single owner: `field-width` + `print-field` (`format "%-10s %s"`, per the `format`-over-`str` standard) for `status` rows — output byte-identical — and data-driven `status-usage-rows` + `print-flag-row` (computed hanging indent) for `help`, replacing hand-counted continuation spaces. Fixed a self-inflicted `""`-inside-docstring reader break while there.
-- Gates re-run: `bb-report-test` ns 3 tests / 125 assertions pass; full `make test` 427 / 2785 pass; `lint` 0/0; `format-check` pass; live `status`/`--edn`/`help` render verified.
+- Gates re-run: `bb-report-test` ns 3 tests / 125 assertions pass; full `make test` 427 / 2786 pass; `lint` 0/0; `format-check` pass; live `status`/`--edn`/`help` render verified.
 
 ## Session log
 - 2026-10-01: progress file created; starting P1. Audited `manifest.clj` (`get-git-info`), `schema/GitInfo` (already nil-able `:branch`), `store/get-out-dir` (JVM-only, schema+io), `annotations_report.bb` arg parsing (positional + `--file`), `bootstrap.bb` (bb classpath = `src` + schema), shared-ns bb-safe pattern (`:clara-rules-explorer/bb-loaded` + stdlib-only).
 - 2026-10-01: P5 done — verified live: source `unknown` (no checkout) / `current`+informational checkout-dirty against own repo; `--edn`; composed current→drift via `--root` defaulting; rejections (`--file` on status, `--checkout` on summary, `--ref` w/o `--checkout`, unknown flag/subcommand); `help` row. Plan example output shape reproduced.
 - 2026-10-01: P1 done — `shared.git` verified under bb against live repo (attached → branch, missing → nil) + 5 stub scenarios (attached/default/other-ref-sorted-first/nothing/HEAD-symref-only). P2 done (manifest delegates). P3 done — 14 stub scenarios green (current/drift/remote-mismatch/generated-dirty/no-checkout/age/checkout-dirty/ref-unresolvable/not-a-repo/composed ×3/aggregate-no-sources/composed+checkout-throws/default-root). P4 done — `layout/unit-dir` + `default-root` + `branches-subdir`; `store` delegates. Fixed two self-inflicted paren bugs (`layout` ns form, `composed-unit-status` — JVM reader counts forms to isolate).
+- 2026-10-01: review round — assessed every `[ ]` in the detailed checklist against the code: all are implemented and tested, so P6 (docs) and the whole checklist are now ticked. Cleanup done alongside: bb arg parsing migrated from the hand-rolled flag table to `babashka.cli` (fixes `--checkout --edn` silently consuming the next flag; adds `--flag=value`; `:no-keyword-opts` keeps `:a/one`-style args positional); `--root` on a source unit now rejected in `unit-status` (mirrors `--checkout` on composed); bb-safety prose removed from bb-loaded ns docstrings (the ns metadata is the single marker); `layout.cljc` doc references switched to `clara.explorer.artifacts.layout`. Gates: 427 tests / 2786 assertions / 0 failures; lint 0/0; reflection + format + bb-smoke pass.
