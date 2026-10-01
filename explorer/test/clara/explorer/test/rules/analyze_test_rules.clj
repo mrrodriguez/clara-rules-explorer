@@ -633,3 +633,66 @@
     (r/insert-all! f)
     (let [f (->fact :demo/shadowed {:id ?app-id})]
       (count f))))
+
+;; ---------------------------------------------------------------------------
+;; ::auto-resolved keyword fixtures
+
+(r/defrule rule-insert-local-auto-resolved-keyword
+  "The boundary arg's ::local-doc must auto-resolve in this ns, not the
+   analysis thread's *ns*."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (with-meta {:app-id ?app-id} {:type ::local-doc})))
+
+(r/defrule rule-insert-aliased-auto-resolved-keyword
+  "::laf/document-check must resolve through this ns's :as alias to
+   :clara.explorer.test.rules.loan-app-facts/document-check."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (with-meta {:app-id ?app-id} {:type ::laf/document-check})))
+
+(r/defrule rule-insert-local-keyword-via-let
+  "A let-bound ::keyword fact — read-init-form must resolve it in this ns
+   during locals tracing."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [f (with-meta {:app-id ?app-id} {:type ::local-doc})]
+    (r/insert! f)))
+
+(r/defrule rule-insert-keyword-typed-ctor
+  "The ::keyword is the type argument to the registered ->fact constructor —
+   the ctor-form reader must resolve it in this ns."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert! (->fact ::local-doc {:app-id ?app-id})))
+
+;; ---------------------------------------------------------------------------
+;; Non-call boundary usages (see docs/planning/fix-boundary-args-parsing-problem.md)
+;;
+;; kondo reports a `:var-usage` for every reference to a boundary fn, not just
+;; calls. A value use (`(run! insert! xs)`) or a bare threaded step
+;; (`(-> m f insert!)`) spans only the symbol, so there are no argument forms
+;; to read — the usage degrades to an unresolved placeholder callsite instead
+;; of aborting analysis.
+
+(defn run-insert-over!
+  "Value use of the boundary fn: `insert!` is passed as a value, never called."
+  [facts]
+  (run! r/insert! facts))
+
+(r/defrule rule-boundary-value-use
+  "Inserts via `(run! insert! …)` — the boundary usage is a bare symbol."
+  [Application (= ?app-id app-id)]
+  =>
+  (run-insert-over! [{:value ?app-id}]))
+
+(defn thread-insert!
+  "Bare threaded step into the boundary fn: `(-> m (->fact :t) insert!)`."
+  [m]
+  (-> m (->fact :t) r/insert!))
+
+(r/defrule rule-boundary-threaded-bare
+  "Inserts via a bare threaded `insert!` step — the usage spans only the symbol."
+  [Application (= ?app-id app-id)]
+  =>
+  (thread-insert! {:value ?app-id}))

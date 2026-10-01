@@ -51,7 +51,8 @@
             [clara.explorer.analyze.utils :as u]
             [clara.explorer.analyze.kondo :as kondo]
             [clara.explorer.analyze.ctor :as ctor]
-            [clara.explorer.analyze.index :as index]))
+            [clara.explorer.analyze.index :as index]
+            [clara.explorer.utils :as utils]))
 
 (def ^:private max-resolution-depth 8)
 
@@ -133,14 +134,15 @@
   (`:fact-type`/`:fact-type-spec`) are present only for callsites discovered through a var-alias
   chain (`:fact-type-spec-fn`)."
   [{:keys [rule direction usage alias-context]} arg-form]
-  (cond-> {:rule rule
-           :ns-name-sym (:from usage)
-           :direction direction
-           :boundary-fn (symbol (str (:to usage)) (str (:name usage)))
-           :arg-form arg-form
-           :source-str (pr-str arg-form)
-           :filename (:filename usage)}
-    alias-context (merge (select-keys alias-context [:fact-type :fact-type-spec]))))
+  (let [arg-form (utils/canonicalize-gensyms arg-form)]
+    (cond-> {:rule rule
+             :ns-name-sym (:from usage)
+             :direction direction
+             :boundary-fn (symbol (str (:to usage)) (str (:name usage)))
+             :arg-form arg-form
+             :source-str (pr-str arg-form)
+             :filename (:filename usage)}
+      alias-context (merge (select-keys alias-context [:fact-type :fact-type-spec])))))
 
 (defn- invoke-callsite-resolver
   "Invokes the caller's `:callsite-resolver-fn`; exceptions are contained
@@ -187,18 +189,27 @@
    `(let [f (->fact :t m)] (insert! f))` — the argument `f` names nothing, but
    its traced form is the constructor call.
 
+   A usage with no argument forms in its span — a value use like
+   `(run! insert! xs)`, a bare threaded step like `(-> m f insert!)`, or an
+   empty call like `(insert!)` — yields a single placeholder argument: the
+   usage's own symbol (e.g. `insert!`).  It falls through every resolver to an
+   unresolved callsite, so the insert stays visible and the rule's
+   `:resolution` stays honest instead of silently dropping the insert.
+
    Returns a vector of `TracedArg` entries."
   [usages {:keys [get-lines alias-context-for] :as ctx}]
   (into []
         (comp (mapcat (fn [usage]
                         (let [alias-ctx (when alias-context-for
-                                          (alias-context-for usage))]
+                                          (alias-context-for usage))
+                              args (or (seq (kondo/read-boundary-args usage get-lines))
+                                       [(:name usage)])]
                           (map (fn [arg]
                                  {:usage usage
                                   :arg arg
                                   :alias-context alias-ctx
                                   :traced (trace-local-form arg ctx (:from usage) (usage->span usage) 0)})
-                               (or (kondo/read-boundary-args usage get-lines) '())))))
+                               args))))
               (map-indexed (fn [i ta] (assoc ta :idx i))))
         usages))
 
@@ -447,7 +458,7 @@
                            (let [ctx' (assoc ctx :usage usage :alias-context alias-context)
                                  tokens (resolve-traced-arg traced ctx' (:from usage))
                                  dropped (get dropped-ctor-provenance idx)
-                                 entry (cond-> {:source-str (pr-str arg)
+                                 entry (cond-> {:source-str (-> arg utils/canonicalize-gensyms pr-str)
                                                 :ns-name-sym (:from usage)
                                                 :filename (:filename usage)
                                                 :status (if (empty? tokens) :none :full)
@@ -606,7 +617,7 @@
               (assoc (->boundary-via boundary-fn-sym (first call-path) rule-to-boundary-path-for)
                      :boundary-to-constructor-path (conj (mapv (fn [v] {:var-name-sym v}) call-path)
                                                          {:var-name-sym ctor-sym})))
-        arg-form ctor-form
+        arg-form (utils/canonicalize-gensyms ctor-form)
         resolver-ctx (cond-> {:constructor-sym ctor-sym
                               :arg-form arg-form
                               :ns-name-sym (:from ctor-usage)

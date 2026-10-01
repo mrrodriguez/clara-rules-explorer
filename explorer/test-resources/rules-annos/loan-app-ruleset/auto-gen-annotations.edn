@@ -148,11 +148,11 @@
       :resolved-types [clara.explorer.test.rules.loan_doc_rules.StaleDocumentNotice],
       :callsite-id "clara.explorer.test.rules.loan-doc-rules:-:6ff9ddbd:0"}],
     :resolution :full}},
-  "clara.explorer.test.rules.loan-doc-rules/extract-doc-meta-rule" {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "resolved__49087__auto__",
+  "clara.explorer.test.rules.loan-doc-rules/extract-doc-meta-rule" {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "resolved__0__auto__",
       :ns-name-sym clara.explorer.test.rules.loan-doc-rules,
       :filename "clara/explorer/test/rules/loan_doc_rules.clj",
       :status :none,
       :via {:boundary-var-name-sym clara.rules/insert!,
        :boundary-in-var clara.explorer.test.rules.loan-doc-rules/extract-doc-meta-rule},
-      :callsite-id "clara.explorer.test.rules.loan-doc-rules:-:fd395c22:0"}],
+      :callsite-id "clara.explorer.test.rules.loan-doc-rules:-:8a786e23:0"}],
     :resolution :none}}}}

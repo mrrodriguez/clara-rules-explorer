@@ -90,13 +90,12 @@
   [ctor-sym]
   (if ctor-sym (name ctor-sym) "-"))
 
-(defn- callsite-basis
+(def ^:private callsite-basis
   "The id basis: namespace, constructor, and source text.  Deliberately
    excluded: :status/:resolved-types (what curation changes), :via (shifts
    when an unrelated helper is renamed), :row/:col (churn on every edit
    above), :filename (equivalent to :ns-name-sym, less legible)."
-  [c]
-  [(:ns-name-sym c) (:constructor-sym c) (:source-str c)])
+  (juxt :ns-name-sym :constructor-sym :source-str))
 
 (defn callsite-id
   "Content-hash identity for a callsite: ns:ctor:hash — the namespace, the
@@ -112,19 +111,18 @@
             (subs (sha256-hex (pr-str (callsite-basis c))) 0 8))))
 
 (defn assign-callsite-ids
-  "Assigns :callsite-id to every entry of one rule+dimension callsite vector
-   — the only place ordinals can be computed.  Entries sharing the full basis
-   (namespace, constructor, source text) form a duplicate group and receive
-   0-based ordinals *within the group*, so adding or removing unrelated
-   callsites in the same rule does not renumber it.  Collisions are detected
-   at emission and resolved by lengthening the hash: ids are unique by
-   construction, not by probability.  Entries must carry :ns-name-sym and
-   :source-str."
+  "Assigns :callsite-id to every entry of one rule+dimension callsite vector — the only place
+  ordinals can be computed. Entries sharing the full basis (namespace, constructor, source text)
+  form a duplicate group and receive 0-based ordinals *within the group*, so adding or removing
+  unrelated callsites in the same rule does not renumber it. Collisions are detected at emission and
+  resolved by lengthening the hash: ids are unique by construction, not by probability. Entries must
+  carry :ns-name-sym and :source-str."
   [callsites]
-  (let [hashes (mapv (comp sha256-hex pr-str callsite-basis) callsites)
+  (let [basis-vec (mapv callsite-basis callsites)
+        hashes (mapv (comp sha256-hex pr-str) basis-vec)
         prefixes (mapv (fn [[ns-name-sym constructor-sym _]]
                          (format "%s:%s" ns-name-sym (ctor-short-name constructor-sym)))
-                       (map callsite-basis callsites))
+                       basis-vec)
         ;; occurrence index within the basis group (hash == basis, up to the
         ;; 64-hex collision that the lengthening loop below would also catch)
         ordinals (second (reduce (fn [[counts out] h]
@@ -142,8 +140,27 @@
 
 (defn has-id-basis?
   "True when a callsite entry carries enough of the id basis to derive one."
-  [c]
-  (and (:ns-name-sym c) (:source-str c)))
+  [{:keys [ns-name-sym source-str]}]
+  (boolean (and ns-name-sym source-str)))
+
+(defn- derive-callsite-ids-step
+  "One reduce step for `derive-callsite-ids`: folds `c` into `[out q]`, where
+   `out` is the derived vector and `q` the queue of precomputed ids for
+   basis-carrying entries.  Entries without an id basis pass through; entries
+   carrying an id keep it; the rest take the next id off the queue."
+  [[out q] c]
+  (cond
+    (not (has-id-basis? c))
+    [(conj out c) q]
+
+    (:callsite-id c)
+    [(conj out c) (pop q)]
+
+    :else
+    (let [with-id (->> q
+                       peek
+                       (assoc c :callsite-id))]
+      [(conj out with-id) (pop q)])))
 
 (defn derive-callsite-ids
   "Derives ids for entries that omit one (hand-written layers need not
@@ -153,16 +170,13 @@
   [callsites]
   (if (every? :callsite-id callsites)
     callsites
-    (let [new-ids (into clojure.lang.PersistentQueue/EMPTY
-                        (map :callsite-id)
-                        (assign-callsite-ids (filterv has-id-basis? callsites)))]
-      (first (reduce (fn [[out q] c]
-                       (cond
-                         (not (has-id-basis? c)) [(conj out c) q]
-                         (:callsite-id c) [(conj out c) (pop q)]
-                         :else [(conj out (assoc c :callsite-id (peek q))) (pop q)]))
-                     [[] new-ids]
-                     callsites)))))
+    (let [new-ids (->> callsites
+                       (filterv has-id-basis?)
+                       assign-callsite-ids
+                       (into clojure.lang.PersistentQueue/EMPTY (map :callsite-id)))]
+      (->> callsites
+           (reduce derive-callsite-ids-step [[] new-ids])
+           first))))
 
 (defn derive-ids-in-rule-annotation
   "Derives callsite ids for both detection dimensions of one rule annotation."

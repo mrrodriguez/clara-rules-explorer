@@ -21,6 +21,15 @@
    (fn [form] String) for a substantial speedup on large rulebases."
   default-form-printer)
 
+(defn- print-form
+  "Canonicalizes reader gensyms in `form` (`utils/canonicalize-gensyms`) and
+   prints the result with the current `*form-printer*`.  Every rendered form
+   goes through here, so a `#(…)`'s `p1__NNN#` numbers cannot leak JVM-wide
+   reader state into persisted output.  `*form-printer*` stays rebindable;
+   canonicalization is not something a caller can bind away."
+  [form]
+  (-> form utils/canonicalize-gensyms *form-printer*))
+
 (defn resolve-type
   "Resolves a raw fact type (Class, keyword, symbol, string, tuple, map, ...) to its
    kind-explicit string representation for JSON.  The kind is self-describing
@@ -237,12 +246,12 @@
             ;; include it trailing in this `format` call.
             (format "[\n%s]"
                     (->> forms
-                         (map *form-printer*)
+                         (map print-form)
                          (str/join \newline))))
           (serialize-accumulator [acc]
             (if (map? acc)
-              (update acc :form #(str/trim-newline (*form-printer* %)))
-              (str/trim-newline (*form-printer* acc))))
+              (update acc :form #(str/trim-newline (print-form %)))
+              (str/trim-newline (print-form acc))))
           (serialize-node [node]
             (cond-> node
               (some? (:type node)) (update :type #(serialize-type-ref known-set prod-ns %))
@@ -306,7 +315,7 @@
   [lhs]
   (->> lhs
        (map condition->form)
-       (map *form-printer*)
+       (map print-form)
        str/join))
 
 (defn serialize-rhs-form
@@ -314,7 +323,7 @@
 
    Form printing is controlled by the dynamic var `*form-printer*`."
   [rhs-form]
-  (*form-printer* rhs-form))
+  (print-form rhs-form))
 
 (defn- chain-entry
   "Builds one `provenance-chain` entry from a raw var symbol."

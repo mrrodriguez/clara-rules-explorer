@@ -6,7 +6,9 @@
             [clara.explorer.annotations :as ann]
             [clara.explorer.annotations.callsite :as ann.callsite]
             [clara.explorer.analyze :as analyze]
+            [clara.explorer.analyze.kondo :as kondo]
             [clara.explorer.conditions :as conditions]
+            [clara.explorer.utils :as utils]
             [clara.explorer.analyze.synth :as synth]
             [clara.explorer.memory :as memory]
             [clara.explorer.test.rules.loan-doc-rules :as ldr]
@@ -196,6 +198,150 @@
                 :filename filename
                 :status :none}]
    :resolution :none})
+
+(deftest test-reader-gensym-counter-independence
+  (testing "reading the same boundary source twice in one JVM yields stable :source-str and :callsite-id"
+    (let [line "(insert! #(= (:type %1) \"C\"))"
+          get-lines (fn [_ns _filename] [line])
+          usage {:row 1 :col 1 :end-row 1 :end-col (inc (count line))
+                 :from 'demo.rules :filename "demo/rules.clj"}
+          read-arg #(-> usage (kondo/read-boundary-args get-lines) first)
+          arg1 (read-arg)
+          _ (dotimes [_ 1000] (gensym))
+          arg2 (read-arg)
+          ;; Mirrors the emission canonicalization in
+          ;; `clara.explorer.analyze.callsite/resolve-boundary-callsites`.
+          source-str #(-> % utils/canonicalize-gensyms pr-str)
+          cs1 {:ns-name-sym 'demo.rules
+               :constructor-sym 'demo/->fact
+               :source-str (source-str arg1)}
+          cs2 {:ns-name-sym 'demo.rules
+               :constructor-sym 'demo/->fact
+               :source-str (source-str arg2)}]
+      (is (some? arg1))
+      (is (not= arg1 arg2)
+          "sanity: raw reads differ before canonicalization")
+      (is (= (:source-str cs1) (:source-str cs2)))
+      (is (= (ann.callsite/callsite-id cs1)
+             (ann.callsite/callsite-id cs2))
+          "callsite-id is stable when its source-str carries a reader gensym"))))
+
+(deftest test-auto-resolved-keywords-resolve-in-callsite-ns
+  (let [resolver (fn [{:keys [arg-form]}]
+                   (when (and (seq? arg-form) (= 'with-meta (first arg-form)))
+                     (when-let [t (get (nth arg-form 2) :type)]
+                       {:resolved-types [t]})))
+        ann (analyze/->annotations-from-rule-source-analysis
+             {:rule-source-analysis edge-case-analysis
+              :session-or-rulebase edge-case-session
+              :callsite-resolver-fn resolver})]
+
+    (testing "::local-doc in a boundary arg auto-resolves in the callsite's ns"
+      (let [a (ann/get-annotation ann `atr/rule-insert-local-auto-resolved-keyword)]
+        (is (= [:clara.explorer.test.rules.analyze-test-rules/local-doc]
+               (:clara-rules/insert-types a))
+            "::local-doc resolves against the rule ns, not the analysis thread's *ns*")))
+
+    (testing "::laf/document-check resolves through the rule ns's :as alias"
+      (let [a (ann/get-annotation ann `atr/rule-insert-aliased-auto-resolved-keyword)]
+        (is (= [:clara.explorer.test.rules.loan-app-facts/document-check]
+               (:clara-rules/insert-types a)))))
+
+    (testing "a let-bound ::keyword survives locals tracing (read-init-form)"
+      (let [a (ann/get-annotation ann `atr/rule-insert-local-keyword-via-let)]
+        (is (= [:clara.explorer.test.rules.analyze-test-rules/local-doc]
+               (:clara-rules/insert-types a))))))
+
+  (testing "::keyword as the ->fact type argument resolves in the ctor's ns"
+    (let [a (ann/get-annotation edge-case-ctor-annotations
+                                `atr/rule-insert-keyword-typed-ctor)]
+      (is (= [:clara.explorer.test.rules.analyze-test-rules/local-doc]
+             (:clara-rules/insert-types a))
+          "read-ctor-form binds *ns* to the ctor usage's :from")))
+
+  (testing "read-boundary-args binds *ns* to the usage's :from (raw source)"
+    ;; The end-to-end cases above go through the synthesized rule RHS, where
+    ;; clara already resolved ::keywords.  Raw classpath source still carries
+    ;; literal `::`, so pin the reader directly — this is the path the fix
+    ;; exists for.
+    (let [line-1 "(insert! (with-meta {:x 1} {:type ::local-doc}))"
+          line-2 "(insert! (with-meta {:x 1} {:type ::laf/document-check}))"
+          get-lines (fn [_ns _filename] [line-1 line-2])
+          read-arg (fn [row line]
+                     (-> (kondo/read-boundary-args
+                          {:row row :col 1 :end-row row :end-col (inc (count line))
+                           :from 'clara.explorer.test.rules.analyze-test-rules
+                           :filename "analyze_test_rules.clj"}
+                          get-lines)
+                         first))]
+      (is (= '(with-meta {:x 1} {:type :clara.explorer.test.rules.analyze-test-rules/local-doc})
+             (read-arg 1 line-1))
+          "::local-doc resolves against the rule ns, not the analysis thread's *ns*")
+      (is (= '(with-meta {:x 1} {:type :clara.explorer.test.rules.loan-app-facts/document-check})
+             (read-arg 2 line-2))
+          "::laf/document-check resolves through the rule ns's :as alias")))
+
+  (testing "read-init-form and init-form-span bind *ns* to ns-sym (raw source)"
+    (let [line "(let [f (with-meta {:x 1} {:type ::laf/document-check})] f)"
+          get-lines (fn [_ns _filename] [line])
+          binding-end-col 9] ; `f` occupies 1-indexed col 8, end-col is exclusive
+      (is (= '(with-meta {:x 1} {:type :clara.explorer.test.rules.loan-app-facts/document-check})
+             (kondo/read-init-form get-lines 'clara.explorer.test.rules.analyze-test-rules
+                                   {:row 1 :end-col binding-end-col}))
+          "read-init-form resolves ::laf/document-check in the caller ns")
+      (is (some? (kondo/init-form-span get-lines 'clara.explorer.test.rules.analyze-test-rules
+                                       {:row 1 :end-col binding-end-col :filename "analyze_test_rules.clj"}))
+          "init-form-span still yields a span when the init form holds a ::alias keyword")))
+
+  (testing "::keyword under an unloaded ns is unresolved, never a wrong keyword"
+    (let [line "(insert! (with-meta {:x 1} {:type ::t}))"
+          usage {:row 1 :col 1 :end-row 1 :end-col (inc (count line))
+                 :from 'clara.explorer.test.rules.not-loaded-ns
+                 :filename "not_loaded_ns.clj"}
+          get-lines (fn [_ns _filename] [line])]
+      (is (nil? (kondo/read-boundary-args usage get-lines))
+          "no live ns to resolve ::t against — the arg is dropped, not mis-resolved"))))
+
+(deftest test-boundary-args-non-call-usages
+  (testing "read-boundary-args degrades to nil/empty on non-call usages instead of throwing"
+    ;; Value use: the span covers only the symbol (`(run! insert! xs)`).
+    (let [line "(run! insert! xs)"
+          ;; `insert!` starts at 1-indexed col 7, ends before col 14.
+          usage {:row 1 :col 7 :end-row 1 :end-col 14
+                 :from 'demo.rules :filename "demo/rules.clj"}
+          get-lines (fn [_ns _filename] [line])]
+      (is (nil? (kondo/read-boundary-args usage get-lines))
+          "a bare symbol is not a call list — no arguments"))
+    ;; Bare threaded step: same shape, symbol-only span.
+    (let [line "(-> m (assoc :a 1) insert!)"
+          col (inc (.indexOf ^String line "insert!"))
+          usage {:row 1 :col col :end-row 1 :end-col (+ col (count "insert!"))
+                 :from 'demo.rules :filename "demo/rules.clj"}
+          get-lines (fn [_ns _filename] [line])]
+      (is (nil? (kondo/read-boundary-args usage get-lines))
+          "a bare threaded step has no argument forms in its span"))
+    ;; Parenthesized threaded step with no args: reads as `(insert!)`, so
+    ;; `rest` is empty — no arguments, but also no crash.
+    (let [line "(->> m (merge {}) (insert!))"
+          start (inc (.indexOf ^String line "(insert!)"))
+          usage {:row 1 :col start :end-row 1 :end-col (+ start (count "(insert!)"))
+                 :from 'demo.rules :filename "demo/rules.clj"}
+          get-lines (fn [_ns _filename] [line])]
+      (is (empty? (kondo/read-boundary-args usage get-lines))
+          "`(insert!)` reads as a call with zero arguments")))
+
+  (testing "non-call boundary usages analyze to unresolved placeholder callsites"
+    (doseq [rule-sym [`atr/rule-boundary-value-use `atr/rule-boundary-threaded-bare]]
+      (let [a (ann/get-annotation edge-case-annotations rule-sym)
+            dyn (:clara-rules/dynamic-insert-types-detected a)]
+        (is (some? dyn) (str rule-sym " still records its insert"))
+        (is (= :none (:resolution dyn)))
+        (is (= 1 (count (:callsites dyn))))
+        (is (= :none (:status (first (:callsites dyn)))))
+        (is (= "insert!" (:source-str (first (:callsites dyn))))
+            "placeholder arg is the usage's own symbol")
+        (is (nil? (:clara-rules/insert-types a))
+            "unresolved placeholders promote no types")))))
 
 ;; ---------------------------------------------------------------------------
 ;; Static insert types (record constructors traced through RHS and helpers)
