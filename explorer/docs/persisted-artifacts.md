@@ -385,7 +385,7 @@ Five namespaces answer that, all under
   `[axis value]` vector ending in `[:ref …]`. Discovery also compares each
   variant unit's decoded path with its manifest's `:variant` and reports a
   directory where they differ (a hand rename), via
-  `registry/variant-mismatches`.
+  `registry/get-variant-mismatches`.
   `registry/compatibility-report` compares each unit's `:slim :dropped` key set
   and names the units that do not share a shape — the question a merge answers
   first. `unit-info` records, for an aggregate unit, the manifest's

@@ -326,7 +326,7 @@
   [^Registry registry]
   (into [] (remove #(aggregate-unit? registry %)) (units registry)))
 
-(defn variant-mismatches
+(defn get-variant-mismatches
   "The variant units whose directory (decoded) disagrees with their manifest's
   `:variant` — e.g. a directory renamed by hand. Returns
   `[{:repo … :path-variant … :manifest-variant …}]`, empty when every variant

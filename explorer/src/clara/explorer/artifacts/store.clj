@@ -226,7 +226,7 @@
   No environment variable is read here. A host that keeps its artifacts under
   some `$…_HOME` resolves that itself and passes the result as `:root`.
 
-  The join itself is `layout/unit-dir`, shared with the babashka `status`
+  The join itself is `layout/->unit-dir`, shared with the babashka `status`
   report; this validates the host axes and delegates."
   [{:keys [root dir repo variant canonical? repo-path] :as opts} :- schema/ArtifactOpts]
   (when (and (str/blank? dir) (str/blank? root))
@@ -243,7 +243,7 @@
                            shared-git/get-git-info
                            (write-variant variant canonical?)))
                     variant)]
-      (layout/unit-dir {:root root :repo repo :variant variant}))))
+      (layout/->unit-dir {:root root :repo repo :variant variant}))))
 
 (s/defn get-artifact-path :- s/Str
   "Absolute path, as a string, of one artifact under `get-out-dir`."

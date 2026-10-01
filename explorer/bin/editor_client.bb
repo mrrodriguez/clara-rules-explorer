@@ -46,11 +46,11 @@
 (defn- print-error [e]
   (prn {:error (or (.getMessage e) (str e))}))
 
-(defn- unit-dir
+(defn- ->unit-dir
   "The persistence dir of one unit, mirroring `clara.explorer.artifacts.store/get-out-dir`:
   `<:root>/<:repo>/`, or `<:root>/_variants/<:repo>/<variant path>` for a variant."
   [root {:keys [repo variant]}]
-  (layout/unit-dir {:root (str root) :repo repo :variant variant}))
+  (layout/->unit-dir {:root (str root) :repo repo :variant variant}))
 
 (defn- ->unit-key
   "A unit's registry-relative path segments → its unit-key string
@@ -89,8 +89,8 @@
   "One part of the unit's split `merged-rulebase-analysis/` directory, or nil when the part is
   absent — a missing part is an absent artifact, not an error, the same posture the JVM store
   takes."
-  [unit-dir part-key]
-  (let [f (fs/file unit-dir (:rulebase-analysis layout/artifact-files) (layout/part-files part-key))]
+  [dir part-key]
+  (let [f (fs/file dir (:rulebase-analysis layout/artifact-files) (layout/part-files part-key))]
     (when (fs/exists? f)
       (edn/read-string {:default (fn [_tag v] v)} (slurp f)))))
 
@@ -99,7 +99,7 @@
   index (`:rules` / `:queries` projections), `:fact-types`, `:dep-graph`, and the `:meta` block
   (`:slim` / `:unresolved`). Nil when the unit has no analysis to read."
   [root unit]
-  (let [dir (unit-dir root unit)
+  (let [dir (->unit-dir root unit)
         index (read-part-or-nil dir :index)
         meta (read-part-or-nil dir :meta)]
     (when (and index meta)
@@ -114,7 +114,7 @@
   "A unit's slim `:dropped` shape, or nil when the unit has no analysis to merge (no `:slim`
   block). The one vocabulary the compatibility check compares across units."
   [root unit]
-  (let [meta (read-part-or-nil (unit-dir root unit) :meta)]
+  (let [meta (read-part-or-nil (->unit-dir root unit) :meta)]
     (when (some? (:slim meta))
       (set (get-in meta [:slim :dropped])))))
 

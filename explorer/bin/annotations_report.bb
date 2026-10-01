@@ -669,9 +669,9 @@
 (defn- print-status
   "The `shared-status/unit-status` result map as aligned `label  value` lines."
   [{:keys [repo variant kind mode source updated staleness verdict reasons sources]}]
-  (print-field "unit" (str repo (when (seq variant) (str "@" (layout/variant-path variant)))))
+  (print-field "unit" (str repo (when (seq variant) (str "@" (layout/variant->path variant)))))
   (print-field "kind" (str (name kind) " unit"
-                             (when (seq variant) (str " (variant " (layout/variant-path variant) ")"))
+                             (when (seq variant) (str " (variant " (layout/variant->path variant) ")"))
                              (when mode (str " (mode " mode ")"))))
   (print-field "source" (format "%s (%s, %s)   updated %s"
                                   (short-sha (:sha source))

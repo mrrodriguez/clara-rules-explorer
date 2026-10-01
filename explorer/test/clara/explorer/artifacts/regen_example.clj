@@ -176,7 +176,7 @@
   (into (mapv :repo example-rulesets)
         [composed-example-repo
          (str "_variants/" (:repo example-variant) "/"
-              (layout/variant-path (:variant example-variant)))]))
+              (layout/variant->path (:variant example-variant)))]))
 
 ;; ---------------------------------------------------------------------------
 ;; Generation

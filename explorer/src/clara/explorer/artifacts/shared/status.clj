@@ -213,9 +213,11 @@
   "The `:source :sha` the source unit's own manifest under `root` records now,
   or nil when that unit (or its manifest) is gone."
   [root {:keys [repo variant]}]
-  (some-> (read-manifest-or-nil (layout/unit-dir {:root root
-                                                  :repo repo
-                                                  :variant variant}))
+  (some-> {:root root
+           :repo repo
+           :variant variant}
+          layout/->unit-dir
+          read-manifest-or-nil
           (get-in [:source :sha])))
 
 (defn- check-source
@@ -301,7 +303,8 @@
           (throw (ex-info "A composed unit has one checkout per source: pass --root, not --checkout"
                           {:dir dir :checkout (str checkout)})))
         (composed-unit-status base manifest
-                              (or root (layout/default-root dir (select-keys manifest [:repo :variant])))))
+                              (or root (layout/->default-root dir
+                                                              (select-keys manifest [:repo :variant])))))
       (do
         (when (some? root)
           (throw (ex-info "A source unit has no sources to locate: --root applies only to a composed unit"

@@ -227,7 +227,7 @@
   (str/replace (str value) #"%25|%2F|%40|%2B"
                {"%25" "%", "%2F" "/", "%40" "@", "%2B" "+"}))
 
-(defn variant-path
+(defn variant->path
   "Encode a `:variant` vector (`[[:region \"eu\"] [:ref \"main\"]]`) as its
   directory path under `_variants/<repo>/`: one `<axis>=<encoded value>` segment
   per pair, `/`-joined. Axis names are keywords here; a reader recovers the
@@ -235,11 +235,11 @@
   [variant]
   (->> variant
        (map (fn [[axis value]]
-              (str (name axis) "=" (encode-value value))))
+              (format "%s=%s" (name axis) (encode-value value))))
        (str/join "/")))
 
 (defn path->variant
-  "The inverse of `variant-path`: a variant directory path back to its
+  "The inverse of `variant->path`: a variant directory path back to its
   `:variant` vector. Each segment splits on its first `=`, so a value may itself
   contain `=`."
   [path]
@@ -259,7 +259,7 @@
   [s]
   (str/replace (str s) #"/+$" ""))
 
-(defn unit-dir
+(defn ->unit-dir
   "Artifact dir for a unit: explicit `:dir`, else `<:root>/<:repo>` (mainline),
   or `<:root>/_variants/<:repo>/<variant path>` for a variant. `:variant` is the
   full ordered vector of `[axis value]` pairs, always ending in `[:ref …]` — a
@@ -267,11 +267,12 @@
   [{:keys [root dir repo variant]}]
   (cond
     dir (strip-trailing-slashes dir)
-    (seq variant) (str (strip-trailing-slashes root)
-                       "/" variants-subdir "/" repo "/" (variant-path variant))
-    :else (str (strip-trailing-slashes root) "/" repo)))
+    (seq variant) (format "%s/%s/%s/%s"
+                          (strip-trailing-slashes root)
+                          variants-subdir repo (variant->path variant))
+    :else (format "%s/%s" (strip-trailing-slashes root) repo)))
 
-(defn default-root
+(defn ->default-root
   "Registry-root guess for a unit dir: `dir` with `/<repo>` (or
   `/_variants/<repo>/<variant path>`, when the unit has one) stripped from the
   end. Falls back to `dir` unchanged when it isn't suffixed that way — e.g. a
@@ -281,8 +282,8 @@
   [dir {:keys [repo variant]}]
   (let [trimmed (strip-trailing-slashes dir)
         suffix (if (seq variant)
-                 (str "/" variants-subdir "/" repo "/" (variant-path variant))
-                 (str "/" repo))]
+                 (format "/%s/%s/%s" variants-subdir repo (variant->path variant))
+                 (format "/%s" repo))]
     (if (and (> (count trimmed) (count suffix))
              (str/ends-with? trimmed suffix))
       (subs trimmed 0 (- (count trimmed) (count suffix)))

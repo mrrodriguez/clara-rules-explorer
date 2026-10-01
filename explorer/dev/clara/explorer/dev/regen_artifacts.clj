@@ -32,7 +32,7 @@
       (println repo "generated layer:" generated-rule-count "rules")
       (println repo "memory layer:" memory-rule-count "rules")
       (println repo "manifest:" manifest))
-    (println (:repo variant) "@" (layout/variant-path (:variant variant)) "variant:" (:manifest variant))
+    (println (:repo variant) "@" (layout/variant->path (:variant variant)) "variant:" (:manifest variant))
     (println (:repo composed) "composed:" (:rule-count composed) "rules")
     (println (:repo composed) "manifest:" (:manifest composed))
     (System/exit 0)))

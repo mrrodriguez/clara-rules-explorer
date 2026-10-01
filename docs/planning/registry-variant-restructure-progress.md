@@ -23,15 +23,15 @@ changes (§8).
   git-derived write path (mainline rule, `ref` resolution) is covered by
   `store-test` with stubbed git, not by the golden artifact set.
 - **Encoding lives in `layout`** (`encode-value` / `decode-value` /
-  `variant-path` / `path->variant`); **validation of host axes lives in
+  `variant->path` / `path->variant`); **validation of host axes lives in
   `store`** (replacing `get-branch-path`).
 - **`:repo-path` moved from `ManifestOptions` into `ArtifactOpts`**, since
   `get-out-dir` now reads it (default: the process's cwd) to resolve the ref.
 
 ## Checklist
 
-- [x] `artifacts.layout` — `variants-subdir`, public encode/decode, `variant-path`
-  / `path->variant`, `unit-dir` / `default-root` take `:variant`
+- [x] `artifacts.layout` — `variants-subdir`, public encode/decode, `variant->path`
+  / `path->variant`, `->unit-dir` / `->default-root` take `:variant`
 - [x] `artifacts.shared.git` — `get-git-info` adds `:default-branch`
 - [x] `artifacts.schema` — `Variant`, `UnitRef`, `ArtifactOpts`,
   `ManifestOptions`, `GitInfo`, composed-unit entries
@@ -40,7 +40,7 @@ changes (§8).
   value validation replaces `get-branch-path`
 - [x] `artifacts.manifest` — top-level `:variant`
 - [x] `artifacts.registry` — discovery split; `unit-ref`/`->opts`/`->unit-info`
-  carry `:variant`; path/manifest consistency report (`variant-mismatches`)
+  carry `:variant`; path/manifest consistency report (`get-variant-mismatches`)
 - [x] `artifacts.compose` / `artifacts.flow` / `artifacts.federate` — `:variant`
   wherever `:branch` was carried
 - [x] `artifacts.shared.status` — unit-key parsing + `unit` line print the

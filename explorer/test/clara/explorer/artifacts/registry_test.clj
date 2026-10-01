@@ -77,10 +77,10 @@
 
 (defn- write-variant-unit!
   "A minimal variant unit at `_variants/<repo>/<variant path>` whose manifest
-  records `variant` — the consistent case `variant-mismatches` reports nothing
-  for."
+  records `variant` — the consistent case `get-variant-mismatches` reports
+  nothing for."
   [root repo variant dropped]
-  (let [dir (io/file root "_variants" repo (layout/variant-path variant))
+  (let [dir (io/file root "_variants" repo (layout/variant->path variant))
         file (io/file dir (:manifest layout/artifact-files))]
     (io/make-parents file)
     (edn-io/write-edn-file! file (assoc (manifest {:repo repo}) :variant variant))
@@ -91,7 +91,7 @@
   "A variant unit whose directory is `dir-variant` but whose manifest records
   `manifest-variant` — the hand-renamed case."
   [root repo dir-variant manifest-variant dropped]
-  (let [dir (io/file root "_variants" repo (layout/variant-path dir-variant))
+  (let [dir (io/file root "_variants" repo (layout/variant->path dir-variant))
         file (io/file dir (:manifest layout/artifact-files))]
     (io/make-parents file)
     (edn-io/write-edn-file! file (assoc (manifest {:repo repo}) :variant manifest-variant))
@@ -138,7 +138,7 @@
         (is (nil? (registry/read-manifest reg {:repo "missing"}))
             "an absent unit reads as nil rather than throwing")))))
 
-(deftest discovery-reports-variant-path-mismatches-test
+(deftest discovery-reports-variant-mismatches-test
   (with-temp-root
     (fn [root]
       (write-unit! root "a" #{:nodes :id})
@@ -146,7 +146,7 @@
       (write-variant-unit-with-manifest! root "a" [[:ref "renamed"]] [[:ref "hand-edited"]] #{:nodes :id})
 
       (let [reg (registry/discover {:root root})
-            mismatches (registry/variant-mismatches reg)]
+            mismatches (registry/get-variant-mismatches reg)]
         (testing "only the hand-renamed directory is reported"
           (is (= [{:repo "a"
                    :path-variant [[:ref "renamed"]]
