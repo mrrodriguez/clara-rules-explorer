@@ -302,6 +302,47 @@
       (is (nil? (kondo/read-boundary-args usage get-lines))
           "no live ns to resolve ::t against — the arg is dropped, not mis-resolved"))))
 
+(deftest test-boundary-args-non-call-usages
+  (testing "read-boundary-args degrades to nil/empty on non-call usages instead of throwing"
+    ;; Value use: the span covers only the symbol (`(run! insert! xs)`).
+    (let [line "(run! insert! xs)"
+          ;; `insert!` starts at 1-indexed col 7, ends before col 14.
+          usage {:row 1 :col 7 :end-row 1 :end-col 14
+                 :from 'demo.rules :filename "demo/rules.clj"}
+          get-lines (fn [_ns _filename] [line])]
+      (is (nil? (kondo/read-boundary-args usage get-lines))
+          "a bare symbol is not a call list — no arguments"))
+    ;; Bare threaded step: same shape, symbol-only span.
+    (let [line "(-> m (assoc :a 1) insert!)"
+          col (inc (.indexOf ^String line "insert!"))
+          usage {:row 1 :col col :end-row 1 :end-col (+ col (count "insert!"))
+                 :from 'demo.rules :filename "demo/rules.clj"}
+          get-lines (fn [_ns _filename] [line])]
+      (is (nil? (kondo/read-boundary-args usage get-lines))
+          "a bare threaded step has no argument forms in its span"))
+    ;; Parenthesized threaded step with no args: reads as `(insert!)`, so
+    ;; `rest` is empty — no arguments, but also no crash.
+    (let [line "(->> m (merge {}) (insert!))"
+          start (inc (.indexOf ^String line "(insert!)"))
+          usage {:row 1 :col start :end-row 1 :end-col (+ start (count "(insert!)"))
+                 :from 'demo.rules :filename "demo/rules.clj"}
+          get-lines (fn [_ns _filename] [line])]
+      (is (empty? (kondo/read-boundary-args usage get-lines))
+          "`(insert!)` reads as a call with zero arguments")))
+
+  (testing "non-call boundary usages analyze to unresolved placeholder callsites"
+    (doseq [rule-sym [`atr/rule-boundary-value-use `atr/rule-boundary-threaded-bare]]
+      (let [a (ann/get-annotation edge-case-annotations rule-sym)
+            dyn (:clara-rules/dynamic-insert-types-detected a)]
+        (is (some? dyn) (str rule-sym " still records its insert"))
+        (is (= :none (:resolution dyn)))
+        (is (= 1 (count (:callsites dyn))))
+        (is (= :none (:status (first (:callsites dyn)))))
+        (is (= "insert!" (:source-str (first (:callsites dyn))))
+            "placeholder arg is the usage's own symbol")
+        (is (nil? (:clara-rules/insert-types a))
+            "unresolved placeholders promote no types")))))
+
 ;; ---------------------------------------------------------------------------
 ;; Static insert types (record constructors traced through RHS and helpers)
 ;; ---------------------------------------------------------------------------

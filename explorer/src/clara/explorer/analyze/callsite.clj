@@ -189,18 +189,27 @@
    `(let [f (->fact :t m)] (insert! f))` — the argument `f` names nothing, but
    its traced form is the constructor call.
 
+   A usage with no argument forms in its span — a value use like
+   `(run! insert! xs)`, a bare threaded step like `(-> m f insert!)`, or an
+   empty call like `(insert!)` — yields a single placeholder argument: the
+   usage's own symbol (e.g. `insert!`).  It falls through every resolver to an
+   unresolved callsite, so the insert stays visible and the rule's
+   `:resolution` stays honest instead of silently dropping the insert.
+
    Returns a vector of `TracedArg` entries."
   [usages {:keys [get-lines alias-context-for] :as ctx}]
   (into []
         (comp (mapcat (fn [usage]
                         (let [alias-ctx (when alias-context-for
-                                          (alias-context-for usage))]
+                                          (alias-context-for usage))
+                              args (or (seq (kondo/read-boundary-args usage get-lines))
+                                       [(:name usage)])]
                           (map (fn [arg]
                                  {:usage usage
                                   :arg arg
                                   :alias-context alias-ctx
                                   :traced (trace-local-form arg ctx (:from usage) (usage->span usage) 0)})
-                               (or (kondo/read-boundary-args usage get-lines) '())))))
+                               args))))
               (map-indexed (fn [i ta] (assoc ta :idx i))))
         usages))
 

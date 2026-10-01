@@ -55,7 +55,13 @@
 
 (defn read-boundary-args
   "Reads the argument forms of the boundary call (`insert!`/`retract!`/…) described
-   by a kondo `:var-usage`.  Returns a (possibly empty) sequence of forms."
+   by a kondo `:var-usage`.  Returns a (possibly empty) sequence of forms.
+
+   A usage that is not a call (a value use like `(run! insert! xs)` or a bare
+   threaded step like `(-> m f insert!)`) has no argument forms in its span —
+   the text reads as the bare symbol — so there is nothing to return.  Only
+   `seq?` forms (call lists) yield arguments; anything else degrades to nil
+   like every other read failure in this namespace."
   [{:keys [row end-row col end-col from filename] :as _usage} get-lines]
   (let [lines (get-lines from filename)
         call-str (source-text-at lines
@@ -63,9 +69,10 @@
                                  col
                                  end-row
                                  end-col)]
-    (if call-str
-      (some-> (read-string-in-ns from call-str) rest)
-      nil)))
+    (when call-str
+      (let [form (read-string-in-ns from call-str)]
+        (when (seq? form)
+          (rest form))))))
 
 (defn read-init-form
   "Reads the init form following a `:locals` binding symbol in the source —
