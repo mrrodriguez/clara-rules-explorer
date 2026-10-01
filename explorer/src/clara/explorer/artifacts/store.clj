@@ -195,13 +195,13 @@
   of the analyzed checkout; the ref is its `:branch`, else its `:sha-short`.
   Throws when there is no checkout to read a ref from — a run with no repo names
   an explicit `:dir` instead."
-  [host-variant canonical? git-info]
+  [host-variant canonical? {:keys [sha-short branch default-branch] :as git-info}]
   (when-not git-info
     (throw (ex-info "Cannot derive a variant from a non-git checkout: pass :dir"
                     {:canonical? canonical?})))
-  (let [ref (or (:branch git-info) (:sha-short git-info))]
-    (when-not (and canonical? (= ref (:default-branch git-info)))
-      (into (vec host-variant) [[:ref ref]]))))
+  (let [ref (or branch sha-short)]
+    (when-not (and canonical? (= ref default-branch))
+      (conj (vec host-variant) [:ref ref]))))
 
 (s/defn get-out-dir :- s/Str
   "Persistence dir for a run.
@@ -236,10 +236,12 @@
   (if-not (str/blank? dir)
     (str dir)
     (let [variant (if (contains? opts :canonical?)
-                    (do (validate-variant! variant)
-                        (write-variant variant canonical?
-                                       (shared-git/get-git-info
-                                        (or repo-path (System/getProperty "user.dir")))))
+                    (do
+                      (validate-variant! variant)
+                      (->> (System/getProperty "user.dir")
+                           (or repo-path)
+                           shared-git/get-git-info
+                           (write-variant variant canonical?)))
                     variant)]
       (layout/unit-dir {:root root :repo repo :variant variant}))))
 

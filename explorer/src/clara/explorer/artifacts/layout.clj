@@ -233,25 +233,26 @@
   per pair, `/`-joined. Axis names are keywords here; a reader recovers the
   vector with `path->variant`."
   [variant]
-  (str/join "/"
-            (map (fn [[axis value]]
-                   (str (name axis) "=" (encode-value value)))
-                 variant)))
+  (->> variant
+       (map (fn [[axis value]]
+              (str (name axis) "=" (encode-value value))))
+       (str/join "/")))
 
 (defn path->variant
   "The inverse of `variant-path`: a variant directory path back to its
   `:variant` vector. Each segment splits on its first `=`, so a value may itself
   contain `=`."
   [path]
-  (->> (str/split (str path) #"/")
-       (remove str/blank?)
-       (mapv (fn [segment]
-               (let [i (str/index-of segment "=")]
-                 (when-not i
-                   (throw (ex-info (format "Variant segment has no '=': %s" segment)
-                                   {:segment segment :path (str path)})))
-                 [(keyword (subs segment 0 i))
-                  (decode-value (subs segment (inc i)))])))))
+  (into []
+        (comp (remove str/blank?)
+              (map (fn [segment]
+                     (let [i (str/index-of segment "=")]
+                       (when-not i
+                         (throw (ex-info (format "Variant segment has no '=': %s" segment)
+                                         {:segment segment :path (str path)})))
+                       [(keyword (subs segment 0 i))
+                        (decode-value (subs segment (inc i)))]))))
+        (str/split (str path) #"/")))
 
 (defn- strip-trailing-slashes
   "`s` with trailing `/`s removed, so joining never doubles a separator."
