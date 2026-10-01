@@ -13,7 +13,8 @@
 ;; + rules on disk) and reports what was written.
 
 (ns clara.explorer.dev.regen-artifacts
-  (:require [clara.explorer.artifacts.regen-example :as example]
+  (:require [clara.explorer.artifacts.layout :as layout]
+            [clara.explorer.artifacts.regen-example :as example]
             [clojure.java.io :as io]))
 
 (set! *warn-on-reflection* true)
@@ -25,13 +26,13 @@
 (defn -main
   [& _]
   (delete-tree! example/example-out-dir)
-  (let [{:keys [dir rulesets branch composed]} (example/generate-example-artifacts! example/example-out-dir)]
+  (let [{:keys [dir rulesets variant composed]} (example/generate-example-artifacts! example/example-out-dir)]
     (println "wrote artifact registry to" dir)
     (doseq [{:keys [repo generated-rule-count memory-rule-count manifest]} rulesets]
       (println repo "generated layer:" generated-rule-count "rules")
       (println repo "memory layer:" memory-rule-count "rules")
       (println repo "manifest:" manifest))
-    (println (:repo branch) "@" (:branch branch) "branch:" (:manifest branch))
+    (println (:repo variant) "@" (layout/variant-path (:variant variant)) "variant:" (:manifest variant))
     (println (:repo composed) "composed:" (:rule-count composed) "rules")
     (println (:repo composed) "manifest:" (:manifest composed))
     (System/exit 0)))

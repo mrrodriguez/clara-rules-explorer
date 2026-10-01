@@ -31,6 +31,7 @@
   (:require
    [clara.rules :as r]
    [clara.explorer.artifacts.flow :as flow]
+   [clara.explorer.artifacts.layout :as layout]
    [clara.explorer.artifacts.manifest :as manifest]
    [clara.explorer.artifacts.store :as store]
    [clara.explorer.test.rules.loan-app-facts :as laf]
@@ -151,20 +152,31 @@
    :analysis-run
    {:scope "composed loan-app + loan-disposition"}})
 
-(def example-branch
-  "The checked-in branch variant: the same unfired disposition session persisted
-   under `<repo>/branches/<label>`, so the registry walk's `branches/` convention
-   is exercised end-to-end on a real unit."
+(def example-variant
+  "The checked-in variant unit: the same unfired disposition session persisted
+   under `_variants/<repo>/ref=<ref>/`, so the registry walk's `_variants/`
+   convention and the ref-value encoding are exercised end-to-end on a real
+   unit.
+
+   The ref is a fixed literal (`feature/new-tax`, chosen so `/` is exercised as
+   `%2F`), not a git read: the disposition ruleset is a set of test namespaces
+   inside this checkout, with no independent repo whose branch a `ref` could
+   truthfully name. A fixed ref is what keeps `make regen-artifacts`
+   byte-identical no matter which branch it is run from — the golden test does
+   not have to normalize it the way it does `:source`. The git-derived write
+   path (where `ref` is read off the checkout) is pinned separately in
+   `store-test`."
   {:repo (:repo loan-disposition-ruleset)
-   :branch "alt"})
+   :variant [[:ref "feature/new-tax"]]})
 
 (def example-repos
-  "Every repo and branch variant generated into the example registry, source
-   bundles first, then the composed unit, then the branch variant (named by its
+  "Every repo and variant unit generated into the example registry, source
+   bundles first, then the composed unit, then the variant unit (named by its
    registry-relative path)."
   (into (mapv :repo example-rulesets)
         [composed-example-repo
-         (str (:repo example-branch) "/branches/" (:branch example-branch))]))
+         (str "_variants/" (:repo example-variant) "/"
+              (layout/variant-path (:variant example-variant)))]))
 
 ;; ---------------------------------------------------------------------------
 ;; Generation
@@ -172,13 +184,14 @@
 
 (defn- persist-ruleset!
   "Generate and persist one ruleset bundle under the registry root `root`.
-   `:branch` (when present) nests the bundle under `<repo>/branches/<label>`."
-  [root {:keys [repo session-fn fact-constructors analysis-run branch]}]
+   `:variant` (when present, already complete and ending in `[:ref …]`) places
+   the bundle under `_variants/<repo>/<variant path>/`."
+  [root {:keys [repo session-fn fact-constructors analysis-run variant]}]
   (let [session (session-fn)
         opts (cond-> {:root root
                       :repo repo
                       :generated-by example-generated-by}
-               branch (assoc :branch branch))
+               variant (assoc :variant variant))
         dir (store/get-out-dir opts)
         generated (flow/generate
                    (cond-> {:session session
@@ -200,7 +213,7 @@
              :generated-rule-count (count (:annotations (:layer generated)))
              :memory-rule-count (if memory-layer (count (:annotations memory-layer)) 0)
              :manifest manifest-file}
-      branch (assoc :branch branch))))
+      variant (assoc :variant variant))))
 
 (defn- persist-composed-example!
   "Compose the source rulesets under `root` into one unit-shaped directory and
@@ -237,6 +250,6 @@
   [dir]
   {:dir dir
    :rulesets (mapv #(persist-ruleset! dir %) example-rulesets)
-   :branch (persist-ruleset! dir (assoc loan-disposition-ruleset
-                                        :branch (:branch example-branch)))
+   :variant (persist-ruleset! dir (assoc loan-disposition-ruleset
+                                         :variant (:variant example-variant)))
    :composed (persist-composed-example! dir composed-example)})

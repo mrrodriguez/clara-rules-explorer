@@ -6,7 +6,7 @@
 ;;   bb bin/editor_client.bb '<selection-edn>' '<navigate-input-edn>'
 ;;   bb bin/editor_client.bb --list-units '<registry-root>'
 ;;
-;; `--list-units` prints the unit keys (`repo`, or `repo@branch` for a branch variant) of every
+;; `--list-units` prints the unit keys (`repo`, or `repo@<variant path>` for a variant) of every
 ;; unit under the root, sorted — the registry discovery the editors used to do themselves, so the
 ;; registry layout has one owner here.
 ;;
@@ -48,32 +48,28 @@
 
 (defn- unit-dir
   "The persistence dir of one unit, mirroring `clara.explorer.artifacts.store/get-out-dir`:
-  `<:root>/<:repo>/`, with `:branch` nested under `<repo>/branches/<branch>/`."
-  [root {:keys [repo branch]}]
-  (let [base (fs/file root repo)]
-    (if (str/blank? branch)
-      base
-      (fs/file base "branches" branch))))
-
-(def ^:private branches-subdir
-  "The `branches/` segment, mirroring
-  `clara.explorer.artifacts.store/branches-subdir`."
-  "branches")
+  `<:root>/<:repo>/`, or `<:root>/_variants/<:repo>/<variant path>` for a variant."
+  [root {:keys [repo variant]}]
+  (layout/unit-dir {:root (str root) :repo repo :variant variant}))
 
 (defn- ->unit-key
-  "A unit's registry-relative path segments → its unit-key string (`repo[@branch]`), mirroring
+  "A unit's registry-relative path segments → its unit-key string
+  (`repo[@variant path]`), mirroring
   `clara.explorer.artifacts.registry/->unit-ref` +
   `clara.explorer.artifacts.shared.registry/unit-key`."
   [segments]
-  (let [bi (first (keep-indexed (fn [i seg] (when (= branches-subdir seg) i)) segments))]
-    (if bi
-      (str (str/join "/" (subvec segments 0 bi))
-           "@"
-           (str/join "/" (subvec segments (inc bi))))
-      (str/join "/" segments))))
+  (if (= layout/variants-subdir (first segments))
+    (let [rest (subvec segments 1)
+          vi (first (keep-indexed (fn [i seg] (when (str/includes? seg "=") i)) rest))]
+      (if vi
+        (shared-registry/unit-key
+         {:repo (str/join "/" (subvec rest 0 vi))
+          :variant (layout/path->variant (str/join "/" (subvec rest vi)))})
+        (str/join "/" rest)))
+    (str/join "/" segments)))
 
 (defn- list-unit-repos
-  "Every unit under `root`, as unit-key strings (`repo` or `repo@branch`), sorted. Discovery is the
+  "Every unit under `root`, as unit-key strings (`repo` or `repo@variant path`), sorted. Discovery is the
   directory walk the editors previously did themselves: find every
   `rules-inspect-manifest.edn` and name the unit by its directory relative to the root. The
   registry layout therefore has one owner (this script), and the editors only prompt over the

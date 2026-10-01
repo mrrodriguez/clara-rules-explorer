@@ -60,6 +60,14 @@
         (when (and (seq stripped) (not= "HEAD" stripped))
           stripped)))))
 
+(defn default-branch
+  "The remote's default branch name (`origin/HEAD`'s target, with the remote
+  alias stripped), or nil when the remote does not advertise one."
+  ^String [dir remote]
+  (some-> (git dir "symbolic-ref" "--short"
+               (format "refs/remotes/%s/HEAD" remote))
+          (strip-remote remote)))
+
 (defn- default-branch-at
   "The remote's default branch name when it points at `sha`, else nil.
   `git symbolic-ref --short refs/remotes/origin/HEAD` names e.g. `origin/main`,
@@ -108,7 +116,9 @@
 
   `:branch` names the branch the analyzed commit belongs to — the checkout's
   own branch when attached, the remote branch pointing at the commit when
-  detached — and is nil when no remote branch points at it."
+  detached — and is nil when no remote branch points at it. `:default-branch`
+  is the remote's advertised default (`origin/HEAD`'s target, remote alias
+  stripped), nil when it has none; a nil default makes no run mainline."
   [dir]
   (when-let [sha (ref-sha dir "HEAD")]
     {:remote (remote-url dir)
@@ -116,4 +126,5 @@
      :sha-short (subs sha 0 7)
      :branch (resolve-branch dir sha "origin"
                              (git dir "rev-parse" "--abbrev-ref" "HEAD"))
+     :default-branch (default-branch dir "origin")
      :working-tree (if (clean-tree? dir) "clean" "dirty")}))

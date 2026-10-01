@@ -23,7 +23,7 @@ production name (`some.ns/some-rule`) or a fact type (`:loan/applicant`). There
 are no ids on disk; the name is the handle.
 
 ```
-<root>/<repo>/                    ... or any explicit :dir
+<root>/<repo>/                    mainline unit, or any explicit :dir
   auto-gen-annotations.edn        layer — what static analysis found
   memory-annotations.edn          layer — what a fired session proved
   agent-annotations.edn           layer — what a curator settled. The one precious file
@@ -31,11 +31,20 @@ are no ids on disk; the name is the handle.
   merged-rulebase-analysis/       the analysis over that merge — a DIRECTORY
   rulebase-analysis-digest.edn    ~1–35KB of counts and work lists
   rules-inspect-manifest.edn      provenance: shas, namespaces, history
+
+<root>/_variants/<repo>/          a variant unit, under the one root-level holder
+  <axis>=<value>/…/ref=<ref>/     the host's axes, then the checkout ref
 ```
 
-`:branch` nests the whole set one level down, under `<base>/branches/<label>/`,
-so a run over work in progress never clobbers the mainline state of the world.
-The label is the caller's, not git's.
+A run writes `<root>/<repo>/` only when the host marks its axes canonical
+(`:canonical? true`) **and** the checkout's ref is the remote's default branch.
+Every other run writes under `_variants/<repo>/<axis>=<value>/…/ref=<ref>/` —
+the axes are the host's, in nesting order; `ref` is read off the checkout, never
+passed by the caller. A dirty working tree does not change this; it is recorded
+in `:source :working-tree` as always. `_variants/` is a single root-level
+holder, so a host that keeps variants out of version control ignores one path.
+Segment values percent-encode `%`, `/`, `@`, and `+` (`/` is how git branch
+names survive a level separator).
 
 **Start with `rulebase-analysis-digest.edn`.** It is the only artifact meant to
 be read whole: counts, per-namespace rule and query totals, the
@@ -50,12 +59,18 @@ lives.
 
 (def opts {:root "/path/to/artifacts"
            :repo "my-ruleset"
+           :variant [[:region "eu"]]   ; host axes; absent for a mainline run
+           :canonical? true            ; this run's axes are mainline
            :generated-by "my-tool"
            :session session})
 
 (-> (flow/generate {:session session :generated-by "my-tool"})
     (flow/persist! opts))
 ```
+
+`:variant` (the host's axes, in nesting order, may be empty) plus `:canonical?`
+place the unit: canonical on the default branch writes mainline; everything else
+writes `_variants/`. An explicit `:dir` wins outright over both.
 
 Two options have no default, on purpose.
 
@@ -80,6 +95,12 @@ root — the layout a rules registry keeps for more than one ruleset:
 - `loan-disposition-ruleset` — the single-ns
   `clara.explorer.test.rules.loan-outcome-notices` session, unfired, so it records the
   downstream consume/produce contract with no memory-derived layer.
+- `_variants/loan-disposition-ruleset/ref=feature%2Fnew-tax` — the same unfired session as a
+  variant unit, exercising the `_variants/` layout and the `/`→`%2F` segment encoding. Its `ref` is a
+  fixed literal, not a git read: the disposition ruleset is test namespaces inside this checkout,
+  with no independent repo to read a truthful ref from, and a fixed ref keeps regeneration
+  byte-identical. The git-derived write path is pinned in
+  `clara.explorer.artifacts.store-test`.
 
 The example is there so a change to any generation step shows up as a reviewable diff rather than a
 silent format drift. Regenerate it (from `explorer/`) with `make regen-artifacts`, which runs
@@ -184,7 +205,7 @@ at them.
 
 ```bash
 S="$CLARA_RULES_EXPLORER_HOME/explorer/bin/annotations_report.bb"
-D="/path/to/artifacts/<repo>"       # a branch run is $D/branches/<label>
+D="/path/to/artifacts/<repo>"       # a variant unit is $ROOT/_variants/<repo>/<variant path>
 
 bb "$S" "$D"                              # summary + resolution tallies
 bb "$S" "$D" gaps                         # rules whose :resolution is not :full
@@ -316,9 +337,9 @@ checkout of the same commit record equal `:source` maps. When no remote branch
 points at the commit, `:branch` is nil: `HEAD` is not a branch, and a local
 branch that happens to point at a detached commit says nothing about what the
 commit was synced against. Whether the checkout was detached is a fact about
-one machine and is not recorded. The manifest's top-level `:branch`, when
-present, is unaffected: that is the artifact-dir label a branch run chose, not
-git's branch.
+one machine and is not recorded. The manifest's top-level `:variant`, when
+present, is the unit's variant — not git's branch, which stays under
+`:source`.
 
 ### Checking a unit: `status`
 
@@ -330,7 +351,7 @@ default `HEAD`): a remote mismatch, a sha drift, a dirty generation tree, or an
 `--checkout` only the checkout-independent checks run and the report says the
 sha was not compared. A composed unit compares each recorded per-source sha
 against that source's manifest under `--root` (default: `<dir>` with the
-manifest's `:repo` and `branches/<label>` stripped off) and is current only if
+manifest's `:repo` and `_variants/<repo>/<variant…>` stripped off) and is current only if
 every source is; `--checkout` is rejected for it, since it has one checkout per
 source. An aggregate with no per-source shas is reported by kind and source
 provenance, with no verdict. `--edn` prints the result map the text report
@@ -347,9 +368,9 @@ and why there are three modes — is
 on-disk view of it.
 
 Everything above addresses **one** artifact set at a time. Hosts accumulate
-many — one per source repo of a rulebase composed from several, one per branch
-variant under review, one per captured session — and the questions worth asking
-span them: *who consumes the type this set produces*, *what does this branch do
+many — one per source repo of a rulebase composed from several, one per variant
+under review, one per captured session — and the questions worth asking
+span them: *who consumes the type this set produces*, *what does this variant do
 to the others*, *what does this set of sets look like as one rulebase*.
 
 Five namespaces answer that, all under
@@ -358,8 +379,13 @@ Five namespaces answer that, all under
 - **`registry`** — discovers and reads N units under a root, as a value. A
   directory is a **unit** iff it holds `rules-inspect-manifest.edn`, the one
   artifact every complete set has; its `:repo` is its path relative to the
-  root. The one reserved segment is `branches`: its children become `:branch`
-  variants of the parent unit rather than units of their own.
+  root. The one reserved root-level directory is `_variants/`: a path under it
+  splits into a repo (segments before the first `<axis>=…` segment) and a
+  variant (that segment and everything after), named by the decoded
+  `[axis value]` vector ending in `[:ref …]`. Discovery also compares each
+  variant unit's decoded path with its manifest's `:variant` and reports a
+  directory where they differ (a hand rename), via
+  `registry/variant-mismatches`.
   `registry/compatibility-report` compares each unit's `:slim :dropped` key set
   and names the units that do not share a shape — the question a merge answers
   first. `unit-info` records, for an aggregate unit, the manifest's
@@ -376,7 +402,7 @@ Five namespaces answer that, all under
   bookkeeping, and `:ns-deps` stay absent.
 - **`compose`** — merges a caller-named selection in two modes. `fold-layers`
   folds every unit's layer stack into one `MergedAnnotations`, qualifying each
-  layer id as `<repo>[@<branch>]/<layer-id>`; `->composed-analysis` asserts the
+  layer id as `<repo>[@<variant>]/<layer-id>`; `->composed-analysis` asserts the
   units are components of ONE rulebase and returns one slim `RulebaseAnalysis`,
   rules/queries merged by fq name (a name in two units is refused), fact types
   merged per name with ancestors unioned, the dep-graph recomputed over the
@@ -398,7 +424,7 @@ Five namespaces answer that, all under
   `read-index` / `read-digest` read them back. `->index` and `persist!` accept
   a caller `:label` recorded into the index's `:scope`, so a persisted index
   names its question without depending on its directory. `diff` compares two
-  indexes over overlapping unit sets — the branch-vs-mainline question —
+  indexes over overlapping unit sets — the variant-vs-mainline question —
   reporting selection, edge, fact-type, entry-point, orphan, and hierarchy
   differences. `grade` checks the union against a composed reference (a
   captured session or monolithic run). `->index` refuses a selection that
@@ -445,7 +471,7 @@ lives in the manifest's `:analysis-run` block rather than in the flattened
 layer files; the manifest's `:analysis-run :mode :compose` and `:units` are
 exactly the aggregate marker `registry/unit-info` reads back, so a composed
 unit is not mistaken for a source unit when discovered again. Each `:units`
-entry also carries its source's `:sha` and `:created` (and `:branch` when
+entry also carries its source's `:sha` and `:created` (and `:variant` when
 present), and `:staleness` names the `review-when-any-source-sha-drifts` policy
 with those per-source shas — so a reader holding only the directory can answer
 "is this current?" for a composition that is stale as soon as any of its N

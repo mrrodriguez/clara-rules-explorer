@@ -90,13 +90,16 @@
     (do
       (testing "an attached checkout names its own branch"
         (with-repo* (fn [repo]
-                      (is (= "main" (:branch (git/get-git-info (:dir repo))))))))
+                      (is (= "main" (:branch (git/get-git-info (:dir repo)))))
+                      (is (nil? (:default-branch (git/get-git-info (:dir repo))))
+                          "no origin refs yet, so no advertised default"))))
 
       (testing "a detached checkout at the remote default records that branch"
         (with-repo* (fn [repo]
                       (point-origin! (:dir repo) (:sha repo) "main" "main")
                       (sh! (:dir repo) "checkout" "-q" "--detach" "HEAD")
-                      (is (= "main" (:branch (git/get-git-info (:dir repo))))))))
+                      (is (= "main" (:branch (git/get-git-info (:dir repo)))))
+                      (is (= "main" (:default-branch (git/get-git-info (:dir repo))))))))
 
       (testing "a detached worktree records the same branch as a checkout"
         (with-repo* (fn [repo]

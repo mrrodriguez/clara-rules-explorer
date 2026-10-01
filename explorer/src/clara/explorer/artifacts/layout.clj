@@ -187,23 +187,71 @@
 ;; unit placement
 ;;
 ;; The unit → directory mapping both the JVM registry and the babashka
-;; `status` report need: `<root>/<repo>/`, or `<root>/<repo>/branches/<label>/`
-;; for a branch variant. Pure `/`-joins — every downstream use goes back
-;; through file IO that accepts them on any platform — so both sides share
-;; this instead of each joining segments its own way.
+;; `status` report need: `<root>/<repo>/` for a mainline unit, or
+;; `<root>/_variants/<repo>/<axis>=<value>/…/ref=<ref>/` for a variant. Pure
+;; `/`-joins — every downstream use goes back through file IO that accepts them
+;; on any platform — so both sides share this instead of each joining segments
+;; its own way.
 ;;
-;; Segments arrive already validated: branch-label validation stays in
-;; `clara.explorer.artifacts.store/get-branch-path`, and discovery's inverse
-;; (dir → ref, splitting on the first `branches` segment) stays in
-;; `clara.explorer.artifacts.registry`, which reads this constant.
+;; The variant directory is named by the *encoded* `[axis value]` pairs in
+;; `:variant`, always ending in `[:ref …]`. Encoding and decoding live here
+;; (public) so a host building its own paths from values — e.g. a composed
+;; unit's directory name — uses the same escaping rather than inventing its own.
+;; Nothing outside this namespace decodes a path.
 ;; ===========================================================================
 
-(def branches-subdir
-  "The directory, under a run's base dir, that holds its per-branch variants. A
-  fixed name so a branch can never collide with an artifact file, and so the
-  mainline dir stays readable as \"the state of the world\" with its experiments
-  gathered in one place beneath it."
-  "branches")
+(def variants-subdir
+  "The single root-level directory holding every repo's variant units, so
+  `<root>/<repo>/` holds exactly the mainline unit and a host that keeps
+  variants out of version control ignores one path."
+  "_variants")
+
+(def ^:private reserved-value-chars
+  "The four characters percent-encoded in a variant value, mapped to their
+  encodings. `%` is the escape character, which is what makes decoding
+  unambiguous; `/` is the level separator; `@` the unit-key separator; `+` the
+  join a host uses to list several values in one segment."
+  {\% "%25", \/ "%2F", \@ "%40", \+ "%2B"})
+
+(defn encode-value
+  "A variant segment value, percent-encoding the four reserved characters and
+  passing everything else through. The value is a non-empty string; a host that
+  keeps several sub-values in one segment joins them with `+` first."
+  [value]
+  (str/escape (str value) reserved-value-chars))
+
+(defn decode-value
+  "The inverse of `encode-value`: an encoded segment value back to the original
+  string."
+  [value]
+  (str/replace (str value) #"%25|%2F|%40|%2B"
+               {"%25" "%", "%2F" "/", "%40" "@", "%2B" "+"}))
+
+(defn variant-path
+  "Encode a `:variant` vector (`[[:region \"eu\"] [:ref \"main\"]]`) as its
+  directory path under `_variants/<repo>/`: one `<axis>=<encoded value>` segment
+  per pair, `/`-joined. Axis names are keywords here; a reader recovers the
+  vector with `path->variant`."
+  [variant]
+  (str/join "/"
+            (map (fn [[axis value]]
+                   (str (name axis) "=" (encode-value value)))
+                 variant)))
+
+(defn path->variant
+  "The inverse of `variant-path`: a variant directory path back to its
+  `:variant` vector. Each segment splits on its first `=`, so a value may itself
+  contain `=`."
+  [path]
+  (->> (str/split (str path) #"/")
+       (remove str/blank?)
+       (mapv (fn [segment]
+               (let [i (str/index-of segment "=")]
+                 (when-not i
+                   (throw (ex-info (format "Variant segment has no '=': %s" segment)
+                                   {:segment segment :path (str path)})))
+                 [(keyword (subs segment 0 i))
+                  (decode-value (subs segment (inc i)))])))))
 
 (defn- strip-trailing-slashes
   "`s` with trailing `/`s removed, so joining never doubles a separator."
@@ -211,28 +259,29 @@
   (str/replace (str s) #"/+$" ""))
 
 (defn unit-dir
-  "Artifact dir for a unit: explicit `:dir`, else `<:root>/<:repo>`. `:branch`
-  nests the whole set one level down, under `<base>/branches/<label>/`, either
-  way — it is a caller-supplied label, not a git branch, so it names whatever
-  variant of a repo is kept apart while the base keeps meaning the mainline
-  state of the world."
-  [{:keys [root dir repo branch]}]
-  (let [base (or dir (str (strip-trailing-slashes root) "/" repo))]
-    (if (seq branch)
-      (str (strip-trailing-slashes base) "/" branches-subdir "/" branch)
-      base)))
+  "Artifact dir for a unit: explicit `:dir`, else `<:root>/<:repo>` (mainline),
+  or `<:root>/_variants/<:repo>/<variant path>` for a variant. `:variant` is the
+  full ordered vector of `[axis value]` pairs, always ending in `[:ref …]` — a
+  mainline unit passes none, and an explicit `:dir` wins outright over both."
+  [{:keys [root dir repo variant]}]
+  (cond
+    dir (strip-trailing-slashes dir)
+    (seq variant) (str (strip-trailing-slashes root)
+                       "/" variants-subdir "/" repo "/" (variant-path variant))
+    :else (str (strip-trailing-slashes root) "/" repo)))
 
 (defn default-root
-  "Registry-root guess for a unit dir: `dir` with `/<repo>` (and
-  `/branches/<label>`, when the unit has one) stripped from the end. Falls back
-  to `dir` unchanged when it isn't suffixed that way — e.g. a unit written to
-  an explicit `:dir` — so composed-source lookups under it report `missing`
-  rather than throwing. `repo`/`branch` are the manifest's top-level `:repo`
-  and `:branch`: the artifact-dir label, not git's own branch."
-  [dir {:keys [repo branch]}]
+  "Registry-root guess for a unit dir: `dir` with `/<repo>` (or
+  `/_variants/<repo>/<variant path>`, when the unit has one) stripped from the
+  end. Falls back to `dir` unchanged when it isn't suffixed that way — e.g. a
+  unit written to an explicit `:dir` — so composed-source lookups under it
+  report `missing` rather than throwing. `repo`/`variant` are the manifest's
+  top-level `:repo` and `:variant`."
+  [dir {:keys [repo variant]}]
   (let [trimmed (strip-trailing-slashes dir)
-        suffix (str "/" repo
-                    (when (seq branch) (str "/" branches-subdir "/" branch)))]
+        suffix (if (seq variant)
+                 (str "/" variants-subdir "/" repo "/" (variant-path variant))
+                 (str "/" repo))]
     (if (and (> (count trimmed) (count suffix))
              (str/ends-with? trimmed suffix))
       (subs trimmed 0 (- (count trimmed) (count suffix)))

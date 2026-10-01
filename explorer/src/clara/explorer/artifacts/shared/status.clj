@@ -189,33 +189,33 @@
 ;; ===========================================================================
 
 (defn- parse-unit-key
-  "`repo[@branch]` back into `{:repo :branch}`. Splits on the last `@`, so a
-  `@` inside the repo survives."
+  "`repo[@variant path]` back into `{:repo :variant}`. Splits on the last `@`,
+  so a `@` inside a value never appears literally (values encode `@`); the
+  variant half decodes via `layout/path->variant`."
   [unit-key]
   (let [s (str unit-key)]
     (if-let [i (str/last-index-of s "@")]
       {:repo (subs s 0 i)
-       :branch (let [branch (subs s (inc i))]
-                 (when-not (str/blank? branch) branch))}
+       :variant (layout/path->variant (subs s (inc i)))}
       {:repo s})))
 
 (defn- source-locator
-  "How to find `unit-key`'s unit dir: its `{:repo :branch}`, taken from the
+  "How to find `unit-key`'s unit dir: its `{:repo :variant}`, taken from the
   manifest's `:analysis-run :units` entry when one matches, else parsed back
   out of the key."
   [manifest unit-key]
   (or (some #(when (= unit-key (shared-registry/unit-key %))
-               (select-keys % [:repo :branch]))
+               (select-keys % [:repo :variant]))
             (get-in manifest [:analysis-run :units]))
       (parse-unit-key unit-key)))
 
 (defn- source-current-sha
   "The `:source :sha` the source unit's own manifest under `root` records now,
   or nil when that unit (or its manifest) is gone."
-  [root {:keys [repo branch]}]
+  [root {:keys [repo variant]}]
   (some-> (read-manifest-or-nil (layout/unit-dir {:root root
                                                   :repo repo
-                                                  :branch branch}))
+                                                  :variant variant}))
           (get-in [:source :sha])))
 
 (defn- check-source
@@ -269,7 +269,7 @@
 
     {:dir       the unit dir, as given
      :repo      the manifest's `:repo`
-     :label     the manifest's top-level `:branch`, when it has one
+     :variant   the manifest's top-level `:variant`, when it has one
      :kind      `:source`, or `:aggregate` with `:mode`
      :source    the manifest's `:source` git identity
      :updated   the manifest's `:updated`
@@ -283,7 +283,8 @@
   `:checkout`/`:ref` compare a source unit against a checkout (`:ref` defaults
   to `HEAD`); `:checkout` on an aggregate throws, since it has one checkout
   per source. `:root` locates a composed unit's sources and defaults to `dir`
-  with the manifest's `:repo` (and `branches/<label>`) stripped from the end."
+  with the manifest's `:repo` (and `_variants/<repo>/<variant…>`) stripped from
+  the end."
   [{:keys [dir manifest checkout ref root]}]
   (let [dir (str dir)
         manifest (or manifest (read-manifest! dir))
@@ -293,14 +294,14 @@
                       :source (:source manifest)
                       :updated (:updated manifest)
                       :staleness (:staleness manifest)}
-               (:branch manifest) (assoc :label (:branch manifest)))]
+               (:variant manifest) (assoc :variant (:variant manifest)))]
     (if (some? mode)
       (do
         (when (some? checkout)
           (throw (ex-info "A composed unit has one checkout per source: pass --root, not --checkout"
                           {:dir dir :checkout (str checkout)})))
         (composed-unit-status base manifest
-                              (or root (layout/default-root dir (select-keys manifest [:repo :branch])))))
+                              (or root (layout/default-root dir (select-keys manifest [:repo :variant])))))
       (do
         (when (some? root)
           (throw (ex-info "A source unit has no sources to locate: --root applies only to a composed unit"

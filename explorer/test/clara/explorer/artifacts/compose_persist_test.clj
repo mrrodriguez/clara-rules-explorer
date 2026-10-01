@@ -78,7 +78,7 @@
                (mapv :repo units)))
         (testing "each source entry carries the state that was composed"
           (is (every? #(and (:sha %) (:created %)) units))
-          (is (not-any? :branch units)))
+          (is (not-any? :variant units)))
         (testing "staleness is stated in composition terms"
           (is (= "review-when-any-source-sha-drifts"
                  (get-in manifest [:staleness :policy])))
