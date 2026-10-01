@@ -13,7 +13,7 @@
 
   Registry I/O arrives through the same capabilities map
   `clara.explorer.artifacts.shared.selection/->selection` takes, so this namespace stays
-  free of `clara.explorer.artifacts.registry`, which bb cannot load. The layer-fold half
+  free of `clara.explorer.artifacts.registry`. The layer-fold half
   of `clara.explorer.artifacts.compose` stays JVM-side: it needs the live annotation
   merge."
   (:require [clara.explorer.artifacts.hierarchy :as hierarchy]

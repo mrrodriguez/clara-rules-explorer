@@ -15,7 +15,8 @@
 ;; :lhs-form, working memory — start the explorer server and query /v1.
 ;;
 
-(require '[babashka.fs :as fs]
+(require '[babashka.cli :as cli]
+         '[babashka.fs :as fs]
          '[clojure.edn :as edn]
          '[clojure.pprint :as pprint]
          '[clojure.string :as str])
@@ -26,7 +27,8 @@
 (load-file (str (fs/file (fs/parent (fs/canonicalize *file*)) "bootstrap.bb")))
 
 (require '[clara.explorer.artifacts.layout :as layout]
-         '[clara.explorer.artifacts.hierarchy :as hierarchy])
+         '[clara.explorer.artifacts.hierarchy :as hierarchy]
+         '[clara.explorer.artifacts.shared.status :as shared-status])
 
 (def ^:private dims
   [[:clara-rules/dynamic-insert-types-detected :clara-rules/insert-types "insert"]
@@ -523,9 +525,50 @@
 
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; aligned text output
+;; ---------------------------------------------------------------------------
+
+(def ^:private field-width
+  "Label-column width for `print-field`. Single owner so callers never
+  hand-count padding spaces."
+  10)
+
+(defn- print-field
+  "Print one `label  value` row, padding `label` to `field-width`. Pass an
+  empty label for continuation rows."
+  [label value]
+  (println (format (str "%-" field-width "s %s") label value)))
+
+(def ^:private status-usage-rows
+  "The `status` flag rows as `[syntax desc-first & desc-rest]`. Continuation
+  lines align under the description column via `print-flag-row`, so a longer
+  flag never means recounting spaces."
+  [["status --checkout PATH [--ref REF]"
+    "compare a source unit against"
+    "the checkout at PATH (REF defaults"
+    "to HEAD)"]
+   ["status --root PATH"
+    "registry root a composed unit's"
+    "sources are read from (default:"
+    "stripped from the unit dir)"]
+   ["status --edn"
+    "print the result map, not the text"
+    "report"]])
+
+(defn- print-flag-row
+  "Print one `[syntax desc-first & desc-rest]` row: syntax plus the first
+  description line together, remaining lines aligned under the description."
+  [syntax desc-first & desc-rest]
+  (let [head (str "  " syntax "  ")
+        pad (apply str (repeat (count head) " "))]
+    (println (str head desc-first))
+    (doseq [line desc-rest]
+      (println (str pad line)))))
+
 (def ^:private usage-line
   "The invocation skeleton, printed first by `help`."
-  "usage: bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|agent|merged]")
+  "usage: bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|agent|merged] [--checkout PATH [--ref REF]] [--root PATH] [--edn]")
 
 (def ^:private subcommands
   "The subcommand menu as `[name signature description]`, in dispatch order;
@@ -540,6 +583,7 @@
    ["edges" "<fq-name>" "dep-graph upstream/downstream"]
    ["curated" "" "what the agent overlay changed vs auto-gen"]
    ["layers" "[<fq-name>]" "the fold: layers + per-key provenance"]
+   ["status" "[--checkout]" "is this unit current? (needs only the manifest)"]
    ["help" "" "this help"]])
 
 (defn- help []
@@ -554,20 +598,136 @@
   (println "falls back to substring search.")
   (println)
   (println "--file auto|agent|merged picks the annotations file for the")
-  (println "annotation-reading subcommands (default merged; gaps defaults to auto)."))
+  (println "annotation-reading subcommands (default merged; gaps defaults to auto).")
+  (println)
+  (println "status checks one unit directory (a source, branch, or composed unit)")
+  (println "reading only its rules-inspect-manifest.edn:")
+  (doseq [row status-usage-rows]
+    (apply print-flag-row row)))
 
-(let [args *command-line-args*
-      which (or (second (drop-while #(not= "--file" %) args)) nil)
-      [target cmd arg] (remove #{"--file" which} args)]
+;; ---------------------------------------------------------------------------
+;; status — is this unit current?
+;; ---------------------------------------------------------------------------
+
+(def ^:private cli-spec
+  "The flags every subcommand recognizes, as `babashka.cli` sees them.
+  `:coerce :string` makes a value flag error on a missing value — including when
+  the next token is itself a flag (`--checkout --edn`) — while staying optional
+  when absent. `babashka.cli` ships with babashka, so parsing stays offline."
+  {:file {:coerce :string}
+   :checkout {:coerce :string}
+   :ref {:coerce :string}
+   :root {:coerce :string}
+   :edn {:coerce :boolean}})
+
+(defn- parse-args
+  "`{:opts {flag-key value} :positionals […]}` — `babashka.cli` strips known
+  flags (and their values), rejects unknown flags, and errors on a missing flag
+  value; everything else is positional (babashka.cli returns the leftovers in
+  the result's `:org.babashka/cli` metadata)."
+  [args]
+  (try
+    (let [result (cli/parse-opts args {:spec cli-spec
+                                       :restrict true
+                                       :no-keyword-opts true})]
+      {:opts result
+       :positionals (get-in (meta result) [:org.babashka/cli :args])})
+    (catch Exception e
+      (die (ex-message e)))))
+
+(defn- reject-flags
+  "Die when `opts` holds a flag outside `allowed` (a set of flag keys)."
+  [opts allowed]
+  (when-let [bad (seq (remove allowed (keys opts)))]
+    (die "Flag(s) not used by this subcommand:"
+         (str/join ", " (map #(str "--" (name %)) (sort bad))))))
+
+(defn- short-sha
+  "First 7 chars of `sha`, for one-line verdict summaries."
+  [sha]
+  (let [s (str sha)]
+    (if (> (count s) 7) (subs s 0 7) s)))
+
+(defn- reason-summary
+  "One reason as a `--edn`-free fragment of the verdict line."
+  [{:keys [check recorded current updated max-age-days ref checkout source]}]
+  (case check
+    :sha-drift (format "sha-drift %s -> %s" (short-sha recorded) (short-sha current))
+    :remote-mismatch (format "remote-mismatch (recorded %s, checkout %s)" recorded current)
+    :generated-dirty "generated-dirty (the unit describes no single commit)"
+    :checkout-dirty "checkout-dirty (informational)"
+    :age-exceeded (format "age-exceeded (updated %s, older than %s days)" updated max-age-days)
+    :sha-not-compared "sha not compared (no --checkout)"
+    :ref-unresolvable (format "ref %s unresolvable in %s" ref checkout)
+    :checkout-not-a-repo (format "%s is not a git checkout" checkout)
+    :source-sha-drift (format "%s: sha-drift %s -> %s"
+                              source (short-sha recorded) (short-sha current))
+    :source-missing (format "%s: missing" source)
+    :aggregate-no-sources "aggregate without per-source shas (no verdict)"
+    (str check)))
+
+(defn- print-status
+  "The `shared-status/unit-status` result map as aligned `label  value` lines."
+  [{:keys [repo label kind mode source updated staleness verdict reasons sources]}]
+  (print-field "unit" (str repo (when label (str "/branches/" label))))
+  (print-field "kind" (str (name kind) " unit"
+                             (when label (str " (label " label ")"))
+                             (when mode (str " (mode " mode ")"))))
+  (print-field "source" (format "%s (%s, %s)   updated %s"
+                                  (short-sha (:sha source))
+                                  (or (:branch source) "no branch")
+                                  (:working-tree source)
+                                  updated))
+  (print-field "policy" (str (:policy staleness)
+                               (when-let [d (:max-age-days staleness)]
+                                 (format " (max %s days)" d))))
+  (doseq [[i {:keys [source recorded current verdict]}] (map-indexed vector sources)]
+    (print-field (if (zero? i) "sources" "")
+                  (str source ": " (name verdict)
+                       (when (= :sha-drift verdict)
+                         (format " %s -> %s" (short-sha recorded) (short-sha current))))))
+  (print-field "verdict" (str (name verdict)
+                                (when (seq reasons)
+                                  (str " | " (str/join "; " (map reason-summary reasons)))))))
+
+(defn- status
+  "`status [--checkout PATH [--ref REF]] [--root PATH] [--edn]` over unit dir
+  `dir`: presentation over `shared-status/unit-status`, which reads
+  rules-inspect-manifest.edn (and, for a composed unit, its sources'
+  manifests) and nothing else."
+  [dir opts]
+  (when (and (:ref opts) (nil? (:checkout opts)))
+    (die "--ref needs --checkout"))
+  (let [result (try
+                  (shared-status/unit-status
+                   (cond-> {:dir dir}
+                     (:checkout opts) (assoc :checkout (:checkout opts))
+                     (:ref opts) (assoc :ref (:ref opts))
+                     (:root opts) (assoc :root (:root opts))))
+                  (catch Exception e
+                    (die (ex-message e))))]
+    (if (:edn opts)
+      (pprint/pprint result)
+      (print-status result))))
+
+(let [{:keys [opts positionals]} (parse-args *command-line-args*)
+      [target cmd arg] positionals]
   (cond
     (or (= "help" target) (= "help" cmd)) (help)
 
     (nil? target) (help)
 
+    (= (or cmd "summary") "status")
+    (do (reject-flags opts #{:checkout :ref :root :edn})
+        (if arg
+          (die "status takes no positional arg")
+          (status target opts)))
+
     :else
-    (let [cmd (or cmd "summary")
+    (do (reject-flags opts #{:file})
+        (let [cmd (or cmd "summary")
           ;; `gaps` is about the deterministic baseline, so it defaults to auto.
-          which (or which (if (= "gaps" cmd) "auto" "merged"))
+          which (or (:file opts) (if (= "gaps" cmd) "auto" "merged"))
           paths (resolve-paths target which)
           dir (:dir paths)
           anns (delay (read-annotations (:annotations paths) (str which " annotations") dir))
@@ -589,4 +749,4 @@
         "edges" (if arg (edges (analysis-part :dep-graph) arg) (die "edges needs a rule name"))
         "curated" (curated @auto @agent)
         "layers" (layers @merged arg)
-        (die "Unknown subcommand:" cmd)))))
+        (die "Unknown subcommand:" cmd))))))
