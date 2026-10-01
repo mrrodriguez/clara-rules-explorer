@@ -21,6 +21,7 @@
   and its absence should not fail a build."
   (:require
    [clara.explorer.core :as core]
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
    [clojure.string :as str]
@@ -142,11 +143,12 @@
         (let [out (run-report "help")]
           (is (str/includes? out "usage: bb annotations_report.bb"))
           (doseq [sub ["summary" "gaps" "types" "producers" "consumers"
-                       "hierarchy" "rule" "edges" "curated" "layers" "help"]]
+                       "hierarchy" "rule" "edges" "curated" "layers" "status" "help"]]
             (is (str/includes? out sub)))
           (is (str/includes? out "<type>"))
           (is (str/includes? out "<fq-name>"))
-          (is (str/includes? out "--file auto|agent|merged"))))
+          (is (str/includes? out "--file auto|agent|merged"))
+          (is (str/includes? out "status --checkout PATH"))))
 
       (testing "`producers` groups a multi-type match into per-type blocks"
         (let [out (run-report "producers" "a/")]
@@ -268,3 +270,129 @@
           (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
           (is (str/includes? out "3 producer rule(s)"))
           (is (str/includes? out "(0 exact, 3 via descendants)")))))))
+
+(def ^:private status-today
+  (str (java.time.LocalDate/now)))
+
+(defn- write-status-manifest!
+  "Hand-written unit manifest in `dir` — hermetic: no git, no analysis."
+  [dir manifest]
+  (let [f (io/file dir "rules-inspect-manifest.edn")]
+    (.mkdirs (.getParentFile f))
+    (spit f (pr-str manifest))
+    (str dir)))
+
+(defn- status-source-manifest
+  []
+  {:repo "demo-ruleset"
+   :generated-by "bb-report-test"
+   :created status-today
+   :updated status-today
+   :source {:working-tree-notes ""
+            :remote "https://example.com/acme/demo-ruleset.git"
+            :sha "ac51808deadbeef"
+            :sha-short "ac51808"
+            :branch "feature-x"
+            :working-tree "clean"}
+   :analysis-run {:method "bb-report-test"}
+   :staleness {:policy "review-when-sha-drifts" :max-age-days 90}
+   :history []})
+
+(defn- status-composed-manifest
+  []
+  {:repo "demo-composed"
+   :generated-by "bb-report-test"
+   :created status-today
+   :updated status-today
+   :source {:working-tree-notes ""
+            :remote nil
+            :sha "c0mp0sed0000000"
+            :sha-short "c0mp0se"
+            :branch nil
+            :working-tree "clean"}
+   :analysis-run {:mode :compose
+                  :units [{:repo "demo-a" :sha "111aaaa" :created status-today}
+                          {:repo "demo-b" :branch "x" :sha "222bbbb" :created status-today}]}
+   :staleness {:policy "review-when-any-source-sha-drifts"
+               :sources {"demo-a" {:sha "111aaaa" :created status-today}
+                         "demo-b@x" {:sha "222bbbb" :created status-today}}}
+   :history []})
+
+(defn- run-status
+  "The script's stdout for `status` over `dir`, asserting success."
+  [dir & args]
+  (let [{:keys [exit out err]} (apply shell/sh "bb" (str report-script) dir "status" args)]
+    (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
+    out))
+
+(deftest bb-report-status-test
+  (if-not (runnable?)
+    (println "SKIPPING bb-report-status-test — babashka is not on PATH, or the script moved:"
+             (str report-script))
+    (let [root (str (io/file (:dir *artifact-opts*) "status-root"))
+          unit (write-status-manifest! (str (io/file root "demo-ruleset"))
+                                       (status-source-manifest))]
+      (testing "text report: kind, source provenance, and a verdict"
+        (let [out (run-status unit)]
+          (is (str/includes? out "unit       demo-ruleset"))
+          (is (str/includes? out "kind       source unit"))
+          (is (str/includes? out "ac51808 (feature-x, clean)"))
+          (is (str/includes? out "review-when-sha-drifts"))
+          (is (str/includes? out "verdict    unknown | sha not compared"))))
+
+      (testing "--edn prints the result map"
+        (let [result (edn/read-string (run-status unit "--edn"))]
+          (is (= :unknown (:verdict result)))
+          (is (= :source (:kind result)))
+          (is (= [{:check :sha-not-compared}] (:reasons result)))
+          (is (not (contains? result :compared)))))
+
+      (testing "--checkout against a foreign remote is remote-mismatch"
+        ;; The runner's own checkout is a real repo whose origin cannot be
+        ;; example.com, whatever its branch or tree state — hermetic verdict.
+        (let [out (run-status unit "--checkout" (System/getProperty "user.dir"))]
+          (is (str/includes? out "verdict    stale | remote-mismatch"))))
+
+      (testing "a composed unit is current, then stale, then missing"
+        (let [root (str (io/file (:dir *artifact-opts*) "status-composed"))
+              write-src (fn [a b]
+                          (when a
+                            (write-status-manifest!
+                             (str (io/file root "demo-a"))
+                             (assoc (status-source-manifest) :repo "demo-a"
+                                    :source {:working-tree-notes "" :remote nil
+                                             :sha a :sha-short (subs a 0 7)
+                                             :branch nil :working-tree "clean"})))
+                          (when b
+                            (write-status-manifest!
+                             (str (io/file root "demo-b" "branches" "x"))
+                             (assoc (status-source-manifest) :repo "demo-b" :branch "x"
+                                    :source {:working-tree-notes "" :remote nil
+                                             :sha b :sha-short (subs b 0 7)
+                                             :branch nil :working-tree "clean"}))))
+              _ (write-src "111aaaa" "222bbbb")
+              dir (write-status-manifest! (str (io/file root "demo-composed"))
+                                          (status-composed-manifest))]
+          (let [out (run-status dir)]
+            (is (str/includes? out "kind       aggregate unit (mode :compose)"))
+            (is (str/includes? out "demo-a: current"))
+            (is (str/includes? out "demo-b@x: current"))
+            (is (str/includes? out "verdict    current")))
+          (write-src "111aaaa" "9999999")
+          (let [out (run-status dir)]
+            (is (str/includes? out "demo-b@x: sha-drift 222bbbb -> 9999999"))
+            (is (str/includes? out "verdict    stale")))
+          (write-src "111aaaa" nil)
+          (let [dir-file (io/file root "demo-b")]
+            (doseq [f (reverse (file-seq dir-file))] (io/delete-file f true)))
+          (let [out (run-status dir)]
+            (is (str/includes? out "demo-b@x: missing"))
+            (is (str/includes? out "verdict    stale"))))
+
+        (testing "--checkout on a composed unit fails"
+          (let [dir (write-status-manifest! (str (io/file root "demo-composed"))
+                                            (status-composed-manifest))
+                {:keys [exit out err]} (shell/sh "bb" (str report-script) dir "status"
+                                                 "--checkout" (System/getProperty "user.dir"))]
+            (is (not (zero? exit)))
+            (is (str/includes? (str out err) "one checkout per source"))))))))

@@ -160,11 +160,9 @@
   layout/layer-artifacts)
 
 (def branches-subdir
-  "The directory, under a run's base dir, that holds its per-branch variants. A
-  fixed name so a branch can never collide with an artifact file, and so the
-  mainline dir stays readable as \"the state of the world\" with its experiments
-  gathered in one place beneath it."
-  "branches")
+  "The directory, under a run's base dir, that holds its per-branch variants. See
+  `layout/branches-subdir`."
+  layout/branches-subdir)
 
 (s/defn ^:private get-branch-path :- s/Str
   "Validate a caller-supplied branch label as a relative path under
@@ -194,18 +192,20 @@
   world*, and an experiment never has to clobber it to be persisted.
 
   It applies to an explicit `:dir` too, so the rule is one rule: a branch is
-  always a subdir of the run's base."
+  always a subdir of the run's base.
+
+  The join itself is `layout/unit-dir`, shared with the babashka `status`
+  report; this validates first and delegates."
   [{:keys [root dir repo branch]} :- schema/ArtifactOpts]
-  (let [base (or dir
-                 (do
-                   (when (str/blank? root)
-                     (throw (ex-info "No output dir: pass :root (an artifact root) or :dir" {})))
-                   (when (str/blank? repo)
-                     (throw (ex-info "Pass :repo (subdir) or an explicit :dir" {})))
-                   (str (io/file root repo))))]
-    (if (str/blank? branch)
-      base
-      (str (io/file base branches-subdir (get-branch-path branch))))))
+  (when (and (str/blank? dir) (str/blank? root))
+    (throw (ex-info "No output dir: pass :root (an artifact root) or :dir" {})))
+  (when (and (str/blank? dir) (str/blank? repo))
+    (throw (ex-info "Pass :repo (subdir) or an explicit :dir" {})))
+  (layout/unit-dir {:root root
+                    :dir dir
+                    :repo repo
+                    :branch (when-not (str/blank? branch)
+                              (get-branch-path branch))}))
 
 (s/defn get-artifact-path :- s/Str
   "Absolute path, as a string, of one artifact under `get-out-dir`."

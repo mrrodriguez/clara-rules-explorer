@@ -306,6 +306,41 @@ runtime. Anything else — the git state of a host's tooling, how the session wa
 built, what scope it covers — arrives through two seams: `:blocks`, merged into
 the manifest whole, and `:analysis-run`, merged into that block.
 
+### `:source :branch` names the remote branch — or nothing
+
+`:source :branch` is the branch the analyzed commit belongs to: the checkout's
+own branch when attached, the remote branch pointing at the commit when the
+checkout is detached (a `git worktree add --detach` worktree, a CI checkout, a
+bisect). Detached checkouts resolve through the checkout's `origin` — its
+default branch first, then the first sorted remote-tracking ref pointing at the
+commit — with the `origin/` alias stripped, so a detached and an attached
+checkout of the same commit record equal `:source` maps. When no remote branch
+points at the commit, `:branch` is nil: `HEAD` is not a branch, and a local
+branch that happens to point at a detached commit says nothing about what the
+commit was synced against. Whether the checkout was detached is a fact about
+one machine and is not recorded. The manifest's top-level `:branch`, when
+present, is unaffected: that is the artifact-dir label a branch run chose, not
+git's branch.
+
+### Checking a unit: `status`
+
+`bb annotations_report.bb <dir> status` answers "is this unit current?" from
+the manifest (and, for a composed unit, its sources' manifests) — no JVM, no
+analysis parts. A source unit compares against `--checkout PATH` (`--ref`,
+default `HEAD`): a remote mismatch, a sha drift, a dirty generation tree, or an
+`:updated` older than the policy's `:max-age-days` makes it stale. Without
+`--checkout` only the checkout-independent checks run and the report says the
+sha was not compared. A composed unit compares each recorded per-source sha
+against that source's manifest under `--root` (default: `<dir>` with the
+manifest's `:repo` and `branches/<label>` stripped off) and is current only if
+every source is; `--checkout` is rejected for it, since it has one checkout per
+source. An aggregate with no per-source shas is reported by kind and source
+provenance, with no verdict. `--edn` prints the result map the text report
+renders. The comparison itself is
+`clara.explorer.artifacts.shared.status/unit-status`, so a host can call it and
+append its own `:reasons` (tool versions, configuration slices kept in
+`:blocks`) before rendering.
+
 ## The artifact registry
 
 The architecture of the registry — the merge modes, the shared selection pass,

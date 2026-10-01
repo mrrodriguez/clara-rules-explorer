@@ -26,12 +26,11 @@
   (:require
    [clara.explorer.analyze :as analyze]
    [clara.explorer.artifacts.schema :as schema]
+   [clara.explorer.artifacts.shared.git :as shared-git]
    [clara.explorer.artifacts.store :as store]
    [clara.explorer.edn-io :as edn-io]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [clojure.java.shell :as sh]
-   [clojure.string :as str]
    [schema.core :as s])
   (:import
    (java.io File)))
@@ -41,10 +40,6 @@
 ;; ===========================================================================
 ;; git provenance
 ;; ===========================================================================
-
-(defn- git [dir & args]
-  (let [{:keys [exit out]} (apply sh/sh "git" "-C" (str dir) args)]
-    (when (zero? exit) (str/trim out))))
 
 (s/defn get-git-info :- schema/GitInfo
   "State-of-the-world for a repo dir, or nil if `dir` is missing / not a git
@@ -56,15 +51,14 @@
   wrote it. Where a reader's own checkout lives is their own to answer.
 
   Public because a caller assembling its own `:blocks` needs the same shape for
-  the checkouts only it knows about."
+  the checkouts only it knows about.
+
+  Delegates to `clara.explorer.artifacts.shared.git/get-git-info` — the same
+  implementation the offline bb `status` report reads through — including its
+  detached-checkout resolution of `:branch` to the remote branch."
   [dir :- (s/maybe (s/cond-pre s/Str File))]
   (when (and dir (.exists (io/file (str dir))))
-    (when-let [sha (git dir "rev-parse" "HEAD")]
-      {:remote (git dir "remote" "get-url" "origin")
-       :sha sha
-       :sha-short (subs sha 0 7)
-       :branch (git dir "rev-parse" "--abbrev-ref" "HEAD")
-       :working-tree (if (str/blank? (git dir "status" "--porcelain")) "clean" "dirty")})))
+    (shared-git/get-git-info (str dir))))
 
 ;; ===========================================================================
 ;; manifest construction

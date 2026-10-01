@@ -20,7 +20,9 @@
   `clara.explorer.artifacts.parts/part-files`,
   `clara.explorer.artifacts.schema/detection-keys-by-dimension` — so
   callers keep reading the name in its natural home. Those are aliases of these;
-  this namespace is the definition.")
+  this namespace is the definition."
+  (:require
+   [clojure.string :as str]))
 
 ;; ===========================================================================
 ;; filenames
@@ -183,6 +185,61 @@
                [rule-name (or (get except rule-name)
                               (expand-rule-provenance verbatim annotation))]))
         annotations))
+
+;; ===========================================================================
+;; unit placement
+;;
+;; The unit → directory mapping both the JVM registry and the babashka
+;; `status` report need: `<root>/<repo>/`, or `<root>/<repo>/branches/<label>/`
+;; for a branch variant. Pure `/`-joins — every downstream use goes back
+;; through file IO that accepts them on any platform — so both sides share
+;; this instead of each joining segments its own way.
+;;
+;; Segments arrive already validated: branch-label validation stays in
+;; `clara.explorer.artifacts.store/get-branch-path`, and discovery's inverse
+;; (dir → ref, splitting on the first `branches` segment) stays in
+;; `clara.explorer.artifacts.registry`, which reads this constant.
+;; ===========================================================================
+
+(def branches-subdir
+  "The directory, under a run's base dir, that holds its per-branch variants. A
+  fixed name so a branch can never collide with an artifact file, and so the
+  mainline dir stays readable as \"the state of the world\" with its experiments
+  gathered in one place beneath it."
+  "branches")
+
+(defn- strip-trailing-slashes
+  "`s` with trailing `/`s removed, so joining never doubles a separator."
+  [s]
+  (str/replace (str s) #"/+$" ""))
+
+(defn unit-dir
+  "Artifact dir for a unit: explicit `:dir`, else `<:root>/<:repo>`. `:branch`
+  nests the whole set one level down, under `<base>/branches/<label>/`, either
+  way — it is a caller-supplied label, not a git branch, so it names whatever
+  variant of a repo is kept apart while the base keeps meaning the mainline
+  state of the world."
+  [{:keys [root dir repo branch]}]
+  (let [base (or dir (str (strip-trailing-slashes root) "/" repo))]
+    (if (seq branch)
+      (str (strip-trailing-slashes base) "/" branches-subdir "/" branch)
+      base)))
+
+(defn default-root
+  "Registry-root guess for a unit dir: `dir` with `/<repo>` (and
+  `/branches/<label>`, when the unit has one) stripped from the end. Falls back
+  to `dir` unchanged when it isn't suffixed that way — e.g. a unit written to
+  an explicit `:dir` — so composed-source lookups under it report `missing`
+  rather than throwing. `repo`/`branch` are the manifest's top-level `:repo`
+  and `:branch`: the artifact-dir label, not git's own branch."
+  [dir {:keys [repo branch]}]
+  (let [trimmed (strip-trailing-slashes dir)
+        suffix (str "/" repo
+                    (when (seq branch) (str "/" branches-subdir "/" branch)))]
+    (if (and (> (count trimmed) (count suffix))
+             (str/ends-with? trimmed suffix))
+      (subs trimmed 0 (- (count trimmed) (count suffix)))
+      trimmed)))
 
 (defn expand-merged-annotations
   "`merged-annotations.edn` as a whole merge — a
