@@ -3,10 +3,13 @@
   that is not stored literally.
 
   **This namespace has no dependencies, and that is its whole reason to exist.**
-  `bin/annotations_report.bb` is a babashka script that `load-file`s it: it
-  cannot load `schema.core`, clara, or anything else the namespaces around here
-  pull in, but it has to agree with them on every filename, on the layer fold
-  order, and on how `merged-annotations.edn` decodes.
+  The babashka scripts (`bin/annotations_report.bb`, `bin/editor_client.bb`)
+  `require` it — `bin/bootstrap.bb` puts `explorer/src` on their classpath — and
+  the `:clara-rules-explorer/bb-loaded true` ns metadata marks it bb-compatible,
+  so `make bb-smoke-test` catches any dependency that would break them. It cannot
+  load `schema.core`, clara, or anything else the namespaces around here pull
+  in, but it has to agree with them on every filename, on the layer fold order,
+  and on how `merged-annotations.edn` decodes.
 
   So what belongs here is narrow: a name or a pure function that **both** the JVM
   code and the babashka tooling need, in plain Clojure with no reader

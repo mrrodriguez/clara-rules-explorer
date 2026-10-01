@@ -140,7 +140,7 @@ is reported by kind and source provenance, with no verdict.
  :compared {:checkout "…" :ref "HEAD" :sha "…"} ; when --checkout was given
  :verdict :current                              ; or :stale / :unknown
  :reasons []                                    ; e.g. [{:check :sha-drift :recorded "…" :current "…"}]
- :sources [{:repo "…" :branch "…" :recorded "…" :current "…" :verdict :current}]}  ; composed only
+ :sources [{:source "repo[@branch]" :recorded "…" :current "…" :verdict :current}]}  ; composed only
 ```
 
 The text report is a few aligned lines rendered from this map:

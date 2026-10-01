@@ -306,7 +306,11 @@
                           {:dir dir :checkout (str checkout)})))
         (composed-unit-status base manifest
                               (or root (layout/default-root dir (select-keys manifest [:repo :branch])))))
-      (source-unit-status base manifest
-                          (when (some? checkout)
-                            (checkout-comparison checkout ref))
-                          (LocalDate/now)))))
+      (do
+        (when (some? root)
+          (throw (ex-info "A source unit has no sources to locate: --root applies only to a composed unit"
+                          {:dir dir :root (str root)})))
+        (source-unit-status base manifest
+                            (when (some? checkout)
+                              (checkout-comparison checkout ref))
+                            (LocalDate/now))))))

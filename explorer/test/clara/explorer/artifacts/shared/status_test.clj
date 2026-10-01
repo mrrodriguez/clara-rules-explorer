@@ -154,6 +154,10 @@
                            (is (= [{:check :sha-not-compared}] (:reasons result)))
                            (is (not (contains? result :compared)))))
 
+                       (testing "--root on a source unit is rejected (it has no sources to locate)"
+                         (is (thrown? clojure.lang.ExceptionInfo
+                                      (status/unit-status {:dir dir :root "/registry"}))))
+
                        (testing "an :updated past :max-age-days is age-exceeded"
                          (let [old-dir (write-manifest!
                                         (str (io/file root "old-unit"))

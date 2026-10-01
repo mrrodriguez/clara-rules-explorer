@@ -15,7 +15,8 @@
 ;; :lhs-form, working memory — start the explorer server and query /v1.
 ;;
 
-(require '[babashka.fs :as fs]
+(require '[babashka.cli :as cli]
+         '[babashka.fs :as fs]
          '[clojure.edn :as edn]
          '[clojure.pprint :as pprint]
          '[clojure.string :as str])
@@ -608,32 +609,31 @@
 ;; status — is this unit current?
 ;; ---------------------------------------------------------------------------
 
-(def ^:private flag-specs
-  "The known flags: `--file`/`--checkout`/`--ref`/`--root` take a value,
-  `--edn` is boolean. Anything else starting with `--` is rejected."
-  {"--file" {:key :file :value? true}
-   "--checkout" {:key :checkout :value? true}
-   "--ref" {:key :ref :value? true}
-   "--root" {:key :root :value? true}
-   "--edn" {:key :edn :value? false}})
+(def ^:private cli-spec
+  "The flags every subcommand recognizes, as `babashka.cli` sees them.
+  `:coerce :string` makes a value flag error on a missing value — including when
+  the next token is itself a flag (`--checkout --edn`) — while staying optional
+  when absent. `babashka.cli` ships with babashka, so parsing stays offline."
+  {:file {:coerce :string}
+   :checkout {:coerce :string}
+   :ref {:coerce :string}
+   :root {:coerce :string}
+   :edn {:coerce :boolean}})
 
 (defn- parse-args
-  "`{:opts {flag-key value} :positionals […]}` — known flags (and their
-  values) stripped out, everything else positional."
+  "`{:opts {flag-key value} :positionals […]}` — `babashka.cli` strips known
+  flags (and their values), rejects unknown flags, and errors on a missing flag
+  value; everything else is positional (babashka.cli returns the leftovers in
+  the result's `:org.babashka/cli` metadata)."
   [args]
-  (loop [args args opts {} positionals []]
-    (if (empty? args)
-      {:opts opts :positionals positionals}
-      (let [a (first args)]
-        (if-let [{:keys [key value?]} (get flag-specs a)]
-          (if value?
-            (if-let [v (second args)]
-              (recur (drop 2 args) (assoc opts key v) positionals)
-              (die "Flag" a "needs a value"))
-            (recur (rest args) (assoc opts key true) positionals))
-          (if (str/starts-with? a "--")
-            (die "Unknown flag:" a)
-            (recur (rest args) opts (conj positionals a))))))))
+  (try
+    (let [result (cli/parse-opts args {:spec cli-spec
+                                       :restrict true
+                                       :no-keyword-opts true})]
+      {:opts result
+       :positionals (get-in (meta result) [:org.babashka/cli :args])})
+    (catch Exception e
+      (die (ex-message e)))))
 
 (defn- reject-flags
   "Die when `opts` holds a flag outside `allowed` (a set of flag keys)."
