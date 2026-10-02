@@ -452,7 +452,9 @@ function M.bb_prompt_selection(cb)
     return
   end
   local keys = {}
-  for _, repo in ipairs(repos) do keys[#keys + 1] = repo.key end
+  for _, repo in ipairs(repos) do
+    keys[#keys + 1] = repo.key
+  end
   vim.ui.select(keys, { prompt = "Unit (under " .. root .. "): " }, function(unit_key)
     if not unit_key then
       cb(nil)

@@ -223,16 +223,13 @@ describe("conjure.bb_list_unit_repos", function()
             end,
           }
         end, function()
-          assert.are.same(
+          assert.are.same({
+            { key = "loan-app-ruleset", entry = '{:repo "loan-app-ruleset"}' },
             {
-              { key = "loan-app-ruleset", entry = '{:repo "loan-app-ruleset"}' },
-              {
-                key = "loan-disposition-ruleset@ref=feature%2Fnew-tax",
-                entry = '{:repo "loan-disposition-ruleset", :variant [[:ref "feature/new-tax"]]}',
-              },
+              key = "loan-disposition-ruleset@ref=feature%2Fnew-tax",
+              entry = '{:repo "loan-disposition-ruleset", :variant [[:ref "feature/new-tax"]]}',
             },
-            conjure.bb_list_unit_repos("/root")
-          )
+          }, conjure.bb_list_unit_repos("/root"))
           assert.are.same({ "bb", "/p/editor_client.bb", "--list-units", "/root" }, captured.cmd)
           assert.are.same(true, captured.opts.text)
         end)
@@ -328,7 +325,10 @@ describe("conjure.bb_prompt_selection", function()
               with_restore(vim, "notify", function(msg) notified = msg end, function()
                 local got
                 conjure.bb_prompt_selection(function(sel) got = sel end)
-                assert.are.same('{:root "/reg" :units [{:repo "loan-disposition-ruleset", :variant [[:ref "feature/new-tax"]]}]}', got)
+                assert.are.same(
+                  '{:root "/reg" :units [{:repo "loan-disposition-ruleset", :variant [[:ref "feature/new-tax"]]}]}',
+                  got
+                )
                 assert.is_nil(notified)
               end)
             end)
