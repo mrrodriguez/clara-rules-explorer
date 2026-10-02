@@ -177,7 +177,7 @@ describe("jump.goto_fallback", function()
     assert.are.same("/repo/src/my/ns.clj", edited)
   end)
 
-  it("resolves the var file first, then munged .clj/.cljc resources", function()
+  it("resolves the munged .clj/.cljc resource, then the var :file metadata as a file: URL", function()
     local code
     jump.goto_fallback(
       { name = "my.ns-with-hyphens/my-rule", ns = "my.ns-with-hyphens" },
@@ -189,5 +189,7 @@ describe("jump.goto_fallback", function()
     assert.truthy(code:find('"my.ns-with-hyphens"', 1, true))
     assert.truthy(code:find('".clj"', 1, true))
     assert.truthy(code:find('".cljc"', 1, true))
+    assert.truthy(code:find('(clojure.string/starts-with? f "/")', 1, true))
+    assert.truthy(code:find('(str "file:" f)', 1, true))
   end)
 end)

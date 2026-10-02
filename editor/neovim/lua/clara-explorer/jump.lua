@@ -82,20 +82,27 @@ local function open_resource(url)
   return false
 end
 
---- Source-location eval form: returns the loaded var's `:file` metadata when
--- the name resolves, else the munged `.clj`/`.cljc` classpath resource. Two
--- `%s` slots: the namespace and the fully-qualified name, both as EDN strings.
-local SOURCE_LOC_FORM = [[(do (require 'clojure.string)
-     (let [p (str (clojure.string/replace (munge %s) "." "/"))]
-       (or (try (some-> (resolve (symbol %s)) meta :file)
-               (catch Throwable _ nil))
-           (some-> (clojure.java.io/resource (str p ".clj")) str)
-           (some-> (clojure.java.io/resource (str p ".cljc")) str))))]]
+--- Source-location eval form: a `file:` URL for the target — the munged
+-- `.clj`/`.cljc` classpath resource first, then the loaded var's `:file`
+-- metadata (a classpath-relative path for `require`d namespaces, so it is
+-- resolved through `resource` to a URL). Two `%s` slots: the namespace and
+-- the fully-qualified name, both as EDN strings.
+local SOURCE_LOC_FORM = [[(do (require 'clojure.string 'clojure.java.io)
+     (let [p (str (clojure.string/replace (munge %s) "." "/"))
+           f (try (some-> (resolve (symbol %s)) meta :file)
+                  (catch Throwable _ nil))]
+       (or (some-> (clojure.java.io/resource (str p ".clj")) str)
+           (some-> (clojure.java.io/resource (str p ".cljc")) str)
+           (when f
+             (if (clojure.string/starts-with? f "/")
+               (str "file:" f)
+               (some-> (clojure.java.io/resource f) str))))))]]
 
 --- Regex fallback: open the namespace file and search for `(defrule|defquery NAME`.
--- The eval prefers the loaded var's `:file` metadata (which works for a
--- buffer-eval'd namespace that is not on the classpath), then falls back to a
--- munged `clojure.java.io/resource` lookup (`.clj`, then `.cljc`).
+-- The eval prefers the munged `clojure.java.io/resource` lookup (`.clj`, then
+-- `.cljc`) and falls back to the loaded var's `:file` metadata, resolved to a
+-- `file:` URL so a classpath-relative `:file` is not mistaken for an
+-- unopenable path.
 function M.goto_fallback(target, eval_edn)
   local ns = target.ns
   local name = target.name
