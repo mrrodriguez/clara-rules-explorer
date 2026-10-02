@@ -75,6 +75,29 @@
     (write-analysis! dir dropped)
     (str dir)))
 
+(defn- write-variant-unit!
+  "A minimal variant unit at `_variants/<repo>/<variant path>` whose manifest
+  records `variant` — the consistent case `get-variant-mismatches` reports
+  nothing for."
+  [root repo variant dropped]
+  (let [dir (io/file root "_variants" repo (layout/variant->path variant))
+        file (io/file dir (:manifest layout/artifact-files))]
+    (io/make-parents file)
+    (edn-io/write-edn-file! file (assoc (manifest {:repo repo}) :variant variant))
+    (write-analysis! dir dropped)
+    (str dir)))
+
+(defn- write-variant-unit-with-manifest!
+  "A variant unit whose directory is `dir-variant` but whose manifest records
+  `manifest-variant` — the hand-renamed case."
+  [root repo dir-variant manifest-variant dropped]
+  (let [dir (io/file root "_variants" repo (layout/variant->path dir-variant))
+        file (io/file dir (:manifest layout/artifact-files))]
+    (io/make-parents file)
+    (edn-io/write-edn-file! file (assoc (manifest {:repo repo}) :variant manifest-variant))
+    (write-analysis! dir dropped)
+    (str dir)))
+
 ;; ---------------------------------------------------------------------------
 ;; discovery
 ;; ---------------------------------------------------------------------------
@@ -88,21 +111,41 @@
       (let [not-a-unit (io/file root "c" "sub")]
         (.mkdirs not-a-unit)
         (edn-io/write-edn-file! (io/file not-a-unit "other.edn") {:x 1}))
-      ;; mainline + a branch variant
+      ;; mainline + a variant unit
       (write-unit! root "d" #{:nodes :id})
-      (write-unit! (io/file root "d" "branches") "feature-x" #{:nodes :id})
+      (write-variant-unit! root "d" [[:ref "feature/new-tax"]] #{:nodes :id})
 
       (let [reg (registry/discover {:root root})
             refs (registry/units reg)]
-        (is (= #{"a" "b" "d" "d@feature-x"}
+        (is (= #{"a" "b" "d" "d@ref=feature%2Fnew-tax"}
                (set (map shared-registry/unit-key refs))))
-        (testing "branch variants are refs with a :branch label"
-          (is (= {:repo "d" :branch "feature-x"}
-                 (first (filter #(= "feature-x" (:branch %)) refs)))))
-        (testing "mainline units carry no :branch"
+        (testing "variant units are refs with a :variant vector"
+          (is (= {:repo "d" :variant [[:ref "feature/new-tax"]]}
+                 (first (filter #(= [[:ref "feature/new-tax"]] (:variant %)) refs)))))
+        (testing "mainline units carry no :variant"
           (is (= [{:repo "a"} {:repo "b"} {:repo "d"}]
-                 (remove :branch refs))
-              "a mainline unit ref has no :branch key"))))))
+                 (remove :variant refs))
+              "a mainline unit ref has no :variant key"))))))
+
+(deftest discover-skips-malformed-variant-dirs-test
+  (with-temp-root
+    (fn [root]
+      (write-unit! root "a" #{:nodes :id})
+      ;; a variant dir with a trailing segment that is not <axis>=<value>
+      (let [bad1 (io/file root "_variants" "a" "ref=main" "extra")
+            mf1 (io/file bad1 (:manifest layout/artifact-files))]
+        (io/make-parents mf1)
+        (edn-io/write-edn-file! mf1 (manifest {:repo "a"})))
+      ;; a dir under _variants/ with no <axis>=<value> segment at all
+      (let [bad2 (io/file root "_variants" "b" "nolabel")
+            mf2 (io/file bad2 (:manifest layout/artifact-files))]
+        (io/make-parents mf2)
+        (edn-io/write-edn-file! mf2 (manifest {:repo "b"})))
+
+      (let [reg (registry/discover {:root root})]
+        (is (= #{"a"}
+               (set (map shared-registry/unit-key (registry/units reg))))
+            "a malformed variant dir is skipped, not thrown or misread")))))
 
 (deftest ->registry-takes-explicit-units
   (with-temp-root
@@ -114,6 +157,21 @@
         (is (= ["a" "missing"] (mapv shared-registry/unit-key (registry/units reg))))
         (is (nil? (registry/read-manifest reg {:repo "missing"}))
             "an absent unit reads as nil rather than throwing")))))
+
+(deftest discovery-reports-variant-mismatches-test
+  (with-temp-root
+    (fn [root]
+      (write-unit! root "a" #{:nodes :id})
+      (write-variant-unit! root "a" [[:ref "feature/new-tax"]] #{:nodes :id})
+      (write-variant-unit-with-manifest! root "a" [[:ref "renamed"]] [[:ref "hand-edited"]] #{:nodes :id})
+
+      (let [reg (registry/discover {:root root})
+            mismatches (registry/get-variant-mismatches reg)]
+        (testing "only the hand-renamed directory is reported"
+          (is (= [{:repo "a"
+                   :path-variant [[:ref "renamed"]]
+                   :manifest-variant [[:ref "hand-edited"]]}]
+                 mismatches)))))))
 
 (deftest same-registry-ignores-the-memo-cache-test
   (with-temp-root

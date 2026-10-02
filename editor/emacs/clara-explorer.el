@@ -250,10 +250,10 @@ EDN.  ARGS is a list of argument strings appended after the script path."
                              (error-message-string err))))))))
 
 (defun clara-explorer--bb-list-unit-repos (root)
-  "Unit keys (`repo` or `repo@branch`) of every unit under ROOT, sorted.
-Discovery lives in `bb editor_client.bb --list-units' — the one place that
-knows the registry layout — so this function only shells out and returns the
-result."
+  "`{:key entry}' maps for every unit under ROOT, sorted by key.
+Discovery and EDN serialization live in `bb editor_client.bb --list-units' —
+the one place that knows the registry layout — so this function only shells
+out and returns the result."
   (let* ((result (clara-explorer--bb-run (list "--list-units" root)))
          (err (and (hash-table-p result)
                    (clara-explorer--edn-get :error result))))
@@ -261,17 +261,6 @@ result."
      (err (user-error "clara-explorer: %s" err))
      ((vectorp result) (append result nil))
      (t (user-error "clara-explorer: unexpected list-units result: %S" result)))))
-
-(defun clara-explorer--unit-edn (unit-key)
-  "EDN for the `:units` entry named by UNIT-KEY (`repo` or `repo@branch`)."
-  (let* ((at (string-match "@" unit-key))
-         (repo (if at (substring unit-key 0 at) unit-key))
-         (branch (and at (substring unit-key (1+ at)))))
-    (format "{:repo %s%s}"
-            (clara-explorer--edn-value repo)
-            (if branch
-                (format " :branch %s" (clara-explorer--edn-value branch))
-              ""))))
 
 (defun clara-explorer--bb-prompt-selection ()
   "Prompt for a single-unit registry selection under the registry root."
@@ -281,10 +270,15 @@ result."
     (let ((repos (clara-explorer--bb-list-unit-repos root)))
       (when (null repos)
         (user-error "clara-explorer: no units (rules-inspect-manifest.edn) found under %s" root))
-      (let ((unit-key (completing-read (format "Unit repo (under %s): " root) repos nil t)))
+      (let* ((keys (mapcar (lambda (m) (clara-explorer--edn-get :key m)) repos))
+             (unit-key (completing-read (format "Unit repo (under %s): " root) keys nil t))
+             (entry (clara-explorer--edn-get :entry
+                       (cl-find-if (lambda (m)
+                                     (equal (clara-explorer--edn-get :key m) unit-key))
+                                   repos))))
         (format "{:root %s :units [%s]}"
                 (clara-explorer--edn-value root)
-                (clara-explorer--unit-edn unit-key))))))
+                entry)))))
 
 (defun clara-explorer--bb-selection ()
   "The cached bb registry-selection EDN, prompting once when unset."

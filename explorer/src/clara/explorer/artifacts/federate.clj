@@ -325,7 +325,7 @@
                   (cond-> {:artifacts (set (:artifacts info))
                            :created (get-in info [:manifest-head :created])
                            :sha (get-in info [:manifest-head :sha])}
-                    (:branch unit) (assoc :branch (:branch unit)))])))
+                    (:variant unit) (assoc :variant (:variant unit)))])))
         selection))
 
 (defn ->index
@@ -348,7 +348,7 @@
    (let [{:keys [analyses ancestors descendants hierarchy-conflicts coverage]}
          (selection/->selection registry selection)
          maps (->production-maps analyses descendants)]
-     {:scope (cond-> {:units (mapv #(select-keys % [:repo :branch :namespaces]) selection)
+     {:scope (cond-> {:units (mapv #(select-keys % [:repo :variant :namespaces]) selection)
                       :namespaces (:namespaces coverage)}
                (some? label) (assoc :label label))
       :provenance (->provenance registry selection)
@@ -455,9 +455,9 @@
 
 (defn- ->rebased-units
   "The units present in both indexes under the same `:repo` but a different
-  `:branch` (or set of branch labels), as `{:repo … :from [unit-key …] :to
-  [unit-key …]}`. A repo selected once on each side is the normal case; the
-  vectors keep the shape total when a selection names more than one branch."
+  `:variant`, as `{:repo … :from [unit-key …] :to [unit-key …]}`. A repo
+  selected once on each side is the normal case; the vectors keep the shape
+  total when a selection names more than one variant."
   [before-units after-units]
   (let [by-repo (fn [units]
                   (into (sorted-map)
@@ -553,14 +553,14 @@
      :conflicts-resolved (diff-set a-conflicts b-conflicts)}))
 
 (defn diff
-  "Diff two indexes over overlapping unit sets — the branch-vs-mainline
+  "Diff two indexes over overlapping unit sets — the variant-vs-mainline
   question: build the index twice over the same units, once mainline and once
-  with a branch variant selected, and compare. A pure function of the two
+  with a variant selected, and compare. A pure function of the two
   values.
 
   Reports, per key:
 
-    :units        selection differences, incl. branch swaps (`:rebased`)
+    :units        selection differences, incl. variant swaps (`:rebased`)
     :unit-edges   edges added/removed, and `:via` sets that grew or shrank
     :fact-types   per-type producer/consumer unit changes
     :entry-points types each unit newly cannot satisfy / now can

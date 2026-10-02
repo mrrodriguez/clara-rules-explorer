@@ -6,9 +6,10 @@
 ;;   bb bin/editor_client.bb '<selection-edn>' '<navigate-input-edn>'
 ;;   bb bin/editor_client.bb --list-units '<registry-root>'
 ;;
-;; `--list-units` prints the unit keys (`repo`, or `repo@branch` for a branch variant) of every
-;; unit under the root, sorted — the registry discovery the editors used to do themselves, so the
-;; registry layout has one owner here.
+;; `--list-units` prints `[{:key :entry} …]` for every unit under the root, sorted by key:
+;; `:key` is the display unit-key (`repo`, or `repo@<variant path>` for a variant), `:entry` the
+;; serialized `UnitRef` EDN ready to splice into a `:units` selection for either the bb client
+;; or a running server's `:registry` config.
 ;;
 ;; <selection-edn> is a registry selection `{:root "…" :units [{:repo "…"}]}` — the same shape the
 ;; server's `:registry` mode takes; the editor resolves the `CLARA_RULES_EXPLORER_REGISTRY` root
@@ -46,55 +47,55 @@
 (defn- print-error [e]
   (prn {:error (or (.getMessage e) (str e))}))
 
-(defn- unit-dir
+(defn- ->unit-dir
   "The persistence dir of one unit, mirroring `clara.explorer.artifacts.store/get-out-dir`:
-  `<:root>/<:repo>/`, with `:branch` nested under `<repo>/branches/<branch>/`."
-  [root {:keys [repo branch]}]
-  (let [base (fs/file root repo)]
-    (if (str/blank? branch)
-      base
-      (fs/file base "branches" branch))))
+  `<:root>/<:repo>/`, or `<:root>/_variants/<:repo>/<variant path>` for a variant."
+  [root {:keys [repo variant]}]
+  (layout/->unit-dir {:root (str root) :repo repo :variant variant}))
 
-(def ^:private branches-subdir
-  "The `branches/` segment, mirroring
-  `clara.explorer.artifacts.store/branches-subdir`."
-  "branches")
+(defn- ->unit-entry
+  "A unit's registry-relative path segments → `{:key entry}`: `:key` is the
+  display unit-key (`repo` or `repo@variant path`), `:entry` the serialized
+  `UnitRef` map for a `:units` selection entry. nil for a path that does not
+  parse as a unit.
 
-(defn- ->unit-key
-  "A unit's registry-relative path segments → its unit-key string (`repo[@branch]`), mirroring
-  `clara.explorer.artifacts.registry/->unit-ref` +
-  `clara.explorer.artifacts.shared.registry/unit-key`."
+  The split is `layout/segments->unit-ref` — the same function the JVM
+  `clara.explorer.artifacts.registry` walk uses — so the two runtimes cannot
+  drift on how `_variants/` is read."
   [segments]
-  (let [bi (first (keep-indexed (fn [i seg] (when (= branches-subdir seg) i)) segments))]
-    (if bi
-      (str (str/join "/" (subvec segments 0 bi))
-           "@"
-           (str/join "/" (subvec segments (inc bi))))
-      (str/join "/" segments))))
+  (when-let [ref (layout/segments->unit-ref segments)]
+    {:key (shared-registry/unit-key ref)
+     :entry (pr-str ref)}))
 
 (defn- list-unit-repos
-  "Every unit under `root`, as unit-key strings (`repo` or `repo@branch`), sorted. Discovery is the
-  directory walk the editors previously did themselves: find every
-  `rules-inspect-manifest.edn` and name the unit by its directory relative to the root. The
-  registry layout therefore has one owner (this script), and the editors only prompt over the
-  returned list."
+  "Every unit under `root`, as `[{:key entry}]` maps sorted by key. `:key` is
+  the display unit-key (`repo` or `repo@variant path`); `:entry` the serialized
+  `UnitRef` EDN for a `:units` selection entry — ready to splice into
+  `{:root … :units […]}` for either the babashka client or a running server's
+  `:registry` config.
+
+  Discovery is the directory walk the editors previously did themselves: find
+  every `rules-inspect-manifest.edn` and name the unit by its directory
+  relative to the root. The registry split has one owner
+  (`layout/segments->unit-ref`, shared with the JVM walk); this script supplies
+  only the babashka directory walk and the EDN serialization."
   [root]
   (let [root-file (fs/canonicalize root)]
     (when-not (fs/directory? root-file)
       (throw (ex-info (format "Registry root is not a directory: %s" root) {:root root})))
     (->> (fs/glob root-file "**/rules-inspect-manifest.edn")
-         (map (fn [manifest]
-                (let [rel (fs/unixify (fs/relativize root-file (fs/parent manifest)))]
-                  (->unit-key (str/split rel #"/")))))
-         sort
+         (keep (fn [manifest]
+                 (let [rel (fs/unixify (fs/relativize root-file (fs/parent manifest)))]
+                   (->unit-entry (str/split rel #"/")))))
+         (sort-by :key)
          vec)))
 
 (defn- read-part-or-nil
   "One part of the unit's split `merged-rulebase-analysis/` directory, or nil when the part is
   absent — a missing part is an absent artifact, not an error, the same posture the JVM store
   takes."
-  [unit-dir part-key]
-  (let [f (fs/file unit-dir (:rulebase-analysis layout/artifact-files) (layout/part-files part-key))]
+  [dir part-key]
+  (let [f (fs/file dir (:rulebase-analysis layout/artifact-files) (layout/part-files part-key))]
     (when (fs/exists? f)
       (edn/read-string {:default (fn [_tag v] v)} (slurp f)))))
 
@@ -103,7 +104,7 @@
   index (`:rules` / `:queries` projections), `:fact-types`, `:dep-graph`, and the `:meta` block
   (`:slim` / `:unresolved`). Nil when the unit has no analysis to read."
   [root unit]
-  (let [dir (unit-dir root unit)
+  (let [dir (->unit-dir root unit)
         index (read-part-or-nil dir :index)
         meta (read-part-or-nil dir :meta)]
     (when (and index meta)
@@ -118,7 +119,7 @@
   "A unit's slim `:dropped` shape, or nil when the unit has no analysis to merge (no `:slim`
   block). The one vocabulary the compatibility check compares across units."
   [root unit]
-  (let [meta (read-part-or-nil (unit-dir root unit) :meta)]
+  (let [meta (read-part-or-nil (->unit-dir root unit) :meta)]
     (when (some? (:slim meta))
       (set (get-in meta [:slim :dropped])))))
 

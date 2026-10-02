@@ -11,9 +11,10 @@
   holds `rules-inspect-manifest.edn`, the one artifact every complete set has and
   the one that says what the rest of the set is.
 
-  The single reserved segment is `branches`: a directory of that name is read as
-  the variant holder `store/branches-subdir` already defines, and its children
-  become `:branch` labels on the parent unit rather than units of their own.
+  The single reserved root-level directory is `_variants/`: a path under it
+  splits into a repo (segments before the first `<axis>=…` segment) and a
+  variant (that segment and everything after); any other path is a mainline
+  unit whose repo is the whole path.
 
   The library discovers and reads. It never decides *which* sets belong together
   or *what a set means* — every entry point takes the selection explicitly, the
@@ -44,9 +45,9 @@
 
 (defn unit-ref
   "The `UnitRef` projection of a unit info map."
-  [{:keys [repo branch]}]
+  [{:keys [repo variant]}]
   (cond-> {:repo repo}
-    (some? branch) (assoc :branch branch)))
+    (some? variant) (assoc :variant variant)))
 
 (defn units
   "The units of `registry`, as `UnitRef`s — the caller-facing selection shape.
@@ -113,21 +114,12 @@
   [^File dir]
   (.isFile (manifest-file dir)))
 
-(defn- ->unit-ref
-  "Segments → `UnitRef`. The first `branches` segment splits repo from branch;
-  without one the whole path is the repo."
-  [segments]
-  (let [bi (first (keep-indexed (fn [i seg] (when (= store/branches-subdir seg) i))
-                                segments))]
-    (if bi
-      {:repo (str/join "/" (subvec segments 0 bi))
-       :branch (str/join "/" (subvec segments (inc bi)))}
-      {:repo (str/join "/" segments)})))
-
 (defn- discover-unit-refs
-  "Every unit under `root`, mainline and `branches/` variants alike, as refs.
+  "Every unit under `root`, mainline and `_variants/` variants alike, as refs.
   Directories are walked arbitrarily deep, so a host groups its units however it
-  likes."
+  likes. The split is `layout/segments->unit-ref` — shared with the babashka
+  editor client — and a path it cannot parse (a directory renamed or created
+  outside the `<axis>=<value>` scheme) is skipped rather than thrown."
   [root]
   (let [root-file (io/file root)]
     (when-not (.isDirectory root-file)
@@ -135,7 +127,7 @@
     (->> (file-seq root-file)
          (filter #(.isDirectory ^File %))
          (filter unit-dir?)
-         (keep #(some-> (relative-segments root %) ->unit-ref))
+         (keep #(some-> (relative-segments root %) layout/segments->unit-ref))
          (sort-by shared-registry/unit-key)
          vec)))
 
@@ -153,14 +145,19 @@
                                  (:rulebase-analysis layout/artifact-files)
                                  (:meta parts/part-files))))
 
-(defn- ->unit-info
+(s/defn ^:private ->unit-info :- schema/UnitInfo
   "What `discover` records per unit: the ref, the resolved dir, present
   artifacts, the slim `:dropped` shape, the manifest's layer ids, the
   manifest head (`:created`, `:sha`, `:history` head), and — when the manifest
   claims an aggregate — its `:analysis-run :mode` (as `:mode`) and the units it
-  was composed from (`:analysis-run :units`, as `:composed-from`). Absence of
-  `:mode` is what marks a source unit."
-  [root ref]
+  was composed from (`:analysis-run :units`, as `:composed-from`). A variant
+  whose directory disagrees with its manifest's `:variant` is recorded as
+  `:variant-mismatch`. Absence of `:mode` is what marks a source unit.
+
+  Validated against `schema/UnitInfo` so the recorded shape cannot drift from
+  the schema that documents it."
+  [root :- s/Str
+   ref :- schema/UnitRef]
   (let [dir (store/get-out-dir (assoc ref :root root))
         present (into #{}
                       (keep (fn [[k filename]]
@@ -169,7 +166,11 @@
         manifest (read-manifest-file (io/file dir))
         meta (read-meta-file (io/file dir))
         mode (get-in manifest [:analysis-run :mode])
-        composed-from (not-empty (mapv unit-ref (get-in manifest [:analysis-run :units])))]
+        composed-from (not-empty (mapv unit-ref (get-in manifest [:analysis-run :units])))
+        path-variant (:variant ref)
+        manifest-variant (:variant manifest)
+        variant-mismatch (when-not (= path-variant manifest-variant)
+                           {:path path-variant :manifest manifest-variant})]
     (cond-> (assoc (unit-ref ref)
                    :dir dir
                    :artifacts present)
@@ -186,7 +187,10 @@
       (assoc :mode mode)
 
       (seq composed-from)
-      (assoc :composed-from composed-from))))
+      (assoc :composed-from composed-from)
+
+      (some? variant-mismatch)
+      (assoc :variant-mismatch variant-mismatch))))
 
 (s/defn ->registry :- Registry
   "A registry of the explicit `:units` under `:root`. `units` is a vector of
@@ -200,8 +204,8 @@
 
 (s/defn discover :- Registry
   "Discover every unit under `:root` — a directory holding
-  `rules-inspect-manifest.edn`, with `branches/` children read as `:branch`
-  variants of their parent."
+  `rules-inspect-manifest.edn`, with `_variants/` children read as `:variant`
+  units of their repo."
   [{:keys [root]} :- {:root s/Str}]
   (->registry {:root root :units (discover-unit-refs root)}))
 
@@ -212,7 +216,7 @@
 (defn- ->opts
   [^Registry registry unit]
   (cond-> {:root (:root registry) :repo (:repo unit)}
-    (some? (:branch unit)) (assoc :branch (:branch unit))))
+    (some? (:variant unit)) (assoc :variant (:variant unit))))
 
 (defn- memo-read
   "Read `unit` once, memoizing the result on the registry. Absent artifacts read
@@ -313,6 +317,20 @@
   `clara.explorer.artifacts.federate/->index`."
   [^Registry registry]
   (into [] (remove #(aggregate-unit? registry %)) (units registry)))
+
+(defn get-variant-mismatches
+  "The variant units whose directory (decoded) disagrees with their manifest's
+  `:variant` — e.g. a directory renamed by hand. Returns
+  `[{:repo … :path-variant … :manifest-variant …}]`, empty when every variant
+  unit is consistent."
+  [^Registry registry]
+  (into []
+        (keep (fn [info]
+                (when-let [{:keys [path manifest]} (:variant-mismatch info)]
+                  {:repo (:repo info)
+                   :path-variant path
+                   :manifest-variant manifest})))
+        (:units registry)))
 
 ;; ===========================================================================
 ;; compatibility

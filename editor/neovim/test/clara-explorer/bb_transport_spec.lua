@@ -217,16 +217,19 @@ describe("conjure.bb_list_unit_repos", function()
             wait = function()
               return {
                 code = 0,
-                stdout = '["composed/loan-app-plus-disposition" "loan-app-ruleset" "loan-disposition-ruleset"]',
+                stdout = [=[[{:key "loan-app-ruleset", :entry "{:repo \"loan-app-ruleset\"}"} {:key "loan-disposition-ruleset@ref=feature%2Fnew-tax", :entry "{:repo \"loan-disposition-ruleset\", :variant [[:ref \"feature/new-tax\"]]}"}]]=],
                 stderr = "",
               }
             end,
           }
         end, function()
-          assert.are.same(
-            { "composed/loan-app-plus-disposition", "loan-app-ruleset", "loan-disposition-ruleset" },
-            conjure.bb_list_unit_repos("/root")
-          )
+          assert.are.same({
+            { key = "loan-app-ruleset", entry = '{:repo "loan-app-ruleset"}' },
+            {
+              key = "loan-disposition-ruleset@ref=feature%2Fnew-tax",
+              entry = '{:repo "loan-disposition-ruleset", :variant [[:ref "feature/new-tax"]]}',
+            },
+          }, conjure.bb_list_unit_repos("/root"))
           assert.are.same({ "bb", "/p/editor_client.bb", "--list-units", "/root" }, captured.cmd)
           assert.are.same(true, captured.opts.text)
         end)
@@ -281,7 +284,12 @@ describe("conjure.bb_prompt_selection", function()
         with_restore(
           conjure,
           "bb_list_unit_repos",
-          function(_root) return { "loan-app-ruleset", "loan-disposition-ruleset" } end,
+          function(_root)
+            return {
+              { key = "loan-app-ruleset", entry = '{:repo "loan-app-ruleset"}' },
+              { key = "loan-disposition-ruleset", entry = '{:repo "loan-disposition-ruleset"}' },
+            }
+          end,
           function()
             with_restore(vim.ui, "select", function(items, _opts, cb) cb(items[1]) end, function()
               with_restore(vim, "notify", function(msg) notified = msg end, function()
@@ -297,20 +305,30 @@ describe("conjure.bb_prompt_selection", function()
     end)
   end)
 
-  it("splits a repo@branch unit-key into :repo and :branch", function()
+  it("splices the serialized variant entry into the selection", function()
     local notified
     with_restore(conjure, "registry_root", function() return "/reg" end, function()
       with_restore(vim.fn, "isdirectory", function() return 1 end, function()
         with_restore(
           conjure,
           "bb_list_unit_repos",
-          function(_root) return { "loan-disposition-ruleset@alt" } end,
+          function(_root)
+            return {
+              {
+                key = "loan-disposition-ruleset@ref=feature%2Fnew-tax",
+                entry = '{:repo "loan-disposition-ruleset", :variant [[:ref "feature/new-tax"]]}',
+              },
+            }
+          end,
           function()
             with_restore(vim.ui, "select", function(items, _opts, cb) cb(items[1]) end, function()
               with_restore(vim, "notify", function(msg) notified = msg end, function()
                 local got
                 conjure.bb_prompt_selection(function(sel) got = sel end)
-                assert.are.same('{:root "/reg" :units [{:repo "loan-disposition-ruleset" :branch "alt"}]}', got)
+                assert.are.same(
+                  '{:root "/reg" :units [{:repo "loan-disposition-ruleset", :variant [[:ref "feature/new-tax"]]}]}',
+                  got
+                )
                 assert.is_nil(notified)
               end)
             end)

@@ -7,7 +7,7 @@
     `fold-layers` (mode `:layers`)
         generalize `store/get-layer-stack` across units: a selection of units
         folded in caller order, lowest precedence first, into one
-        `MergedAnnotations`. Layer ids are qualified `<repo>[@<branch>]/<layer-id>`
+        `MergedAnnotations`. Layer ids are qualified `<repo>[@<variant>]/<layer-id>`
         because a `LayerId` is a per-set identity.
 
     `->composed-analysis` (mode `:compose`)
@@ -45,14 +45,14 @@
 
 (defn qualified-layer-id
   "A layer id qualified with its unit, so `:provenance` names whose layer a fold
-  credited. `<repo>[@<branch>]/<layer-id>`."
+  credited. `<repo>[@<variant>]/<layer-id>`."
   [unit layer-id]
   (format "%s/%s" (shared-registry/unit-key unit) layer-id))
 
 (defn- ->opts
   [registry unit]
   (cond-> {:root (:root registry) :repo (:repo unit)}
-    (some? (:branch unit)) (assoc :branch (:branch unit))))
+    (some? (:variant unit)) (assoc :variant (:variant unit))))
 
 (defn- ->narrowed-layer
   "Qualify `layer`'s id with `unit` and narrow its annotations to the unit's

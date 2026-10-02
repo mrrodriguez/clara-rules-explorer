@@ -70,6 +70,7 @@
    [clara.explorer.artifacts.layout :as layout]
    [clara.explorer.artifacts.parts :as parts]
    [clara.explorer.artifacts.schema :as schema]
+   [clara.explorer.artifacts.shared.git :as shared-git]
    [clara.explorer.edn-io :as edn-io]
    [clojure.java.io :as io]
    [clojure.string :as str]
@@ -159,53 +160,93 @@
   curated overlay over both. See `layout/layer-artifacts`."
   layout/layer-artifacts)
 
-(def branches-subdir
-  "The directory, under a run's base dir, that holds its per-branch variants. See
-  `layout/branches-subdir`."
-  layout/branches-subdir)
+(def variants-subdir
+  "The root-level directory holding every repo's variant units. See
+  `layout/variants-subdir`."
+  layout/variants-subdir)
 
-(s/defn ^:private get-branch-path :- s/Str
-  "Validate a caller-supplied branch label as a relative path under
-  `branches-subdir`. Slashes are kept — `feature/foo` nests two deep, the way
-  the name already reads — but nothing that could climb out of the base dir."
-  [branch :- s/Str]
-  (let [branch (str/trim branch)]
-    (when (some #{"" "." ".."} (str/split branch #"/"))
-      (throw (ex-info (str "Branch must be a relative path with no empty, '.' or "
-                           "'..' segments")
-                      {:branch branch})))
-    branch))
+(def ^:private axis-name-re
+  "A host axis name: `[a-z0-9][a-z0-9-]*`. `ref` is reserved and refused below."
+  #"[a-z0-9][a-z0-9-]*")
+
+(defn- validate-repo!
+  "Refuse a `:repo` path that cannot round-trip through discovery or that would
+  escape the root: a blank segment, a `.` or `..` segment, or an `=` in any
+  segment (discovery reads the first `=` segment as the start of a variant)."
+  [repo]
+  (doseq [seg (str/split (str repo) #"/")]
+    (when (or (str/blank? seg)
+              (contains? #{"." ".."} seg)
+              (str/includes? seg "="))
+      (throw (ex-info (format "Bad repo path: %s" (str repo))
+                      {:repo (str repo) :segment seg})))))
+
+(defn- validate-variant!
+  "Refuse a caller-supplied host `:variant` (no `ref` pair): a non-keyword or
+  namespaced axis, an axis name outside `[a-z0-9][a-z0-9-]*` or named `ref`, a
+  non-string value, a blank value, or a value that encodes to `.` or `..`
+  (which would climb out of the variant dir)."
+  [variant]
+  (doseq [[axis value] variant]
+    (let [valid-axis? (and (keyword? axis)
+                           (nil? (namespace axis))
+                           (let [n (name axis)]
+                             (and (not= "ref" n)
+                                  (boolean (re-matches axis-name-re (str n))))))]
+      (when-not valid-axis?
+        (throw (ex-info (format "Bad variant axis: %s" (pr-str axis))
+                        {:axis (pr-str axis)})))
+      (let [axis-name (name axis)]
+        (when-not (string? value)
+          (throw (ex-info (format "Bad variant value for %s: %s" axis-name (pr-str value))
+                          {:axis axis-name :value value})))
+        (let [encoded (layout/encode-value value)]
+          (when (or (str/blank? encoded) (contains? #{"." ".."} encoded))
+            (throw (ex-info (format "Bad variant value for %s: %s" axis-name (pr-str value))
+                            {:axis axis-name :value value}))))))))
 
 (s/defn get-out-dir :- s/Str
-  "Persistence dir for a run: explicit `:dir`, else `<:root>/<:repo>/`.
+  "Persistence dir for a run.
+
+  An explicit `:dir` wins outright — no variant nesting, no git read. A host
+  whose run has no checkout (a session restored from a serialized artifact, a
+  composed unit) names its directory this way.
+
+  Otherwise the unit is placed under `:root`:
+
+  - When `:canonical?` is present (a write over a checkout), the git info of
+    `:repo-path` (default: the process's cwd) derives the `ref` axis, and the
+    unit is mainline (`<root>/<repo>/`) only when `:canonical?` is true and the
+    ref is the remote's default branch; every other run writes
+    `<root>/_variants/<repo>/<variant…>/ref=<ref>/`.
+
+  - When `:canonical?` is absent (a reader reconstructing a known unit, or a
+    caller that has already decided its unit's identity), `:variant` is used
+    exactly as given — complete, ending in `[:ref …]` for a variant — and no git
+    read happens.
 
   No environment variable is read here. A host that keeps its artifacts under
-  some `$…_HOME` resolves that itself and passes the result as `:root`, so the
-  message its own users see names their own variable rather than a key in this
-  library's schema.
+  some `$…_HOME` resolves that itself and passes the result as `:root`.
 
-  `:branch` nests the whole artifact set one level down, under
-  `<base>/branches/<branch>/`. It is a caller-supplied label, not a git branch —
-  nothing reads it back off a checkout — so it names whatever variant of a
-  repo you want kept apart: an in-flight refactor, a spike, a comparison run.
-  The point is that the base dir keeps meaning *the mainline state of the
-  world*, and an experiment never has to clobber it to be persisted.
-
-  It applies to an explicit `:dir` too, so the rule is one rule: a branch is
-  always a subdir of the run's base.
-
-  The join itself is `layout/unit-dir`, shared with the babashka `status`
-  report; this validates first and delegates."
-  [{:keys [root dir repo branch]} :- schema/ArtifactOpts]
+  The join itself is `layout/->unit-dir`, shared with the babashka `status`
+  report; this validates the host axes and delegates."
+  [{:keys [root dir repo variant canonical? repo-path] :as opts} :- schema/ArtifactOpts]
   (when (and (str/blank? dir) (str/blank? root))
     (throw (ex-info "No output dir: pass :root (an artifact root) or :dir" {})))
   (when (and (str/blank? dir) (str/blank? repo))
     (throw (ex-info "Pass :repo (subdir) or an explicit :dir" {})))
-  (layout/unit-dir {:root root
-                    :dir dir
-                    :repo repo
-                    :branch (when-not (str/blank? branch)
-                              (get-branch-path branch))}))
+  (when (and (str/blank? dir) (some? repo))
+    (validate-repo! repo))
+  (if-not (str/blank? dir)
+    (str dir)
+    (let [variant (if (contains? opts :canonical?)
+                    (do
+                      (validate-variant! variant)
+                      (let [git-dir (or repo-path (System/getProperty "user.dir"))]
+                        (layout/write-variant variant canonical?
+                                              (shared-git/get-git-info git-dir))))
+                    variant)]
+      (layout/->unit-dir {:root root :repo repo :variant variant}))))
 
 (s/defn get-artifact-path :- s/Str
   "Absolute path, as a string, of one artifact under `get-out-dir`."

@@ -600,7 +600,7 @@
   (println "--file auto|agent|merged picks the annotations file for the")
   (println "annotation-reading subcommands (default merged; gaps defaults to auto).")
   (println)
-  (println "status checks one unit directory (a source, branch, or composed unit)")
+  (println "status checks one unit directory (a source, variant, or composed unit)")
   (println "reading only its rules-inspect-manifest.edn:")
   (doseq [row status-usage-rows]
     (apply print-flag-row row)))
@@ -668,10 +668,10 @@
 
 (defn- print-status
   "The `shared-status/unit-status` result map as aligned `label  value` lines."
-  [{:keys [repo label kind mode source updated staleness verdict reasons sources]}]
-  (print-field "unit" (str repo (when label (str "/branches/" label))))
+  [{:keys [repo variant kind mode source updated staleness verdict reasons sources]}]
+  (print-field "unit" (str repo (when (seq variant) (str "@" (layout/variant->path variant)))))
   (print-field "kind" (str (name kind) " unit"
-                             (when label (str " (label " label ")"))
+                             (when (seq variant) (str " (variant " (layout/variant->path variant) ")"))
                              (when mode (str " (mode " mode ")"))))
   (print-field "source" (format "%s (%s, %s)   updated %s"
                                   (short-sha (:sha source))

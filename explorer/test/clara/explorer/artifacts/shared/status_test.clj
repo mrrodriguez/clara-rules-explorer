@@ -49,7 +49,7 @@
 (defn- source-manifest
   []
   {:repo "loan-app-ruleset"
-   :branch "alt"
+   :variant [[:ref "alt"]]
    :generated-by "status-test"
    :created today
    :updated today
@@ -81,7 +81,7 @@
 
 (deftest source-unit-status-test
   (with-temp-root* (fn [root]
-                     (let [dir (write-manifest! (str (io/file root "loan-app-ruleset" "branches" "alt"))
+                     (let [dir (write-manifest! (str (io/file root "_variants" "loan-app-ruleset" "ref=alt"))
                                                 (source-manifest))]
 
                        (testing "a checkout at the recorded sha is current"
@@ -90,7 +90,7 @@
                              (is (= :current (:verdict result)))
                              (is (= [] (:reasons result)))
                              (is (= :source (:kind result)))
-                             (is (= "alt" (:label result)))
+                             (is (= [[:ref "alt"]] (:variant result)))
                              (is (= {:checkout "/co" :ref "HEAD" :sha recorded-sha}
                                     (:compared result))))))
 
@@ -193,15 +193,16 @@
    :history []})
 
 (defn- write-sources!
-  "Source manifests under `root`: `aaa` at `aaa-sha`, `bbb/branches/x` at
-  `bbb-sha` (nil sha = absent unit)."
+  "Source manifests under `root`: `aaa` at `aaa-sha`,
+  `_variants/bbb/ref=x` at `bbb-sha` (nil sha = absent unit)."
   [root aaa-sha bbb-sha]
   (when aaa-sha
     (write-manifest! (str (io/file root "aaa"))
                      (minimal-source-manifest "aaa" aaa-sha)))
   (when bbb-sha
-    (write-manifest! (str (io/file root "bbb" "branches" "x"))
-                     (assoc (minimal-source-manifest "bbb" bbb-sha) :branch "x"))))
+    (write-manifest! (str (io/file root "_variants" "bbb" "ref=x"))
+                     (assoc (minimal-source-manifest "bbb" bbb-sha)
+                            :variant [[:ref "x"]]))))
 
 (defn- composed-manifest
   []
@@ -217,10 +218,10 @@
             :working-tree "clean"}
    :analysis-run {:mode :compose
                   :units [{:repo "aaa" :sha "111aaaa" :created today}
-                          {:repo "bbb" :branch "x" :sha "222bbbb" :created today}]}
+                          {:repo "bbb" :variant [[:ref "x"]] :sha "222bbbb" :created today}]}
    :staleness {:policy "review-when-any-source-sha-drifts"
                :sources {"aaa" {:sha "111aaaa" :created today}
-                         "bbb@x" {:sha "222bbbb" :created today}}}
+                         "bbb@ref=x" {:sha "222bbbb" :created today}}}
    :history []})
 
 (deftest composed-unit-status-test
@@ -236,7 +237,7 @@
                            (is (= :compose (:mode result)))
                            (is (= [] (:reasons result)))
                            (is (= [{:source "aaa" :recorded "111aaaa" :current "111aaaa" :verdict :current}
-                                   {:source "bbb@x" :recorded "222bbbb" :current "222bbbb" :verdict :current}]
+                                   {:source "bbb@ref=x" :recorded "222bbbb" :current "222bbbb" :verdict :current}]
                                   (:sources result)))))
 
                        (testing "an explicit :root is honored"
@@ -247,17 +248,17 @@
                          (write-sources! root "111aaaa" "9999999")
                          (let [result (status/unit-status {:dir dir})]
                            (is (= :stale (:verdict result)))
-                           (is (= [{:check :source-sha-drift :source "bbb@x"
+                           (is (= [{:check :source-sha-drift :source "bbb@ref=x"
                                     :recorded "222bbbb" :current "9999999"}]
                                   (:reasons result)))
                            (is (= :sha-drift (:verdict (second (:sources result)))))))
 
                        (testing "a removed source is missing"
                          (write-sources! root "111aaaa" nil)
-                         (delete-tree (str (io/file root "bbb")))
+                         (delete-tree (str (io/file root "_variants" "bbb")))
                          (let [result (status/unit-status {:dir dir})]
                            (is (= :stale (:verdict result)))
-                           (is (= [{:check :source-missing :source "bbb@x"}]
+                           (is (= [{:check :source-missing :source "bbb@ref=x"}]
                                   (:reasons result)))
                            (is (= :missing (:verdict (second (:sources result)))))
                            (is (nil? (:current (second (:sources result)))))))
@@ -266,11 +267,11 @@
                          (is (thrown? clojure.lang.ExceptionInfo
                                       (status/unit-status {:dir dir :checkout "/co"}))))))))
 
-(testing "a branch-label composed unit strips branches/<label> off the root"
+(testing "a variant composed unit strips _variants/<repo>/<variant path> off the root"
   (with-temp-root* (fn [root]
                      (write-sources! root "111aaaa" "222bbbb")
-                     (let [dir (write-manifest! (str (io/file root "composed-all" "branches" "alt"))
-                                                (assoc (composed-manifest) :branch "alt"))]
+                     (let [dir (write-manifest! (str (io/file root "_variants" "composed-all" "ref=alt"))
+                                                (assoc (composed-manifest) :variant [[:ref "alt"]]))]
                        (is (= :current (:verdict (status/unit-status {:dir dir}))))))))
 
 (deftest aggregate-without-sources-test

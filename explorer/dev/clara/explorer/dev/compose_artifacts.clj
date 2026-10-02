@@ -46,7 +46,7 @@
   [& args]
   (when (empty? args)
     (println "usage: compose-artifacts <edn-opts-map | edn-string | edn-file>")
-    (println "  keys: :root :repo :units :generated-by [:dir] [:branch] [:analysis-run]")
+    (println "  keys: :root :repo :units :generated-by [:dir] [:analysis-run]")
     (System/exit 1))
   (let [{:keys [dir layers rule-count manifest]}
         (flow/compose-persist! (read-opts (first args)))]

@@ -68,8 +68,8 @@ path from the coordinates and ref it wants, with no lookup of a baseline.
 
 A segment is `<axis>=<encoded value>`. It is split on its first `=`, so a value may contain `=`.
 
-**Axis names** match `[a-z0-9][a-z0-9-]*`. `ref` is reserved. A host axis named `ref`, or a name
-outside that pattern, is refused.
+**Axis names** match `[a-z0-9][a-z0-9-]*` as unqualified keywords. `ref` is reserved. A host axis
+named `ref`, a namespaced keyword, or a name outside that pattern is refused.
 
 **Values** are non-empty strings, percent-encoded on exactly four characters, and passed through
 otherwise:
@@ -129,6 +129,8 @@ before the first `<axis>=…` segment) and a variant (that segment and everythin
 other path is a mainline unit whose repo is the whole path. A repo path may therefore contain
 `/` but no `=` in any segment. The reserved `branches` segment is removed.
 
+A path under `_variants/` that does not split this way — no `<axis>=…` segment, an empty repo
+before the first one, or a non-`<axis>=…` segment after it — is skipped rather than thrown.
 Discovery also compares each variant unit's decoded path with the manifest's `:variant`, and
 reports any directory where they differ (e.g. one renamed by hand).
 
@@ -154,16 +156,16 @@ The top-level `:branch` is replaced by `:variant`: the decoded `[axis value]` ve
 
 | Namespace / file | Change |
 |---|---|
-| `artifacts.layout` | `variants-subdir` (`"_variants"`) replaces `branches-subdir`; public segment encode/decode; `unit-dir` and `default-root` take `:variant` |
-| `artifacts.store` | `get-out-dir` resolves the ref and applies the mainline rule; value validation replaces `get-branch-path` |
+| `artifacts.layout` | `variants-subdir` (`"_variants"`) replaces `branches-subdir`; public segment encode/decode; `segments->unit-ref` (shared discovery split); `unit-dir` and `default-root` take `:variant` |
+| `artifacts.store` | `get-out-dir` resolves the ref and applies the mainline rule; repo + axis/value validation replaces `get-branch-path` |
 | `artifacts.shared.git` | `get-git-info` adds `:default-branch` |
-| `artifacts.schema` | `UnitRef`, `ArtifactOpts`, `ManifestOptions`, the git-info schema, composed-unit entries |
-| `artifacts.registry` | discovery split and path/manifest consistency report; `unit-ref` carries `:variant` |
+| `artifacts.schema` | `UnitRef`, `ArtifactOpts`, `ManifestOptions`, the git-info schema, composed-unit entries, `UnitInfo` + `VariantMismatch` |
+| `artifacts.registry` | discovery walk delegates to `layout/segments->unit-ref`; path/manifest consistency report; `unit-ref`/`->unit-info` carry `:variant` |
 | `artifacts.shared.registry` | `unit-key` over `:variant` |
 | `artifacts.manifest` | top-level `:variant` |
 | `artifacts.compose`, `artifacts.flow`, `artifacts.federate` | `:variant` wherever `:branch` is carried today |
 | `artifacts.shared.status`, `bin/annotations_report.bb` | unit-key parsing and the `unit` line print the variant path |
-| `bin/editor_client.bb` | its discovery mirror follows the new split |
+| `bin/editor_client.bb` | discovery uses the shared `layout/segments->unit-ref` |
 | `explorer/docs/persisted-artifacts.md`, `explorer/docs/registry-architecture.md` | describe `_variants/`, axes, `ref`, encoding |
 
 `branches/` is removed outright, with no migration path. A registry rebuilds its variants by

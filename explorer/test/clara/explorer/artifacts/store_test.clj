@@ -7,6 +7,7 @@
   (:require
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing use-fixtures]]
+   [clara.explorer.artifacts.shared.git :as shared-git]
    [clara.explorer.artifacts.store :as store]
    [clara.explorer.artifacts.test-fixtures :as fixtures
     :refer [*artifact-opts* generated-annotations read-generated-layer
@@ -19,31 +20,89 @@
 (use-fixtures :once st/validate-schemas)
 (use-fixtures :each fixtures/temp-artifact-dir-fixture)
 
+(defn- with-git
+  "Run `(f)` with `shared-git/get-git-info` stubbed to return `git-info` for
+  every dir."
+  [git-info f]
+  (with-redefs [shared-git/get-git-info (fn [_] git-info)]
+    (f)))
+
 (deftest out-dir-test
-  (testing "an explicit :dir is the base, unchanged"
-    (is (= "/tmp/annos" (store/get-out-dir {:dir "/tmp/annos"}))))
-  (testing "a blank/absent branch leaves the base alone — mainline is the default"
-    (is (= "/tmp/annos" (store/get-out-dir {:dir "/tmp/annos" :branch nil})))
-    (is (= "/tmp/annos" (store/get-out-dir {:dir "/tmp/annos" :branch "  "}))))
-  (testing "a branch nests one level down, under branches/"
-    (is (= "/tmp/annos/branches/vc-income-refactor"
-           (store/get-out-dir {:dir "/tmp/annos" :branch "vc-income-refactor"}))))
-  (testing "the label is trimmed, and slashes nest the way the name reads"
-    (is (= "/tmp/annos/branches/feature/vc-income"
-           (store/get-out-dir {:dir "/tmp/annos" :branch " feature/vc-income "}))))
-  (testing "no branch can climb out of the base dir"
-    (doseq [bad ["../elsewhere" "a/../../b" "." "a//b" "/absolute"]]
-      (is (thrown? clojure.lang.ExceptionInfo
-                   (store/get-out-dir {:dir "/tmp/annos" :branch bad}))
-          (str "expected a throw for " (pr-str bad)))))
+  (testing "an explicit :dir is the base, unchanged — no git read"
+    (is (= "/tmp/annos" (store/get-out-dir {:dir "/tmp/annos"})))
+    (is (= "/tmp/annos"
+           (store/get-out-dir {:dir "/tmp/annos" :variant [[:ref "x"]]}))))
+  (testing "without :canonical? the :variant is used as-is (the read path)"
+    (is (= "/r/x" (store/get-out-dir {:root "/r" :repo "x"})))
+    (is (= "/r/_variants/x/ref=feature%2Fnew-tax"
+           (store/get-out-dir {:root "/r" :repo "x"
+                               :variant [[:ref "feature/new-tax"]]}))))
   (testing "no output target at all is an error, not a silent cwd write"
     (is (thrown? clojure.lang.ExceptionInfo (store/get-out-dir {})))))
 
+(deftest out-dir-mainline-rule-test
+  (testing "canonical + default branch writes the base dir"
+    (with-git {:branch "main" :sha-short "abc1234" :default-branch "main"}
+      #(is (= "/r/x"
+              (store/get-out-dir {:root "/r" :repo "x" :variant [] :canonical? true})))))
+  (testing "canonical + other branch writes under _variants/"
+    (with-git {:branch "feature" :sha-short "abc1234" :default-branch "main"}
+      #(is (= "/r/_variants/x/ref=feature"
+              (store/get-out-dir {:root "/r" :repo "x" :variant [] :canonical? true})))))
+  (testing "non-canonical + default branch writes under _variants/"
+    (with-git {:branch "main" :sha-short "abc1234" :default-branch "main"}
+      #(is (= "/r/_variants/x/ref=main"
+              (store/get-out-dir {:root "/r" :repo "x" :variant [] :canonical? false})))))
+  (testing "a nil :default-branch makes no run mainline"
+    (with-git {:branch "main" :sha-short "abc1234" :default-branch nil}
+      #(is (= "/r/_variants/x/ref=main"
+              (store/get-out-dir {:root "/r" :repo "x" :variant [] :canonical? true})))))
+  (testing "a detached commit with no remote branch falls back to the short sha"
+    (with-git {:branch nil :sha-short "abc1234" :default-branch "main"}
+      #(is (= "/r/_variants/x/ref=abc1234"
+              (store/get-out-dir {:root "/r" :repo "x" :variant [] :canonical? false})))))
+  (testing "host axes prefix the ref, in order"
+    (with-git {:branch "feature" :sha-short "abc1234" :default-branch "main"}
+      #(is (= "/r/_variants/x/region=eu/tier=gold/ref=feature"
+              (store/get-out-dir {:root "/r" :repo "x"
+                                  :variant [[:region "eu"] [:tier "gold"]]
+                                  :canonical? false})))))
+  (testing "a non-git checkout on the write path is refused"
+    (with-git nil
+      #(is (thrown? clojure.lang.ExceptionInfo
+                    (store/get-out-dir {:root "/r" :repo "x" :variant [] :canonical? true}))))))
+
+(deftest out-dir-variant-validation-test
+  (testing "bad axis names are refused before any git read"
+    (doseq [axis [:ref :Bad-axis :-bad :a_b :region/eu]]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (store/get-out-dir {:root "/r" :repo "x"
+                                       :variant [[axis "v"]] :canonical? false}))
+          (str "expected a throw for axis " (pr-str axis)))))
+  (testing "a blank value is refused"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (store/get-out-dir {:root "/r" :repo "x"
+                                     :variant [[:region ""]] :canonical? false}))))
+  (testing "values that encode to . or .. are refused"
+    (doseq [v ["." ".."]]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (store/get-out-dir {:root "/r" :repo "x"
+                                       :variant [[:region v]] :canonical? false}))))))
+
+(deftest out-dir-repo-validation-test
+  (testing "a repo path that cannot round-trip through discovery is refused"
+    (doseq [repo ["a=b" "a/../b" "a//b" "a/./b"]]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (store/get-out-dir {:root "/r" :repo repo}))
+          (str "expected a throw for repo " (pr-str repo)))))
+  (testing "an explicit :dir wins, so a bad repo beside it is irrelevant"
+    (is (= "/tmp/annos" (store/get-out-dir {:dir "/tmp/annos" :repo "a=b"})))))
+
 (deftest artifact-path-test
-  (testing "every artifact resolves under the branch dir when one is set"
-    (let [opts {:dir "/tmp/annos" :branch "spike"}]
+  (testing "every artifact resolves under the variant dir when one is set"
+    (let [opts {:root "/r" :repo "x" :variant [[:ref "spike"]]}]
       (doseq [k (keys store/artifact-files)]
-        (is (= (str (io/file "/tmp/annos/branches/spike" (get store/artifact-files k)))
+        (is (= (str (io/file "/r/_variants/x/ref=spike" (get store/artifact-files k)))
                (store/get-artifact-path k opts))))))
   (testing "an unknown artifact key is rejected by the schema"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"does not match schema"

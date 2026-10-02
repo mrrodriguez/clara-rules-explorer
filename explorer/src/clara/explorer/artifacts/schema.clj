@@ -343,13 +343,22 @@
   fold order."
   (s/enum :auto :memory :agent))
 
+(s/defschema Variant
+  "An ordered vector of `[axis value]` pairs naming a unit's variant, in
+  directory-nesting order. A variant unit always ends with `[:ref …]` — the
+  checkout ref the artifacts were generated from — and the pairs before it are
+  the host's own axes, in the host's own nesting order. A mainline unit carries
+  none."
+  [[(s/one s/Keyword "axis") (s/one s/Str "value")]])
+
 (s/defschema ArtifactOpts
   "Where a run's artifacts live, and the map every artifact step is threaded.
 
-  An explicit `:dir`, or a `:repo` subdir of `:root`; `:branch` nests the whole
-  set under `<base>/branches/<label>/`.
-  `clara.explorer.artifacts.store/get-out-dir` resolves them, and it is
-  the one place a bad combination throws.
+  An explicit `:dir`, or a `:repo` subdir of `:root`; `:variant` (the host's
+  axes, in nesting order, may be empty) and `:canonical?` (the host's claim that
+  those axes are mainline) place the unit under `_variants/<repo>/…` or
+  `<root>/<repo>/`. `clara.explorer.artifacts.store/get-out-dir` resolves
+  them, and it is the one place a bad combination throws.
 
   `:root` is the caller's artifact root. This library reads no environment
   variable to find one — a host that keeps its artifacts under some `$…_HOME`
@@ -362,7 +371,9 @@
   {(s/optional-key :root) s/Str
    (s/optional-key :dir) s/Str
    (s/optional-key :repo) s/Str
-   (s/optional-key :branch) (s/maybe s/Str)
+   (s/optional-key :variant) Variant
+   (s/optional-key :canonical?) s/Bool
+   (s/optional-key :repo-path) s/Str
    s/Any s/Any})
 
 (s/defschema StackOpts
@@ -599,6 +610,7 @@
     :sha s/Str
     :sha-short s/Str
     :branch (s/maybe s/Str)
+    :default-branch (s/maybe s/Str)
     :working-tree (s/enum "clean" "dirty")}))
 
 (s/defschema NamespacesFn
@@ -629,7 +641,6 @@
   (merge (dissoc ArtifactOpts (s/optional-key :repo))
          ProvenanceOpts
          {:repo s/Str
-          (s/optional-key :repo-path) s/Str
           (s/optional-key :namespaces) [(s/cond-pre s/Str s/Symbol)]
           (s/optional-key :namespaces-fn) NamespacesFn
           (s/optional-key :session) SessionOrRulebase
@@ -657,9 +668,10 @@
 ;; ===========================================================================
 
 (s/defschema UnitRef
-  "One artifact unit: a `:repo` subdir under a registry `:root`, optionally
-  nested under `<repo>/branches/<label>/` as `:branch`. `:repo` is the path
-  relative to the root, `/`-joined; `:branch` is a caller label, never git's.
+  "One artifact unit: a `:repo` path under a registry `:root`, optionally a
+  `:variant` — the ordered `[axis value]` vector, always ending in `[:ref …]`,
+  naming a unit under `_variants/<repo>/<variant…>/`. `:repo` is the path
+  relative to the root, `/`-joined; a mainline unit carries no `:variant`.
 
   `:namespaces`, when present, narrows the unit to the named namespaces for the
   merge — a filter the caller supplies, not a claim about what the unit covers.
@@ -670,7 +682,7 @@
   Addressed by the same pair
   `clara.explorer.artifacts.store/get-out-dir` already resolves."
   {:repo s/Str
-   (s/optional-key :branch) (s/maybe s/Str)
+   (s/optional-key :variant) Variant
    (s/optional-key :namespaces) [(s/cond-pre s/Str s/Symbol)]})
 
 (s/defschema ComposePersistOptions
@@ -704,6 +716,14 @@
    :rulebase-analysis-digest s/Str
    :manifest s/Str})
 
+(s/defschema VariantMismatch
+  "A variant unit whose decoded directory path disagrees with its manifest's
+  `:variant` — e.g. a directory renamed by hand. `:path` is the directory's
+  decoded `:variant` (nil for a mainline dir), `:manifest` the manifest's.
+  Consumed by `clara.explorer.artifacts.registry/get-variant-mismatches`."
+  {:path (s/maybe Variant)
+   :manifest (s/maybe Variant)})
+
 (s/defschema UnitInfo
   "What
   `clara.explorer.artifacts.registry/discover` records per unit: its
@@ -711,16 +731,22 @@
   `:dropped` key set (the merge's shape), the layer ids the manifest records,
   the manifest's `:created` / `:sha` / `:history` head, and — for an aggregate
   unit — the manifest's `:analysis-run :mode` and the units it was composed
-  from (`:analysis-run :units`). Absence of `:mode` marks a source unit; the
-  `:mode` value is host-set and open."
+  from (`:analysis-run :units`). A variant whose directory disagrees with its
+  manifest's `:variant` carries a `:variant-mismatch`. Absence of `:mode`
+  marks a source unit; the `:mode` value is host-set and open.
+
+  Validated at build time by `clara.explorer.artifacts.registry/->unit-info`,
+  so a key the walk records but this schema omits fails the test suite rather
+  than drifting silently."
   (merge UnitRef
          {:dir s/Str
           :artifacts #{ArtifactKey}
           (s/optional-key :slim-dropped) (s/maybe #{s/Keyword})
-          (s/optional-key :layer-ids) {s/Keyword s/Any}
+          (s/optional-key :layer-ids) (s/maybe {s/Keyword s/Any})
           (s/optional-key :manifest-head) {s/Keyword s/Any}
           (s/optional-key :mode) s/Any
-          (s/optional-key :composed-from) [UnitRef]}))
+          (s/optional-key :composed-from) [UnitRef]
+          (s/optional-key :variant-mismatch) VariantMismatch}))
 
 (s/defschema CompatibilityReport
   "What

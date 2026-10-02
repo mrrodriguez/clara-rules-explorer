@@ -3,14 +3,17 @@
   a unit's string handle, and the `:namespaces` narrowing of one unit's slim analysis.
 
    `clara.explorer.artifacts.registry` requires this namespace for the same definitions,
-  so the JVM and bb cannot drift on how a unit is named or narrowed.")
+  so the JVM and bb cannot drift on how a unit is named or narrowed."
+  (:require [clara.explorer.artifacts.layout :as layout]))
 
 (defn unit-key
-  "The string handle for a unit ref: `<repo>[@<branch>]`. A `UnitRef` map is not
-  a comparable map key under the library's own `sorted-map` convention, so maps
-  keyed by unit use this."
-  [{:keys [repo branch]}]
-  (str repo (when (seq branch) (str "@" branch))))
+  "The string handle for a unit ref: `<repo>`, or `<repo>@<encoded variant path>`
+  for a variant unit. The variant is encoded with `layout/variant->path`, so a
+  `@` or `/` inside a value never breaks the split a reader does on the last
+  `@`. A `UnitRef` map is not a comparable map key under the library's own
+  `sorted-map` convention, so maps keyed by unit use this."
+  [{:keys [repo variant]}]
+  (str repo (when (seq variant) (str "@" (layout/variant->path variant)))))
 
 (defn narrow-analysis
   "Narrow `analysis` to `unit`'s `:namespaces` filter, when present: `:rules`

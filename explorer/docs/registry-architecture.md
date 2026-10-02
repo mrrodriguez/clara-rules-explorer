@@ -9,12 +9,12 @@ why the library offers three merge modes rather than one.
 Read `persisted-artifacts.md` first if you do not already know what a unit, a
 layer, a slim analysis, or the manifest are; this doc assumes that vocabulary.
 The questions the registry exists to answer span units: *who consumes the type
-this set produces*, *what does this branch do to the others*, and *what does
+this set produces*, *what does this variant do to the others*, and *what does
 this set of sets look like as one rulebase*.
 
 ## The one join key, and the three relations over it
 
-Every unit is addressed by `:repo` and optionally `:branch`; the **join key
+Every unit is addressed by `:repo` and optionally `:variant`; the **join key
 between units is the fact type name**. Two units using one name for two
 different things produce a wrong join, and nothing here can detect that. It is
 the assumption the whole registry states and does not verify — the hierarchy
@@ -68,7 +68,7 @@ the distinction the registry exists to draw.
 
 | mode | entry point | invariant |
 | --- | --- | --- |
-| **fold layers** | `compose/fold-layers` | union semantics; no collision concept. Layer ids are qualified `<repo>[@<branch>]/<layer-id>` so `:provenance` names whose layer claimed what. |
+| **fold layers** | `compose/fold-layers` | union semantics; no collision concept. Layer ids are qualified `<repo>[@<variant>]/<layer-id>` so `:provenance` names whose layer claimed what. |
 | **compose** | `compose/->composed-analysis` | the caller asserts the units are components of ONE rulebase. Productions merge by fq name, a name claimed by two units is refused, and the dep-graph is recomputed so cross-unit edges exist. |
 | **federate** | `federate/->index` | the caller asserts the units are NOT claimed to compose. Productions stay per-unit; disagreements are recorded (`:hierarchy :conflicts`), never resolved. |
 
@@ -123,7 +123,7 @@ join at production granularity, over the same closed `:ancestors`.
   nothing is written on the path to an answer. `federate/persist!` +
   `federate/read-index` / `federate/read-digest` exist only for handing a file
   to a reader; `federate/->digest` reduces the index to what fits in a head.
-  `federate/diff` compares two indexes (the branch-vs-mainline question);
+  `federate/diff` compares two indexes (the variant-vs-mainline question);
   `federate/grade` checks the union against a composed reference.
 
 ## Namespace map

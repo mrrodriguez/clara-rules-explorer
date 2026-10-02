@@ -388,11 +388,14 @@ function M.bb_script()
   return vim.fn.fnamemodify(this_dir .. "editor_client.bb", ":p")
 end
 
---- Repo names (relative to ROOT) of every unit under ROOT, sorted. Discovery
--- lives in `bb editor_client.bb --list-units` — the one place that knows the
--- registry layout — so this function only runs the subprocess and decodes the
--- EDN vector it prints. Mirrors `editor/emacs/clara-explorer.el`'s
--- `clara-explorer--bb-list-unit-repos`.
+--- `{key=…, entry=…}` maps for every unit under ROOT, sorted by key. `key` is
+-- the display unit-key (`repo` or `repo@variant path`); `entry` the serialized
+-- `UnitRef` EDN for a `:units` selection entry, ready to splice into either
+-- the bb client or a running server's `:registry` config. Discovery and EDN
+-- serialization live in `bb editor_client.bb --list-units` — the one place
+-- that knows the registry layout — so this function only runs the subprocess
+-- and decodes the EDN vector it prints. Mirrors
+-- `editor/emacs/clara-explorer.el`'s `clara-explorer--bb-list-unit-repos`.
 function M.bb_list_unit_repos(root)
   local script = M.bb_script()
   if vim.fn.filereadable(script) ~= 1 then
@@ -428,21 +431,6 @@ function M.bb_list_unit_repos(root)
   return repos
 end
 
---- EDN for the `:units` entry named by a unit-key (`repo` or `repo@branch`).
--- Mirrors `editor/emacs/clara-explorer.el`'s `clara-explorer--unit-edn`.
-local function unit_edn(unit_key)
-  local repo, branch
-  local at = unit_key:find("@", 1, true)
-  if at then
-    repo = unit_key:sub(1, at - 1)
-    branch = unit_key:sub(at + 1)
-  else
-    repo = unit_key
-  end
-  if branch then return string.format("{:repo %s :branch %s}", M.edn_string(repo), M.edn_string(branch)) end
-  return string.format("{:repo %s}", M.edn_string(repo))
-end
-
 --- Prompt for a single-unit registry selection under the registry root.
 -- Calls `cb(selection_edn)` with the EDN map string, or `cb(nil)` when
 -- cancelled/absent. Mirrors `editor/emacs/clara-explorer.el`'s
@@ -463,12 +451,20 @@ function M.bb_prompt_selection(cb)
     cb(nil)
     return
   end
-  vim.ui.select(repos, { prompt = "Unit (under " .. root .. "): " }, function(unit_key)
+  local keys = {}
+  for _, repo in ipairs(repos) do
+    keys[#keys + 1] = repo.key
+  end
+  vim.ui.select(keys, { prompt = "Unit (under " .. root .. "): " }, function(unit_key)
     if not unit_key then
       cb(nil)
       return
     end
-    cb(string.format("{:root %s :units [%s]}", M.edn_string(root), unit_edn(unit_key)))
+    local entry
+    for _, repo in ipairs(repos) do
+      if repo.key == unit_key then entry = repo.entry end
+    end
+    cb(string.format("{:root %s :units [%s]}", M.edn_string(root), entry))
   end)
 end
 

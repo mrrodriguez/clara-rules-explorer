@@ -312,10 +312,10 @@
             :working-tree "clean"}
    :analysis-run {:mode :compose
                   :units [{:repo "demo-a" :sha "111aaaa" :created status-today}
-                          {:repo "demo-b" :branch "x" :sha "222bbbb" :created status-today}]}
+                          {:repo "demo-b" :variant [[:ref "x"]] :sha "222bbbb" :created status-today}]}
    :staleness {:policy "review-when-any-source-sha-drifts"
                :sources {"demo-a" {:sha "111aaaa" :created status-today}
-                         "demo-b@x" {:sha "222bbbb" :created status-today}}}
+                         "demo-b@ref=x" {:sha "222bbbb" :created status-today}}}
    :history []})
 
 (defn- run-status
@@ -371,8 +371,9 @@
                                              :branch nil :working-tree "clean"})))
                           (when b
                             (write-status-manifest!
-                             (str (io/file root "demo-b" "branches" "x"))
-                             (assoc (status-source-manifest) :repo "demo-b" :branch "x"
+                             (str (io/file root "_variants" "demo-b" "ref=x"))
+                             (assoc (status-source-manifest) :repo "demo-b"
+                                    :variant [[:ref "x"]]
                                     :source {:working-tree-notes "" :remote nil
                                              :sha b :sha-short (subs b 0 7)
                                              :branch nil :working-tree "clean"}))))
@@ -382,17 +383,17 @@
           (let [out (collapse-whitespace (run-status dir))]
             (is (str/includes? out "kind aggregate unit (mode :compose)"))
             (is (str/includes? out "demo-a: current"))
-            (is (str/includes? out "demo-b@x: current"))
+            (is (str/includes? out "demo-b@ref=x: current"))
             (is (str/includes? out "verdict current")))
           (write-src "111aaaa" "9999999")
           (let [out (collapse-whitespace (run-status dir))]
-            (is (str/includes? out "demo-b@x: sha-drift 222bbbb -> 9999999"))
+            (is (str/includes? out "demo-b@ref=x: sha-drift 222bbbb -> 9999999"))
             (is (str/includes? out "verdict stale")))
           (write-src "111aaaa" nil)
-          (let [dir-file (io/file root "demo-b")]
+          (let [dir-file (io/file root "_variants" "demo-b")]
             (doseq [f (reverse (file-seq dir-file))] (io/delete-file f true)))
           (let [out (collapse-whitespace (run-status dir))]
-            (is (str/includes? out "demo-b@x: missing"))
+            (is (str/includes? out "demo-b@ref=x: missing"))
             (is (str/includes? out "verdict stale"))))
 
         (testing "--checkout on a composed unit fails"

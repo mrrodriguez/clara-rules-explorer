@@ -88,15 +88,17 @@
 
 (defn- write-manifest!
   ([dir repo] (write-manifest! dir repo {}))
-  ([dir repo analysis-run]
+  ([dir repo analysis-run] (write-manifest! dir repo analysis-run nil))
+  ([dir repo analysis-run variant]
    (let [file (io/file dir (:manifest layout/artifact-files))]
      (io/make-parents file)
-     (edn-io/write-edn-file! file {:repo repo
-                                   :generated-by "federate-test"
-                                   :created "2025-01-01"
-                                   :analysis-run (merge {:layer-ids store/layer-artifacts}
-                                                        analysis-run)
-                                   :history []})
+     (edn-io/write-edn-file! file (cond-> {:repo repo
+                                           :generated-by "federate-test"
+                                           :created "2025-01-01"
+                                           :analysis-run (merge {:layer-ids store/layer-artifacts}
+                                                                analysis-run)
+                                           :history []}
+                                    variant (assoc :variant variant)))
      (str file))))
 
 (defn- write-analysis! [dir rules fact-types]
@@ -315,19 +317,19 @@
             :hierarchy {:conflicts-added [] :conflicts-resolved []}}
            (federate/diff index index)))))
 
-(deftest diff-branch-variant-reports-only-touched-edges-and-types-test
+(deftest diff-variant-reports-only-touched-edges-and-types-test
   (let [dir (temp-dir)]
     (try
       (let [src-a (io/file dir "src-a")
-            src-a-branch (io/file dir "src-a" "branches" "feature-x")
+            src-a-variant (io/file dir "_variants" "src-a" "ref=feature-x")
             src-b (io/file dir "src-b")]
         (write-manifest! src-a "src-a")
         (write-analysis! src-a
                          {"a.ns/insert-t" {:ns "a.ns" :name "a.ns/insert-t"
                                            :lhs-types [] :insert-types ["T"] :retract-types []}}
                          {"T" {:name "T" :ns nil :ancestors []}})
-        (write-manifest! src-a-branch "src-a")
-        (write-analysis! src-a-branch
+        (write-manifest! src-a-variant "src-a" {} [[:ref "feature-x"]])
+        (write-analysis! src-a-variant
                          {"a.ns/insert-t2" {:ns "a.ns" :name "a.ns/insert-t2"
                                             :lhs-types [] :insert-types ["T2"] :retract-types []}}
                          {"T2" {:name "T2" :ns nil :ancestors []}})
@@ -339,13 +341,13 @@
 
         (let [reg (registry/discover {:root dir})
               before (federate/->index reg [{:repo "src-a"} {:repo "src-b"}])
-              after (federate/->index reg [{:repo "src-a" :branch "feature-x"}
+              after (federate/->index reg [{:repo "src-a" :variant [[:ref "feature-x"]]}
                                            {:repo "src-b"}])
               d (federate/diff before after)]
-          (testing "the selection reports the branch swap alongside the raw add/remove"
-            (is (= [{:repo "src-a" :from ["src-a"] :to ["src-a@feature-x"]}]
+          (testing "the selection reports the variant swap alongside the raw add/remove"
+            (is (= [{:repo "src-a" :from ["src-a"] :to ["src-a@ref=feature-x"]}]
                    (get-in d [:units :rebased])))
-            (is (= ["src-a@feature-x"] (get-in d [:units :added])))
+            (is (= ["src-a@ref=feature-x"] (get-in d [:units :added])))
             (is (= ["src-a"] (get-in d [:units :removed]))))
           (testing "only the touched edge disappears"
             (is (= [["src-a" "src-b"]] (get-in d [:unit-edges :removed])))
@@ -353,12 +355,12 @@
             (is (= {} (get-in d [:unit-edges :changed]))))
           (testing "the touched fact types record the producer/consumer change"
             (is (= {"T" {:producers {:added #{} :removed #{"src-a"}}}
-                    "T2" {:producers {:added #{"src-a@feature-x"} :removed #{}}}}
+                    "T2" {:producers {:added #{"src-a@ref=feature-x"} :removed #{}}}}
                    (:fact-types d))))
           (testing "the downstream entry point appears and the orphan moves"
             (is (= {"src-b" #{"T"}} (get-in d [:entry-points :added])))
             (is (= {} (get-in d [:entry-points :resolved])))
-            (is (= {"src-a@feature-x" #{"T2"}} (get-in d [:orphans :added])))
+            (is (= {"src-a@ref=feature-x" #{"T2"}} (get-in d [:orphans :added])))
             (is (= {} (get-in d [:orphans :resolved]))))
           (testing "hierarchy conflicts did not change"
             (is (= {:conflicts-added [] :conflicts-resolved []}

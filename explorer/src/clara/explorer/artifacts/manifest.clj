@@ -25,6 +25,7 @@
   `clara.explorer.artifacts.store/artifact-files`."
   (:require
    [clara.explorer.analyze :as analyze]
+   [clara.explorer.artifacts.layout :as layout]
    [clara.explorer.artifacts.schema :as schema]
    [clara.explorer.artifacts.shared.git :as shared-git]
    [clara.explorer.artifacts.store :as store]
@@ -125,12 +126,17 @@
   wrote it, is worse than one that refuses to be written. `:repo-path` defaults
   to the process's cwd.
 
-  `:branch` is recorded only on a branch run — its absence is what says \"this is
-  the mainline state of the world\" — and is the artifact-dir label, not git's own
-  branch, which stays under `:source`."
-  [{:keys [repo branch repo-path generated-by working-tree-notes change out-dir blocks]
+  `:variant` is recorded only on a variant unit — its absence is what says
+  \"this is the mainline state of the world\". On the write path (`:canonical?`
+  present) it is derived from the same git info `:source` reads; on the read
+  path it is the already-complete `[axis value]` vector, ending in `[:ref …]`."
+  [{:keys [repo variant canonical? repo-path generated-by working-tree-notes change out-dir blocks]
     :as opts} :- schema/ManifestOptions]
-  (let [today (str (java.time.LocalDate/now))]
+  (let [today (str (java.time.LocalDate/now))
+        git (get-git-info (or repo-path (System/getProperty "user.dir")))
+        variant (if (contains? opts :canonical?)
+                  (layout/write-variant variant canonical? git)
+                  variant)]
     (cond-> (merge
              {:repo repo
               :generated-by generated-by
@@ -138,7 +144,7 @@
               :updated today
               :artifacts store/unit-artifact-files
               :source (merge {:working-tree-notes (or working-tree-notes "")}
-                             (get-git-info (or repo-path (System/getProperty "user.dir"))))
+                             git)
               :analysis-run (->analysis-run-provenance opts)
               :staleness {:policy "review-when-sha-drifts" :max-age-days 90}
               :history [{:date today
@@ -146,10 +152,7 @@
                                      (str "Annotation generation via " generated-by "."))}]}
              (->pointer-blocks out-dir)
              blocks)
-      ;; Only on a branch run: its absence is what says "this is the mainline
-      ;; state of the world". The git branch of the checkout is separate, and
-      ;; stays under :source — this is the label that chose the directory.
-      branch (assoc :branch branch))))
+      variant (assoc :variant variant))))
 
 ;; ===========================================================================
 ;; write (preserve :created, append :history on re-runs)
@@ -165,15 +168,17 @@
   existing manifest's `:created` and appends this run's entry to `:history`.
   Returns the written file path.
 
-  `opts` is a `schema/ManifestOptions`; its `:root`/`:dir`/`:repo`/`:branch`
-  resolve the directory through `store/get-out-dir`, the same way every other
-  artifact does."
+  `opts` is a `schema/ManifestOptions`; its `:root`/`:dir`/`:repo`/`:variant`/
+  `:canonical?` resolve the directory through `store/get-out-dir`, the same way
+  every other artifact does."
   [opts :- schema/ManifestOptions]
-  ;; The whole opts map, so `:branch` lands the manifest in the same directory
-  ;; as the layers it describes rather than at the mainline base.
+  ;; The whole opts map, so `:variant`/`:canonical?` land the manifest in the
+  ;; same directory as the layers it describes rather than at the mainline base.
   (let [dir (store/get-out-dir opts)
         _ (.mkdirs (io/file dir))
-        file (store/get-artifact-file :manifest opts)
+        ;; Built from `dir` rather than `store/get-artifact-file`, which would
+        ;; re-derive the directory (and re-read git on the write path).
+        file (io/file dir (:manifest store/artifact-files))
         fresh (->manifest (assoc opts :out-dir dir))
         existing (read-existing file)
         manifest (if existing

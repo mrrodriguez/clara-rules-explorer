@@ -370,7 +370,7 @@
     (cond-> {:repo (:repo unit)
              :sha (:sha head)
              :created (:created head)}
-      (:branch unit) (assoc :branch (:branch unit)))))
+      (:variant unit) (assoc :variant (:variant unit)))))
 
 (defn- ->source-staleness
   "`{unit-key {:sha … :created …}}` — the per-source shas a composed unit's
@@ -378,11 +378,11 @@
   entries so the two blocks cannot disagree."
   [composed-units]
   (into (sorted-map)
-        (map (fn [{:keys [repo branch sha created]}]
+        (map (fn [{:keys [repo variant sha created]}]
                [(shared-registry/unit-key (cond-> {:repo repo}
-                                            branch (assoc :branch branch)))
+                                            variant (assoc :variant variant)))
                 (cond-> {:sha sha :created created}
-                  branch (assoc :branch branch))]))
+                  variant (assoc :variant variant))]))
         composed-units))
 
 (s/defn compose-persist! :- schema/ComposePersistResult
