@@ -6,9 +6,10 @@
 ;;   bb bin/editor_client.bb '<selection-edn>' '<navigate-input-edn>'
 ;;   bb bin/editor_client.bb --list-units '<registry-root>'
 ;;
-;; `--list-units` prints the unit keys (`repo`, or `repo@<variant path>` for a variant) of every
-;; unit under the root, sorted — the registry discovery the editors used to do themselves, so the
-;; registry layout has one owner here.
+;; `--list-units` prints `[{:key :entry} …]` for every unit under the root, sorted by key:
+;; `:key` is the display unit-key (`repo`, or `repo@<variant path>` for a variant), `:entry` the
+;; serialized `UnitRef` EDN ready to splice into a `:units` selection for either the bb client
+;; or a running server's `:registry` config.
 ;;
 ;; <selection-edn> is a registry selection `{:root "…" :units [{:repo "…"}]}` — the same shape the
 ;; server's `:registry` mode takes; the editor resolves the `CLARA_RULES_EXPLORER_REGISTRY` root
@@ -52,22 +53,32 @@
   [root {:keys [repo variant]}]
   (layout/->unit-dir {:root (str root) :repo repo :variant variant}))
 
-(defn- ->unit-key
-  "A unit's registry-relative path segments → its unit-key string
-  (`repo[@variant path]`), or nil for a path that does not parse as a unit.
+(defn- ->unit-entry
+  "A unit's registry-relative path segments → `{:key entry}`: `:key` is the
+  display unit-key (`repo` or `repo@variant path`), `:entry` the serialized
+  `UnitRef` map for a `:units` selection entry. nil for a path that does not
+  parse as a unit.
+
   The split is `layout/segments->unit-ref` — the same function the JVM
   `clara.explorer.artifacts.registry` walk uses — so the two runtimes cannot
   drift on how `_variants/` is read."
   [segments]
-  (some-> (layout/segments->unit-ref segments) shared-registry/unit-key))
+  (when-let [ref (layout/segments->unit-ref segments)]
+    {:key (shared-registry/unit-key ref)
+     :entry (pr-str ref)}))
 
 (defn- list-unit-repos
-  "Every unit under `root`, as unit-key strings (`repo` or `repo@variant path`), sorted. Discovery is the
-  directory walk the editors previously did themselves: find every
-  `rules-inspect-manifest.edn` and name the unit by its directory relative to the root. The
-  registry split has one owner (`layout/segments->unit-ref`, shared with the JVM walk); this
-  script supplies only the babashka directory walk, and the editors only prompt over the
-  returned list."
+  "Every unit under `root`, as `[{:key entry}]` maps sorted by key. `:key` is
+  the display unit-key (`repo` or `repo@variant path`); `:entry` the serialized
+  `UnitRef` EDN for a `:units` selection entry — ready to splice into
+  `{:root … :units […]}` for either the babashka client or a running server's
+  `:registry` config.
+
+  Discovery is the directory walk the editors previously did themselves: find
+  every `rules-inspect-manifest.edn` and name the unit by its directory
+  relative to the root. The registry split has one owner
+  (`layout/segments->unit-ref`, shared with the JVM walk); this script supplies
+  only the babashka directory walk and the EDN serialization."
   [root]
   (let [root-file (fs/canonicalize root)]
     (when-not (fs/directory? root-file)
@@ -75,8 +86,8 @@
     (->> (fs/glob root-file "**/rules-inspect-manifest.edn")
          (keep (fn [manifest]
                  (let [rel (fs/unixify (fs/relativize root-file (fs/parent manifest)))]
-                   (->unit-key (str/split rel #"/")))))
-         sort
+                   (->unit-entry (str/split rel #"/")))))
+         (sort-by :key)
          vec)))
 
 (defn- read-part-or-nil

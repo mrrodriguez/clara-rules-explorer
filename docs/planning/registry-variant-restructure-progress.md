@@ -58,8 +58,9 @@ changes (§8).
 - [x] `artifacts.shared.status` — unit-key parsing + `unit` line print the
   variant path; `:variant` replaces `:label`
 - [x] `bin/annotations_report.bb` — `status` renders the variant path
-- [x] `bin/editor_client.bb` — discovery uses `layout/segments->unit-ref`
-  (no local split)
+- [x] `bin/editor_client.bb` — discovery uses `layout/segments->unit-ref`;
+  `--list-units` returns `[{:key :entry}]` (display key + serialized `UnitRef`
+  EDN, ready to splice into a `:units` selection)
 - [x] `docs/persisted-artifacts.md`, `docs/registry-architecture.md` — describe
   `_variants/`, axes, `ref`, encoding
 - [x] Tests updated (`layout`, `store`, `registry`, `shared/status`,
@@ -91,3 +92,10 @@ changes (§8).
   private to `registry` (plan §8 listed it under `registry`): the babashka
   editor client needs the same split and cannot `require` the JVM registry, so
   the pure split is shared in `layout`, exactly like the encoding already is.
+- The editor transports (Emacs + Neovim) now splice the serialized `UnitRef`
+  entry `--list-units` returns instead of hand-building `:branch` from a
+  `repo@…` key — so a variant selection is correct against both the babashka
+  client and a running server's `:registry` config. Emacs `make test-tier1` +
+  `make check-elisp` pass (Tier 2 via eldev could not fetch deps: ELPA proxy
+  auth); Neovim `make test` passes (stylua/selene not installed, so its
+  format/lint targets could not run here).

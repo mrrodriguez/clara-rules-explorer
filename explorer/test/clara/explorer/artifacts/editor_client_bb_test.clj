@@ -96,10 +96,14 @@
     (let [{:keys [exit out err]}
           (shell/sh "bb" (str editor-client-script) "--list-units" (registry-root))]
       (is (zero? exit) (str "editor_client.bb --list-units exited " exit ": " err))
-      (is (= ["composed/loan-app-plus-disposition"
-              "loan-app-ruleset"
-              "loan-disposition-ruleset"
-              "loan-disposition-ruleset@ref=feature%2Fnew-tax"]
+      (is (= [{:key "composed/loan-app-plus-disposition"
+               :entry "{:repo \"composed/loan-app-plus-disposition\"}"}
+              {:key "loan-app-ruleset"
+               :entry "{:repo \"loan-app-ruleset\"}"}
+              {:key "loan-disposition-ruleset"
+               :entry "{:repo \"loan-disposition-ruleset\"}"}
+              {:key "loan-disposition-ruleset@ref=feature%2Fnew-tax"
+               :entry "{:repo \"loan-disposition-ruleset\", :variant [[:ref \"feature/new-tax\"]]}"}]
              (edn/read-string out))))))
 
 (deftest editor-client-composes-multi-unit-selection-and-matches-rehydrate-test
