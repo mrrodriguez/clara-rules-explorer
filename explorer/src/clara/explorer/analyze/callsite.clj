@@ -510,8 +510,10 @@
           (or (< row er) (and (= row er) (< col ec)))))))
 
 (defn- first-usage-index-at-or-after
-  "Binary search: first index in `[row col]`-sorted `sorted-usages` at or
-   after `[srow scol]`."
+  "Binary search: first index in `[row col]`-sorted `sorted-usages` (a vector)
+   at or after `[srow scol]`.  Vectors make `count`/`nth` O(1) — on the seq
+   `sort-by` returns this becomes O(n) per probe, so the span-index map (see
+   `index/usages-by-filename`) materializes its groups as vectors."
   [sorted-usages srow scol]
   (loop [lo 0 hi (count sorted-usages)]
     (if (>= lo hi)
@@ -525,21 +527,20 @@
           (recur (inc mid) hi))))))
 
 (defn- usages-in-span
-  "Entries of `[row col]`-sorted `sorted-usages` (one file) whose start
-   position lies in `span`. Nil-safe on malformed spans."
+  "Entries of `[row col]`-sorted `sorted-usages` (one file, a vector) whose
+   start position lies in `span` (`:end` exclusive).  Two binary searches
+   bound the slice, so the cost is O(log n + k) in the usages rather than an
+   O(n) `drop` after an O(n) search.  Nil-safe on malformed spans."
   [sorted-usages {:keys [start end] :as _span}]
   (if (or (nil? start) (nil? end))
     []
     (let [[sr sc] start
           [er ec] end
-          starts-before-end? (fn [u]
-                               (let [r (or (:row u) 0)
-                                     c (or (:col u) 0)]
-                                 (or (< r er) (and (= r er) (< c ec)))))]
-      (->> sorted-usages
-           (drop (first-usage-index-at-or-after sorted-usages sr sc))
-           (take-while starts-before-end?)
-           (into [])))))
+          from (first-usage-index-at-or-after sorted-usages sr sc)
+          to (first-usage-index-at-or-after sorted-usages er ec)]
+      (if (<= from to)
+        (subvec sorted-usages from to)
+        []))))
 
 (defn- arg-span-set
   "The ephemeral span set for one boundary-call argument: the boundary usage
