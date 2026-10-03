@@ -211,7 +211,7 @@
           arg2 (read-arg)
           ;; Mirrors the emission canonicalization in
           ;; `clara.explorer.analyze.callsite/resolve-boundary-callsites`.
-          source-str #(-> % utils/canonicalize-gensyms pr-str)
+          source-str #(-> % utils/canonicalize-minted-names pr-str)
           cs1 {:ns-name-sym 'demo.rules
                :constructor-sym 'demo/->fact
                :source-str (source-str arg1)}
@@ -225,6 +225,32 @@
       (is (= (ann.callsite/callsite-id cs1)
              (ann.callsite/callsite-id cs2))
           "callsite-id is stable when its source-str carries a reader gensym"))))
+
+(deftest test-digest-suffix-callsite-stability
+  (testing "a callsite whose argument is a digest-suffixed local yields the same :source-str and :callsite-id for two different digests of the same prefix"
+    (let [read-arg (fn [line]
+                     (let [get-lines (fn [_ns _filename] [line])
+                           usage {:row 1 :col 1 :end-row 1 :end-col (inc (count line))
+                                  :from 'demo.rules :filename "demo/rules.clj"}]
+                       (-> usage (kondo/read-boundary-args get-lines) first)))
+          arg1 (read-arg "(insert! monthly-income5f0c1a7e9b2d4c3a8e6f1b0d9c7a2e4f)")
+          arg2 (read-arg "(insert! monthly-income0b9e8d7c6a5f4e3d2c1b0a9f8e7d6c5b)")
+          ;; Mirrors the emission canonicalization in
+          ;; `clara.explorer.analyze.callsite/resolve-boundary-callsites`.
+          source-str #(-> % utils/canonicalize-minted-names pr-str)
+          cs1 {:ns-name-sym 'demo.rules
+               :constructor-sym 'demo/->fact
+               :source-str (source-str arg1)}
+          cs2 {:ns-name-sym 'demo.rules
+               :constructor-sym 'demo/->fact
+               :source-str (source-str arg2)}]
+      (is (some? arg1))
+      (is (not= arg1 arg2)
+          "sanity: raw reads differ before canonicalization")
+      (is (= (:source-str cs1) (:source-str cs2)))
+      (is (= (ann.callsite/callsite-id cs1)
+             (ann.callsite/callsite-id cs2))
+          "callsite-id is stable when its source-str carries a digest-suffixed local"))))
 
 (deftest test-auto-resolved-keywords-resolve-in-callsite-ns
   (let [resolver (fn [{:keys [arg-form]}]

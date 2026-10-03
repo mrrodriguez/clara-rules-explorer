@@ -143,7 +143,7 @@
         (let [out (run-report "help")]
           (is (str/includes? out "usage: bb annotations_report.bb"))
           (doseq [sub ["summary" "gaps" "types" "producers" "consumers"
-                       "hierarchy" "rule" "edges" "curated" "layers" "status" "help"]]
+                       "hierarchy" "rule" "edges" "curated" "layers" "status" "diff" "help"]]
             (is (str/includes? out sub)))
           (is (str/includes? out "<type>"))
           (is (str/includes? out "<fq-name>"))
@@ -270,6 +270,70 @@
           (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
           (is (str/includes? out "3 producer rule(s)"))
           (is (str/includes? out "(0 exact, 3 via descendants)")))))))
+
+(deftest bb-report-diff-test
+  (if-not (runnable?)
+    (println "SKIPPING bb-report-diff-test — babashka is not on PATH, or the script moved:"
+             (str report-script))
+    (let [root (registry-root)
+          disposition (str (io/file root "loan-disposition-ruleset"))
+          variant (str (io/file root "_variants" "loan-disposition-ruleset"
+                                "ref=feature%2Fnew-tax"))
+          app (str (io/file root "loan-app-ruleset"))
+          composed (str (io/file root "composed" "loan-app-plus-disposition"))
+          run (fn [& args]
+                (let [{:keys [exit out err]} (apply shell/sh "bb" (str report-script) args)]
+                  (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
+                  out))]
+      (testing "variant diff: the same session at a variant address — no differences"
+        (let [out (run disposition "diff" variant)]
+          (is (str/includes? out "before loan-disposition-ruleset "))
+          (is (str/includes? out "after loan-disposition-ruleset@ref=feature%2Fnew-tax "))
+          (is (str/includes? out "no differences"))))
+      (testing "composed diff: the disposition namespace lands under :scope"
+        (let [out (run app "diff" composed)]
+          (is (str/includes? out "scope namespaces (only after):"))
+          (is (str/includes? out "clara.explorer.test.rules.loan-outcome-notices"))
+          (is (str/includes? out "app-outcome-approved? [unit]"))))
+      (testing "--edn prints the diff value"
+        (let [result (edn/read-string (run disposition "diff" variant "--edn"))]
+          (is (= "loan-disposition-ruleset" (get-in result [:before :repo])))
+          (is (= [[:ref "feature/new-tax"]] (get-in result [:after :variant])))
+          (is (empty? (get-in result [:productions :changed])))))
+      (testing "--rule prints one production's before and after"
+        (let [out (run app "diff" composed "--rule" "digest-doc-meta")]
+          (is (str/includes? out "digest-doc-meta-rule [unit]"))
+          (is (str/includes? out "before: nil"))
+          (is (str/includes? out "after:  \"loan-app-ruleset\""))))
+      (testing "a missing after dir fails loudly"
+        (let [{:keys [exit out err]}
+              (shell/sh "bb" (str report-script) app "diff" (str (io/file root "nope")))]
+          (is (not (zero? exit)))
+          (is (str/includes? (str out err) "missing unit manifest")))))))
+
+(deftest bb-report-diff-rule-skips-full-diff-test
+  (if-not (runnable?)
+    (println "SKIPPING bb-report-diff-rule-skips-full-diff-test — babashka is not on PATH, or the script moved:"
+             (str report-script))
+    (do
+      (write-artifacts!)
+      ;; The temp unit carries no manifest; write a minimal one so the full
+      ;; read gets past it. dep-graph.edn serves only the full diff: removing
+      ;; it must break the full report while --rule still answers.
+      (spit (io/file (:dir *artifact-opts*) "rules-inspect-manifest.edn")
+            (pr-str {:repo "tmp"}))
+      (io/delete-file (io/file (:dir *artifact-opts*) "merged-rulebase-analysis" "dep-graph.edn"))
+      (let [dir (:dir *artifact-opts*)]
+        (testing "--rule answers without the dep-graph"
+          (let [{:keys [exit out err]}
+                (shell/sh "bb" (str report-script) dir "diff" dir "--rule" "full-rule")]
+            (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
+            (is (str/includes? out "a.ns/full-rule"))))
+        (testing "the full diff still needs it"
+          (let [{:keys [exit out err]}
+                (shell/sh "bb" (str report-script) dir "diff" dir)]
+            (is (not (zero? exit)))
+            (is (str/includes? (str out err) "dep-graph"))))))))
 
 (def ^:private status-today
   (str (java.time.LocalDate/now)))

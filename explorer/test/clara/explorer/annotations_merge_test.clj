@@ -483,7 +483,7 @@
   (testing "a canonicalized gensym source-str derives the same id in memory and from a persisted layer"
     (let [source-str (->  "#(= (:type %1) \"C\")"
                           read-string
-                          utils/canonicalize-gensyms
+                          utils/canonicalize-minted-names
                           pr-str)
           cs {:source-str source-str
               :ns-name-sym 'acme.pricing

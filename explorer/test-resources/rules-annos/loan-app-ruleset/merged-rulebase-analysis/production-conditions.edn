@@ -125,6 +125,7 @@
     :constraints "[\n]",
     :fact-binding :?extract-doc-meta,
     :bindings {:binding-keys [], :new-bindings []}}]},
+ "clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule" {:lhs []},
  "clara.explorer.test.rules.loan-doc-rules/doc-check-count" {:lhs [{:accumulator {:form "(clara.rules.accumulators/count)",
      :some-initial-value? true},
     :from {:type "clara.explorer.test.rules.loan_app_facts.DocumentCheck",

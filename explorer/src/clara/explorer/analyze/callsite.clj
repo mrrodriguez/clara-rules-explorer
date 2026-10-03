@@ -134,7 +134,7 @@
   (`:fact-type`/`:fact-type-spec`) are present only for callsites discovered through a var-alias
   chain (`:fact-type-spec-fn`)."
   [{:keys [rule direction usage alias-context]} arg-form]
-  (let [arg-form (utils/canonicalize-gensyms arg-form)]
+  (let [arg-form (utils/canonicalize-minted-names arg-form)]
     (cond-> {:rule rule
              :ns-name-sym (:from usage)
              :direction direction
@@ -458,7 +458,7 @@
                            (let [ctx' (assoc ctx :usage usage :alias-context alias-context)
                                  tokens (resolve-traced-arg traced ctx' (:from usage))
                                  dropped (get dropped-ctor-provenance idx)
-                                 entry (cond-> {:source-str (-> arg utils/canonicalize-gensyms pr-str)
+                                 entry (cond-> {:source-str (-> arg utils/canonicalize-minted-names pr-str)
                                                 :ns-name-sym (:from usage)
                                                 :filename (:filename usage)
                                                 :status (if (empty? tokens) :none :full)
@@ -618,7 +618,7 @@
               (assoc (->boundary-via boundary-fn-sym (first call-path) rule-to-boundary-path-for)
                      :boundary-to-constructor-path (conj (mapv (fn [v] {:var-name-sym v}) call-path)
                                                          {:var-name-sym ctor-sym})))
-        arg-form (utils/canonicalize-gensyms ctor-form)
+        arg-form (utils/canonicalize-minted-names ctor-form)
         resolver-ctx (cond-> {:constructor-sym ctor-sym
                               :arg-form arg-form
                               :ns-name-sym (:from ctor-usage)
