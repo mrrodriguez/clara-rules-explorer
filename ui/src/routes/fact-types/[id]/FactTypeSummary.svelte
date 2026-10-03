@@ -74,8 +74,6 @@
 			{#if factType.ancestors && factType.ancestors.length > 0}
 				<p class="text-muted small ps-2 mt-1 mb-0">
 					Ancestors are listed in hierarchy order (descendants before their own ancestors).
-					Italicized entries are hierarchy-only types with no rulebase usage — they are not
-					linkable.
 				</p>
 			{/if}
 		</div>
@@ -96,8 +94,7 @@
 			{#if factType.descendants && factType.descendants.length > 0}
 				<p class="text-muted small ps-2 mt-1 mb-0">
 					Descendants are listed in hierarchy order (direct descendants first, then their
-					descendants). Italicized entries are hierarchy-only types with no rulebase usage — they
-					are not linkable.
+					descendants).
 				</p>
 			{/if}
 		</div>

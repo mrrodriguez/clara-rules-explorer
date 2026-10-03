@@ -18,7 +18,7 @@
    [clojure.test :refer [deftest is testing use-fixtures]]
    [clara.explorer.artifacts.flow :as ann]
    [clara.explorer.artifacts.manifest :as manifest]
-   [clara.explorer.artifacts.shared.git :as shared-git]
+   [clara.explorer.artifacts.git :as git]
    [clara.explorer.artifacts.store :as store]
    [clara.explorer.artifacts.test-fixtures :as fixtures
     :refer [*artifact-opts* generated-annotations merged-insert-types
@@ -425,7 +425,7 @@
                    (into-array java.nio.file.attribute.FileAttribute [])))]
     (try
       (testing "canonical on the default branch is mainline: base dir, no :variant"
-        (with-redefs [shared-git/get-git-info (fn [_] (stub-git-info {:branch "main" :default-branch "main"}))
+        (with-redefs [git/get-git-info (fn [_] (stub-git-info {:branch "main" :default-branch "main"}))
                       core/->rulebase-analysis (fn [_ _ _] {:rules {}})]
           (let [opts {:root root :repo "x" :variant [] :canonical? true
                       :generated-by "flow-test" :session stub-rulebase :repo-path root}
@@ -436,7 +436,7 @@
             (is (.isFile (io/file dir "auto-gen-annotations.edn"))))))
 
       (testing "non-canonical writes _variants/ and records the full variant"
-        (with-redefs [shared-git/get-git-info (fn [_] (stub-git-info {:branch "main" :default-branch "main"}))
+        (with-redefs [git/get-git-info (fn [_] (stub-git-info {:branch "main" :default-branch "main"}))
                       core/->rulebase-analysis (fn [_ _ _] {:rules {}})]
           (let [opts {:root root :repo "x" :variant [[:region "eu"]] :canonical? false
                       :generated-by "flow-test" :session stub-rulebase :repo-path root}

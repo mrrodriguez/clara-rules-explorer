@@ -1,4 +1,4 @@
-(ns clara.explorer.artifacts.shared.status-test
+(ns clara.explorer.artifacts.status-test
   " `unit-status` over temp unit dirs holding hand-written manifests, plus
   stubbed checkout git reads.
 
@@ -7,8 +7,8 @@
   comparison needs commits the test would otherwise have to manufacture."
   (:require
    [clara.explorer.artifacts.layout :as layout]
-   [clara.explorer.artifacts.shared.git :as git]
-   [clara.explorer.artifacts.shared.status :as status]
+   [clara.explorer.artifacts.git :as git]
+   [clara.explorer.artifacts.status :as status]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 

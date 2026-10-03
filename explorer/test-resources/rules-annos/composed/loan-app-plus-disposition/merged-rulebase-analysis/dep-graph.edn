@@ -20,6 +20,7 @@
  "clara.explorer.test.rules.loan-doc-rules/collect-app-id-card-given-docs" {},
  "clara.explorer.test.rules.loan-doc-rules/collect-app-req-docs" {},
  "clara.explorer.test.rules.loan-doc-rules/collect-doc-meta" {:upstream #{"clara.explorer.test.rules.loan-doc-rules/extract-doc-meta-rule"}},
+ "clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule" {},
  "clara.explorer.test.rules.loan-doc-rules/doc-check-count" {:upstream #{"clara.explorer.test.rules.loan-doc-rules/app-has-all-required-docs"}},
  "clara.explorer.test.rules.loan-doc-rules/doc-check-count-satisfies-min" {:upstream #{"clara.explorer.test.rules.loan-doc-rules/doc-check-count"}},
  "clara.explorer.test.rules.loan-doc-rules/dynamic-insert-audit-trail" {:upstream #{"clara.explorer.test.rules.loan-doc-rules/app-has-all-required-docs"}},

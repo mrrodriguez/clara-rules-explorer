@@ -145,7 +145,7 @@
       (is (not (contains? orphans "loan-disposition-ruleset"))))
     (testing "the producer unit keeps only the types nothing in scope satisfies"
       (is (= 6 (count (get entries "loan-app-ruleset"))))
-      (is (= 6 (count (get orphans "loan-app-ruleset")))))))
+      (is (= 7 (count (get orphans "loan-app-ruleset")))))))
 
 (deftest namespace-filter-narrows-productions-not-just-scope-test
   (let [index (federate/->index (registry/discover {:root (registry-root)})
@@ -153,7 +153,7 @@
                                   :namespaces ["clara.explorer.test.rules.loan-doc-rules"]}
                                  {:repo "loan-disposition-ruleset"}])]
     (testing "the fact-type map stays whole (keyed by type, not namespace)"
-      (is (= 38 (count (:fact-types index)))))
+      (is (= 39 (count (:fact-types index)))))
     (testing "the cross-unit edge disappears once its producer is filtered out"
       (is (not (contains? (:unit-edges index)
                           ["loan-app-ruleset" "loan-disposition-ruleset"]))))

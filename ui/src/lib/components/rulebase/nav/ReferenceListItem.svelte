@@ -12,11 +12,6 @@
 		badge?: Snippet;
 		/** Right-side action buttons (e.g. a popover trigger, a jump link). */
 		actions?: Snippet;
-		/**
-		 * Renders the row as non-linkable muted text (hierarchy ghosts and
-		 * other types with no rulebase presence).
-		 */
-		muted?: boolean;
 		active?: boolean;
 		/**
 		 * When true, the name itself is a click-to-copy control instead of
@@ -32,7 +27,6 @@
 		activeColor,
 		badge,
 		actions,
-		muted = false,
 		active = false,
 		copyable = false
 	}: Props = $props();
@@ -41,35 +35,31 @@
 	// carry a native `title` – the inner QualifiedName/CopyableTitle already
 	// handles the tooltip and the outer title's hit-area can otherwise cover
 	// sibling action buttons (Playwright hover intercepts on CI).
-	const effectiveTitle = $derived(copyable || muted ? undefined : title);
+	const effectiveTitle = $derived(copyable ? undefined : title);
 </script>
 
 <NavigationListItem {href} title={effectiveTitle} {fullName} {activeColor} {active}>
-	{#if muted}
-		<div class="text-muted fst-italic w-100 min-width-0">{fullName}</div>
-	{:else}
-		<div class="d-flex justify-content-between align-items-center w-100 min-width-0">
-			{#if copyable}
-				<div class="title-col">
-					<CopyableTitle {fullName} size="sm" class="w-100" />
-				</div>
-			{:else}
-				<div class="title-col">
-					<QualifiedName {fullName} size="sm" class="w-100" />
-				</div>
-			{/if}
-			{#if badge || actions}
-				<div class="d-flex align-items-center gap-1 ms-2 actions-col">
-					{#if badge}
-						{@render badge()}
-					{/if}
-					{#if actions}
-						{@render actions()}
-					{/if}
-				</div>
-			{/if}
-		</div>
-	{/if}
+	<div class="d-flex justify-content-between align-items-center w-100 min-width-0">
+		{#if copyable}
+			<div class="title-col">
+				<CopyableTitle {fullName} size="sm" class="w-100" />
+			</div>
+		{:else}
+			<div class="title-col">
+				<QualifiedName {fullName} size="sm" class="w-100" />
+			</div>
+		{/if}
+		{#if badge || actions}
+			<div class="d-flex align-items-center gap-1 ms-2 actions-col">
+				{#if badge}
+					{@render badge()}
+				{/if}
+				{#if actions}
+					{@render actions()}
+				{/if}
+			</div>
+		{/if}
+	</div>
 </NavigationListItem>
 
 <style>

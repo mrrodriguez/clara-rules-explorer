@@ -42,6 +42,17 @@
     (with-meta {:doc-meta doc-meta}
       {:type :extracted-doc-meta})))
 
+;; Digest-suffixed variant of the same pattern: the rule's local is minted
+;; from the md5 of the printed body (which includes a `#(…)`), so it differs
+;; per compiling process and only minted-name canonicalization keeps the
+;; persisted `:rhs-form` and callsite `:source-str` stable. The fact type is
+;; consumed by nothing, like `:extract-doc-meta` above.
+(h/def-digest-fact digest-doc-meta :digest-doc-meta
+  [doc-fact]
+  (let [doc-meta ((#(or (:doc-meta %) {::no-doc-meta true})) (meta doc-fact))]
+    (with-meta {:doc-meta doc-meta}
+      {:type :digested-doc-meta})))
+
 ;; ---------------------------------------------------------------------------
 ;; Using a "function as a fact" pattern in the RHS.
 ;; ---------------------------------------------------------------------------

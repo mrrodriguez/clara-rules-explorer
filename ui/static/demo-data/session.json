@@ -116,7 +116,7 @@
 		"clara.explorer.test.rules.loan-app-facts.AllGivenDocumentsMe-5i4flqd7": {
 			"count": 1,
 			"id": "clara.explorer.test.rules.loan-app-facts.AllGivenDocumentsMe-5i4flqd7",
-			"ids": [16],
+			"ids": [17],
 			"inserted-from": [
 				{
 					"facts": [
@@ -141,7 +141,7 @@
 									}
 								]
 							},
-							"id": 16,
+							"id": 17,
 							"inserted-from": [
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-collect-doc-meta-t1ktwuz1",
@@ -1995,7 +1995,7 @@
 		"clara.explorer.test.rules.loan-doc-rules.AllIdCardGivenDocum-sclvnog1": {
 			"count": 1,
 			"id": "clara.explorer.test.rules.loan-doc-rules.AllIdCardGivenDocum-sclvnog1",
-			"ids": [17],
+			"ids": [18],
 			"inserted-from": [
 				{
 					"facts": [
@@ -2009,7 +2009,7 @@
 									}
 								]
 							},
-							"id": 17,
+							"id": 18,
 							"inserted-from": [
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-collect-app-id-card-l2g2xv9f",
@@ -2041,7 +2041,7 @@
 		"clara.explorer.test.rules.loan-doc-rules.AuditTrail-gcizek4k": {
 			"count": 1,
 			"id": "clara.explorer.test.rules.loan-doc-rules.AuditTrail-gcizek4k",
-			"ids": [18],
+			"ids": [19],
 			"inserted-from": [
 				{
 					"facts": [
@@ -2051,7 +2051,7 @@
 								"app-id": "app-1",
 								"timestamp": 1767225600000
 							},
-							"id": 18,
+							"id": 19,
 							"inserted-from": [
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-dynamic-insert-audi-qwv47w4g",
@@ -2083,7 +2083,7 @@
 		"clara.explorer.test.rules.loan-doc-rules.ComplianceReview-c7n3ao6o": {
 			"count": 1,
 			"id": "clara.explorer.test.rules.loan-doc-rules.ComplianceReview-c7n3ao6o",
-			"ids": [19],
+			"ids": [20],
 			"inserted-from": [
 				{
 					"facts": [
@@ -2093,7 +2093,7 @@
 								"reviewer": "automated-review",
 								"status": "pass"
 							},
-							"id": 19,
+							"id": 20,
 							"inserted-from": [
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-dynamic-insert-comp-p70cmhrc",
@@ -2161,6 +2161,44 @@
 				}
 			],
 			"name": ":compliance-review-result",
+			"ns": null,
+			"used-by": []
+		},
+		"digest-doc-meta-h7qkjgug": {
+			"count": 1,
+			"id": "digest-doc-meta-h7qkjgug",
+			"ids": [16],
+			"inserted-from": [
+				{
+					"facts": [
+						{
+							"data": "#'clara.explorer.test.rules.loan-doc-rules/digest-doc-meta",
+							"id": 16,
+							"inserted-from": [
+								{
+									"id": "clara.explorer.test.rules.loan-doc-rules-digest-doc-meta-rul-beccrr9b",
+									"name": "clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
+									"type": "rule"
+								}
+							],
+							"is-root": false,
+							"ns": null,
+							"type": {
+								"id": "digest-doc-meta-h7qkjgug",
+								"known": true,
+								"name": ":digest-doc-meta"
+							},
+							"used-by": []
+						}
+					],
+					"id": "clara.explorer.test.rules.loan-doc-rules-digest-doc-meta-rul-beccrr9b",
+					"name": "clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule",
+					"ns": "clara.explorer.test.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"name": ":digest-doc-meta",
 			"ns": null,
 			"used-by": []
 		},
@@ -2414,7 +2452,7 @@
 		}
 	},
 	"fact-types": {
-		"total-count": 19,
+		"total-count": 20,
 		"types": [
 			{
 				"count": 1,
@@ -2493,6 +2531,12 @@
 				"id": "clara.explorer.test.rules.loan-app-facts.GivenDocument-sn7nyl80",
 				"name": "clara.explorer.test.rules.loan_app_facts.GivenDocument",
 				"ns": "clara.explorer.test.rules.loan_app_facts"
+			},
+			{
+				"count": 1,
+				"id": "digest-doc-meta-h7qkjgug",
+				"name": ":digest-doc-meta",
+				"ns": null
 			},
 			{
 				"count": 1,
@@ -3051,6 +3095,26 @@
 			"used-by": []
 		},
 		"16": {
+			"data": "#'clara.explorer.test.rules.loan-doc-rules/digest-doc-meta",
+			"id": 16,
+			"inserted-from": [
+				{
+					"id": "clara.explorer.test.rules.loan-doc-rules-digest-doc-meta-rul-beccrr9b",
+					"name": "clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule",
+					"ns": "clara.explorer.test.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"is-root": false,
+			"ns": null,
+			"type": {
+				"id": "digest-doc-meta-h7qkjgug",
+				"known": true,
+				"name": ":digest-doc-meta"
+			},
+			"used-by": []
+		},
+		"17": {
 			"data": {
 				"app-id": "app-1",
 				"doc-metas": [
@@ -3071,7 +3135,7 @@
 					}
 				]
 			},
-			"id": 16,
+			"id": 17,
 			"inserted-from": [
 				{
 					"id": "clara.explorer.test.rules.loan-doc-rules-collect-doc-meta-t1ktwuz1",
@@ -3089,7 +3153,7 @@
 			},
 			"used-by": []
 		},
-		"17": {
+		"18": {
 			"data": {
 				"app-id": "app-1",
 				"docs": [
@@ -3099,7 +3163,7 @@
 					}
 				]
 			},
-			"id": 17,
+			"id": 18,
 			"inserted-from": [
 				{
 					"id": "clara.explorer.test.rules.loan-doc-rules-collect-app-id-card-l2g2xv9f",
@@ -3117,13 +3181,13 @@
 			},
 			"used-by": []
 		},
-		"18": {
+		"19": {
 			"data": {
 				"action": "doc-check-passed",
 				"app-id": "app-1",
 				"timestamp": 1767225600000
 			},
-			"id": 18,
+			"id": 19,
 			"inserted-from": [
 				{
 					"id": "clara.explorer.test.rules.loan-doc-rules-dynamic-insert-audi-qwv47w4g",
@@ -3141,13 +3205,13 @@
 			},
 			"used-by": []
 		},
-		"19": {
+		"20": {
 			"data": {
 				"app-id": "app-1",
 				"reviewer": "automated-review",
 				"status": "pass"
 			},
-			"id": 19,
+			"id": 20,
 			"inserted-from": [
 				{
 					"id": "clara.explorer.test.rules.loan-doc-rules-dynamic-insert-comp-p70cmhrc",
@@ -4383,7 +4447,7 @@
 							}
 						]
 					},
-					"id": 17,
+					"id": 18,
 					"inserted-from": [
 						{
 							"id": "clara.explorer.test.rules.loan-doc-rules-collect-app-id-card-l2g2xv9f",
@@ -4701,7 +4765,7 @@
 							}
 						]
 					},
-					"id": 16,
+					"id": 17,
 					"inserted-from": [
 						{
 							"id": "clara.explorer.test.rules.loan-doc-rules-collect-doc-meta-t1ktwuz1",
@@ -5011,6 +5075,31 @@
 				}
 			]
 		},
+		"clara.explorer.test.rules.loan-doc-rules-digest-doc-meta-rul-beccrr9b": {
+			"inserted-facts": [
+				{
+					"data": "#'clara.explorer.test.rules.loan-doc-rules/digest-doc-meta",
+					"id": 16,
+					"inserted-from": [
+						{
+							"id": "clara.explorer.test.rules.loan-doc-rules-digest-doc-meta-rul-beccrr9b",
+							"name": "clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule",
+							"ns": "clara.explorer.test.rules.loan-doc-rules",
+							"type": "rule"
+						}
+					],
+					"is-root": false,
+					"ns": null,
+					"type": {
+						"id": "digest-doc-meta-h7qkjgug",
+						"known": true,
+						"name": ":digest-doc-meta"
+					},
+					"used-by": []
+				}
+			],
+			"matches": []
+		},
 		"clara.explorer.test.rules.loan-doc-rules-doc-check-count-q1svbgsf": {
 			"inserted-facts": [
 				{
@@ -5120,7 +5209,7 @@
 						"app-id": "app-1",
 						"timestamp": 1767225600000
 					},
-					"id": 18,
+					"id": 19,
 					"inserted-from": [
 						{
 							"id": "clara.explorer.test.rules.loan-doc-rules-dynamic-insert-audi-qwv47w4g",
@@ -5316,7 +5405,7 @@
 						"reviewer": "automated-review",
 						"status": "pass"
 					},
-					"id": 19,
+					"id": 20,
 					"inserted-from": [
 						{
 							"id": "clara.explorer.test.rules.loan-doc-rules-dynamic-insert-comp-p70cmhrc",

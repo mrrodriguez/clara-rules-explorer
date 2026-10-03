@@ -8,11 +8,10 @@
   and each ruleset's provenance manifest apart from the fields that are environment rather than
   generation, eg. run dates and git state.
 
-   Two exceptions are normalized, not because generation is allowed to change them but because they
-  are not functions of generation at all: the compiler auto-gensym the from macros for, eg.
-  `clara.explorer.test.rules.loan-doc-rules/extract-doc-meta-rule`, varies with the JVM's
-  gensym counter, and a callsite `:callsite-id` hash is derived from the source string that carries
-  it. Those are pinned by shape, everything else is compared via equality."
+   The comparison is exact bytes: minted names (auto-gensyms, digest-suffixed
+   locals) are canonicalized at emission, so a regeneration from any JVM (a
+   fresh `make regen-artifacts`, the test runner, a REPL) yields identical
+   bytes."
   (:require
    [clara.explorer.artifacts.regen-example :as example]
    [clojure.edn :as edn]
@@ -45,26 +44,9 @@
         .getParentFile
         .getPath)))
 
-(def ^:private auto-gensym-re
-  #"__\d+__auto__")
-
-(def ^:private callsite-hash-re
-  #"(?<=:)[0-9a-f]{8,}(?=:\d)")
-
-(defn- normalize-gensyms
-  "Replace the two process-specific byte sequences with fixed tokens, so a
-  regeneration from any JVM (a fresh `make regen-artifacts`, the test runner,
-  a REPL) compares equal. The auto-gensym number and the callsite-id hash
-  derived from it are the only bytes in the artifact set that vary with the
-  gensym counter; everything else must match exactly."
-  [s]
-  (-> s
-      (str/replace auto-gensym-re "__<n>__auto__")
-      (str/replace callsite-hash-re "<hash>")))
-
 (defn- get-snapshot
   "Every regular file under `dir`, as a map of its path relative to `dir` to its
-  normalized bytes — the same shape the byte-stability test in
+  exact bytes — the same shape the byte-stability test in
   `clara.explorer.artifacts.flow-test` uses, so a run can be compared
   file-by-file and a mismatch names the file."
   [dir]
@@ -72,7 +54,7 @@
         (comp (filter #(.isFile ^java.io.File %))
               (map (fn [^java.io.File f]
                      [(subs (.getPath f) (count (.getPath (io/file dir))))
-                      (normalize-gensyms (slurp f))])))
+                      (slurp f)])))
         (file-seq (io/file dir))))
 
 (defn- dissoc-manifests

@@ -1,4 +1,4 @@
-(ns ^{:clara-rules-explorer/bb-loaded true} clara.explorer.artifacts.shared.git
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.explorer.artifacts.git
   "Git reads shared by the JVM manifest writer and the babashka `status`
   report: a checkout's identity (remote + sha + branch + working-tree), with
   remote-branch resolution for detached checkouts.
@@ -30,7 +30,7 @@
         (str/trim (str out))))))
 
 ;; ===========================================================================
-;; checkout reads — the seam `clara.explorer.artifacts.shared.status` compares
+;; checkout reads — the seam `clara.explorer.artifacts.status` compares
 ;; a unit against through, so bb and the JVM resolve refs the same way.
 ;; ===========================================================================
 

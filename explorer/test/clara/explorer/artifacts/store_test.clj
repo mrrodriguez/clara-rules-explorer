@@ -7,7 +7,7 @@
   (:require
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing use-fixtures]]
-   [clara.explorer.artifacts.shared.git :as shared-git]
+   [clara.explorer.artifacts.git :as git]
    [clara.explorer.artifacts.store :as store]
    [clara.explorer.artifacts.test-fixtures :as fixtures
     :refer [*artifact-opts* generated-annotations read-generated-layer
@@ -21,10 +21,10 @@
 (use-fixtures :each fixtures/temp-artifact-dir-fixture)
 
 (defn- with-git
-  "Run `(f)` with `shared-git/get-git-info` stubbed to return `git-info` for
+  "Run `(f)` with `git/get-git-info` stubbed to return `git-info` for
   every dir."
   [git-info f]
-  (with-redefs [shared-git/get-git-info (fn [_] git-info)]
+  (with-redefs [git/get-git-info (fn [_] git-info)]
     (f)))
 
 (deftest out-dir-test

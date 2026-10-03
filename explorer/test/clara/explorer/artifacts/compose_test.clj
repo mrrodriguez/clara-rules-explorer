@@ -128,7 +128,7 @@
                         :namespaces ["clara.explorer.test.rules.loan-doc-rules"]}
                        {:repo "loan-disposition-ruleset"}])]
     (testing "only the in-scope namespace's productions compose"
-      (is (= 16 (count (:rules composed))))
+      (is (= 17 (count (:rules composed))))
       (is (= 3 (count (:queries composed))))
       (is (= #{"clara.explorer.test.rules.loan-doc-rules"
                "clara.explorer.test.rules.loan-outcome-notices"}

@@ -352,3 +352,43 @@
     {:layers (:layers compacted)
      :annotations expanded
      :provenance (expand-provenance provenance expanded)}))
+
+(defn ->short-sha
+  "First 7 chars of `sha`, for one-line provenance and verdict summaries.
+   nil-safe: a nil sha reads as the empty string. Shared by the babashka
+   `status` report and `clara.explorer.artifacts.diff` so the two cannot
+   drift on how a sha is shortened."
+  [sha]
+  (let [s (str sha)]
+    (if (> (count s) 7) (subs s 0 7) s)))
+
+(defn read-layer-stack
+  "The annotation layer stack of unit dir `dir` in fold order, as
+   `[[layer-id annotations] …]`. `read-layer` is called with each layer
+   file's path and returns the layer map; nil skips a layer that is absent.
+   A layer whose `:annotations` is not a map is skipped.
+
+   The fold order and the extraction live here, once, so the babashka report
+   (loud `read-layer`) and `clara.explorer.artifacts.diff` (tolerant
+   `read-layer`) cannot drift on them;
+   `clara.explorer.artifacts.store/->layer-annotations-stack` is the JVM
+   counterpart, whose `read-layer` validates each layer."
+  [dir read-layer]
+  (into []
+        (keep (fn [role]
+                (let [f (str dir "/" (get artifact-files role))]
+                  (when-let [m (read-layer f)]
+                    (when (map? (:annotations m))
+                      [(:id m) (:annotations m)])))))
+        (keys layer-artifacts)))
+
+(defn resolve-key
+  "`{:exact key}` when `name*` is a key of `m`, else
+   `{:candidates [sorted substring matches]}`. Pure; callers decide how to
+   report a non-singleton answer. Shared by the babashka report (prints a
+   resolution or an ambiguity list) and
+   `clara.explorer.artifacts.diff/find-production-name` (throws)."
+  [m name*]
+  (if (contains? m name*)
+    {:exact name*}
+    {:candidates (->> m keys (filter #(str/includes? % name*)) sort vec)}))

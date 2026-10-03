@@ -66,32 +66,26 @@
 			<i class="bi {expanded ? 'bi-chevron-down' : 'bi-chevron-right'}"></i>
 		</button>
 	{/if}
-	{#if type.known}
-		<OpenReferenceLink path={factPath(type.id)} name={type.name} />
-	{/if}
+	<OpenReferenceLink path={factPath(type.id)} name={type.name} />
 {/snippet}
 
-{#if type.known}
-	<ReferenceListItem
-		title={type.name}
-		fullName={type.name}
-		activeColor="#0dcaf0"
-		{active}
-		copyable
-		{actions}
-	/>
+<ReferenceListItem
+	title={type.name}
+	fullName={type.name}
+	activeColor="#0dcaf0"
+	{active}
+	copyable
+	{actions}
+/>
 
-	{#if expanded && hasRelated}
-		<div class="list-group-item fact-type-details border-0 py-2 ps-3 bg-light-subtle">
-			{#each relatedRefs as ref, i (relatedRefKeys[i])}
-				<div class="mb-2">
-					<ProductionReferenceLink {ref} {fullView} />
-				</div>
-			{/each}
-		</div>
-	{/if}
-{:else}
-	<ReferenceListItem title={type.name} fullName={type.name} muted />
+{#if expanded && hasRelated}
+	<div class="list-group-item fact-type-details border-0 py-2 ps-3 bg-light-subtle">
+		{#each relatedRefs as ref, i (relatedRefKeys[i])}
+			<div class="mb-2">
+				<ProductionReferenceLink {ref} {fullView} />
+			</div>
+		{/each}
+	</div>
 {/if}
 
 <style>
