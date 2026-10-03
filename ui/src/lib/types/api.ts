@@ -1,8 +1,9 @@
 /**
- * A linkable fact-type reference: `name` is the kind-explicit serialized
- * type string (display), `id` the deterministic route id (linkage), and
- * `known` distinguishes types linkable in this rulebase (`true`) from
- * hierarchy ghosts that render as plain text.
+ * A fact-type reference: `name` is the kind-explicit serialized type string
+ * (display), `id` the deterministic route id (linkage), and `known` marks
+ * whether the type is directly consumed or produced by a production in this
+ * rulebase (`true`) versus a hierarchy ghost reachable only as an
+ * ancestor/descendant of a referenced type (`false`).
  */
 export interface TypeReference {
 	name: string;
@@ -209,15 +210,15 @@ export interface FactTypeSummary {
 	/**
 	 * Hierarchy-ordered ancestor types (descendants before their own
 	 * ancestors, ties broken lexicographically). Detail-only — the list
-	 * endpoint omits it. `known: true` entries link via their id; ghosts
-	 * render as plain text.
+	 * endpoint omits it. Every entry links via its id (hierarchy-only
+	 * ghosts have a fact-type page too).
 	 */
 	ancestors?: TypeReference[];
 	/**
 	 * Hierarchy-ordered descendant types (direct descendants first, then their
 	 * descendants, ties broken lexicographically). Detail-only — the list
-	 * endpoint omits it. `known: true` entries link via their id; ghosts
-	 * render as plain text.
+	 * endpoint omits it. Every entry links via its id (hierarchy-only
+	 * ghosts have a fact-type page too).
 	 */
 	descendants?: TypeReference[];
 }

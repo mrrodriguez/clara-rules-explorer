@@ -16,7 +16,7 @@ test.describe('Hierarchy ancestors section (hierarchy ruleset)', () => {
 		await ui.groupedNav.expandAll(page);
 	});
 
-	test('renders known ancestors as links and ghosts as non-linkable rows, in hierarchy order', async ({
+	test('renders ancestors as links in hierarchy order (ghosts included)', async ({
 		page
 	}) => {
 		// income-document <: supporting-document <: loan-document <: base-document.
@@ -46,11 +46,14 @@ test.describe('Hierarchy ancestors section (hierarchy ruleset)', () => {
 			/\/fact-types\//
 		);
 
-		// base-document is never on an LHS → ghost → muted italic row, no link.
-		const ghostRow = category.locator('div.list-group-item').filter({ hasText: 'base-document' });
+		// base-document is hierarchy-only (never on an LHS), but it still has a
+		// fact-type page → it carries the same dedicated open icon.
+		const ghostRow = category.locator(`div.list-group-item[data-fullname="${BASE}"]`);
 		await expect(ghostRow).toBeVisible();
-		await expect(ghostRow.locator('.text-muted.fst-italic')).toBeVisible();
-		await expect(ghostRow.locator('a')).toHaveCount(0);
+		await expect(ghostRow.locator('a[aria-label^="Open "]')).toHaveAttribute(
+			'href',
+			/\/fact-types\//
+		);
 
 		// The ordering note accompanies a non-empty ancestor list.
 		await expect(page.getByText('Ancestors are listed in hierarchy order')).toBeVisible();

@@ -6,12 +6,12 @@ organized separately — do not mix tooling or conventions between them.
 
 ## Project Layout
 
-| Directory        | Language              | Toolchain | Test runner      |
-| ---------------- | --------------------- | --------- | ---------------- |
-| `explorer/`      | Clojure (tools.deps)  | `make`    | `make test`      |
-| `ui/`            | TypeScript + Svelte 5 | `pnpm`    | `pnpm run test`  |
-| `editor/emacs/`  | Emacs Lisp            | `make`    | `make test`      |
-| `editor/neovim/` | Lua (Neovim plugin)   | `make`    | `make test`      |
+| Directory        | Language              | Toolchain | Test runner     |
+| ---------------- | --------------------- | --------- | --------------- |
+| `explorer/`      | Clojure (tools.deps)  | `make`    | `make test`     |
+| `ui/`            | TypeScript + Svelte 5 | `pnpm`    | `pnpm run test` |
+| `editor/emacs/`  | Emacs Lisp            | `make`    | `make test`     |
+| `editor/neovim/` | Lua (Neovim plugin)   | `make`    | `make test`     |
 
 ---
 
@@ -37,7 +37,7 @@ make clean            # remove target and .cpcache
   [clojure-engineering skill](.agents/skills/clojure-engineering/SKILL.md).
 - The server API is defined in `explorer/src/clara/explorer/server/api.clj`.
 - Demo rules live under `server/test/clara/explorer/rules/`.
-- **Temporary files:** Write any scratch/tmp files to `explorer/target/` (e.g. `explorer/target/tmp/`) instead of the system `/tmp`. The sandbox may restrict `/tmp` access and `make clean` in `explorer/` automatically removes `target/` and `.cpcache`.
+- **Temporary files:** Write any scratch/tmp files to `explorer/target/` (e.g. `explorer/target/tmp/`) or `ui/target` instead of the system `/tmp`. The sandbox may restrict `/tmp` access and `make clean` in `explorer/` automatically removes `target/` and `.cpcache`.
 
 ### Annotation Key Normalization
 
