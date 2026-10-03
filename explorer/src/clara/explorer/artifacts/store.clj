@@ -414,6 +414,20 @@
 ;; the fold
 ;; ===========================================================================
 
+(defn- ->fold-stack
+  "The ordered fold input — the props layer (when `:session`), then every file
+  layer in `layer-artifacts` order — resolving each file layer through
+  `resolve-layer`, a `(fn [layer-artifact-key] -> Layer-or-nil)`, and dropping
+  nils.
+
+  Both public builders share this so the fold order and the props base are
+  defined once."
+  [opts resolve-layer]
+  (into []
+        (filter some?)
+        (cons (when (:session opts) (ann.merge/->props-layer (:session opts)))
+              (map resolve-layer (keys layer-artifacts)))))
+
 (s/defn get-layer-stack :- [schema/Layer]
   "The ordered fold input for a persisted artifact set, lowest precedence first:
 
@@ -431,13 +445,23 @@
   present: only the analyzer *discovers* callsites, so what the overlay may
   annotate has to be defined without the overlay."
   ([opts :- schema/StackOpts] (get-layer-stack opts #{}))
-  ([{:keys [session] :as opts} :- schema/StackOpts
+  ([opts :- schema/StackOpts
     omit :- #{schema/LayerArtifactKey}]
-   (into []
-         (filter some?)
-         (cons (when session (ann.merge/->props-layer session))
-               (map (fn [k] (when-not (omit k) (read-layer k opts)))
-                    (keys layer-artifacts))))))
+   (->fold-stack opts (fn [k] (when-not (omit k) (read-layer k opts))))))
+
+(s/defn ->layer-stack :- [schema/Layer]
+  "The ordered fold input, lowest precedence first, taking `in-hand` layers as
+  already read instead of re-reading their files.
+
+  `clara.explorer.artifacts.flow/persist!` holds the generated and memory layers
+  it just wrote and supplies them here, so the stack folds them from memory
+  rather than re-parsing the two files it just produced — the most expensive
+  read in the pipeline. The props layer (from `:session`) and every layer
+  `in-hand` does not supply are resolved exactly as `get-layer-stack` resolves
+  them, so the two builders agree for the same disk."
+  [opts :- schema/StackOpts
+   in-hand :- {schema/LayerArtifactKey schema/Layer}]
+  (->fold-stack opts (fn [k] (or (get in-hand k) (read-layer k opts)))))
 
 (s/defn fold-layers :- schema/MergedAnnotations
   "Fold an explicit stack. `:type-derivation` is the library default

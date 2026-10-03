@@ -496,10 +496,15 @@
   `:rulebase-analysis-in-hand` is used in place of building one whenever it is
   `rulebase-analysis-of?` this same merge; with no `:session` it is the only way
   to get one at all. `:rulebase-analysis? false` writes the merged annotations
-  and leaves the analysis and digest files untouched."
+  and leaves the analysis and digest files untouched.
+
+  `:layer-stack` is the pre-read fold stack, supplied by
+  `clara.explorer.artifacts.flow/persist!` when it already holds the layers it
+  just wrote; absent, the stack is read off disk."
   (assoc StackOpts
          (s/optional-key :rulebase-analysis-in-hand) RulebaseAnalysisInHand
-         (s/optional-key :rulebase-analysis?) s/Bool))
+         (s/optional-key :rulebase-analysis?) s/Bool
+         (s/optional-key :layer-stack) [Layer]))
 
 (s/defschema MergePersistedResult
   "What `clara.explorer.artifacts.flow/merge-persisted!` returns: the
