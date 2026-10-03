@@ -26,10 +26,12 @@ identity: rules, queries, and fact types are named by their namespace, never by 
 happened to carry them. Which unit supplied a production is attribution, a fact about how the
 selection was assembled. It belongs with the units, not with the production.
 
-Nothing is lost by moving it. A composed unit holds each production name once (they are the keys
+Nothing is lost by dropping it. A composed unit holds each production name once (they are the keys
 of `production-index.edn`), so the only way a production can keep its name and change units is for
-its namespace to move from one source unit to another, and that is visible as a difference between
-the two sides' unit lists.
+its namespace to move from one source unit to another. If its code is the same, that is not a change
+to the rulebase, and the diff should report nothing for it. If its code is different, the other
+compared fields say so. Fact types carry no unit at all, so this was only ever a production-level
+tag.
 
 ### 1.3 Change
 
@@ -42,7 +44,10 @@ the two sides' unit lists.
   - `:changed`: repos on both sides whose `:variant` or `:sha` differs, each with its before and
     after.
 
-  A ruleset unit records no `:units`, so for two ruleset units the key is empty.
+  A ruleset unit records no `:units`, so for two ruleset units the key is empty. This is provenance
+  for the comparison (which source units the two compositions were built from), not a statement
+  about any production: a namespace moving between two source units that are on both sides shows
+  here only as both units' shas changing.
 - `->text` prints a `units:` count line and a `changed units:` section (`~ <repo> <before> ->
   <after>`, variant path and short sha) only when either side is composed, so a ruleset-unit diff
   reads exactly as it does today.
