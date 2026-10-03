@@ -26,6 +26,24 @@
 			]
 		},
 		{
+			"ancestors": [],
+			"descendants": [],
+			"id": "digest-doc-meta-h7qkjgug",
+			"inserted-by-rules": [
+				{
+					"id": "clara.explorer.test.rules.loan-doc-rules-digest-doc-meta-rul-beccrr9b",
+					"name": "clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule",
+					"ns": "clara.explorer.test.rules.loan-doc-rules",
+					"type": "rule"
+				}
+			],
+			"name": ":digest-doc-meta",
+			"ns": null,
+			"retracted-by-rules": [],
+			"used-by-queries": [],
+			"used-by-rules": []
+		},
+		{
 			"ancestors": [
 				{
 					"id": "clojure.lang.IHashEq-bkwe48s5",
@@ -4273,6 +4291,31 @@
 		{
 			"doc": null,
 			"dynamic-insert-types-detected": {
+				"fact-instance-derived-types": [":digest-doc-meta"]
+			},
+			"id": "clara.explorer.test.rules.loan-doc-rules-digest-doc-meta-rul-beccrr9b",
+			"insert-types": [
+				{
+					"id": "digest-doc-meta-h7qkjgug",
+					"known": true,
+					"name": ":digest-doc-meta"
+				}
+			],
+			"lhs": [],
+			"lhs-form": "",
+			"lhs-types": [],
+			"name": "clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule",
+			"notes": null,
+			"ns": "clara.explorer.test.rules.loan-doc-rules",
+			"props": {},
+			"retract-types": [],
+			"rhs-form": "(do\n (clojure.core/let\n  [digest-doc-meta00000000000000000000000000000000 #'digest-doc-meta]\n  (clara.rules/insert!\n   digest-doc-meta00000000000000000000000000000000)))\n",
+			"sink-rule": true,
+			"source-rule": true
+		},
+		{
+			"doc": null,
+			"dynamic-insert-types-detected": {
 				"callsites": [
 					{
 						"filename": "clara/explorer/test/rules/loan_doc_rules.clj",
@@ -6836,9 +6879,9 @@
 		}
 	],
 	"summary": {
-		"fact-type-count": 36,
+		"fact-type-count": 37,
 		"query-count": 2,
-		"rule-count": 18,
+		"rule-count": 19,
 		"working-memory-available": true
 	}
 }
