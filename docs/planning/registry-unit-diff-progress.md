@@ -12,14 +12,14 @@ Tracks `docs/planning/registry-unit-diff-plan.md`. Updated as parts land.
 - [x] Regenerated checked-in example; diff is exactly the fixture's new rule (§4.1)
 - [x] Cleanup (§2.6): byte-level caveat dropped from `persisted-artifacts.md`, `normalize-gensyms` dropped from golden test, verified from fresh process + polluted-counter JVM
 
-## Part B — `diff` over two units (§3)
+## Part B — `diff` over two units (§3) — complete
 
-- [ ] `artifacts.shared.diff`: `read-unit`, `diff`, `->text` (§3.2–3.5)
-- [ ] `annotations_report.bb <before> diff <after>` subcommand (`--edn`, `--rule`) (§3.1, §3.5)
-- [ ] `shared/diff_test`: one per tag + scope/edges/fact-types/shape-skew/empty-against-itself (§3.8)
-- [ ] Checked-in example assertions: variant no-diff, composed `:scope`/`:unit` (§3.8)
-- [ ] `bb_report_test`: subcommand end to end (§3.8)
-- [ ] Docs: `persisted-artifacts.md` §"Querying it offline" (§3.9)
+- [x] `artifacts.shared.diff`: `read-unit`, `diff`, `->text` (§3.2–3.5)
+- [x] `annotations_report.bb <before> diff <after>` subcommand (`--edn`, `--rule`) (§3.1, §3.5)
+- [x] `shared/diff_test`: one per tag + scope/edges/fact-types/shape-skew/empty-against-itself (§3.8)
+- [x] Checked-in example assertions: variant no-diff, composed `:scope`/`:unit` (§3.8)
+- [x] `bb_report_test`: subcommand end to end (§3.8)
+- [x] Docs: `persisted-artifacts.md` §"Querying it offline" (§3.9)
 
 ## Notes
 
@@ -33,3 +33,25 @@ Tracks `docs/planning/registry-unit-diff-plan.md`. Updated as parts land.
   (`make regen-artifacts`, test JVM, polluted-counter JVM). Ripple: three
   absolute-count assertions bumped (`compose_test` 16→17, `federate_test`
   38→39 fact types, 6→7 orphans for the unconsumed `:digest-doc-meta` type).
+- 2026-10-03: Part B complete. `make test` 454 tests / 2971 assertions green
+  (+12: 11 `shared.diff-test`, 1 `bb-report-diff-test`); `format`,
+  `format-check`, `lint`, `reflection-check`, `bb-smoke-test` clean.
+  Test-caught fixes along the way: an unclosed `let` vector and `if` in
+  `shared/diff.clj`, and a scope test that claimed the same namespaces on
+  both sides. `:tags` is a sorted vector (deterministic `--edn`); `:resolution`
+  compares per-dimension (`{:insert … :retract …}`); plan's `:scope-fields`
+  read as the `:analysis-run` scope fields (no such literal key exists).
+- 2026-10-03 (follow-up): `--rule` no longer runs the full diff. The script
+  branches first (`rule-report` vs `diff-report-full`); new public
+  `shared.diff/read-productions` reads only index/conditions/details/merged
+  annotations, skipping dep-graph, fact-types, manifest, and shape refusal.
+  Pinned by a `read-productions`-agrees-with-`read-unit` test and a bb e2e
+  test proving `--rule` answers with dep-graph.edn deleted while the full
+  diff fails.
+- 2026-10-03 (review cleanup): `empty-diff?` uses `every?`; `read-edn!`
+  renamed `read-edn` (pure); `(vec (filter|remove|sort …))` → `filterv` /
+  `->`/`->>` pipelines per the skill (incl. the skill's literal
+  `->> xs filter sort vec` shape for substring matches). File-read audit:
+  `read-productions` reads index/conditions/details/merged+layers once each;
+  `read-unit` adds manifest/meta/fact-types/dep-graph once each; `diff`,
+  `->text`, `rule-detail` do no IO — no file is ever read twice on any path.

@@ -28,6 +28,7 @@
 
 (require '[clara.explorer.artifacts.layout :as layout]
          '[clara.explorer.artifacts.hierarchy :as hierarchy]
+         '[clara.explorer.artifacts.shared.diff :as shared-diff]
          '[clara.explorer.artifacts.shared.status :as shared-status])
 
 (def ^:private dims
@@ -584,6 +585,7 @@
    ["curated" "" "what the agent overlay changed vs auto-gen"]
    ["layers" "[<fq-name>]" "the fold: layers + per-key provenance"]
    ["status" "[--checkout]" "is this unit current? (needs only the manifest)"]
+   ["diff" "<after-dir>" "production-level diff of this unit vs <after-dir> (--edn, --rule NAME)"]
    ["help" "" "this help"]])
 
 (defn- help []
@@ -618,6 +620,7 @@
    :checkout {:coerce :string}
    :ref {:coerce :string}
    :root {:coerce :string}
+   :rule {:coerce :string}
    :edn {:coerce :boolean}})
 
 (defn- parse-args
@@ -710,6 +713,46 @@
       (pprint/pprint result)
       (print-status result))))
 
+(defn- rule-report
+  "`diff <after-dir> --rule NAME`: one production's before/after. Reads only
+  the production files of each unit — never the dep-graph, fact-types,
+  manifest, or shape — and never runs the full `diff`. As EDN with `--edn`."
+  [before-dir after-dir opts]
+  (let [before (try {:productions (shared-diff/read-productions before-dir)}
+                     (catch Exception e (die (ex-message e))))
+        after (try {:productions (shared-diff/read-productions after-dir)}
+                    (catch Exception e (die (ex-message e))))
+        detail (try (shared-diff/rule-detail before after (:rule opts))
+                     (catch Exception e (die (ex-message e))))]
+    (if (:edn opts)
+      (pprint/pprint detail)
+      (println (shared-diff/rule-detail-text detail)))))
+
+(defn- diff-report-full
+  "`diff <after-dir> [--edn] [--rule NAME]` over unit dir `before-dir`: presentation
+   over `shared-diff/diff`, which reads both units' `merged-rulebase-analysis/`
+   and merged annotations and nothing else; `--edn` prints the `diff` value.
+   (`--rule` never reaches here — the dispatcher sends it to `rule-report`.)"
+  [before-dir after-dir opts]
+  (let [before (try (shared-diff/read-unit before-dir)
+                     (catch Exception e (die (ex-message e))))
+        after (try (shared-diff/read-unit after-dir)
+                    (catch Exception e (die (ex-message e))))
+        d (try (shared-diff/diff before after)
+                (catch Exception e (die (ex-message e))))]
+    (if (:edn opts)
+      (pprint/pprint d)
+      (println (shared-diff/->text d)))))
+
+(defn- diff-report
+  "`diff <after-dir> [--edn] [--rule NAME]`: `--rule` prints one production's
+  before/after via `rule-report` — which reads only the production files and
+  never runs the full `diff` — while the full report reads both units whole."
+  [before-dir after-dir opts]
+  (if (:rule opts)
+    (rule-report before-dir after-dir opts)
+    (diff-report-full before-dir after-dir opts)))
+
 (let [{:keys [opts positionals]} (parse-args *command-line-args*)
       [target cmd arg] positionals]
   (cond
@@ -722,6 +765,12 @@
         (if arg
           (die "status takes no positional arg")
           (status target opts)))
+
+    (= cmd "diff")
+    (do (reject-flags opts #{:edn :rule})
+        (if (nil? arg)
+          (die "diff needs two unit dirs: bb annotations_report.bb <before-dir> diff <after-dir>")
+          (diff-report target arg opts)))
 
     :else
     (do (reject-flags opts #{:file})

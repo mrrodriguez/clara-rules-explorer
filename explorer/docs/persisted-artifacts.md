@@ -211,6 +211,7 @@ bb "$S" "$D" rule some.ns/some-rule       # one rule's whole annotation (+ :unit
 bb "$S" "$D" edges some.ns/some-rule      # up/downstream             (dep-graph)
 bb "$S" "$D" curated                      # what the overlay changed vs the baseline
 bb "$S" "$D" layers                       # the fold + per-key provenance
+bb "$S" "$D" diff "$AFTER"               # production-level diff of this unit vs $AFTER
 ```
 
 Five of the ten subcommands never open the analysis at all — `summary`, `gaps`,
@@ -232,6 +233,21 @@ rule names fall back to substring matching the same way.
 `--file auto|agent|merged` picks which annotations the annotation-reading
 subcommands use. Default is `merged`, except `gaps`, which defaults to `auto`
 because the deterministic baseline is the real work list.
+
+`diff` compares two unit-shaped directories — two ruleset units, a unit and
+its variant, or two composed units — production by production: which rules and
+queries were added or removed, which changed and how (`:lhs`, `:rhs-form`,
+types, `:resolution`, `:unit` attribution), which fact types appeared or
+lost ancestors, and which dep-graph edges were gained or lost. It reads both
+units' `merged-rulebase-analysis/` parts plus their merged annotations, and
+refuses units with differing `:slim :dropped` shapes, since those do not hold
+the same keys. Namespaces present on only one side are reported under `scope`,
+never as added or removed. `--rule NAME` (substring matching, as `rule` does)
+prints one production's before and after per changed field; `--edn` prints the
+diff value. `--rule` reads only the production files and skips the full diff,
+so it answers even when the dep-graph, fact-types, or shape are absent. Three things it does not answer: a renamed production shows as one
+removed and one added; an `:rhs` tag says the text changed, not what it does
+at runtime; names compare verbatim, so per-build stamps get no useful diff.
 
 It is babashka, so it cannot `require` the namespaces that wrote the files. The
 one definition it shares with the JVM — every filename, the layer fold order,
