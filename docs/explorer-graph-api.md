@@ -554,7 +554,7 @@ Full fact-type detail — the list shape plus the hierarchy-ordered
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `ancestors` | TypeReference[] | Ancestor types in deterministic hierarchy order — descendants before their own ancestors, ties broken lexicographically (see `core/hierarchy-order`). `known: true` entries link via their id; `known: false` ghosts render as plain text |
+| `ancestors` | TypeReference[] | Ancestor types in deterministic hierarchy order — descendants before their own ancestors, ties broken lexicographically (see `clara.explorer.artifacts.hierarchy/hierarchy-order`). `known: true` entries link via their id; `known: false` ghosts render as plain text |
 | `descendants` | TypeReference[] | Descendant types (types that list this type among their ancestors) in deterministic hierarchy order — direct descendants first, then their descendants, ties broken lexicographically. `known: false` ghosts are not part of the rulebase's fact-types map |
 
 `known` is the primary noise filter: Clara's default ancestors-fn

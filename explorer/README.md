@@ -34,7 +34,7 @@ The explorer tools were originally part of the main `clara-rules` repository. Th
 ;; Start the server
 (server/start! {:session session
                 :port 9999
-                :annotations-file "annotations.edn"}) ;; optional
+                :annotations ["annotations.edn"]}) ;; optional
 
 ;; ... inspect at http://localhost:9999/v1/rulebase-summary
 
@@ -57,8 +57,11 @@ The server provides a `-main` entry point with two modes:
 |------|-------------|
 | `-s`, `--session PATH` | Serialized Clara session file (Fressian). Required for server and `--generate-analysis` modes. |
 | `-f`, `--facts PATH` | Serialized facts file. Defaults to `<session-path>.facts`. |
-| `-a`, `--annotations PATH` | EDN sidecar annotations file ([format](docs/rule-annotations.md#path-b--sidecar-edn-file)). |
+| `-l`, `--layer PATH` | EDN annotation layer file (repeatable; folded lowest precedence first). |
+| `--annotations EDN` | Annotations spec as inline EDN or a path to an EDN file containing one. |
 | `-p`, `--port PORT` | Server port (default: `9999`). |
+| `--working-memory-enabled BOOL` | Set to `false` to disable working-memory routes (rulebase analysis only). |
+| `--edn-printer PRINTER` | EDN printer for artifact output: `pprint` (default) or `pr-str`. |
 | `--generate-analysis DIR` | Output directory for `annotations.edn` + `analysis.edn` dump. |
 | `--load-session-state-fn SYMBOL` | Fully qualified symbol for a custom session deserializer (see below). |
 
@@ -66,7 +69,7 @@ The server provides a `-main` entry point with two modes:
 
 ```bash
 # Start the explorer server (use -M:dev for the Logback logging backend)
-clojure -M:dev -m clara.explorer.server.main -s session.bin -a annotations.edn
+clojure -M:dev -m clara.explorer.server.main -s session.bin -l annotations.edn
 
 # Static dump: annotations + full analysis to disk
 clojure -M:dev -m clara.explorer.server.main --generate-analysis out -s session.bin
@@ -170,7 +173,8 @@ explorer/
 │   │   └── hierarchy_run.clj        # Hierarchy rules server entry point
 │   ├── regen_artifacts.clj          # Regenerate the rules-annos example registry
 │   ├── regen_fixture.clj            # Regenerate the annotation layer fixture
-│   └── kondo_config_sync.clj        # clj-kondo config sync tooling
+│   ├── kondo_config_sync.clj        # clj-kondo config sync tooling
+│   └── compose_artifacts.clj        # Compose persisted artifact examples
 ├── src/clara/explorer/
 │   ├── server/                      # HTTP server + API (serve, navigate, schema, …)
 │   ├── artifacts/                   # Artifact read/write, registry, compose, …

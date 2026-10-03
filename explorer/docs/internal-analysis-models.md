@@ -1,104 +1,53 @@
 # Clara Rules Explorer — Internal Models
 
-This document covers the **internal** Clojure structures and analysis logic that power the explorer. For the external API contract (endpoints, response shapes), see [`docs/explorer-graph-api.md`](../../docs/explorer-graph-api.md).  For how rule annotations (insert/retract types) are auto-detected from source code via clj-kondo, see [`explorer/docs/analyze-pipeline-concepts.md`](analyze-pipeline-concepts.md).
+This page orients you to the **internal** Clojure structures the explorer builds
+on. It is deliberately thin — the authoritative descriptions live with the code
+and in the sibling docs:
 
-## Internal Rule & Query Structures
+- [`../../docs/explorer-graph-api.md`](../../docs/explorer-graph-api.md) — the external API contract.
+- [`analyze-pipeline-concepts.md`](analyze-pipeline-concepts.md) — how annotations are derived from source via clj-kondo.
+- [`rule-annotations.md`](rule-annotations.md) — the annotation layer model and fold.
+- [`persisted-artifacts.md`](persisted-artifacts.md) and [`registry-architecture.md`](registry-architecture.md) — the on-disk artifact model.
 
-The `Rulebase` stores rules and queries as **Production** records (or maps).
+## Productions
 
-### Rule (Production)
-```clojure
-{:name "ns/rule-name"
- :ns-name 'ns
- :lhs [...]         ; Sequence of internal condition maps
- :rhs (fn [...] ...) ; Compiled RHS function
- :props {...}        ; Metadata map, including :clara-rules/insert-types
- :handler ...}       ; Internal Clara handler
-```
+The rulebase stores rules and queries as **Production** maps, exactly as the
+clara-rules compiler produces them. The explorer reads the compiled rulebase —
+it never re-parses DSL forms — via `clara.explorer.utils/get-rulebase`
+(`(-> session-or-rulebase eng/components :rulebase)`). The field set
+(`:name`, `:ns-name`, `:lhs`, `:rhs`, `:props`, …) is defined by
+`clara.rules.schema`, not by this project.
 
-### Query
-```clojure
-{:name "ns/query-name"
- :lhs [...]
- :params #{:?param-name}
- :props {...}}
-```
+LHS conditions are normalized into `{:condition-type … :children …}` / leaf
+maps by `clara.explorer.conditions/normalize-lhs`; fact types on the LHS are
+extracted by `clara.explorer.conditions/extract-lhs-fact-types`.
 
-### LHS Condition Structures
+## Where each concern lives
 
-Unlike the DSL's vector form, the internal LHS is a sequence of maps (for leaf conditions) or vectors (for boolean operators).
+| Concern | Namespace / entry point |
+| --- | --- |
+| Static rulebase analysis, dep graph, type-hierarchy indexes, summaries | `clara.explorer.core` (`->rulebase-analysis`, `->dep-graph`) |
+| LHS normalization, condition walking, binding summaries | `clara.explorer.conditions` |
+| Kind-explicit type serialization, route ids, dep `:match` | `clara.explorer.serialize` (`resolve-type`, `route-id`) |
+| Working-memory analysis | `clara.explorer.memory` |
+| Annotation layers, fold, derivation | `clara.explorer.annotations` (`merge-layers`) |
+| Source analysis (kondo) → generated annotations | `clara.explorer.analyze` |
+| Persisted artifacts + registry | `clara.explorer.artifacts.*` |
 
-- **Fact Condition**: `{:type java.lang.Class, :constraints [...]}`. `:type` is typically the **resolved Java Class**, not a symbol.
-- **Accumulator Condition**: `{:accumulator ..., :from FactCondition, :result-binding :?var}`.
-- **Boolean Condition**: `[:or Condition1 Condition2]`.
+## Dependency graph
 
-### Metadata (:props)
+Edges are **type-based**, not Rete-node-based. `clara.explorer.core/->dep-graph`
+links rule A → rule B when a type A inserts/retracts is compatible with a type
+B's LHS matches — an inserted type satisfies its ancestors, a matched type is
+reached by its descendants. The insert/retract types come from the folded
+annotation layers (rule `:props` + generated + curated — see
+[`rule-annotations.md`](rule-annotations.md)), not from `:props` alone.
 
-The `:props` map carries annotations used for dependency graph construction. Symbols provided in the DSL (e.g., `{:clara-rules/insert-types [MyFact]}`) are often resolved to `java.lang.Class` instances by the Clara compiler if available in the namespace during macro expansion.
+The Rete node graph (`:id-to-node`) is still what `clara.explorer.memory` reads
+for working-memory analysis, but it is not the basis of the static dependency
+graph.
 
----
+## Example
 
-## Core Model: The Rete DAG
-
-The explorer is built from the **Rete Network** (the DAG of nodes that evaluate conditions). The source of truth is the `clara.rules.compiler/Rulebase` record, extracted via `(-> session eng/components :rulebase)`.
-
-### Why `id-to-node`?
-
-The `Rulebase` contains `:id-to-node`, a map of `node-id -> node-record`. This is the primary index because:
-
-1. **Stability**: Node IDs are compiler-assigned and unique within a rulebase.
-2. **Exhaustiveness**: Contains every node in the network (Alpha, Beta, terminals).
-3. **Structure**: Each node record has a `:children` field for forward traversal.
-
----
-
-## Static Analysis Logic
-
-### 1. LHS Type Extraction
-
-To build a dependency graph, we walk the `:lhs` of each production, dispatching on `clara.rules.schema/condition-type`:
-- `:fact`: Extract the `:type`.
-- `:accumulator`: Extract the `:type` from the `:from` condition.
-- `:and`, `:or`, `:not`, `:exists`: Recursively walk children.
-
-### 2. Dependency Graph Construction
-
-The dependency graph represents potential fact flow.
-
-**Edge Logic**: An edge exists from Rule A to Rule B if:
-1. Rule A inserts type `T` (declared in `:props` metadata).
-2. Rule B reads type `R` (extracted from LHS).
-3. `T` is "compatible" with `R` (either `T == R` or `T` is a descendant of `R` per the rulebase's `ancestors-fn`).
-
-**Relationship to `fact_graph`**:
-- `clara.tools.fact-graph`: Provides a **dynamic** trace of facts in a *specific session* after they have fired. Instance-based.
-- `clara.explorer.core`: Provides a **static** model of what *could* happen based on rule definitions. Type-based.
-
-### 3. Reachability & Path Analysis
-
-For any rule or query, we identify the specific path through the Rete network:
-
-- **Reachable Nodes**: Starting from a `ProductionNode` or `QueryNode`, walk **upwards** using a reverse-index of `:id-to-node`.
-- **Reverse Index**: Since nodes only store `:children`, we build `Map<id, Set<parent-id>>` by iterating over all nodes once.
-
----
-
-## Example: Loan App Rules
-
-Using `clara.explorer.test.rules.loan-app-rules`:
-
-**Rule**: `collect-app-given-docs`
-- **LHS Types**: `[Application, GivenDocument]`
-- **Insert Types**: `[AllGivenDocuments]`
-
-**Rule**: `collect-app-doc-check-input`
-- **LHS Types**: `[Application, AllGivenDocuments, AllRequiredDocuments]`
-
-**Static Edge**: `collect-app-given-docs` → `collect-app-doc-check-input`
-(Because the first inserts `AllGivenDocuments` and the second reads it).
-
-### Rete Mapping
-```
-AlphaNode(GivenDocument) → AccumulateNode → ProductionNode(collect-app-given-docs)
-AlphaNode(AllGivenDocuments) → HashJoinNode → ProductionNode(collect-app-doc-check-input)
-```
+`clara.explorer.test.rules.loan-app-rules` is the demo ruleset; the tests under
+`explorer/test/clara/explorer/` are the worked examples.

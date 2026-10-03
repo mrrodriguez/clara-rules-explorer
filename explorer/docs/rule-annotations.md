@@ -198,11 +198,11 @@ The library is split into a namespace group under
 
 | Namespace | Contents |
 |---|---|
-| `…graph.annotations` | Rule-name normalization (`normalize-rule-name`, `normalize-annotations`, `get-annotation`) and per-production lookup (`production-annotation`) |
-| `…graph.annotations.callsite` | Callsite format and identity: `callsite-id`, `assign-callsite-ids`, `aggregate-resolution` |
-| `…graph.annotations.merge` | Layers and merging: `->layer`, `write-layer!`, `->props-layer`, `merge-layers`, `derive-conclusions`, `annotations`, `provenance` |
-| `…graph.annotations.report` | `unresolved-report` (the curation work list) and `validate-layers` (pure lint) |
-| `…graph.annotations.rebase` | `rebase-layer` — remap a layer across a namespace rename |
+| `clara.explorer.annotations` | Rule-name normalization (`normalize-rule-name`, `normalize-annotations`, `get-annotation`) and per-production lookup (`production-annotation`) |
+| `clara.explorer.annotations.callsite` | Callsite format and identity: `callsite-id`, `assign-callsite-ids`, `aggregate-resolution` |
+| `clara.explorer.annotations.merge` | Layers and merging: `->layer`, `write-layer!`, `->props-layer`, `merge-layers`, `derive-conclusions`, `annotations`, `provenance` |
+| `clara.explorer.annotations.report` | `unresolved-report` (the curation work list) and `validate-layers` (pure lint) |
+| `clara.explorer.annotations.rebase` | `rebase-layer` — remap a layer across a namespace rename |
 
 Layers produced by `clara.explorer.server.main --generate-analysis` (and by the
 fixture generator, `make regen-fixture`) carry the distinguished id
@@ -381,7 +381,7 @@ Resolved types are **promoted**: a fully-resolved dynamic insert also appears in
 * **`:ns-name-sym`** / **`:filename`** — where the callsite was found (may be a helper namespace).
 * **`:callsite-id`** — stable identity within the rule+dimension:
   `ns:ctor:hash:ordinal` over the namespace, constructor, and source text
-  (see [anno-merging-update-plan.md](anno-merging-update-plan.md) §4.4).
+  (see `clara.explorer.annotations.callsite/callsite-id`).
 * **`:status`** — `:full` (every type this callsite can produce is known),
   `:partial` (some known, possibly more), or `:none` (nothing known).  The
   analyzer emits only `:full` and `:none`; `:partial` is reachable through
@@ -469,7 +469,7 @@ Example — resolving the var-as-fact pattern (`(insert! (var my-fact-fn))`):
         {:resolved-types [t]}))))
 
 (analyze/->annotations-from-rule-source-analysis
- {:analysis analysis
+ {:rule-source-analysis analysis
   :session-or-rulebase my-session
   :callsite-resolver-fn var-fact-resolver})
 ```
@@ -506,7 +506,7 @@ mapping via `:fact-type-spec-fn`:
 
 ```clojure
 (analyze/->annotations-from-rule-source-analysis
- {:analysis analysis
+ {:rule-source-analysis analysis
   :session-or-rulebase my-session
   :fact-type-spec-fn (fn [t]
                        (when (= t :extract-doc-meta)
@@ -614,7 +614,7 @@ The analyzer is told about `->fact`:
 
 ```clojure
 (analyze/->annotations-from-rule-source-analysis
- {:analysis analysis
+ {:rule-source-analysis analysis
   :session-or-rulebase my-session
   :fact-constructors
   [{:match-fn (fn [sym] (= 'my.helpers/->fact sym))
@@ -759,7 +759,7 @@ boundary argument forms out of the synthesized source. `:fact-constructors` and
                                      (mapv (fn [[sym form]] {:name sym :form form})
                                            defs)))})
       annotations (analyze/->annotations-from-rule-source-analysis
-                    {:analysis analysis
+                    {:rule-source-analysis analysis
                      :session-or-rulebase session})]
   …)
 ```
@@ -801,7 +801,7 @@ Auto-discover namespaces from the session and generate annotations:
                    {:session-or-rulebase my-session
                     :include-ns-prefixes ["my.project.rules"]})
       annotations (analyze/->annotations-from-rule-source-analysis
-                   {:analysis analysis
+                   {:rule-source-analysis analysis
                     :session-or-rulebase my-session})]
   (clojure.pprint/pprint annotations))
 ```
@@ -810,7 +810,7 @@ Rules defined by `eval` in namespaces with no classpath source are handled autom
 
 #### 3. Generate full static analysis from a live session
 
-To get the same output as `--generate-analysis` (annotations + full rulebase analysis), use `clara.explorer.core/rulebase-analysis`:
+To get the same output as `--generate-analysis` (annotations + full rulebase analysis), use `clara.explorer.core/->rulebase-analysis`:
 
 ```clojure
 (require '[clara.explorer.analyze :as analyze]
@@ -820,12 +820,12 @@ To get the same output as `--generate-analysis` (annotations + full rulebase ana
 (let [analysis    (analyze/->rule-source-analysis
                    {:session-or-rulebase my-session})
       annotations (analyze/->annotations-from-rule-source-analysis
-                   {:analysis analysis
+                   {:rule-source-analysis analysis
                     :session-or-rulebase my-session})
-      full        (core/rulebase-analysis my-session annotations)]
+      full        (core/->rulebase-analysis my-session annotations)]
   ;; Inspect interactively:
   (keys full)
-  ;; => (:rules :queries :fact-types :nodes :dep-graph :unresolved)
+  ;; => (:rules :queries :fact-types :nodes :dep-graph :unresolved :ns-deps)
 
   ;; Write to disk:
   (spit "annotations.edn" (with-out-str (pprint/pprint annotations)))
@@ -836,7 +836,7 @@ For large rulebases the LHS/RHS form pretty-printing inside
 `rulebase-analysis` can be slow.  Pass `:form-printer pr-str` to skip it:
 
 ```clojure
-(core/rulebase-analysis my-session annotations {:form-printer pr-str})
+(core/->rulebase-analysis my-session annotations {:form-printer pr-str})
 ```
 
 #### 4. Start the explorer UI from a live session
@@ -870,6 +870,6 @@ clojure -M:dev -m clara.explorer.server.main --generate-analysis out \
 Output:
 ```
 out/
-├── annotations.edn   # Auto-generated sidecar annotations
+├── annotations.edn   # Generated annotation layer (id :clara.explorer.analyze/generated)
 └── analysis.edn      # Full rulebase-analysis (rules, queries, fact-types, dep-graph, unresolved)
 ```

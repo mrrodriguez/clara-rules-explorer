@@ -59,7 +59,7 @@ See the sub-project READMEs for detailed prerequisites and instructions:
   [Neovim/Conjure](./docs/explorer-editor-navigation-neovim.md).
 - [Static Demo Setup](./docs/static-demo-setup.md) — build and host a fully
   static demo on GitHub Pages.
-- [GitHub Actions Setup](./docs/gha-setup.md) — CI workflow configuration.
+- [GitHub Actions](./.github/workflows/) — CI workflows for explorer, ui, and demo deploy.
 - [UI Architecture](./ui/docs/app-arch.md) — UI component architecture and
   design decisions.
 - [Persisted Artifacts](./explorer/docs/persisted-artifacts.md) — writing an

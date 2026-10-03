@@ -192,7 +192,7 @@ The `:lhs` is a vector of condition maps (each with `:type` and
 `:constraints`). The `:rhs` is a quoted s-expression — the same body you'd
 write inside a `defrule` macro. Queries follow the same pattern with
 `:params`, `:lhs`, and a `:type` of `:query`. See
-`server/test/clara/explorer/rules/perf_gen_helpers.clj` for a
+`test/clara/explorer/test/rules/perf_gen_helpers.clj` for a
 working example (`build-chain-rules`, `build-chain-session`).
 
 When a single static query is needed alongside dynamically generated rules,

@@ -20,6 +20,8 @@ The client is `editor/neovim/` (a clean Lua plugin).
 | `:ClaraExplorerTransportStatus`     | open the effective + configured transport (and the explorer-server probe) in a scratch buffer |
 | `:ClaraExplorerLastError`           | open the full last nREPL error (stack trace + code) in a scratch buffer |
 | `:ClaraExplorerSelectUnit`          | re-prompt for the babashka transport's registry unit                  |
+| `:ClaraExplorerToggleDebug`         | toggle debug logging for the nREPL transport                          |
+| `:ClaraExplorerDebugLog`            | open the debug log in a scratch buffer                                |
 
 Direct jump when exactly one candidate; `vim.ui.select` picker when more than
 one (delegates to Telescope/snacks/fzf-lua if you have a `ui-select`

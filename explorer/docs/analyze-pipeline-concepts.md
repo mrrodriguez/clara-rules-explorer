@@ -570,4 +570,5 @@ emitted.  Every Priority 2 entry also gains a boundary-side `:via`
 | Var-alias discovery, `alias-usage-map`, `lhs-var-bindings` | `analyze/alias.clj` |
 | Kondo usage helper (`fq-sym`, `var-usage-caller`, `var-usage-callee`) | `analyze/utils.clj` |
 | Kondo interaction mechanics (`with-in-str`, stdin pattern) | `docs/analyze-clj-kondo-notes.md` |
-| Annotation normalization, sidecar merge | `annotations.clj` |
+| Annotation normalization (`normalize-annotations`, `get-annotation`) | `annotations.clj` |
+| Layer merge (`merge-layers`, `->layer`) | `annotations/merge.clj` |
