@@ -36,12 +36,12 @@ make clean            # remove target and .cpcache
 - Clojure engineering standards are documented in the
   [clojure-engineering skill](.agents/skills/clojure-engineering/SKILL.md).
 - The server API is defined in `explorer/src/clara/explorer/server/api.clj`.
-- Demo rules live under `server/test/clara/explorer/rules/`.
+- Demo rules live under `explorer/test/clara/explorer/test/rules/`.
 - **Temporary files:** Write any scratch/tmp files to `explorer/target/` (e.g. `explorer/target/tmp/`) or `ui/target` instead of the system `/tmp`. The sandbox may restrict `/tmp` access and `make clean` in `explorer/` automatically removes `target/` and `.cpcache`.
 
 ### Annotation Key Normalization
 
-Annotation maps (loaded from EDN sidecar files, generated from kondo analysis,
+Annotation maps (loaded from EDN layer files, generated from kondo analysis,
 or enriched from session data) use **string keys** for rule names — never symbols.
 The normalization layer lives in `explorer/src/clara/explorer/annotations.clj`:
 
@@ -54,12 +54,16 @@ The normalization layer lives in `explorer/src/clara/explorer/annotations.clj`:
 **Rules:**
 
 1. Every boundary that reads, writes, or receives annotations from outside must
-   normalize: `load-sidecar`, `write-annotations!`, `generate-annotations-from-analysis`,
-   `add-auto-detected-annotations`, `enrich-annotations-from-session`, `merge-annotations`.
+   normalize: `clara.explorer.annotations.merge/->layer` and
+   `clara.explorer.annotations.merge/write-layer!`,
+   `clara.explorer.analyze/->annotations-from-rule-source-analysis`,
+   `clara.explorer.analyze/->memory-layer`, and
+   `clara.explorer.annotations.merge/merge-layers`.
 2. Use `get-annotation` (never raw `get`) when the lookup key may be a symbol
    (e.g., from kondo analysis, backtick-quoted vars in tests, or EDN input).
-3. The internal kondo analysis pipeline (`build-graph`, `transitive-reachability`,
-   `productions-by-name`) uses symbols — conversion happens at the boundaries only.
+3. The internal kondo analysis pipeline (`clara.explorer.analyze.index/->analysis-index`
+   and its symbol-keyed `:productions-by-name` map) uses symbols — conversion
+   happens at the boundaries only.
 
 Writing annotations to disk, and everything about the artifact set around them,
 is [`explorer/docs/persisted-artifacts.md`](explorer/docs/persisted-artifacts.md).

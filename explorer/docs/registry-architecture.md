@@ -130,11 +130,11 @@ join at production granularity, over the same closed `:ancestors`.
 
 | namespace | responsibility |
 | --- | --- |
-| `registry` | discover/read N units as a value; unit-key; `narrow-analysis` / `narrow-annotations`; `compatibility-report` / `assert-compatible!`; `source-units` / `aggregate-unit?` |
+| `registry` | discover/read N units as a value; `narrow-annotations`; `compatibility-report` / `assert-compatible!`; `source-units` / `aggregate-unit?` (pure helpers `unit-key` / `narrow-analysis` live in `clara.explorer.artifacts.shared.registry`) |
 | `selection` | the shared merge preamble: read + narrow + assert-compatible + unioned hierarchy + coverage |
 | `hierarchy` | union / re-close / transpose / order of ancestor maps; the two named closures |
 | `rehydrate` | slim's inverse: rebuild the recomputable reverse directions |
-| `compose` | `fold-layers`, `->standard-role-layers`, `->composed-analysis`, `union-fact-types` |
+| `compose` | `fold-layers`, `->standard-role-layers`, `->composed-analysis` (`union-fact-types` lives in `clara.explorer.artifacts.shared.compose`) |
 | `federate` | `->index` + query fns, `diff`, `grade`, `->digest`, `persist!` / `read-*` |
 | `flow` | `generate` → `persist!` (single unit) and `compose-persist!` (composed unit) |
 | `slim` / `parts` / `compact` / `digest` / `manifest` | one unit's on-disk shape — see `persisted-artifacts.md` |

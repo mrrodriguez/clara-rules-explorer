@@ -20,14 +20,6 @@
     form in the production namespace and return its `:form` and
     `:some-initial-value?` details.
 
-  * `analyze-lhs-bindings` — reproduce the compiler's binding bookkeeping
-    (used / join / new bindings per condition) using clara-rules' own
-    `com/sort-conditions` and `com/condition-to-node`, tagged with each
-    record's origin path in the raw LHS.  Groups (`:or` / `:exists` /
-    negations) are analyzed in their own scope via `analyze-node`: nested
-    leaves attach at their real tree paths and every group carries the
-    componentwise union of its children's summaries.
-
   * `augment-lhs` — evaluate accumulators and attach per-node binding info
     (leaves and groups alike) on an already-normalized LHS."
   (:require [clara.rules.compiler :as com]
@@ -42,23 +34,32 @@
   {:form s/Any
    :some-initial-value? s/Bool})
 
-(s/defschema LhsBindingRecord
-  "In-memory shape of one origin-tagged binding record produced by
-   `analyze-lhs-bindings`.  The cumulative `:used-bindings` /
-   `:ancestor-bindings` / `:all-bindings` sets are kept here because the walk
-   needs them for propagation; only `:binding-keys` / `:new-bindings` (plus
-   `:join-filter-join-bindings` when present) are surfaced on the wire."
-  {:condition s/Any
-   :origin [s/Int]
-   :attach-path (s/maybe [s/Int])
-   :used-bindings #{s/Keyword}
-   :binding-keys #{s/Keyword}
-   :new-bindings #{s/Keyword}
-   :ancestor-bindings #{s/Keyword}
-   :all-bindings #{s/Keyword}
-   (s/optional-key :result-binding) s/Keyword
-   (s/optional-key :fact-binding) s/Keyword
-   (s/optional-key :join-filter-join-bindings) #{s/Keyword}})
+(defn- ->memoized
+  "Returns a value-keyed memoized version of `f`, backed by `cache` (an atom
+   holding a map of argument-vector keys to results).  Keys compare by value,
+   not identity, so equal conditions and accumulator forms across productions
+   share one computation.  Nil results are cached like any other value.  The
+   caller owns the cache atom's lifetime."
+  [cache f]
+  (fn [& args]
+    (let [k (vec args)
+          snapshot @cache]
+      (if (contains? snapshot k)
+        (get snapshot k)
+        (let [v (apply f args)]
+          (swap! cache assoc k v)
+          v)))))
+
+(defn- ->walk-ctx
+  "Builds the analysis context threaded through the binding walk and
+   accumulator enrichment: `:env`, plus the (possibly memoized)
+   `:analyze-condition-fn`, `:condition-to-node-fn`, and
+   `:accumulator-info-fn`."
+  [{:keys [env analyze-condition-fn condition-to-node-fn accumulator-info-fn]}]
+  {:env env
+   :analyze-condition-fn analyze-condition-fn
+   :condition-to-node-fn condition-to-node-fn
+   :accumulator-info-fn accumulator-info-fn})
 
 (defn- get-condition-type
   "Returns the condition type of a normalized LHS node: the `:condition-type`
@@ -257,13 +258,15 @@
   "Returns `lhs` with every accumulator condition's `:accumulator` replaced by
    its `accumulator-info` map.  Only the normalized condition structure is
    traversed (`:from` / `:children`); the retained `:raw-condition` subtrees are
-   skipped, so each accumulator form is evaluated exactly once."
-  [lhs prod-ns]
+   skipped, so each accumulator form is evaluated exactly once.
+
+   `ctx` carries the (possibly memoized) `:accumulator-info-fn` to call."
+  [lhs prod-ns {:keys [accumulator-info-fn]}]
   (letfn [(enrich-node [node]
             (cond
               (and (map? node) (contains? node :accumulator))
               (-> node
-                  (update :accumulator #(accumulator-info % prod-ns))
+                  (update :accumulator #(accumulator-info-fn % prod-ns))
                   (update :from enrich-node))
 
               (and (map? node) (contains? node :children))
@@ -311,12 +314,13 @@
 
 (defn- sort-tagged-conditions
   "Reimplements `clara.rules.compiler/sort-conditions` over origin-tagged
-   conditions while preserving each condition's origin.  Uses the compiler's
-   own `com/analyze-condition` for the per-condition classification, so the
-   ordering is identical."
-  [tagged-conditions]
+   conditions while preserving each condition's origin.  Uses the ctx's
+   `:analyze-condition-fn` (the compiler's `com/analyze-condition`, possibly
+   memoized) for the per-condition classification, so the ordering is
+   identical."
+  [tagged-conditions {:keys [analyze-condition-fn]}]
   (let [classified (mapv (fn [{:keys [condition] :as item}]
-                           (assoc item :classified (com/analyze-condition condition)))
+                           (assoc item :classified (analyze-condition-fn condition)))
                          tagged-conditions)]
     (loop [sorted []
            bound #{}
@@ -392,117 +396,101 @@
       (seq join-filter)
       (assoc :join-filter-join-bindings (sort-bindings join-filter)))))
 
-(s/defn ^:private conjunction-binding-record :- LhsBindingRecord
-  "Computes one `LhsBindingRecord` for a single condition conjunction."
-  [conjunction env ancestor-bindings origin attach-path]
-  (let [compiled-node (com/condition-to-node conjunction env ancestor-bindings)
+(defn- conjunction-binding-summary
+  "Computes the wire binding summary and post-condition binding set for a
+   single condition conjunction."
+  [conjunction {:keys [ancestor-bindings]}
+   {:keys [env condition-to-node-fn]}]
+  (let [compiled-node (condition-to-node-fn conjunction env ancestor-bindings)
         {:keys [result-binding fact-binding]} conjunction
         all-bindings (cond-> (set/union ancestor-bindings (:used-bindings compiled-node))
                        result-binding (conj result-binding)
-                       fact-binding (conj fact-binding))]
-    (cond-> {:condition conjunction
-             :origin origin
-             :attach-path attach-path
-             :used-bindings (:used-bindings compiled-node)
-             :binding-keys (or (:join-bindings compiled-node) #{})
-             :new-bindings (:new-bindings compiled-node)
-             :ancestor-bindings ancestor-bindings
-             :all-bindings all-bindings}
-      (:join-filter-join-bindings compiled-node)
-      (assoc :join-filter-join-bindings (:join-filter-join-bindings compiled-node))
-
-      result-binding
-      (assoc :result-binding result-binding)
-
-      fact-binding
-      (assoc :fact-binding fact-binding))))
+                       fact-binding (conj fact-binding))
+        summary (binding-summary {:binding-keys (or (:join-bindings compiled-node) #{})
+                                  :new-bindings (:new-bindings compiled-node)
+                                  :join-filter-join-bindings (:join-filter-join-bindings compiled-node)})]
+    {:summary summary
+     :all-bindings all-bindings}))
 
 (declare analyze-node)
 
 (defn- analyze-leaf-node
-  "Analyzes a leaf map (fact / test / accumulator) at `path` with `ancestor`
-   in scope.  Returns `{:index :summary :outer :records}` where `:index` holds
-   the wire summary at `path`, `:summary` is that same summary, `:outer` is
-   the binding set available after the leaf, and `:records` is the single
-   origin-tagged record."
-  [leaf path ancestor env]
-  (let [record (conjunction-binding-record leaf env ancestor path path)
-        summary (binding-summary record)]
+  "Analyzes a leaf map (fact / test / accumulator) at the `:path` in `frame`
+   with `:ancestor-bindings` in scope.  Returns `{:index :summary :outer}`
+   where `:index` holds the wire summary at `:path`, `:summary` is that same
+   summary, and `:outer` is the binding set available after the leaf."
+  [leaf {:keys [path ancestor-bindings]} ctx]
+  (let [{:keys [summary all-bindings]} (conjunction-binding-summary leaf {:ancestor-bindings ancestor-bindings}
+                                                                    ctx)]
     {:index {path {:bindings summary}}
      :summary summary
-     :outer (:all-bindings record)
-     :records [record]}))
+     :outer all-bindings}))
 
 (defn- analyze-and-children
   "Analyzes `:and` children sequentially, threading each child's `:outer`
    into the next sibling's ancestor set.  The group's summary is the union of
    its children's; `:outer` is the final sibling's output."
-  [children path ancestor env]
+  [children {:keys [path ancestor-bindings]} ctx]
   (loop [j 0
-         local ancestor
+         local ancestor-bindings
          index {}
-         summaries []
-         records []]
+         summaries []]
     (if (>= j (count children))
       {:index (if (seq summaries)
                 (assoc index path {:bindings (union-binding-summaries summaries)})
                 index)
        :summary (union-binding-summaries summaries)
-       :outer local
-       :records records}
+       :outer local}
       (let [child (nth children j)
             child-path (conj path j)
-            sub (analyze-node child child-path local env)]
+            sub (analyze-node child {:path child-path :ancestor-bindings local} ctx)]
         (recur (inc j)
                (:outer sub)
                (merge index (:index sub))
-               (conj summaries (:summary sub))
-               (into records (:records sub)))))))
+               (conj summaries (:summary sub)))))))
 
 (defn- analyze-or-children
   "Analyzes `:or` branches independently: every branch starts from the group's
    ancestor set, never from the previous branch's result.  The group's summary
    is the union of its branches'; `:outer` is the union of the branches'
    finals (matching the compiler's disjunction handling)."
-  [children path ancestor env]
+  [children {:keys [path ancestor-bindings]} ctx]
   (let [subs (mapv (fn [j child]
-                     (analyze-node child (conj path j) ancestor env))
+                     (analyze-node child {:path (conj path j)
+                                          :ancestor-bindings ancestor-bindings}
+                                   ctx))
                    (range (count children))
                    children)
         index (into {} (mapcat :index) subs)
         summaries (mapv :summary subs)
         summary (union-binding-summaries summaries)
-        outer (reduce set/union ancestor (map :outer subs))]
+        outer (reduce set/union ancestor-bindings (map :outer subs))]
     {:index (assoc index path {:bindings summary})
      :summary summary
-     :outer outer
-     :records (into [] (mapcat :records) subs)}))
+     :outer outer}))
 
 (defn- analyze-not-group
   "Analyzes a `[:not …]` group.  Simple negations compute one
-   `condition-to-node` record for the whole group and attach its summary at
-   both the child and the group path.  Compound negations run the sub-scope
-   walk over the inner `negation-expr` (the decomposition the compiler
-   actually builds) and attach its union at the group path.  Either way
-   nothing escapes: `:outer` is the incoming ancestor set."
-  [raw path ancestor env]
+   `condition-to-node` summary for the whole group and attach it at both the
+   child and the group path.  Compound negations run the sub-scope walk over
+   the inner `negation-expr` (the decomposition the compiler actually builds)
+   and attach its union at the group path.  Either way nothing escapes:
+   `:outer` is the incoming ancestor set."
+  [raw {:keys [path ancestor-bindings]} ctx]
   (if (compound-negation? raw)
     (let [negation-expr (second raw)
           child-path (conj path 0)
-          sub (analyze-node negation-expr child-path ancestor env)
+          sub (analyze-node negation-expr {:path child-path :ancestor-bindings ancestor-bindings} ctx)
           summary (:summary sub)]
       {:index (assoc (:index sub) path {:bindings summary})
        :summary summary
-       :outer ancestor
-       :records (:records sub)})
+       :outer ancestor-bindings})
     (let [child-path (conj path 0)
-          record (conjunction-binding-record raw env ancestor path child-path)
-          summary (binding-summary record)]
+          {:keys [summary]} (conjunction-binding-summary raw {:ancestor-bindings ancestor-bindings} ctx)]
       {:index {child-path {:bindings summary}
                path {:bindings summary}}
        :summary summary
-       :outer ancestor
-       :records [record]})))
+       :outer ancestor-bindings})))
 
 (defn- analyze-exists-group
   "Analyzes a `[:exists child]` group by analyzing `child` directly: the
@@ -510,67 +498,61 @@
    child's.  The summary attaches at both the child and the group path; no
    synthetic `:?__exists__…` binding is ever surfaced.  Nothing escapes:
    `:outer` is the incoming ancestor set."
-  [raw path ancestor env]
+  [raw {:keys [path ancestor-bindings]} ctx]
   (let [child (second raw)
         child-path (conj path 0)
-        sub (analyze-node child child-path ancestor env)
+        sub (analyze-node child {:path child-path :ancestor-bindings ancestor-bindings} ctx)
         summary (:summary sub)]
     {:index (assoc (:index sub) path {:bindings summary})
      :summary summary
-     :outer ancestor
-     :records (:records sub)}))
+     :outer ancestor-bindings}))
 
 (defn- analyze-node
-  "Analyzes one raw condition at `path` with `ancestor` bindings in scope.
-   Returns `{:index :summary :outer :records}`:
+  "Analyzes one raw condition at the `:path` in `frame` with
+   `:ancestor-bindings` in scope.  Returns `{:index :summary :outer}`:
 
    * `:index` — `{attach-path {:bindings summary}}` for this subtree, including
      the group's own path;
    * `:summary` — the wire summary for this node (leaf summary, or the union
      of children's for groups);
    * `:outer` — the binding set available *after* this node (what the parent
-     threads onward; negations and `:exists` contribute nothing);
-   * `:records` — flat origin-tagged leaf records for `analyze-lhs-bindings`."
-  [raw-condition path ancestor env]
+     threads onward; negations and `:exists` contribute nothing)."
+  [raw-condition {:keys [ancestor-bindings] :as frame} ctx]
   (cond
     (map? raw-condition)
-    (analyze-leaf-node raw-condition path ancestor env)
+    (analyze-leaf-node raw-condition frame ctx)
 
     (sequential? raw-condition)
     (let [op (group-op raw-condition)
           children (vec (rest raw-condition))]
       (case op
-        :and (analyze-and-children children path ancestor env)
-        :or (analyze-or-children children path ancestor env)
-        :not (analyze-not-group raw-condition path ancestor env)
-        :exists (analyze-exists-group raw-condition path ancestor env)
-        (analyze-leaf-node raw-condition path ancestor env)))
+        :and (analyze-and-children children frame ctx)
+        :or (analyze-or-children children frame ctx)
+        :not (analyze-not-group raw-condition frame ctx)
+        :exists (analyze-exists-group raw-condition frame ctx)
+        (analyze-leaf-node raw-condition frame ctx)))
 
     :else
     {:index {}
      :summary {:binding-keys [] :new-bindings []}
-     :outer ancestor
-     :records []}))
+     :outer ancestor-bindings}))
 
 (defn- analyze-tagged-conditions
   "Runs the compiler-order binding walk over sorted, origin-tagged conditions.
    Each tagged condition is analyzed in its own scope via `analyze-node`; the
-   returned `:outer` becomes the next condition's ancestor set.  Returns
-   `{:index :records}` covering the whole walk, including nested leaves and
-   group summaries."
-  [tagged-conditions env]
+   returned `:outer` becomes the next condition's ancestor set.  Returns the
+   `{attach-path {:bindings summary}}` index covering the whole walk,
+   including nested leaves and group summaries."
+  [tagged-conditions ctx]
   (loop [remaining tagged-conditions
          ancestor-bindings #{}
-         index {}
-         records []]
+         index {}]
     (if-let [{:keys [origin condition]} (first remaining)]
-      (let [sub (analyze-node condition origin ancestor-bindings env)]
+      (let [sub (analyze-node condition {:path origin :ancestor-bindings ancestor-bindings} ctx)]
         (recur (rest remaining)
                (:outer sub)
-               (merge index (:index sub))
-               (into records (:records sub))))
-      {:index index
-       :records records})))
+               (merge index (:index sub))))
+      index)))
 
 (defn- top-level-and-group-paths
   "Returns the set of top-level `[i]` paths whose normalized entry is an `:and`
@@ -607,53 +589,14 @@
   "Full binding walk returning `{attach-path {:bindings summary}}` for every
    node in the normalized `lhs` — leaves, nested leaves, and groups.  Group
    summaries are the componentwise union of their children's."
-  [lhs env]
+  [lhs ctx]
   (let [raw-lhs (get-raw-lhs lhs)
         and-paths (top-level-and-group-paths lhs)
         tagged (-> raw-lhs
                    flatten-and-tag-conditions
-                   sort-tagged-conditions)
-        {:keys [index]} (analyze-tagged-conditions tagged env)]
+                   (sort-tagged-conditions ctx))
+        index (analyze-tagged-conditions tagged ctx)]
     (attach-top-level-and-groups index and-paths)))
-
-(defn analyze-lhs-bindings
-  "Analyzes the compiler's binding bookkeeping for a normalized `lhs` using
-   clara-rules' own `com/sort-conditions` and `com/condition-to-node`.  The
-   normalized LHS is read via `get-raw-lhs` only for this compiler-coupled
-   walk.
-
-   Returns a flat vector of origin-tagged records, in compiler processing
-   order — one per leaf, including leaves nested inside `:or` / `:exists` /
-   negation groups.  Each record:
-
-   * `:origin` — path into the LHS tree the record came from;
-   * `:attach-path` — path where this record's info is attached when
-     augmenting the LHS (always non-nil; nested leaves attach at their real
-     tree paths);
-   * `:condition` — the analyzed condition form (`:exists` is analyzed via
-     its child directly, so no synthetic `:?__exists__…` binding is ever
-     surfaced);
-   * `:used-bindings` — variables the condition references;
-   * `:binding-keys` — variables already bound upstream that this condition
-     joins on (the compiled node's `:binding-keys`);
-   * `:new-bindings` — variables introduced by this condition's constraints;
-   * `:join-filter-join-bindings` — present only when the condition has
-     non-equality unifications that reference an upstream binding;
-   * `:result-binding` / `:fact-binding` — present when the condition binds one;
-   * `:ancestor-bindings` — bindings available before the condition;
-   * `:all-bindings` — bindings available after it.
-
-   Group summaries (the union of children's) live in the augment index (see
-   `analyze-lhs->index`), not as records.
-
-   `env` is the production's `:env` (usually nil)."
-  [lhs env]
-  (let [raw-lhs (get-raw-lhs lhs)
-        tagged (-> raw-lhs
-                   flatten-and-tag-conditions
-                   sort-tagged-conditions)
-        {:keys [records]} (analyze-tagged-conditions tagged env)]
-    records))
 
 (defn- merge-bindings-into-tree
   "Walks the (normalized, accumulator-enriched) LHS tree, merging binding info
@@ -698,10 +641,24 @@
 
    `opts`:
    * `:prod-ns` — production namespace (required for accumulator evaluation);
-   * `:env` — the production's `:env` (usually nil)."
-  [lhs {:keys [prod-ns env]}]
-  (let [binding-index (analyze-lhs->index lhs env)
-        enriched (enrich-accumulators lhs prod-ns)]
+   * `:env` — the production's `:env` (usually nil);
+   * `:cache` — optional atom-backed map cache shared across productions, used
+     to memoize `com/analyze-condition`, `com/condition-to-node`, and
+     `accumulator-info` by value."
+  [lhs {:keys [prod-ns env cache]}]
+  (let [ctx (->walk-ctx
+             {:env env
+              :analyze-condition-fn (if cache
+                                      (->memoized cache com/analyze-condition)
+                                      com/analyze-condition)
+              :condition-to-node-fn (if cache
+                                      (->memoized cache com/condition-to-node)
+                                      com/condition-to-node)
+              :accumulator-info-fn (if cache
+                                     (->memoized cache accumulator-info)
+                                     accumulator-info)})
+        binding-index (analyze-lhs->index lhs ctx)
+        enriched (enrich-accumulators lhs prod-ns ctx)]
     (map-indexed (fn [i entry]
                    (merge-bindings-into-tree entry [i] binding-index))
                  enriched)))

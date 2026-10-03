@@ -26,16 +26,16 @@ We set `prerender.handleUnseenRoutes: 'ignore'` in `svelte.config.js` to prevent
 
 ### Step 1: Bootstrap the Demo Data
 
-First, generate the demo data artifacts (e.g., `session.bin` and annotations) required to run the demo server. From the `server` directory, run:
+First, generate the demo data artifacts (e.g., `session.bin` and annotations) required to run the demo server. From the `explorer` directory, run:
 
 ```bash
-cd server
+cd explorer
 make demo-setup
 ```
 
 ### Step 2: Start the Demo Server
 
-Next, start the server using the generated demo data artifacts. The scraper script requires the backend to be running locally (default: port `9001`). From the `server` directory, run:
+Next, start the server using the generated demo data artifacts. The scraper script requires the backend to be running locally (default: port `9001`). From the `explorer` directory, run:
 
 ```bash
 make demo-run

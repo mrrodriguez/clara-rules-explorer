@@ -12,7 +12,8 @@
             [clara.explorer.ns-deps :as ns-deps]
             [clara.explorer.serialize :as serialize]
             [clara.explorer.utils :as utils]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [schema.core :as schema]))
 
 (defn working-memory-available?
   "True when `session-or-rulebase` is a live session with inspectable working memory."
@@ -139,18 +140,21 @@
   `annotations` is the merged rule→annotation map (see
   annotations/merge-layers).  `ctx` is the shared analysis context map
   (annotations, dep-graph, production-map, type-analysis-map,
-  ancestors-set-fn, known-set; see `->rulebase-analysis`).  `known-set` is the
+  ancestors-set-fn, known-set, condition-cache; see `->rulebase-analysis`).
+  `known-set` is the
   analysis's serialized fact-type names, used for
   `clara.explorer.server.api/TypeReference` `known` flags.
 
   Form printing is controlled by the dynamic var `serialize/*form-printer*`."
   [{p-name :name :as production}
-   {:keys [annotations dep-graph production-map known-set include-lhs-form?] :as ctx}]
+   {:keys [annotations dep-graph production-map known-set include-lhs-form?
+           condition-cache] :as ctx}]
   (let [ann (ann/production-annotation annotations production)
         p-ns-name (get-production-ns-name-sym production)
         lhs-analysis (conditions/augment-lhs (:lhs production)
                                              {:prod-ns p-ns-name
-                                              :env (:env production)})
+                                              :env (:env production)
+                                              :cache condition-cache})
         serialize-type-ref (partial serialize/serialize-type-ref known-set p-ns-name)
 
         {:keys [upstream downstream]} (get-production-deps-summary p-name ctx)
@@ -401,6 +405,11 @@
         dep-graph (->dep-graph type-analysis-map ancestors-set-fn)
         production-map (->production-map productions)
 
+        ;; Shared value-keyed cache for the compiler-coupled condition passes
+        ;; (`com/analyze-condition`, `com/condition-to-node`) and accumulator
+        ;; eval. One per analysis build, so it cannot leak across builds.
+        condition-cache (atom {})
+
         ;; Shared context threaded through every production summary — the
         ;; per-production summary functions destructure what they need.
         analysis-ctx {:annotations annotations
@@ -409,7 +418,8 @@
                       :type-analysis-map type-analysis-map
                       :ancestors-set-fn ancestors-set-fn
                       :known-set known-set
-                      :include-lhs-form? include-lhs-form?}
+                      :include-lhs-form? include-lhs-form?
+                      :condition-cache condition-cache}
 
         rules (->rule-summary-map productions analysis-ctx)
 
@@ -440,6 +450,13 @@
            :fact-type-id-index (ft/->fact-type-id-index analysis)
            :production-id-index (->production-id-index analysis))))
 
+(defn- bypass-schema-validation
+  "Returns `value` unchanged, matching `schema.core/validate`'s success arity.
+   Rulebase analysis runs on an already-compiled session, so Clara's condition
+   schema validation is redundant and elided for the duration of the call."
+  [_schema value]
+  value)
+
 (defn ->rulebase-analysis
   "Analyzes a rulebase against merged annotations.  `annotations` is either
    a `ann.merge/MergedAnnotations` value (`ann.merge/merge-layers` output —
@@ -455,6 +472,12 @@
    annotations used for computation — so a caller holding a cached analysis
    can test validity: `(= (:merged-annotations cached) current-annotations)`.
 
+   Schema validation is elided for the duration of the call: the rulebase is
+   already compiled, so re-validating Clara's condition schema is redundant.
+   Elision is a `with-redefs` of `schema.core/validate`, which redefines the
+   var globally and is therefore not thread-safe — do not run analyses
+   concurrently with other threads that depend on schema validation.
+
    `opts` is an optional map:
    - `:form-printer` — (fn [form] String) for serializing LHS/RHS forms.
      Defaults to `serialize/default-form-printer` (clojure.pprint).
@@ -466,10 +489,11 @@
    (->rulebase-analysis session-or-rulebase annotations nil))
   ([session-or-rulebase annotations opts]
    (let [form-printer (:form-printer opts)]
-     (if form-printer
-       (binding [serialize/*form-printer* form-printer]
-         (->rulebase-analysis* session-or-rulebase annotations opts))
-       (->rulebase-analysis* session-or-rulebase annotations opts)))))
+     (with-redefs [schema/validate bypass-schema-validation]
+       (if form-printer
+         (binding [serialize/*form-printer* form-printer]
+           (->rulebase-analysis* session-or-rulebase annotations opts))
+         (->rulebase-analysis* session-or-rulebase annotations opts))))))
 
 (defn get-rulebase-counts
   "Returns a high-level summary of the rulebase counts using kebab-case keys."
