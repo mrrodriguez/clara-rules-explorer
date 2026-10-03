@@ -1,5 +1,5 @@
 #!/usr/bin/env bb
-;; bb smoke test for the `shared.*` namespaces. Every namespace marked
+;; bb smoke test for the bb-loaded namespaces. Every namespace marked
 ;; `:clara-rules-explorer/bb-loaded true` must `require` under babashka with
 ;; only `explorer/src` plus the schema version from `deps.edn` on the classpath.
 ;; The marker is the JVM side's promise that a namespace is bb-safe; this turns

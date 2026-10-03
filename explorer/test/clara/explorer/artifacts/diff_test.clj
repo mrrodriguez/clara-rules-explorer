@@ -1,12 +1,12 @@
-(ns clara.explorer.artifacts.shared.diff-test
-  "`clara.explorer.artifacts.shared.diff` over hand-built `read-unit` values —
+(ns clara.explorer.artifacts.diff-test
+  "`clara.explorer.artifacts.diff` over hand-built `read-unit` values —
   one test per change tag — plus the checked-in example: the variant diff is
   empty, and the composed diff separates scope from change.
 
   The pure tests never touch disk: `unit`/`prod` build the `read-unit` shape
   directly, so each test names exactly the field its tag watches."
   (:require
-   [clara.explorer.artifacts.shared.diff :as d]
+   [clara.explorer.artifacts.diff :as d]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))

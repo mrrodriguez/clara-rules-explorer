@@ -27,7 +27,7 @@
    [clara.explorer.analyze :as analyze]
    [clara.explorer.artifacts.layout :as layout]
    [clara.explorer.artifacts.schema :as schema]
-   [clara.explorer.artifacts.shared.git :as shared-git]
+   [clara.explorer.artifacts.git :as git]
    [clara.explorer.artifacts.store :as store]
    [clara.explorer.edn-io :as edn-io]
    [clojure.edn :as edn]
@@ -54,12 +54,12 @@
   Public because a caller assembling its own `:blocks` needs the same shape for
   the checkouts only it knows about.
 
-  Delegates to `clara.explorer.artifacts.shared.git/get-git-info` — the same
+  Delegates to `clara.explorer.artifacts.git/get-git-info` — the same
   implementation the offline bb `status` report reads through — including its
   detached-checkout resolution of `:branch` to the remote branch."
   [dir :- (s/maybe (s/cond-pre s/Str File))]
   (when (and dir (.exists (io/file (str dir))))
-    (shared-git/get-git-info (str dir))))
+    (git/get-git-info (str dir))))
 
 ;; ===========================================================================
 ;; manifest construction
@@ -133,9 +133,9 @@
   [{:keys [repo variant canonical? repo-path generated-by working-tree-notes change out-dir blocks]
     :as opts} :- schema/ManifestOptions]
   (let [today (str (java.time.LocalDate/now))
-        git (get-git-info (or repo-path (System/getProperty "user.dir")))
+        git-info (get-git-info (or repo-path (System/getProperty "user.dir")))
         variant (if (contains? opts :canonical?)
-                  (layout/write-variant variant canonical? git)
+                  (layout/write-variant variant canonical? git-info)
                   variant)]
     (cond-> (merge
              {:repo repo
@@ -144,7 +144,7 @@
               :updated today
               :artifacts store/unit-artifact-files
               :source (merge {:working-tree-notes (or working-tree-notes "")}
-                             git)
+                             git-info)
               :analysis-run (->analysis-run-provenance opts)
               :staleness {:policy "review-when-sha-drifts" :max-age-days 90}
               :history [{:date today

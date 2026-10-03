@@ -28,8 +28,8 @@
 
 (require '[clara.explorer.artifacts.layout :as layout]
          '[clara.explorer.artifacts.hierarchy :as hierarchy]
-         '[clara.explorer.artifacts.shared.diff :as shared-diff]
-         '[clara.explorer.artifacts.shared.status :as shared-status])
+         '[clara.explorer.artifacts.diff :as diff]
+         '[clara.explorer.artifacts.status :as status])
 
 (def ^:private dims
   [[:clara-rules/dynamic-insert-types-detected :clara-rules/insert-types "insert"]
@@ -48,12 +48,6 @@
   "The analysis is a DIRECTORY split by access pattern — a scan opens
   production-index.edn (~1.9MB) rather than the whole ~11.9MB value."
   (:rulebase-analysis layout/artifact-files))
-
-(def ^:private layer-filenames
-  "The layer files, in FOLD order — lowest precedence first. merged-annotations.edn
-  stores nearly every rule as a reference into one of these, so reading the merge
-  means reading them too."
-  (mapv layout/artifact-files (keys layout/layer-artifacts)))
 
 (def ^:private resolved-statuses
   "Callsite statuses that carry a conclusion. `:partial` counts: it resolved
@@ -86,16 +80,16 @@
   (edn/read-string {:default (fn [_tag v] v)} (slurp (fs/file f))))
 
 (defn- read-layer-stack
-  "Every layer file in `dir` that exists, in fold order, as [layer-id annotations].
-  What merged-annotations.edn's references resolve against."
+  "Every layer file in `dir` that exists, in fold order, as [layer-id
+  annotations]. What merged-annotations.edn's references resolve against. The
+  fold and extraction live in `layout/read-layer-stack`; here the reader is
+  the loud one — a missing layer is skipped, a malformed one dies."
   [dir]
-  (into []
-        (keep (fn [filename]
-                (let [f (fs/file dir filename)]
-                  (when (fs/exists? f)
-                    (let [m (read-edn f filename)]
-                      [(:id m) (:annotations m)])))))
-        layer-filenames))
+  (layout/read-layer-stack
+   dir
+   (fn [f]
+     (when (fs/exists? f)
+       (read-edn f (fs/file-name f))))))
 
 (defn- read-merged
   "merged-annotations.edn, expanded. The whole `{:annotations :layers
@@ -405,19 +399,19 @@
   "The key of `m` the caller meant: an exact hit, else the one key containing
   `name*` as a substring. nil when there is no unique answer, having said why.
   A unique substring match prints the fully-qualified key it resolved to, so an
-  unqualified name is never answered from an invisible choice."
+  unqualified name is never answered from an invisible choice. Matching is
+  `layout/resolve-key`; this report's job is only how to say the answer."
   [m name*]
-  (if (contains? m name*)
-    name*
-    (let [cands (filter #(str/includes? % name*) (keys m))]
-      (cond
-        (= 1 (count cands)) (let [k (first cands)]
-                              (println "Resolved" name* "->" k)
-                              k)
-        (seq cands) (do (println "Ambiguous —" (count cands) "matches:")
-                        (doseq [c (sort cands)] (println " " c))
-                        nil)
-        :else (do (println "No match for" name*) nil)))))
+  (let [{:keys [exact candidates]} (layout/resolve-key m name*)]
+    (cond
+      exact exact
+      (= 1 (count candidates)) (let [k (first candidates)]
+                                 (println "Resolved" name* "->" k)
+                                 k)
+      (seq candidates) (do (println "Ambiguous —" (count candidates) "matches:")
+                           (doseq [c candidates] (println " " c))
+                           nil)
+      :else (do (println "No match for" name*) nil))))
 
 (defn- find-key [m name*]
   (when-let [k (find-key-name m name*)] (get m k)))
@@ -645,17 +639,11 @@
     (die "Flag(s) not used by this subcommand:"
          (str/join ", " (map #(str "--" (name %)) (sort bad))))))
 
-(defn- short-sha
-  "First 7 chars of `sha`, for one-line verdict summaries."
-  [sha]
-  (let [s (str sha)]
-    (if (> (count s) 7) (subs s 0 7) s)))
-
 (defn- reason-summary
   "One reason as a `--edn`-free fragment of the verdict line."
   [{:keys [check recorded current updated max-age-days ref checkout source]}]
   (case check
-    :sha-drift (format "sha-drift %s -> %s" (short-sha recorded) (short-sha current))
+    :sha-drift (format "sha-drift %s -> %s" (layout/->short-sha recorded) (layout/->short-sha current))
     :remote-mismatch (format "remote-mismatch (recorded %s, checkout %s)" recorded current)
     :generated-dirty "generated-dirty (the unit describes no single commit)"
     :checkout-dirty "checkout-dirty (informational)"
@@ -664,20 +652,20 @@
     :ref-unresolvable (format "ref %s unresolvable in %s" ref checkout)
     :checkout-not-a-repo (format "%s is not a git checkout" checkout)
     :source-sha-drift (format "%s: sha-drift %s -> %s"
-                              source (short-sha recorded) (short-sha current))
+                              source (layout/->short-sha recorded) (layout/->short-sha current))
     :source-missing (format "%s: missing" source)
     :aggregate-no-sources "aggregate without per-source shas (no verdict)"
     (str check)))
 
 (defn- print-status
-  "The `shared-status/unit-status` result map as aligned `label  value` lines."
+  "The `status/unit-status` result map as aligned `label  value` lines."
   [{:keys [repo variant kind mode source updated staleness verdict reasons sources]}]
   (print-field "unit" (str repo (when (seq variant) (str "@" (layout/variant->path variant)))))
   (print-field "kind" (str (name kind) " unit"
                              (when (seq variant) (str " (variant " (layout/variant->path variant) ")"))
                              (when mode (str " (mode " mode ")"))))
   (print-field "source" (format "%s (%s, %s)   updated %s"
-                                  (short-sha (:sha source))
+                                  (layout/->short-sha (:sha source))
                                   (or (:branch source) "no branch")
                                   (:working-tree source)
                                   updated))
@@ -688,21 +676,21 @@
     (print-field (if (zero? i) "sources" "")
                   (str source ": " (name verdict)
                        (when (= :sha-drift verdict)
-                         (format " %s -> %s" (short-sha recorded) (short-sha current))))))
+                         (format " %s -> %s" (layout/->short-sha recorded) (layout/->short-sha current))))))
   (print-field "verdict" (str (name verdict)
                                 (when (seq reasons)
                                   (str " | " (str/join "; " (map reason-summary reasons)))))))
 
 (defn- status
   "`status [--checkout PATH [--ref REF]] [--root PATH] [--edn]` over unit dir
-  `dir`: presentation over `shared-status/unit-status`, which reads
+  `dir`: presentation over `status/unit-status`, which reads
   rules-inspect-manifest.edn (and, for a composed unit, its sources'
   manifests) and nothing else."
   [dir opts]
   (when (and (:ref opts) (nil? (:checkout opts)))
     (die "--ref needs --checkout"))
   (let [result (try
-                  (shared-status/unit-status
+                  (status/unit-status
                    (cond-> {:dir dir}
                      (:checkout opts) (assoc :checkout (:checkout opts))
                      (:ref opts) (assoc :ref (:ref opts))
@@ -718,31 +706,31 @@
   the production files of each unit — never the dep-graph, fact-types,
   manifest, or shape — and never runs the full `diff`. As EDN with `--edn`."
   [before-dir after-dir opts]
-  (let [before (try {:productions (shared-diff/read-productions before-dir)}
+  (let [before (try {:productions (diff/read-productions before-dir)}
                      (catch Exception e (die (ex-message e))))
-        after (try {:productions (shared-diff/read-productions after-dir)}
+        after (try {:productions (diff/read-productions after-dir)}
                     (catch Exception e (die (ex-message e))))
-        detail (try (shared-diff/rule-detail before after (:rule opts))
+        detail (try (diff/rule-detail before after (:rule opts))
                      (catch Exception e (die (ex-message e))))]
     (if (:edn opts)
       (pprint/pprint detail)
-      (println (shared-diff/rule-detail-text detail)))))
+      (println (diff/rule-detail-text detail)))))
 
 (defn- diff-report-full
   "`diff <after-dir> [--edn] [--rule NAME]` over unit dir `before-dir`: presentation
-   over `shared-diff/diff`, which reads both units' `merged-rulebase-analysis/`
+   over `diff/diff`, which reads both units' `merged-rulebase-analysis/`
    and merged annotations and nothing else; `--edn` prints the `diff` value.
    (`--rule` never reaches here — the dispatcher sends it to `rule-report`.)"
   [before-dir after-dir opts]
-  (let [before (try (shared-diff/read-unit before-dir)
+  (let [before (try (diff/read-unit before-dir)
                      (catch Exception e (die (ex-message e))))
-        after (try (shared-diff/read-unit after-dir)
+        after (try (diff/read-unit after-dir)
                     (catch Exception e (die (ex-message e))))
-        d (try (shared-diff/diff before after)
+        d (try (diff/diff before after)
                 (catch Exception e (die (ex-message e))))]
     (if (:edn opts)
       (pprint/pprint d)
-      (println (shared-diff/->text d)))))
+      (println (diff/->text d)))))
 
 (defn- diff-report
   "`diff <after-dir> [--edn] [--rule NAME]`: `--rule` prints one production's

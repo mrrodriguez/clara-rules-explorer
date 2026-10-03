@@ -53,14 +53,13 @@
   [32])
 
 (def ^:private digest-patterns
-  "`digest-widths` as `{:width … :pattern … :ordinal-fmt …}` entries, in order. Each pattern
-   captures the prefix of `<prefix><width lowercase hex>`; the greedy `.+`
-   anchors the hex run at the name's end, so a prefix ending in a hex letter
-   keeps its last letter. A bare digest (no prefix) cannot match — `.+`
-   needs at least one character — and neither can uppercase hex."
+  "`digest-widths` as `{:pattern … :ordinal-fmt …}` entries, in order. Each
+   pattern captures the prefix of `<prefix><width lowercase hex>`; the greedy
+   `.+` anchors the hex run at the name's end, so a prefix ending in a hex
+   letter keeps its last letter. A bare digest (no prefix) cannot match —
+   `.+` needs at least one character — and neither can uppercase hex."
   (mapv (fn [width]
-          {:width width
-           :pattern (re-pattern (format "(.+)[0-9a-f]{%d}" width))
+          {:pattern (re-pattern (format "(.+)[0-9a-f]{%d}" width))
            :ordinal-fmt (format "%%0%dx" width)})
         digest-widths))
 

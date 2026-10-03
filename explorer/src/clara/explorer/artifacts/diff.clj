@@ -1,4 +1,4 @@
-(ns ^{:clara-rules-explorer/bb-loaded true} clara.explorer.artifacts.shared.diff
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.explorer.artifacts.diff
   "Production-level diff of two unit directories: which rules and queries were
   added or removed, which changed and how, which fact types appeared or
   disappeared, and which producer→consumer edges were gained or lost.
@@ -29,33 +29,35 @@
 ;; reading
 ;; ===========================================================================
 
-(defn- read-edn-or-nil
-  "The EDN value in file `f`, or nil when it cannot be read."
+(defn- read-edn
+  "The EDN value in file `f`, throwing when it cannot be read."
   [f]
-  (try
-    (edn/read-string {:default (fn [_tag v] v)} (slurp (str f)))
-    (catch Exception _ nil)))
+  (edn/read-string {:default (fn [_tag v] v)} (slurp (str f))))
+
+(defn- read-edn-or-nil
+  "The EDN value in file `f`, or nil when it cannot be read (missing or
+   malformed)."
+  [f]
+  (try (read-edn f) (catch Exception _ nil)))
 
 (defn- read-edn-or-throw
-  "`what` from file `f`, throwing when it cannot be read.
-   The throwing read; `read-edn-or-nil` returns nil instead."
+  "`what` from file `f`, throwing when it cannot be read. The throw names
+   `what` and the file, so a part that failed to read is reported as that
+   part, never as an absent EDN value."
   [f what]
-  (or (read-edn-or-nil f)
+  (try
+    (read-edn f)
+    (catch Exception e
       (throw (ex-info (format "Cannot diff: missing %s — %s" what (str f))
-                      {:file (str f) :what what}))))
+                      {:file (str f) :what what}
+                      e)))))
 
 (defn- read-layer-stack
-  "Every layer file in `dir` that exists, in fold order, as `[layer-id
-  annotations]` — what `merged-annotations.edn`'s references resolve against.
-   Fold order is `layout/layer-artifacts`' key order (an `array-map`, lowest
-   precedence first), so this must keep reading its keys in map order."
+  "The annotation layer stack of unit dir `dir`, read tolerantly: the fold
+   order and extraction are `layout/read-layer-stack`; here `read-edn-or-nil`
+   is the reader, so an absent or malformed layer is skipped."
   [dir]
-  (into []
-        (keep (fn [role]
-                (let [m (read-edn-or-nil (str dir "/" (get layout/artifact-files role)))]
-                  (when (map? (:annotations m))
-                    [(:id m) (:annotations m)]))))
-        (keys layout/layer-artifacts)))
+  (layout/read-layer-stack dir read-edn-or-nil))
 
 (defn- resolution-of
   "One production's annotation resolutions as `{dim resolution}` (`:insert`
@@ -165,9 +167,10 @@
    :units (vec (get-in manifest [:analysis-run :units]))})
 
 (defn- assert-same-shape!
-  "Refuse a diff across slim shapes, as `registry/assert-compatible!`
-   refuses a merge: when `:slim :dropped` differs the two units do not hold
-   the same keys and every comparison would be suspect. Names both shapes."
+  "Refuse a diff across slim shapes, as
+   `clara.explorer.artifacts.registry/assert-compatible!` refuses a merge:
+   when `:slim :dropped` differs the two units do not hold the same keys and
+   every comparison would be suspect. Names both shapes."
   [before after]
   (let [b-shape (:shape before)
         a-shape (:shape after)]
@@ -201,27 +204,42 @@
   [productions nses name]
   (contains? nses (str (get-in productions [name :ns]))))
 
+(def ^:private compared-fields
+  "Production fields the diff compares, in display order: `[tag key set?]`.
+   `tag` names the change in `:changed` and the field in `rule-detail-text`;
+   `key` is the field in a production value; `set?` compares
+   order-insensitively — the type lists (`:lhs-types`, `:insert-types`,
+   `:retract-types`) are sets to the diff. `:rhs` is the tag for the
+   `:rhs-form` field. One spec, so the tag set and the `--rule` detail cannot
+   disagree on what counts as a change."
+  [[:kind :kind false]
+   [:lhs-types :lhs-types true]
+   [:lhs :lhs false]
+   [:insert-types :insert-types true]
+   [:retract-types :retract-types true]
+   [:rhs :rhs-form false]
+   [:doc :doc false]
+   [:props :props false]
+   [:resolution :resolution false]
+   [:unit :unit false]])
+
+(defn- compared-value
+  "`(get production key)`, as a set when `set?`, so both `production-tags`
+   and `rule-detail-text` read the same value for the same field."
+  [production key set?]
+  (let [v (get production key)]
+    (if set? (set v) v)))
+
 (defn- production-tags
   "The change tags for a production present on both sides: one tag per
-   compared field whose value differs. Type lists compare as sets."
+   `compared-fields` entry whose value differs."
   [b a]
   (into (sorted-set)
-        (keep (fn [[tag kf set?]]
-                (let [bv (get b kf)
-                      av (get a kf)]
-                  (when (not= (if set? (set bv) bv)
-                              (if set? (set av) av))
-                    tag))))
-        [[:kind :kind false]
-         [:lhs-types :lhs-types true]
-         [:lhs :lhs false]
-         [:insert-types :insert-types true]
-         [:retract-types :retract-types true]
-         [:rhs :rhs-form false]
-         [:doc :doc false]
-         [:props :props false]
-         [:resolution :resolution false]
-         [:unit :unit false]]))
+        (keep (fn [[tag key set?]]
+                (when (not= (compared-value b key set?)
+                            (compared-value a key set?))
+                  tag)))
+        compared-fields))
 
 (defn- diff-productions
   "`{:added [...] :removed [...] :changed {name #{tags}}}` over the
@@ -270,11 +288,6 @@
                                       :removed (-> b-anc (set/difference a-anc) sort vec)}])))))
                     names)}))
 
-(defn- edge-endpoint-names
-  "Both production names of an `[upstream downstream]` pair."
-  [[up down]]
-  [up down])
-
 (defn- diff-edges
   "`{:gained [...] :lost [...]}` — dep-graph pairs present on exactly one
    side, excluding pairs touching a scope-only production (those are listed
@@ -306,10 +319,9 @@
         scope-prods (set productions)
         edges (->> [before after]
                    (mapcat :edges)
-                   (filter (fn [pair]
-                             (let [[up down] (edge-endpoint-names pair)]
-                               (or (contains? scope-prods up)
-                                   (contains? scope-prods down)))))
+                   (filter (fn [[up down]]
+                             (or (contains? scope-prods up)
+                                 (contains? scope-prods down))))
                    distinct
                    sort
                    vec)]
@@ -350,13 +362,7 @@
 ;; text rendering
 ;; ===========================================================================
 
-(defn- short-sha
-  "First 7 chars of `sha`, for one-line provenance."
-  [sha]
-  (let [s (str sha)]
-    (if (> (count s) 7) (subs s 0 7) s)))
-
-(defn- unit-handle
+(defn- ->unit-handle
   "`repo`, or `repo@<variant path>` for a variant unit."
   [{:keys [repo variant]}]
   (str repo (when (seq variant) (str "@" (layout/variant->path variant)))))
@@ -366,8 +372,8 @@
   [side {:keys [sha sha-short branch working-tree] :as prov}]
   (format "%s %s %s (%s, %s)"
           (name side)
-          (unit-handle prov)
-          (or sha-short (short-sha sha))
+          (->unit-handle prov)
+          (or sha-short (layout/->short-sha sha))
           (or branch "no branch")
           (or working-tree "unknown")))
 
@@ -453,40 +459,22 @@
 ;; one production's before/after
 ;; ===========================================================================
 
-(def ^:private detail-fields
-  "Compared production fields in display order: `[label key]`."
-  [[:kind :kind]
-   [:ns :ns]
-   [:lhs-types :lhs-types]
-   [:lhs :lhs]
-   [:insert-types :insert-types]
-   [:retract-types :retract-types]
-   [:rhs-form :rhs-form]
-   [:doc :doc]
-   [:props :props]
-   [:resolution :resolution]
-   [:unit :unit]])
-
 (defn- find-production-name
   "The production `name*` names: an exact hit, else the unique key containing
-   it as a substring. Throws naming the candidates when there is no unique
-   answer."
+   it as a substring. Matching is `layout/resolve-key`; here a non-singleton
+   answer throws, naming the candidates, so `rule-detail` stays a pure
+   function."
   [productions name*]
-  (if (contains? productions name*)
-    name*
-    (let [cands (->> productions
-                     keys
-                     (filter #(str/includes? % name*))
-                     sort
-                     vec)]
-      (cond
-        (= 1 (count cands)) (first cands)
-        (seq cands) (throw (ex-info (format "Ambiguous production %s — %d matches: %s"
-                                            (pr-str name*) (count cands)
-                                            (str/join ", " cands))
-                                    {:name name* :candidates cands}))
-        :else (throw (ex-info (format "No production matches %s" (pr-str name*))
-                              {:name name*}))))))
+  (let [{:keys [exact candidates]} (layout/resolve-key productions name*)]
+    (cond
+      exact exact
+      (= 1 (count candidates)) (first candidates)
+      (seq candidates) (throw (ex-info (format "Ambiguous production %s — %d matches: %s"
+                                               (pr-str name*) (count candidates)
+                                               (str/join ", " candidates))
+                                       {:name name* :candidates candidates}))
+      :else (throw (ex-info (format "No production matches %s" (pr-str name*))
+                            {:name name*})))))
 
 (defn rule-detail
   "One production's before/after across two units — `read-unit` values, or
@@ -507,20 +495,21 @@
 
 (defn rule-detail-text
   "A `rule-detail` value as text: the name and tags, then each changed
-   field's before and after — including both `:rhs-form` texts."
+   field's before and after — including both `:rhs-form` texts. A production
+   on one side only names that side and stops there."
   [{rule-name :name :keys [tags before after]}]
-  (let [lines (volatile! [(if (seq tags)
-                            (->> tags (map name) (str/join " ") (format "%s [%s]" rule-name))
-                            (format "%s (unchanged)" rule-name))])
-        emit! (fn [& ls] (vswap! lines into ls))]
-    (cond
-      (nil? before) (emit! "(only in after)")
-      (nil? after) (emit! "(only in before)"))
-    (doseq [[label kf] detail-fields
-            :let [bv (get before kf)
-                  av (get after kf)]
-            :when (not= bv av)]
-      (emit! (format "%s:" (name label)))
-      (emit! (format "  before: %s" (pr-str bv)))
-      (emit! (format "  after:  %s" (pr-str av))))
-    (str/join "\n" @lines)))
+  (let [header (cond
+                 (nil? before) (format "%s (only in after)" rule-name)
+                 (nil? after) (format "%s (only in before)" rule-name)
+                 (seq tags) (format "%s [%s]" rule-name
+                                    (->> tags (map name) (str/join " ")))
+                 :else (format "%s (unchanged)" rule-name))
+        field-lines (when (and before after)
+                      (mapcat (fn [[tag key set?]]
+                                (when (not= (compared-value before key set?)
+                                            (compared-value after key set?))
+                                  [(format "%s:" (name tag))
+                                   (format "  before: %s" (pr-str (get before key)))
+                                   (format "  after:  %s" (pr-str (get after key)))]))
+                              compared-fields))]
+    (str/join "\n" (into [header] field-lines))))

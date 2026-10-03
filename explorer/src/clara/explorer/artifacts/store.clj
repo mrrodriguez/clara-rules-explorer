@@ -70,7 +70,7 @@
    [clara.explorer.artifacts.layout :as layout]
    [clara.explorer.artifacts.parts :as parts]
    [clara.explorer.artifacts.schema :as schema]
-   [clara.explorer.artifacts.shared.git :as shared-git]
+   [clara.explorer.artifacts.git :as git]
    [clara.explorer.edn-io :as edn-io]
    [clojure.java.io :as io]
    [clojure.string :as str]
@@ -244,7 +244,7 @@
                       (validate-variant! variant)
                       (let [git-dir (or repo-path (System/getProperty "user.dir"))]
                         (layout/write-variant variant canonical?
-                                              (shared-git/get-git-info git-dir))))
+                                              (git/get-git-info git-dir))))
                     variant)]
       (layout/->unit-dir {:root root :repo repo :variant variant}))))
 

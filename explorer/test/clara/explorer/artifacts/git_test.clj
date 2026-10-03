@@ -1,11 +1,11 @@
-(ns clara.explorer.artifacts.shared.git-test
+(ns clara.explorer.artifacts.git-test
   "Detached-checkout branch resolution over real temp git repos.
 
   No network: remote-tracking refs are created with `update-ref` /
   `symbolic-ref`, which is exactly what a fetch would have left behind.
   Skipped, loudly, when `git` is not on PATH."
   (:require
-   [clara.explorer.artifacts.shared.git :as git]
+   [clara.explorer.artifacts.git :as git]
    [clojure.java.io :as io]
    [clojure.java.shell :as sh]
    [clojure.string :as str]

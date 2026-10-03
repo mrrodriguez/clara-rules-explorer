@@ -1,7 +1,7 @@
 # Diff two units, production by production
 
 Status: **proposal**. Scope: `explorer/` — `clara.explorer.utils` canonicalization, a new
-babashka-loaded `clara.explorer.artifacts.shared.diff`, an `annotations_report.bb` subcommand, and
+babashka-loaded `clara.explorer.artifacts.diff`, an `annotations_report.bb` subcommand, and
 `docs/persisted-artifacts.md`. No artifact-shape change. Part A changes artifact *values* once, for
 units with the name shape it covers.
 
@@ -166,7 +166,7 @@ units, a unit and its variant, or two composed units.
 
 ### 3.2 Namespace
 
-`clara.explorer.artifacts.shared.diff`, marked `:clara-rules-explorer/bb-loaded true`:
+`clara.explorer.artifacts.diff`, marked `:clara-rules-explorer/bb-loaded true`:
 
 - `read-unit`: `dir` → the values the diff compares, read through `layout/part-files`,
   `layout/artifact-files`, and `layout/expand-merged-annotations`, the same definitions
@@ -249,7 +249,7 @@ summary of the same question, and the two read well together.
 
 ### 3.8 Tests
 
-- `shared/diff_test`: pure tests over edited `read-unit` values, one per tag, plus scope
+- `diff_test`: pure tests over edited `read-unit` values, one per tag, plus scope
   separation (a namespace present on one side lands under `:scope`, not `:added`), edge gain and
   loss, fact-type changes, the shape-skew refusal, and empty-against-itself.
 - **Against the checked-in example:**

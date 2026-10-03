@@ -1,4 +1,4 @@
-(ns ^{:clara-rules-explorer/bb-loaded true} clara.explorer.artifacts.shared.status
+(ns ^{:clara-rules-explorer/bb-loaded true} clara.explorer.artifacts.status
   "Whether a persisted unit is current: the comparison behind the offline bb
   `status` report, shared with any JVM host that wants the same verdict.
 
@@ -8,7 +8,7 @@
   inputs exist."
   (:require
    [clara.explorer.artifacts.layout :as layout]
-   [clara.explorer.artifacts.shared.git :as git]
+   [clara.explorer.artifacts.git :as git]
    [clara.explorer.artifacts.shared.registry :as shared-registry]
    [clojure.edn :as edn]
    [clojure.string :as str])

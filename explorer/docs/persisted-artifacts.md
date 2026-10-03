@@ -366,7 +366,7 @@ every source is; `--checkout` is rejected for it, since it has one checkout per
 source. An aggregate with no per-source shas is reported by kind and source
 provenance, with no verdict. `--edn` prints the result map the text report
 renders. The comparison itself is
-`clara.explorer.artifacts.shared.status/unit-status`, so a host can call it and
+`clara.explorer.artifacts.status/unit-status`, so a host can call it and
 append its own `:reasons` (tool versions, configuration slices kept in
 `:blocks`) before rendering.
 

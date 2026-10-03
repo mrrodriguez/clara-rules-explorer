@@ -14,9 +14,9 @@ Tracks `docs/planning/registry-unit-diff-plan.md`. Updated as parts land.
 
 ## Part B — `diff` over two units (§3) — complete
 
-- [x] `artifacts.shared.diff`: `read-unit`, `diff`, `->text` (§3.2–3.5)
+- [x] `artifacts.diff`: `read-unit`, `diff`, `->text` (§3.2–3.5)
 - [x] `annotations_report.bb <before> diff <after>` subcommand (`--edn`, `--rule`) (§3.1, §3.5)
-- [x] `shared/diff_test`: one per tag + scope/edges/fact-types/shape-skew/empty-against-itself (§3.8)
+- [x] `diff_test`: one per tag + scope/edges/fact-types/shape-skew/empty-against-itself (§3.8)
 - [x] Checked-in example assertions: variant no-diff, composed `:scope`/`:unit` (§3.8)
 - [x] `bb_report_test`: subcommand end to end (§3.8)
 - [x] Docs: `persisted-artifacts.md` §"Querying it offline" (§3.9)
@@ -62,3 +62,51 @@ Tracks `docs/planning/registry-unit-diff-plan.md`. Updated as parts land.
   (`layout/layer-artifacts` is an `array-map`, lowest precedence first);
   throwing reader renamed `read-edn-or-throw` to pair with `read-edn-or-nil`.
   Text output is byte-identical (existing tests pin it).
+- 2026-10-03 (review round 3): correctness + standards fixes. One-sided
+  `--rule` no longer prints a contradictory `(unchanged)` header beside
+  `(only in after/before)`, and no longer dumps every field as
+  `before: nil` — the header is the whole answer. One `compared-fields`
+  spec (`[tag key set?]`) + a `compared-value` helper now feed both
+  `production-tags` and `rule-detail-text`, so the `--rule` detail and the
+  full diff's `:changed` tags agree on what counts as a change (type lists
+  compare as sets in both; the dead `:ns` field is gone; `--rule` labels are
+  now the tag names — `rhs:` rather than `rhs-form:` — matching the diff).
+  `rule-detail-text` rewritten data-driven (no `volatile!`/`emit!`), the
+  same cleanup `->text` got. `read-edn-or-throw` no longer conflates a
+  legitimately nil/false EDN value with a read failure: a base `read-edn`
+  throws, `read-edn-or-throw` wraps with `what` + cause, `read-edn-or-nil`
+  swallows. `registry/assert-compatible!` docstring reference is now fully
+  qualified (`clara.explorer.artifacts.registry/assert-compatible!`).
+  `short-sha` consolidated into `layout/->short-sha` (nil-safe, shared by
+  the script and `shared.diff`; private copies removed); `unit-handle` →
+  `->unit-handle`; dead `edge-endpoint-names` identity fn and the unused
+  `:width` key in `digest-patterns` removed. Not consolidated on purpose:
+  the script's `read-layer-stack` is the loud variant (dies on a missing
+  layer) while `shared.diff`'s tolerates absence, and `find-production-name`
+  throws where the script's `find-key-name` prints-and-returns-nil —
+  different contracts, both deriving fold order from `layout/layer-artifacts`.
+  `make test` 456 tests / 2976 assertions green; `format-check`, `lint`,
+  `reflection-check`, `bb-smoke-test` clean.
+- 2026-10-03 (review round 4): namespace + duplication pass. Moved
+  `clara.explorer.artifacts.shared.diff` → `clara.explorer.artifacts.diff`
+  (test → `clara.explorer.artifacts.diff-test`): `shared` is only for a name
+  that collides at the `artifacts` level (`compose`, `registry`,
+  `rehydrate`, `selection`) — bb-loaded is the ns metadata, not a
+  sub-namespace, and `diff` collides with nothing there (`layout` and
+  `hierarchy` were already bb-loaded at the top level). Consolidated the two
+  duplicated readers: `read-layer-stack` is now `layout/read-layer-stack`
+  (takes a `read-layer` fn — the missing/malformed behavior is the only edge,
+  injected by the caller); the script passes a loud reader, `diff` passes
+  `read-edn-or-nil`. Substring matching is now `layout/resolve-key`
+  (`{:exact …}` or `{:candidates …}`); the script's `find-key-name` (prints)
+  and `diff`'s `find-production-name` (throws) are thin report/throw edges
+  over it. This supersedes the round-3 "not consolidated" note.
+  `make test` 456 tests / 2976 assertions green; `format-check`, `lint`,
+  `reflection-check`, `bb-smoke-test` clean.
+- 2026-10-03 (review round 5): moved `shared.git` → `clara.explorer.artifacts.git`
+  and `shared.status` → `clara.explorer.artifacts.status` (and their tests),
+  completing the `shared` = collision-only cleanup — only `compose`, `registry`,
+  `rehydrate`, `selection` remain there, each with a JVM-only top-level
+  namesake. `manifest.clj`'s local `git` binding renamed `git-info` so the
+  `git` alias is unambiguous. `make test` 456 tests / 2976 assertions green;
+  `format-check`, `lint`, `reflection-check`, `bb-smoke-test` clean.
