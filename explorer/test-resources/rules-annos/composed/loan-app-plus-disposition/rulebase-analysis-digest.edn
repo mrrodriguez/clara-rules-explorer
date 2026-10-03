@@ -1,10 +1,10 @@
-{:summary {:rule-count 20, :query-count 5, :fact-type-count 38},
+{:summary {:rule-count 21, :query-count 5, :fact-type-count 39},
  :counts {:node-count 0, :dep-edge-count 34, :unresolved-count 0},
  :namespaces {"clara.explorer.test.rules.loan-app-rules" {:rules 4, :queries 1},
   "clara.explorer.test.rules.loan-doc-queries" {:rules 0, :queries 1},
-  "clara.explorer.test.rules.loan-doc-rules" {:rules 14, :queries 1},
+  "clara.explorer.test.rules.loan-doc-rules" {:rules 15, :queries 1},
   "clara.explorer.test.rules.loan-outcome-notices" {:rules 2, :queries 2}},
- :flag-counts {:no-output-types 2, :sink-rule 9, :source-rule 6, :unlinked-rule 0},
+ :flag-counts {:no-output-types 2, :sink-rule 10, :source-rule 7, :unlinked-rule 0},
  :unlinked-rules #{},
  :no-output-rules #{"clara.explorer.test.rules.loan-app-rules/app-outcome-approved-args-demo"
   "clara.explorer.test.rules.loan-doc-rules/collect-all-missing-required-docs"},

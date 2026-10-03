@@ -107,16 +107,10 @@ silent format drift. Regenerate it (from `explorer/`) with `make regen-artifacts
 `dev/regen_artifacts.clj`; a regeneration is byte-identical when nothing has changed, and anything
 that did change is exactly what the diff should be read for. The golden test
 `clara.explorer.artifacts.regen-example-test` regenerates the whole registry into a temp
-dir and pins it against the checked-in copy.
-
-One byte-level caveat: the `def-fact-fn` macro emits an auto-gensym
-(`resolved__N__auto__`) for `extract-doc-meta-rule`'s var-as-fact local, and `N` depends on the
-JVM's gensym counter — so a regeneration from a different process (a REPL, the test runner) shows
-churn in `auto-gen-annotations.edn`, `merged-annotations.edn`, and
-`production-details.edn` that is process noise, not a generation change. The golden test normalizes
-exactly those two byte sequences (the gensym number and the `:callsite-id` hash derived from it),
-matching how `clara.explorer.analyze-test` already asserts the gensym's *shape*, never its
-value.
+dir and pins it against the checked-in copy byte-for-byte: minted names
+(`resolved__N__auto__` auto-gensyms, digest-suffixed locals) are canonicalized
+at emission, so a regeneration from a different process (a REPL, the test
+runner) yields identical bytes.
 
 ## `merged-rulebase-analysis/` is split by what you are asking
 

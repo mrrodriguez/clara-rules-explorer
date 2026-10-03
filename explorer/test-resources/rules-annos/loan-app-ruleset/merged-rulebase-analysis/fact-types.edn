@@ -1,4 +1,5 @@
 {":compliance-review-result" {:ns nil, :name ":compliance-review-result", :ancestors []},
+ ":digest-doc-meta" {:ns nil, :name ":digest-doc-meta", :ancestors []},
  ":doc-check-count" {:ns nil, :name ":doc-check-count", :ancestors []},
  ":doc-check-count-min" {:ns nil, :name ":doc-check-count-min", :ancestors []},
  ":doc-check-count-satisfies-min" {:ns nil, :name ":doc-check-count-satisfies-min", :ancestors []},

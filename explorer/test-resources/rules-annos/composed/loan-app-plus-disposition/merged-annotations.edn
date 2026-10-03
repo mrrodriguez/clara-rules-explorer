@@ -3,7 +3,18 @@
   {:id :memory,
    :source {:composed-of ["loan-app-ruleset" "loan-disposition-ruleset"], :role :memory}}],
  :verbatim {:default :clara.explorer.analyze/generated, :except {}},
- :annotations {"clara.explorer.test.rules.loan-doc-rules/dynamic-insert-audit-trail" {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)",
+ :annotations {"clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule" {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "digest-doc-meta00000000000000000000000000000000",
+      :ns-name-sym clara.explorer.test.rules.loan-doc-rules,
+      :filename "clara/explorer/test/rules/loan_doc_rules.clj",
+      :status :none,
+      :via {:boundary-var-name-sym clara.rules/insert!,
+       :boundary-in-var clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule},
+      :callsite-id "clara.explorer.test.rules.loan-doc-rules:-:86dd5d60:0",
+      :from-layer :clara.explorer.analyze/generated}],
+    :fact-instance-derived-types [:digest-doc-meta],
+    :resolution :none},
+   :clara-rules/insert-types [:digest-doc-meta]},
+  "clara.explorer.test.rules.loan-doc-rules/dynamic-insert-audit-trail" {:clara-rules/dynamic-insert-types-detected {:callsites [{:source-str "(build-audit-trail-entry ?app-id :doc-check-passed)",
       :ns-name-sym clara.explorer.test.rules.loan-doc-rules,
       :filename "clara/explorer/test/rules/loan_doc_rules.clj",
       :status :none,
@@ -52,7 +63,10 @@
    :clara-rules/insert-types [:clara.explorer.analyze/generated],
    :clara-rules/no-output-types :clara.explorer.analyze/generated,
    :clara-rules/retract-types [:clara.explorer.analyze/generated]},
-  :except {"clara.explorer.test.rules.loan-doc-rules/dynamic-insert-audit-trail" {:clara-rules/dynamic-insert-types-detected [:clara.explorer.analyze/generated
+  :except {"clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule" {:clara-rules/dynamic-insert-types-detected [:clara.explorer.analyze/generated
+     :memory],
+    :clara-rules/insert-types [:memory]},
+   "clara.explorer.test.rules.loan-doc-rules/dynamic-insert-audit-trail" {:clara-rules/dynamic-insert-types-detected [:clara.explorer.analyze/generated
      :memory],
     :clara-rules/insert-types [:memory]},
    "clara.explorer.test.rules.loan-doc-rules/dynamic-insert-compliance-metadata" {:clara-rules/dynamic-insert-types-detected [:clara.explorer.analyze/generated

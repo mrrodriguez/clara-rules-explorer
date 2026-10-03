@@ -22,13 +22,13 @@
   default-form-printer)
 
 (defn- print-form
-  "Canonicalizes reader gensyms in `form` (`utils/canonicalize-gensyms`) and
+  "Canonicalizes minted names in `form` (`utils/canonicalize-minted-names`) and
    prints the result with the current `*form-printer*`.  Every rendered form
    goes through here, so a `#(…)`'s `p1__NNN#` numbers cannot leak JVM-wide
    reader state into persisted output.  `*form-printer*` stays rebindable;
    canonicalization is not something a caller can bind away."
   [form]
-  (-> form utils/canonicalize-gensyms *form-printer*))
+  (-> form utils/canonicalize-minted-names *form-printer*))
 
 (defn resolve-type
   "Resolves a raw fact type (Class, keyword, symbol, string, tuple, map, ...) to its
