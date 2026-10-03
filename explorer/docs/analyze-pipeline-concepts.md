@@ -85,7 +85,7 @@ A **boundary function** is any Clara var that directly touches working memory
 — the boundary where RHS execution meets the Rete network.
 
 ```clojure
-;; The complete boundary set (see index.clj):
+;; The complete boundary set (see clara.explorer.analyze.index):
 #{clara.rules/insert!
   clara.rules/insert-unconditional!
   clara.rules/insert-all-unconditional!
@@ -559,16 +559,16 @@ emitted.  Every Priority 2 entry also gains a boundary-side `:via`
 
 ## 7. Where to Find Each Concept
 
-| Concept | File |
+| Concept | Namespace |
 |---|---|
-| Entry points, prune-and-replace, `extract-insert-types`, `infer-annotation-for-var`, `->annotations-from-rule-source-analysis` | `analyze.clj` |
-| Call graph, reachability, direct-inserters, inserter-type-map, constructor-callsite-map, `->analysis-index` | `analyze/index.clj` |
-| Boundary-call argument tracing, locals resolution, `resolve-boundary-callsites`, `resolve-constructor-callsites` | `analyze/callsite.clj` |
-| Record/Java constructor recognition, `resolve-record-type` | `analyze/ctor.clj` |
-| Source synthesis (`synthesize-ns-source`), namespace reconstruction | `analyze/synth.clj` |
-| Reading source forms at kondo positions | `analyze/kondo.clj` |
-| Var-alias discovery, `alias-usage-map`, `lhs-var-bindings` | `analyze/alias.clj` |
-| Kondo usage helper (`fq-sym`, `var-usage-caller`, `var-usage-callee`) | `analyze/utils.clj` |
-| Kondo interaction mechanics (`with-in-str`, stdin pattern) | `docs/analyze-clj-kondo-notes.md` |
-| Annotation normalization (`normalize-annotations`, `get-annotation`) | `annotations.clj` |
-| Layer merge (`merge-layers`, `->layer`) | `annotations/merge.clj` |
+| Entry points, prune-and-replace, `extract-insert-types`, `infer-annotation-for-var`, `->annotations-from-rule-source-analysis` | `clara.explorer.analyze` |
+| Call graph, reachability, direct-inserters, inserter-type-map, constructor-callsite-map, `->analysis-index` | `clara.explorer.analyze.index` |
+| Boundary-call argument tracing, locals resolution, `resolve-boundary-callsites`, `resolve-constructor-callsites` | `clara.explorer.analyze.callsite` |
+| Record/Java constructor recognition, `resolve-record-type` | `clara.explorer.analyze.ctor` |
+| Source synthesis (`synthesize-ns-source`), namespace reconstruction | `clara.explorer.analyze.synth` |
+| Reading source forms at kondo positions | `clara.explorer.analyze.kondo` |
+| Var-alias discovery, `alias-usage-map`, `lhs-var-bindings` | `clara.explorer.analyze.alias` |
+| Kondo usage helper (`fq-sym`, `var-usage-caller`, `var-usage-callee`) | `clara.explorer.analyze.utils` |
+| Kondo interaction mechanics (`with-in-str`, stdin pattern) | [analyze-clj-kondo-notes.md](analyze-clj-kondo-notes.md) |
+| Annotation normalization (`normalize-annotations`, `get-annotation`) | `clara.explorer.annotations` |
+| Layer merge (`merge-layers`, `->layer`) | `clara.explorer.annotations.merge` |
