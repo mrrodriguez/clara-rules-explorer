@@ -52,6 +52,21 @@
     (testing "…with the curation still folded into the merge"
       (is (= #{:a/two} (merged-insert-types "a.ns/gap-rule"))))))
 
+(deftest persist-folds-generated-layer-from-memory-test
+  (let [read-calls (atom [])
+        stack-calls (atom 0)]
+    (with-redefs [core/->rulebase-analysis (fn [_ _ _] {:rules {}})
+                  store/get-layer-stack (fn [& _] (swap! stack-calls inc) [])
+                  store/read-layer (fn [k _] (swap! read-calls conj k) nil)]
+      (ann/persist! {:layer (store/->generated-layer *artifact-opts* generated-annotations)}
+                    (assoc *artifact-opts* :session stub-rulebase)))
+    (testing "the generated layer it just wrote is folded from memory, not re-read"
+      (is (not (contains? (set @read-calls) :auto))))
+    (testing "the curated overlay it never touched is still read"
+      (is (contains? (set @read-calls) :agent)))
+    (testing "the stack is supplied by `->layer-stack`, never read wholesale off disk"
+      (is (zero? @stack-calls)))))
+
 (deftest merged-artifact-carries-layers-and-provenance-test
   (write-generated-layer!)
   (record-resolution! "a.ns/gap-rule" 0 [:a/two])
@@ -227,6 +242,8 @@
         (testing "…through the repo's own form printer, never the explorer's
                   `clojure.pprint` default"
           (is (= [edn-io/pretty-edn-str] (map :form-printer @opts-seen))))
+        (testing "…with `:lhs-form` skipped, since slim drops it before the write"
+          (is (every? false? (map :include-lhs-form? @opts-seen))))
         (testing "…and is nil, not a throw, on something carrying none"
           (is (nil? (ann/get-rulebase-analysis {:layer ::no-analysis-here}))))
         (testing "`rulebase-analysis-of?` answers without building anything"

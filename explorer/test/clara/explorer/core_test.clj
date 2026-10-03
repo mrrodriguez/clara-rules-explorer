@@ -292,6 +292,25 @@
           (is (contains? (:upstream edges) "clara.explorer.test.rules.loan-doc-rules/collect-app-given-docs"))
           (is (contains? (:upstream edges) "clara.explorer.test.rules.loan-doc-rules/collect-app-req-docs")))))))
 
+(deftest test-rulebase-analysis-include-lhs-form-opt
+  (let [session (->test-session)
+        anns (loan-doc-annotations session)
+        with-form (core/->rulebase-analysis session anns)
+        without-form (core/->rulebase-analysis session anns {:include-lhs-form? false})
+        strip-lhs-form (fn [analysis]
+                         (-> analysis
+                             (update :rules #(update-vals % (fn [r] (dissoc r :lhs-form))))
+                             (update :queries #(update-vals % (fn [r] (dissoc r :lhs-form))))))]
+    (testing "`:lhs-form` is present by default, absent when :include-lhs-form? is false"
+      (let [rule-name "clara.explorer.test.rules.loan-doc-rules/collect-app-given-docs"
+            query-name "clara.explorer.test.rules.loan-app-rules/find-app-outcome"]
+        (is (string? (get-in with-form [:rules rule-name :lhs-form])))
+        (is (string? (get-in with-form [:queries query-name :lhs-form])))
+        (is (nil? (get-in without-form [:rules rule-name :lhs-form])))
+        (is (nil? (get-in without-form [:queries query-name :lhs-form])))))
+    (testing "omitting :lhs-form changes nothing else"
+      (is (= (strip-lhs-form with-form) without-form)))))
+
 (deftest test-dependency-graph-correctness
   (let [session (->test-session)
         analysis (core/->rulebase-analysis session (loan-doc-annotations session))

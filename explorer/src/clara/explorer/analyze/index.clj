@@ -135,15 +135,21 @@
         (recur seen unvisited)))))
 
 (defn- usages-by-filename
-  "Groups kondo usages by `:filename`, each group sorted by `[row col]`.
-   Entries missing a position sort first; entries missing a filename are
-   dropped (span queries key on filename and could never reach them)."
+  "Groups kondo usages by `:filename`, each group sorted into a vector by
+   `[row col]`.  Entries missing a position sort first; entries missing a
+   filename are dropped (span queries key on filename and could never reach
+   them).
+
+   The vector matters: `analyze.callsite/usages-in-span` binary-searches these
+   groups and slices them with `subvec`, both of which are O(1)-step on a
+   vector but O(n) per step on the seq `sort-by` otherwise returns (the
+   AnalysisIndex schema declares vectors for this reason)."
   [usages]
   (->> usages
        (remove #(nil? (:filename %)))
        (group-by :filename)
        (map (fn [[f us]]
-              [f (sort-by (juxt #(or (:row %) 0) #(or (:col %) 0)) us)]))
+              [f (vec (sort-by (juxt #(or (:row %) 0) #(or (:col %) 0)) us))]))
        (into {})))
 
 (defn- memoized-reachability

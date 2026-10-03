@@ -75,11 +75,16 @@
 (def ^:private rulebase-analysis-opts
   "The `core/->rulebase-analysis` opts every call in this namespace threads.
 
-  Its `:form-printer` renders each rule's `:lhs` / `:lhs-form` / `:rhs-form`, tens of thousands of
-  small forms per analysis, and the default is `clojure.pprint` — on a large session that alone is
-  seconds of the run. `edn-io/pretty-edn-str` is the printer every artifact here already goes
-  through, so the strings land in the same layout they would have had."
-  {:form-printer edn-io/pretty-edn-str})
+  `:form-printer` renders each rule's `:lhs` / `:rhs-form` (which can be many small forms per
+  analysis) and the default is `clojure.pprint`; on a large session that alone is seconds of the
+  run. `edn-io/pretty-edn-str` is the printer every artifact here already goes through, so the
+  strings land in the same layout they would have had.
+
+  `:include-lhs-form? false` skips the whole-LHS `:lhs-form` string. This namespace builds analyses
+  only to slim and write them, and `clara.explorer.artifacts.slim/dropped-production-keys` drops
+  `:lhs-form` before the write anyway, so rendering it would be pure waste."
+  {:form-printer edn-io/pretty-edn-str
+   :include-lhs-form? false})
 
 (s/defn ->deferred-rulebase-analysis :- schema/DeferredRulebaseAnalysis
   "The `core/->rulebase-analysis` of `merged` over `session`, as the pair
@@ -298,17 +303,18 @@
 
   `opts` is a `schema/MergePersistedOptions`. It needs `:session` and/or
   `:rulebase-analysis-in-hand` to produce an analysis at all — see `->merged-rulebase-analysis`
-  for which wins.
+  for which wins. `:layer-stack`, when supplied, is the pre-read fold stack — `persist!` folds
+  the layers it holds in hand rather than re-reading them; absent, the stack is read off disk.
 
   `:rulebase-analysis? false` writes the merged annotations and leaves the analysis directory and
   digest file untouched — not a shortcut, but for a caller that can fold the layers yet cannot
   re-derive an analysis, where the existing files beat none."
-  [{:keys [rulebase-analysis?] :or {rulebase-analysis? true} :as opts}
+  [{:keys [rulebase-analysis? layer-stack] :or {rulebase-analysis? true} :as opts}
    :- schema/MergePersistedOptions]
-  (let [;; The stack is read once and used twice: folded, then used again as
-        ;; what the fold is compacted against. Re-reading it would be the most
-        ;; expensive read in the pipeline.
-        stack (store/get-layer-stack opts)
+  (let [;; The stack arrives in hand (`persist!` just wrote the layers it holds) or is read once off
+        ;; disk; used twice: folded, then again as what the fold is compacted against. Re-reading it
+        ;; would be the most expensive read in the pipeline.
+        stack (or layer-stack (store/get-layer-stack opts))
         merged (store/fold-layers stack)
         analysis-dir (store/get-artifact-path :rulebase-analysis opts)
         digest-file (store/get-artifact-file :rulebase-analysis-digest opts)
@@ -345,6 +351,11 @@
   which this supplies: `:session` is required once any layer beyond the generated one exists, so
   the analysis reflects the merged graph. Returns the directory path.
 
+  The layers just written are also folded from memory rather than read back: the generated layer
+  is the second-biggest file a persist writes, and re-parsing it right after writing it is the
+  most expensive read in the pipeline. `store/->layer-stack` reads only the agent overlay it did
+  not touch.
+
   `annotation-data` carries the `->deferred-rulebase-analysis` pair itself, so it rides through to
   `merge-persisted!` as `:rulebase-analysis-in-hand`: a run whose layers still describe the merge
   that analysis is of writes it rather than building another."
@@ -352,11 +363,16 @@
    opts :- schema/MergePersistedOptions]
   ;; Resolved first: `get-out-dir` is where a bad `:repo`/`:dir` throws, and it
   ;; should throw before anything has been written rather than half way through.
-  (let [dir (store/get-out-dir opts)]
+  (let [dir (store/get-out-dir opts)
+        in-hand (cond-> {:auto layer}
+                  memory-layer (assoc :memory memory-layer))]
     (store/write-layer! :auto opts layer)
     (when memory-layer
       (store/write-layer! :memory opts memory-layer))
-    (merge-persisted! (assoc opts :rulebase-analysis-in-hand annotation-data))
+    (merge-persisted!
+     (assoc opts
+            :rulebase-analysis-in-hand annotation-data
+            :layer-stack (store/->layer-stack opts in-hand)))
     dir))
 
 (defn- ->composed-unit-provenance
