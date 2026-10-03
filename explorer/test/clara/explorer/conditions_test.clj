@@ -175,6 +175,48 @@
                 :new-bindings []}
                (:bindings fact-entry)))))))
 
+(deftest test-augment-lhs--shared-cache-reuses-work
+  (testing "a shared cache reuses classification, node conversion, and accumulator eval across equal LHS forms"
+    (let [lhs [{:type Application
+                :constraints '[(= ?app-id app-id)]}
+               {:accumulator '(clara.rules.accumulators/all)
+                :from {:type GivenDocument
+                       :constraints '[(= ?app-id app-id)]}
+                :result-binding :?docs}]
+          normalized (conditions/normalize-lhs lhs)
+          cache (atom {})
+          opts {:prod-ns prod-ns :env nil :cache cache}
+          analyze-calls (atom 0)
+          to-node-calls (atom 0)
+          accum-calls (atom 0)
+          orig-analyze com/analyze-condition
+          orig-to-node com/condition-to-node
+          orig-accum conditions/accumulator-info]
+      (with-redefs [com/analyze-condition (fn [c]
+                                            (swap! analyze-calls inc)
+                                            (orig-analyze c))
+                    com/condition-to-node (fn [c env parent]
+                                            (swap! to-node-calls inc)
+                                            (orig-to-node c env parent))
+                    conditions/accumulator-info (fn [form pns]
+                                                  (swap! accum-calls inc)
+                                                  (orig-accum form pns))]
+        (let [first-aug (conditions/augment-lhs normalized opts)
+              analyze-after-first @analyze-calls
+              to-node-after-first @to-node-calls
+              accum-after-first @accum-calls
+              second-aug (conditions/augment-lhs normalized opts)]
+          (is (= first-aug second-aug))
+          (is (pos? analyze-after-first))
+          (is (pos? to-node-after-first))
+          (is (pos? accum-after-first))
+          (is (= analyze-after-first @analyze-calls)
+              "second call reuses com/analyze-condition results")
+          (is (= to-node-after-first @to-node-calls)
+              "second call reuses com/condition-to-node results")
+          (is (= accum-after-first @accum-calls)
+              "second call reuses accumulator-info results"))))))
+
 (deftest test-augment-lhs--join-filter-join-bindings
   (testing "non-equality unifications referencing an upstream binding are surfaced"
     (let [lhs [{:type Application

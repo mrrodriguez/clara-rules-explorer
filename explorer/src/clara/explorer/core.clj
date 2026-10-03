@@ -139,18 +139,21 @@
   `annotations` is the merged rule→annotation map (see
   annotations/merge-layers).  `ctx` is the shared analysis context map
   (annotations, dep-graph, production-map, type-analysis-map,
-  ancestors-set-fn, known-set; see `->rulebase-analysis`).  `known-set` is the
+  ancestors-set-fn, known-set, condition-cache; see `->rulebase-analysis`).
+  `known-set` is the
   analysis's serialized fact-type names, used for
   `clara.explorer.server.api/TypeReference` `known` flags.
 
   Form printing is controlled by the dynamic var `serialize/*form-printer*`."
   [{p-name :name :as production}
-   {:keys [annotations dep-graph production-map known-set include-lhs-form?] :as ctx}]
+   {:keys [annotations dep-graph production-map known-set include-lhs-form?
+           condition-cache] :as ctx}]
   (let [ann (ann/production-annotation annotations production)
         p-ns-name (get-production-ns-name-sym production)
         lhs-analysis (conditions/augment-lhs (:lhs production)
                                              {:prod-ns p-ns-name
-                                              :env (:env production)})
+                                              :env (:env production)
+                                              :cache condition-cache})
         serialize-type-ref (partial serialize/serialize-type-ref known-set p-ns-name)
 
         {:keys [upstream downstream]} (get-production-deps-summary p-name ctx)
@@ -401,6 +404,11 @@
         dep-graph (->dep-graph type-analysis-map ancestors-set-fn)
         production-map (->production-map productions)
 
+        ;; Shared value-keyed cache for the compiler-coupled condition passes
+        ;; (`com/analyze-condition`, `com/condition-to-node`) and accumulator
+        ;; eval. One per analysis build, so it cannot leak across builds.
+        condition-cache (atom {})
+
         ;; Shared context threaded through every production summary — the
         ;; per-production summary functions destructure what they need.
         analysis-ctx {:annotations annotations
@@ -409,7 +417,8 @@
                       :type-analysis-map type-analysis-map
                       :ancestors-set-fn ancestors-set-fn
                       :known-set known-set
-                      :include-lhs-form? include-lhs-form?}
+                      :include-lhs-form? include-lhs-form?
+                      :condition-cache condition-cache}
 
         rules (->rule-summary-map productions analysis-ctx)
 
