@@ -75,11 +75,16 @@
 (def ^:private rulebase-analysis-opts
   "The `core/->rulebase-analysis` opts every call in this namespace threads.
 
-  Its `:form-printer` renders each rule's `:lhs` / `:lhs-form` / `:rhs-form`, tens of thousands of
-  small forms per analysis, and the default is `clojure.pprint` — on a large session that alone is
-  seconds of the run. `edn-io/pretty-edn-str` is the printer every artifact here already goes
-  through, so the strings land in the same layout they would have had."
-  {:form-printer edn-io/pretty-edn-str})
+  `:form-printer` renders each rule's `:lhs` / `:rhs-form` (which can be many small forms per
+  analysis) and the default is `clojure.pprint`; on a large session that alone is seconds of the
+  run. `edn-io/pretty-edn-str` is the printer every artifact here already goes through, so the
+  strings land in the same layout they would have had.
+
+  `:include-lhs-form? false` skips the whole-LHS `:lhs-form` string. This namespace builds analyses
+  only to slim and write them, and `clara.explorer.artifacts.slim/dropped-production-keys` drops
+  `:lhs-form` before the write anyway, so rendering it would be pure waste."
+  {:form-printer edn-io/pretty-edn-str
+   :include-lhs-form? false})
 
 (s/defn ->deferred-rulebase-analysis :- schema/DeferredRulebaseAnalysis
   "The `core/->rulebase-analysis` of `merged` over `session`, as the pair

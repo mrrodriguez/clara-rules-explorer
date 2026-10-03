@@ -227,6 +227,8 @@
         (testing "…through the repo's own form printer, never the explorer's
                   `clojure.pprint` default"
           (is (= [edn-io/pretty-edn-str] (map :form-printer @opts-seen))))
+        (testing "…with `:lhs-form` skipped, since slim drops it before the write"
+          (is (every? false? (map :include-lhs-form? @opts-seen))))
         (testing "…and is nil, not a throw, on something carrying none"
           (is (nil? (ann/get-rulebase-analysis {:layer ::no-analysis-here}))))
         (testing "`rulebase-analysis-of?` answers without building anything"

@@ -145,7 +145,7 @@
 
   Form printing is controlled by the dynamic var `serialize/*form-printer*`."
   [{p-name :name :as production}
-   {:keys [annotations dep-graph production-map known-set] :as ctx}]
+   {:keys [annotations dep-graph production-map known-set include-lhs-form?] :as ctx}]
   (let [ann (ann/production-annotation annotations production)
         p-ns-name (get-production-ns-name-sym production)
         lhs-analysis (conditions/augment-lhs (:lhs production)
@@ -179,10 +179,12 @@
                  :lhs       (-> lhs-analysis
                                 (serialize/serialize-lhs p-ns-name known-set)
                                 serialize/prune-fns)
-                 :lhs-form   (-> production :lhs
-                                 conditions/get-raw-lhs
-                                 serialize/serialize-lhs-form)
                  :notes     (:notes ann)}
+
+          include-lhs-form?
+          (assoc :lhs-form (-> production :lhs
+                               conditions/get-raw-lhs
+                               serialize/serialize-lhs-form))
 
           is-rule?
           (assoc :insert-types  (->> ann
@@ -373,7 +375,10 @@
   "Implementation of `->rulebase-analysis`.  Callers go through the public
    multi-arity `->rulebase-analysis`, which manages the `*form-printer*`
    dynamic binding."
-  [session-or-rulebase annotations]
+  [session-or-rulebase
+   annotations
+   {:keys [include-lhs-form?]
+    :or {include-lhs-form? true}}]
   (let [{:keys [productions id-to-node] :as rulebase} (utils/get-rulebase session-or-rulebase)
         ;; Normalize the LHS once, up front, so every downstream pass
         ;; (fact-type extraction, binding augmentation, serialization) works
@@ -403,7 +408,8 @@
                       :production-map production-map
                       :type-analysis-map type-analysis-map
                       :ancestors-set-fn ancestors-set-fn
-                      :known-set known-set}
+                      :known-set known-set
+                      :include-lhs-form? include-lhs-form?}
 
         rules (->rule-summary-map productions analysis-ctx)
 
@@ -452,15 +458,18 @@
    `opts` is an optional map:
    - `:form-printer` — (fn [form] String) for serializing LHS/RHS forms.
      Defaults to `serialize/default-form-printer` (clojure.pprint).
-     Pass `pr-str` for a cheap non-pretty-printing alternative."
+     Pass `pr-str` for a cheap non-pretty-printing alternative.
+   - `:include-lhs-form?` — when false, omit the per-production `:lhs-form`
+     pretty-printed string (the persistence path slims it away before
+     writing). Defaults to true."
   ([session-or-rulebase annotations]
    (->rulebase-analysis session-or-rulebase annotations nil))
   ([session-or-rulebase annotations opts]
    (let [form-printer (:form-printer opts)]
      (if form-printer
        (binding [serialize/*form-printer* form-printer]
-         (->rulebase-analysis* session-or-rulebase annotations))
-       (->rulebase-analysis* session-or-rulebase annotations)))))
+         (->rulebase-analysis* session-or-rulebase annotations opts))
+       (->rulebase-analysis* session-or-rulebase annotations opts)))))
 
 (defn get-rulebase-counts
   "Returns a high-level summary of the rulebase counts using kebab-case keys."
