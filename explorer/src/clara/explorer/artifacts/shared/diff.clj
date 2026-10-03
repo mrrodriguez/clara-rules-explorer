@@ -36,8 +36,9 @@
     (edn/read-string {:default (fn [_tag v] v)} (slurp (str f)))
     (catch Exception _ nil)))
 
-(defn- read-edn
-  "`what` from file `f`, throwing when it cannot be read."
+(defn- read-edn-or-throw
+  "`what` from file `f`, throwing when it cannot be read.
+   The throwing read; `read-edn-or-nil` returns nil instead."
   [f what]
   (or (read-edn-or-nil f)
       (throw (ex-info (format "Cannot diff: missing %s — %s" what (str f))
@@ -45,7 +46,9 @@
 
 (defn- read-layer-stack
   "Every layer file in `dir` that exists, in fold order, as `[layer-id
-  annotations]` — what `merged-annotations.edn`'s references resolve against."
+  annotations]` — what `merged-annotations.edn`'s references resolve against.
+   Fold order is `layout/layer-artifacts`' key order (an `array-map`, lowest
+   precedence first), so this must keep reading its keys in map order."
   [dir]
   (into []
         (keep (fn [role]
@@ -100,8 +103,8 @@
 
 (defn- read-part
   [analysis-dir k]
-  (read-edn (str analysis-dir "/" (get layout/part-files k))
-            (format "analysis part %s" (name k))))
+  (read-edn-or-throw (str analysis-dir "/" (get layout/part-files k))
+                     (format "analysis part %s" (name k))))
 
 (defn read-productions
   "Every production's compared fields from unit dir `dir`: the production
@@ -114,8 +117,8 @@
         index (read-part analysis-dir :index)
         anns (:annotations
               (layout/expand-merged-annotations
-               (read-edn (str dir "/" (:merged layout/artifact-files))
-                         "merged annotations")
+               (read-edn-or-throw (str dir "/" (:merged layout/artifact-files))
+                                  "merged annotations")
                (read-layer-stack dir)))]
     (productions-of index (read-part analysis-dir :conditions)
                     (read-part analysis-dir :details) anns)))
@@ -127,8 +130,8 @@
   dep-graph edge pairs."
   [dir]
   (let [dir (str dir)
-        manifest (read-edn (str dir "/" (:manifest layout/artifact-files))
-                           "unit manifest")
+        manifest (read-edn-or-throw (str dir "/" (:manifest layout/artifact-files))
+                                    "unit manifest")
         analysis-dir (str dir "/" (:rulebase-analysis layout/artifact-files))]
     {:dir dir
      :manifest manifest
@@ -383,72 +386,68 @@
            (get-in scope [:namespaces :only-before])
            (get-in scope [:namespaces :only-after])]))
 
+(defn- section-lines
+  "One report section as lines: `header` followed by one `line-fn` line per
+   item in `coll` — or `[]` when the section is empty, so `->text` keeps only
+   the non-empty sections."
+  [[header coll line-fn]]
+  (if (seq coll)
+    (into [header] (map line-fn) coll)
+    []))
+
 (defn ->text
   "The compact rendering of a `diff` value: two provenance lines, one count
    line per section, then each non-empty section — one line per name,
    `changed` lines carrying their tags. A diff with no changes prints the
    provenance lines and `no differences`."
   [{:keys [before after productions fact-types edges scope] :as d}]
-  (let [lines (volatile! [(provenance-line :before before)
-                          (provenance-line :after after)
-                          (format "productions: %d added, %d removed, %d changed"
-                                  (count (:added productions))
-                                  (count (:removed productions))
-                                  (count (:changed productions)))
-                          (format "fact-types: %d added, %d removed, %d changed"
-                                  (count (:added fact-types))
-                                  (count (:removed fact-types))
-                                  (count (:changed fact-types)))
-                          (format "edges: %d gained, %d lost"
-                                  (count (:gained edges))
-                                  (count (:lost edges)))
-                          (format "scope: %d namespaces, %d productions, %d edges"
-                                  (+ (count (get-in scope [:namespaces :only-before]))
-                                     (count (get-in scope [:namespaces :only-after])))
-                                  (count (:productions scope))
-                                  (count (:edges scope)))])
-        emit! (fn [& ls] (vswap! lines into ls))]
-    (when (seq (:added productions))
-      (emit! "added productions:")
-      (doseq [n (:added productions)] (emit! (str "  + " n))))
-    (when (seq (:removed productions))
-      (emit! "removed productions:")
-      (doseq [n (:removed productions)] (emit! (str "  - " n))))
-    (when (seq (:changed productions))
-      (emit! "changed productions:")
-      (doseq [[n tags] (:changed productions)]
-        (emit! (->> tags sort (map name) (str/join " ") (format "  ~ %s [%s]" n)))))
-    (when (seq (:added fact-types))
-      (emit! "added fact-types:")
-      (doseq [n (:added fact-types)] (emit! (str "  + " n))))
-    (when (seq (:removed fact-types))
-      (emit! "removed fact-types:")
-      (doseq [n (:removed fact-types)] (emit! (str "  - " n))))
-    (when (seq (:changed fact-types))
-      (emit! "changed fact-types:")
-      (doseq [[n {:keys [added removed]}] (:changed fact-types)]
-        (emit! (format "  ~ %s (+%d -%d ancestors)" n (count added) (count removed)))))
-    (when (seq (:gained edges))
-      (emit! "gained edges:")
-      (doseq [[up down] (:gained edges)] (emit! (format "  + %s -> %s" up down))))
-    (when (seq (:lost edges))
-      (emit! "lost edges:")
-      (doseq [[up down] (:lost edges)] (emit! (format "  - %s -> %s" up down))))
-    (when (seq (get-in scope [:namespaces :only-before]))
-      (emit! "scope namespaces (only before):")
-      (doseq [n (get-in scope [:namespaces :only-before])] (emit! (str "  " n))))
-    (when (seq (get-in scope [:namespaces :only-after]))
-      (emit! "scope namespaces (only after):")
-      (doseq [n (get-in scope [:namespaces :only-after])] (emit! (str "  " n))))
-    (when (seq (:productions scope))
-      (emit! "scope productions:")
-      (doseq [n (:productions scope)] (emit! (str "  " n))))
-    (when (seq (:edges scope))
-      (emit! "scope edges:")
-      (doseq [[up down] (:edges scope)] (emit! (format "  %s -> %s" up down))))
-    (when (empty-diff? d)
-      (emit! "no differences"))
-    (str/join "\n" @lines)))
+  (str/join "\n"
+            (cond-> (into [(provenance-line :before before)
+                           (provenance-line :after after)
+                           (format "productions: %d added, %d removed, %d changed"
+                                   (count (:added productions))
+                                   (count (:removed productions))
+                                   (count (:changed productions)))
+                           (format "fact-types: %d added, %d removed, %d changed"
+                                   (count (:added fact-types))
+                                   (count (:removed fact-types))
+                                   (count (:changed fact-types)))
+                           (format "edges: %d gained, %d lost"
+                                   (count (:gained edges))
+                                   (count (:lost edges)))
+                           (format "scope: %d namespaces, %d productions, %d edges"
+                                   (+ (count (get-in scope [:namespaces :only-before]))
+                                      (count (get-in scope [:namespaces :only-after])))
+                                   (count (:productions scope))
+                                   (count (:edges scope)))]
+                          (mapcat section-lines)
+                          [["added productions:" (:added productions)
+                            (fn [n] (str "  + " n))]
+                           ["removed productions:" (:removed productions)
+                            (fn [n] (str "  - " n))]
+                           ["changed productions:" (:changed productions)
+                            (fn [[n tags]]
+                              (format "  ~ %s [%s]" n (->> tags sort (map name) (str/join " "))))]
+                           ["added fact-types:" (:added fact-types)
+                            (fn [n] (str "  + " n))]
+                           ["removed fact-types:" (:removed fact-types)
+                            (fn [n] (str "  - " n))]
+                           ["changed fact-types:" (:changed fact-types)
+                            (fn [[n {:keys [added removed]}]]
+                              (format "  ~ %s (+%d -%d ancestors)" n (count added) (count removed)))]
+                           ["gained edges:" (:gained edges)
+                            (fn [[up down]] (format "  + %s -> %s" up down))]
+                           ["lost edges:" (:lost edges)
+                            (fn [[up down]] (format "  - %s -> %s" up down))]
+                           ["scope namespaces (only before):" (get-in scope [:namespaces :only-before])
+                            (fn [n] (str "  " n))]
+                           ["scope namespaces (only after):" (get-in scope [:namespaces :only-after])
+                            (fn [n] (str "  " n))]
+                           ["scope productions:" (:productions scope)
+                            (fn [n] (str "  " n))]
+                           ["scope edges:" (:edges scope)
+                            (fn [[up down]] (format "  %s -> %s" up down))]])
+              (empty-diff? d) (conj "no differences"))))
 
 ;; ===========================================================================
 ;; one production's before/after

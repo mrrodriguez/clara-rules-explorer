@@ -55,3 +55,10 @@ Tracks `docs/planning/registry-unit-diff-plan.md`. Updated as parts land.
   `read-productions` reads index/conditions/details/merged+layers once each;
   `read-unit` adds manifest/meta/fact-types/dep-graph once each; `diff`,
   `->text`, `rule-detail` do no IO — no file is ever read twice on any path.
+- 2026-10-03 (review round 2): `->text` is now a loop — a `section-lines`
+  helper (`[header coll line-fn]` → lines or `[]`) driven by a data vector
+  through one `(mapcat section-lines)`, ending the volatile/emit! builder;
+  `read-layer-stack` docstring now names its order source
+  (`layout/layer-artifacts` is an `array-map`, lowest precedence first);
+  throwing reader renamed `read-edn-or-throw` to pair with `read-edn-or-nil`.
+  Text output is byte-identical (existing tests pin it).
