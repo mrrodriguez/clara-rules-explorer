@@ -108,3 +108,30 @@
         (is (contains? sources "loan-disposition-ruleset@ref=feature%2Fnew-tax"))
         (is (= [[:ref "feature/new-tax"]]
                (get-in sources ["loan-disposition-ruleset@ref=feature%2Fnew-tax" :variant])))))))
+
+(deftest compose-persist-manifest-fn-sees-each-source-manifest-test
+  (let [opts (assoc *artifact-opts*
+                    :root (registry-root)
+                    :repo "composed/demo-hook"
+                    :units [{:repo "loan-app-ruleset"}
+                            {:repo "loan-disposition-ruleset" :variant [[:ref "feature/new-tax"]]}]
+                    :manifest-fn (fn [manifest {:keys [sources]}]
+                                   (update-in manifest [:analysis-run :units]
+                                              (fn [units]
+                                                (mapv (fn [entry {:keys [unit manifest]}]
+                                                        (assoc entry
+                                                               :source-unit unit
+                                                               :source-repo (:repo manifest)))
+                                                      units
+                                                      sources)))))
+        _ (flow/compose-persist! opts)
+        units (-> (store/get-artifact-file :manifest opts)
+                  edn-io/read-edn-file
+                  (get-in [:analysis-run :units]))]
+    (testing ":sources follow :analysis-run :units, each with its unit's own manifest"
+      (is (= [{:repo "loan-app-ruleset"}
+              {:repo "loan-disposition-ruleset" :variant [[:ref "feature/new-tax"]]}]
+             (mapv :source-unit units)))
+      (is (= ["loan-app-ruleset" "loan-disposition-ruleset"] (mapv :source-repo units))))
+    (testing "the composition's own entries are still there to enrich"
+      (is (every? #(and (:sha %) (:created %)) units)))))

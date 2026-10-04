@@ -237,17 +237,28 @@ because the deterministic baseline is the real work list.
 `diff` compares two unit-shaped directories — two ruleset units, a unit and
 its variant, or two composed units — production by production: which rules and
 queries were added or removed, which changed and how (`:lhs`, `:rhs-form`,
-types, `:resolution`, `:unit` attribution), which fact types appeared or
-lost ancestors, and which dep-graph edges were gained or lost. It reads both
-units' `merged-rulebase-analysis/` parts plus their merged annotations, and
-refuses units with differing `:slim :dropped` shapes, since those do not hold
-the same keys. Namespaces present on only one side are reported under `scope`,
-never as added or removed. `--rule NAME` (substring matching, as `rule` does)
-prints one production's before and after per changed field; `--edn` prints the
-diff value. `--rule` reads only the production files and skips the full diff,
-so it answers even when the dep-graph, fact-types, or shape are absent. Three things it does not answer: a renamed production shows as one
-removed and one added; an `:rhs` tag says the text changed, not what it does
-at runtime; names compare verbatim, so per-build stamps get no useful diff.
+types, `:resolution`), which fact types appeared or lost ancestors, and which
+dep-graph edges were gained or lost. `:unit` attribution is not a change: it
+is the source unit that carried a production, not part of its identity, so it
+stays in `--edn` / `--rule` output but never tags a changed production. Two
+composed units instead get a `units` section comparing each manifest's
+`:analysis-run :units` by repo — which source units were added, removed, or
+changed (variant or sha). Any other unit records no source units, so a
+composed unit diffed against one has no `units` section. It reads both units' `merged-rulebase-analysis/`
+parts plus their merged annotations, and refuses units with differing
+`:slim :dropped` shapes, since those do not hold the same keys. Namespaces
+present on only one side are reported under `scope`, never as added or
+removed; `scope` also lists the fact types only scope-only namespaces touch,
+through the `:ancestors` hierarchy. `--rule NAME` (substring matching, as
+`rule` does) prints one production's before and after per changed field;
+`--edn` prints the diff value. `--rule` reads only the production files and
+skips the full diff, so it answers even when the dep-graph, fact-types, or
+shape are absent. Three things it does not answer: a renamed production shows
+as one removed and one added; an `:rhs` tag says the text changed, not what it
+does at runtime; names compare verbatim, so per-build stamps get no useful
+diff. It also cannot trace a fact type's changed ancestors (or an edge that
+appears only through such a change) back to a namespace, since the analysis
+records a type's `:ancestors`, not where a `derive` was declared.
 
 It is babashka, so it cannot `require` the namespaces that wrote the files. The
 one definition it shares with the JVM — every filename, the layer fold order,
@@ -333,7 +344,13 @@ per callsite in the layers, not counted here.
 `artifacts/manifest.clj` knows the artifact set, the run's own checkout and the
 runtime. Anything else — the git state of a host's tooling, how the session was
 built, what scope it covers — arrives through two seams: `:blocks`, merged into
-the manifest whole, and `:analysis-run`, merged into that block.
+the manifest whole, and `:analysis-run`, merged into that block. What a merge
+cannot say goes through `:manifest-fn`, `(fn [manifest context] -> manifest)`,
+called on the finished manifest just before it is written; its return value is
+what is written. `context` holds the `:dir`, and for a composition `:sources`:
+each source unit's ref and manifest, in `:analysis-run :units` order, so a host
+can copy a field of each source's manifest onto its entry without reading a
+file.
 
 ### `:source :branch` names the remote branch — or nothing
 

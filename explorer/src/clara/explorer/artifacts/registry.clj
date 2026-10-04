@@ -148,7 +148,9 @@
 (s/defn ^:private ->unit-info :- schema/UnitInfo
   "What `discover` records per unit: the ref, the resolved dir, present
   artifacts, the slim `:dropped` shape, the manifest's layer ids, the
-  manifest head (`:created`, `:sha`, `:history` head), and — when the manifest
+  manifest head (`:created`, `:sha`, `:history` head) and the whole manifest
+  (`:manifest`, read once here so a composition's manifest hook can use it), and
+  — when the manifest
   claims an aggregate — its `:analysis-run :mode` (as `:mode`) and the units it
   was composed from (`:analysis-run :units`, as `:composed-from`). A variant
   whose directory disagrees with its manifest's `:variant` is recorded as
@@ -179,6 +181,7 @@
 
       (some? manifest)
       (assoc :layer-ids (get-in manifest [:analysis-run :layer-ids])
+             :manifest manifest
              :manifest-head {:created (:created manifest)
                              :sha (get-in manifest [:source :sha])
                              :history (vec (take 1 (:history manifest)))})

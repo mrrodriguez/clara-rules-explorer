@@ -448,6 +448,30 @@
       (finally
         (delete-tree root)))))
 
+(deftest manifest-fn-has-the-last-word-test
+  (let [root (str (java.nio.file.Files/createTempDirectory
+                   "clara-flow-manifest-fn"
+                   (into-array java.nio.file.attribute.FileAttribute [])))]
+    (try
+      (with-redefs [git/get-git-info (fn [_] (stub-git-info {:branch "main" :default-branch "main"}))]
+        (let [seen (atom nil)
+              opts {:root root :repo "x" :generated-by "flow-test" :namespaces ["a.ns"]
+                    :repo-path root
+                    :manifest-fn (fn [m context]
+                                   (reset! seen {:history (count (:history m)) :context context})
+                                   (assoc m :host {:note "added by the hook"}))}
+              _ (manifest/write-manifest! (dissoc opts :manifest-fn))
+              m (edn-io/read-edn-file (io/file (manifest/write-manifest! opts)))]
+          (testing "the hook runs on the finished manifest, history already appended"
+            (is (= 2 (:history @seen)))
+            (is (= {:dir (str root "/x")} (:context @seen))))
+          (testing "what the hook returns is what is written"
+            (is (= {:note "added by the hook"} (:host m)))
+            (is (= 2 (count (:history m))))
+            (is (not (contains? m :manifest-fn))))))
+      (finally
+        (delete-tree root)))))
+
 (deftest memory-layer-is-nil-when-nothing-was-observed-test
   (testing "an empty delta yields no layer, so `:layers` in the merged artifact
             stays an honest record of what actually contributed"
