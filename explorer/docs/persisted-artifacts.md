@@ -207,22 +207,34 @@ bb "$S" "$D" types                        # every resolved insert-type + produce
 bb "$S" "$D" producers :loan/applicant    # who inserts it or a descendant   (annotations + fact-types)
 bb "$S" "$D" consumers :loan/applicant    # who matches it or an ancestor    (production-index + fact-types)
 bb "$S" "$D" hierarchy :loan/applicant    # that type's ancestors + descendants  (fact-types)
-bb "$S" "$D" rule some.ns/some-rule       # one rule's whole annotation (+ :unit)
+bb "$S" "$D" production some.ns/some-rule # one production's full record; --part lhs|rhs|props (index+conditions+details)
+bb "$S" "$D" production some.ns/some-rule --annotations  # one production's raw annotation
 bb "$S" "$D" edges some.ns/some-rule      # up/downstream             (dep-graph)
 bb "$S" "$D" curated                      # what the overlay changed vs the baseline
 bb "$S" "$D" layers                       # the fold + per-key provenance
 bb "$S" "$D" diff "$AFTER"               # production-level diff of this unit vs $AFTER
+bb "$S" "$D" digest                       # registry digest: summary + per-key counts
+bb "$S" "$D" digest coverage              # select-keys off registry-digest.edn
 ```
 
-Five of the ten subcommands never open the analysis at all — `summary`, `gaps`,
+For `digest`, `$D` is the directory `federate/persist!` wrote
+`registry-digest.edn` into — beside the units it federated, not inside one.
+
+Five subcommands never open the analysis at all — `summary`, `gaps`,
 `types`, `curated`, and `layers` read only the annotation layers. `producers`,
 `consumers`, and `hierarchy` read `fact-types.edn`: `producers` closes over a
 type's descendants, `consumers` over its ancestors — the two opposite closures —
 and both print the split between exact matches and ones reached through the
 hierarchy; `hierarchy` shows a type's ancestors and descendants directly.
 `consumers` reads `production-index.edn`; `edges` reads `dep-graph.edn` and
-inverts `:upstream` for the downstream side; `rule` reads `production-index.edn`
-for `:unit` attribution on a composed set.
+inverts `:upstream` for the downstream side. `production` joins the three
+`production-*` files for one rule or query — `production-index.edn` for
+resolution and the index fields, `production-conditions.edn` for `:lhs`, and
+`production-details.edn` for `:rhs-form`/`:doc`/`:props` — and reads the merged
+annotations only for the full record's `:resolution`; `--part lhs` never opens
+`production-details.edn` or the annotations. With `--annotations` it prints the
+merged annotation for that production instead — a production with no annotation
+says so — and `--file` picks which annotation file that read uses.
 
 `producers`, `consumers`, and `hierarchy` resolve a fact type against the names
 in `fact-types.edn` — exact first, then substring. A substring that lands on one
@@ -232,7 +244,8 @@ rule names fall back to substring matching the same way.
 
 `--file auto|agent|merged` picks which annotations the annotation-reading
 subcommands use. Default is `merged`, except `gaps`, which defaults to `auto`
-because the deterministic baseline is the real work list.
+because the deterministic baseline is the real work list. `production
+--annotations` reads it too.
 
 `diff` compares two unit-shaped directories — two ruleset units, a unit and
 its variant, or two composed units — production by production: which rules and
@@ -307,6 +320,11 @@ Open the one part your question lives in. On the JVM:
 From babashka or anything else, `clojure.edn/read-string` over the one file is
 enough — the artifacts are plain EDN with no tagged literals, and
 `clara.explorer.artifacts.layout` gives you the filenames.
+
+Two values already have a reader, so reach for it before `bb -e`: `digest
+<key>` selects keys of `registry-digest.edn` (the federated digest), and
+`production <fq-name>` joins one production's record from the three
+`production-*` files, with `--part lhs|rhs|props` to open only one field.
 
 Two things not to do:
 

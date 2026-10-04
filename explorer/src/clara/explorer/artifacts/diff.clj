@@ -71,28 +71,37 @@
                     [dim (get-in entry [det-key :resolution])]))))
         layout/detection-keys-by-dimension))
 
+(defn- ->production-entry
+  "One production's compared fields from the already-read parts. `name` is an
+  exact key of `:rules`/`:queries` merged; `conditions`, `details`, and `anns`
+  may be nil when the caller did not read them, which reads as nil (or `{}`
+  for `:resolution`, which `resolution-of` builds from an absent annotations
+  map)."
+  [index conditions details anns name]
+  (let [rules (:rules index)
+        queries (:queries index)
+        entry (get (merge queries rules) name)]
+    {:kind (if (contains? queries name) :query :rule)
+     :ns (:ns entry)
+     :lhs-types (vec (:lhs-types entry))
+     :insert-types (vec (:insert-types entry))
+     :retract-types (vec (:retract-types entry))
+     :lhs (get-in conditions [name :lhs])
+     :rhs-form (get-in details [name :rhs-form])
+     :doc (get-in details [name :doc])
+     :props (get-in details [name :props])
+     :resolution (resolution-of anns name)
+     :unit (:unit entry)}))
+
 (defn- productions-of
   "Every production (rules and queries) as one flat map of the compared
   fields, keyed by name. Queries carry no `:insert-types`/`:retract-types` on
   disk, which read as `[]`; composed productions carry `:unit`."
   [index conditions details anns]
-  (let [rules (:rules index)
-        queries (:queries index)]
-    (into (sorted-map)
-          (map (fn [[name entry]]
-                 [name
-                  {:kind (if (contains? queries name) :query :rule)
-                   :ns (:ns entry)
-                   :lhs-types (vec (:lhs-types entry))
-                   :insert-types (vec (:insert-types entry))
-                   :retract-types (vec (:retract-types entry))
-                   :lhs (get-in conditions [name :lhs])
-                   :rhs-form (get-in details [name :rhs-form])
-                   :doc (get-in details [name :doc])
-                   :props (get-in details [name :props])
-                   :resolution (resolution-of anns name)
-                   :unit (:unit entry)}]))
-          (merge queries rules))))
+  (into (sorted-map)
+        (map (fn [[name _entry]]
+               [name (->production-entry index conditions details anns name)]))
+        (merge (:queries index) (:rules index))))
 
 (defn- edges-of
   "The dep-graph as `#{[upstream downstream]}` pairs. Only `:upstream` is on
@@ -124,6 +133,38 @@
                (read-layer-stack dir)))]
     (productions-of index (read-part analysis-dir :conditions)
                     (read-part analysis-dir :details) anns)))
+
+(defn read-production
+  "One production's compared fields from unit dir `dir`, by resolved `name`
+  (an exact key of `:rules`/`:queries` merged). `parts` names the fields the
+  caller needs — a set of `productions-of` keys, or `:all` for the whole
+  record. Only the parts those fields live in are read:
+  `production-conditions.edn` for `:lhs`, `production-details.edn` for
+  `:rhs-form`/`:doc`/`:props`, and the merged annotations for `:resolution`;
+  `production-index.edn` is always read, for the index fields. A `--part lhs`
+  read therefore never opens `production-details.edn` or the annotations."
+  [dir name parts]
+  (let [dir (str dir)
+        analysis-dir (str dir "/" (:rulebase-analysis layout/artifact-files))
+        index (read-part analysis-dir :index)
+        all (merge (:queries index) (:rules index))
+        name (if (contains? all name)
+               name
+               (throw (ex-info (format "No production matches %s" (pr-str name))
+                               {:name name})))
+        all-fields? (= parts :all)
+        need? (fn [k] (or all-fields? (contains? parts k)))
+        conditions (when (need? :lhs) (read-part analysis-dir :conditions))
+        details (when (some need? [:rhs-form :doc :props])
+                  (read-part analysis-dir :details))
+        anns (when (need? :resolution)
+               (:annotations
+                (layout/expand-merged-annotations
+                 (read-edn-or-throw (str dir "/" (:merged layout/artifact-files))
+                                    "merged annotations")
+                 (read-layer-stack dir))))
+        entry (->production-entry index conditions details anns name)]
+    (if all-fields? entry (select-keys entry parts))))
 
 (defn read-unit
   "The values `diff` compares, read from unit dir `dir`: the manifest (for
