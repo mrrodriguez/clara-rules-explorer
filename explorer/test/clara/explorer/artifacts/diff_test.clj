@@ -168,14 +168,29 @@
       (is (= ["s"] (get-in result [:units :added])))
       (is (= ["gone"] (get-in result [:units :removed])))
       (is (empty? (get-in result [:units :changed])))))
-  (testing "two ruleset units: :units empty and ->text unchanged"
+  (testing "two ruleset units: no :units and ->text unchanged"
     (let [b (with-prods (unit {}) {"a.ns/p" (prod {:rhs-form "(a)"})})
           a (with-prods (unit {}) {"a.ns/p" (prod {:rhs-form "(b)"})})
           result (d/diff b a)]
-      (is (empty? (get-in result [:units :added])))
-      (is (empty? (get-in result [:units :removed])))
-      (is (empty? (get-in result [:units :changed])))
-      (is (not (str/includes? (d/->text result) "units:"))))))
+      (is (nil? (:units result)))
+      (is (not (str/includes? (d/->text result) "units:")))))
+  (testing "a composition against a unit that records no source units: no :units"
+    (let [composed (unit {:manifest {:repo "composed"
+                                     :source {:sha "aaa" :working-tree "clean"}
+                                     :analysis-run {:mode :compose
+                                                    :namespaces []
+                                                    :units [{:repo "r" :sha "1111111"}
+                                                            {:repo "s" :sha "2222222"}]}}})]
+      (doseq [[label other] [["a ruleset unit" (unit {})]
+                             ["a session unit" (unit {:manifest {:repo "session"
+                                                                 :source {:sha "bbb"
+                                                                          :working-tree "clean"}
+                                                                 :analysis-run {:mode :session
+                                                                                :namespaces []}}})]]]
+        (testing label
+          (doseq [result [(d/diff other composed) (d/diff composed other)]]
+            (is (nil? (:units result)))
+            (is (not (str/includes? (d/->text result) "units:")))))))))
 
 (deftest scope-fact-types-test
   (testing "a fact type only a scope-only namespace touches lands under :scope"
@@ -408,8 +423,5 @@
       (is (empty? (get-in result [:productions :changed])))
       (is (empty? (get-in result [:productions :added])))
       (is (empty? (get-in result [:productions :removed]))))
-    (testing "the composed side's source units are reported under :units"
-      (is (= ["loan-app-ruleset" "loan-disposition-ruleset"]
-             (get-in result [:units :added])))
-      (is (empty? (get-in result [:units :removed])))
-      (is (empty? (get-in result [:units :changed]))))))
+    (testing "a ruleset side has no source units to compare against"
+      (is (nil? (:units result))))))

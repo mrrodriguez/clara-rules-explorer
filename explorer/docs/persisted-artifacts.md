@@ -240,10 +240,11 @@ queries were added or removed, which changed and how (`:lhs`, `:rhs-form`,
 types, `:resolution`), which fact types appeared or lost ancestors, and which
 dep-graph edges were gained or lost. `:unit` attribution is not a change: it
 is the source unit that carried a production, not part of its identity, so it
-stays in `--edn` / `--rule` output but never tags a changed production. A
-composed side instead gets a `units` section comparing each manifest's
+stays in `--edn` / `--rule` output but never tags a changed production. Two
+composed units instead get a `units` section comparing each manifest's
 `:analysis-run :units` by repo — which source units were added, removed, or
-changed (variant or sha). It reads both units' `merged-rulebase-analysis/`
+changed (variant or sha). Any other unit records no source units, so a
+composed unit diffed against one has no `units` section. It reads both units' `merged-rulebase-analysis/`
 parts plus their merged annotations, and refuses units with differing
 `:slim :dropped` shapes, since those do not hold the same keys. Namespaces
 present on only one side are reported under `scope`, never as added or

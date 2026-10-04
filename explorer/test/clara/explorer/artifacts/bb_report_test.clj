@@ -294,7 +294,8 @@
         (let [out (run app "diff" composed)]
           (is (str/includes? out "scope namespaces (only after):"))
           (is (str/includes? out "clara.explorer.test.rules.loan-outcome-notices"))
-          (is (str/includes? out "units: 2 added, 0 removed, 0 changed"))))
+          (is (not (str/includes? out "units:"))
+              "a ruleset side records no source units to compare")))
       (testing "--edn prints the diff value"
         (let [result (edn/read-string (run disposition "diff" variant "--edn"))]
           (is (= "loan-disposition-ruleset" (get-in result [:before :repo])))

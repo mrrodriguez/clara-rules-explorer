@@ -335,32 +335,43 @@
                     names)
      :scope (sort (concat scope-added scope-removed))}))
 
+(defn- composed?
+  "Whether `unit` (a `read-unit` value) is a composition, which records the
+   source units it was built from."
+  [unit]
+  (= :compose (get-in unit [:manifest :analysis-run :mode])))
+
 (defn- diff-units
   "`{:added [...] :removed [...] :changed {repo {:before … :after …}}}` over
    each manifest's `:analysis-run :units` (the source units a composed unit
    was built from), matched by `:repo`. `:added`/`:removed` are the repos
    supplying units on one side only; `:changed` repos whose `:variant` or
-   `:sha` differs carry each side's entry. A ruleset unit records no `:units`,
-   so the key is empty there."
+   `:sha` differs carry each side's entry.
+
+   Nil unless both sides are compositions: any other unit records no source
+   units, so against a composition every one of its units would read as added
+   or removed."
   [before after]
-  (let [b-units (get-in before [:manifest :analysis-run :units])
-        a-units (get-in after [:manifest :analysis-run :units])
-        by-repo (fn [units] (into {} (map (juxt :repo identity)) units))
-        b-by-repo (by-repo b-units)
-        a-by-repo (by-repo a-units)
-        repos (sort (set/union (set (keys b-by-repo)) (set (keys a-by-repo))))]
-    {:added (filterv #(and (contains? a-by-repo %) (not (contains? b-by-repo %))) repos)
-     :removed (filterv #(and (contains? b-by-repo %) (not (contains? a-by-repo %))) repos)
-     :changed (into (sorted-map)
-                    (keep (fn [repo]
-                            (when (and (contains? b-by-repo repo)
-                                       (contains? a-by-repo repo))
-                              (let [b-entry (get b-by-repo repo)
-                                    a-entry (get a-by-repo repo)]
-                                (when (not= (select-keys b-entry [:variant :sha])
-                                            (select-keys a-entry [:variant :sha]))
-                                  [repo {:before b-entry :after a-entry}])))))
-                    repos)}))
+  (when (and (composed? before) (composed? after))
+    (let [by-repo (fn [unit]
+                    (into {}
+                          (map (juxt :repo identity))
+                          (get-in unit [:manifest :analysis-run :units])))
+          b-by-repo (by-repo before)
+          a-by-repo (by-repo after)
+          repos (sort (set/union (set (keys b-by-repo)) (set (keys a-by-repo))))]
+      {:added (filterv #(and (contains? a-by-repo %) (not (contains? b-by-repo %))) repos)
+       :removed (filterv #(and (contains? b-by-repo %) (not (contains? a-by-repo %))) repos)
+       :changed (into (sorted-map)
+                      (keep (fn [repo]
+                              (when (and (contains? b-by-repo repo)
+                                         (contains? a-by-repo repo))
+                                (let [b-entry (get b-by-repo repo)
+                                      a-entry (get a-by-repo repo)]
+                                  (when (not= (select-keys b-entry [:variant :sha])
+                                              (select-keys a-entry [:variant :sha]))
+                                    [repo {:before b-entry :after a-entry}])))))
+                      repos)})))
 
 (defn- diff-edges
   "`{:gained [...] :lost [...]}` — dep-graph pairs present on exactly one
@@ -414,8 +425,8 @@
                       productions, edges, and fact types
     :productions      `:added`, `:removed`, and `:changed {name #{tag}}`
     :fact-types       added, removed, and `:ancestors` changes
-    :units            the source units each composition was built from,
-                      matched by `:repo` (empty for ruleset units)
+    :units            when both sides are compositions, the source units
+                      each was built from, matched by `:repo`; else nil
     :edges            dep-graph pairs `:gained` and `:lost`
 
    Shape skew is refused before any comparison. A diff of a unit against
@@ -494,12 +505,11 @@
 (defn ->text
   "The compact rendering of a `diff` value: two provenance lines, one count
    line per section, then each non-empty section — one line per name,
-   `changed` lines carrying their tags. A composed side adds a `units:` count
+   `changed` lines carrying their tags. Two compositions add a `units:` count
    line and a `changed units:` section. A diff with no changes prints the
    provenance lines and `no differences`."
   [{:keys [before after productions fact-types edges scope units] :as d}]
-  (let [composed? (or (some? (:mode before)) (some? (:mode after)))
-        count-lines (cond-> [(format "productions: %d added, %d removed, %d changed"
+  (let [count-lines (cond-> [(format "productions: %d added, %d removed, %d changed"
                                      (count (:added productions))
                                      (count (:removed productions))
                                      (count (:changed productions)))
@@ -516,7 +526,7 @@
                                      (count (:productions scope))
                                      (count (:edges scope))
                                      (count (:fact-types scope)))]
-                      composed?
+                      units
                       (conj (format "units: %d added, %d removed, %d changed"
                                     (count (:added units))
                                     (count (:removed units))
