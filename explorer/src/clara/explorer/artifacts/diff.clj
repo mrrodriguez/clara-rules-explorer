@@ -220,8 +220,7 @@
    [:rhs :rhs-form false]
    [:doc :doc false]
    [:props :props false]
-   [:resolution :resolution false]
-   [:unit :unit false]])
+   [:resolution :resolution false]])
 
 (defn- compared-value
   "`(get production key)`, as a set when `set?`, so both `production-tags`
@@ -268,16 +267,63 @@
                                 (when (seq tags) [n tags])))))
                     names)}))
 
+(defn- ancestors-of
+  "Fact type `T`'s ancestors on `side`: the `:ancestors` set of type-name
+   strings `fact-types.edn` records for it, empty when `T` is not there."
+  [side T]
+  (or (get-in side [:fact-types T :ancestors]) #{}))
+
+(defn- descendants-of
+  "The type names on `side` that list `T` among their `:ancestors` — the
+   inverse of the `:ancestors` relation, so a fact of a descendant is a fact
+   of each of its ancestors."
+  [side T]
+  (into #{}
+        (keep (fn [[name {:keys [ancestors]}]]
+                (when (contains? ancestors T) name)))
+        (:fact-types side)))
+
+(defn- production-touches-type?
+  "Whether production `prod` touches fact type `T` through the hierarchy: it
+   matches `T` or an ancestor (`:lhs-types`), or inserts/retracts `T` or a
+   descendant (`:insert-types` / `:retract-types`). `ancestors` and
+   `descendants` are `T`'s closure on the same side, precomputed."
+  [prod T ancestors descendants]
+  (let [lhs (set (:lhs-types prod))
+        out (into #{} cat [(:insert-types prod) (:retract-types prod)])]
+    (or (some (conj ancestors T) lhs)
+        (some (conj descendants T) out))))
+
+(defn- scope-touched?
+  "Whether fact type `T` on `side` is touched by no shared production — one
+   not in `scope-prods`. Such a type appears in the diff only because a
+   scope-only namespace inserted or matched it, so it belongs under `:scope`
+   rather than as an added/removed fact type."
+  [side scope-prods T]
+  (let [shared-prods (->> (:productions side)
+                          (remove (fn [[name _]] (contains? scope-prods name)))
+                          (map val))
+        ancestors (ancestors-of side T)
+        descendants (descendants-of side T)]
+    (not-any? #(production-touches-type? % T ancestors descendants) shared-prods)))
+
 (defn- diff-fact-types
   "`{:added [...] :removed [...] :changed {name {:added [...] :removed
-   [...]}}}` — which types appeared or disappeared, and whose `:ancestors`
-   changed."
-  [before after]
+   [...]}} :scope [...]}` — which types appeared or disappeared, whose
+   `:ancestors` changed, and which added/removed types belong under `:scope`
+   because no shared production touches them. `:added` is judged against the
+   after side's productions and hierarchy, `:removed` against the before
+   side's."
+  [before after scope-prods]
   (let [b-fts (:fact-types before)
         a-fts (:fact-types after)
-        names (sort (set/union (set (keys b-fts)) (set (keys a-fts))))]
-    {:added (filterv #(and (contains? a-fts %) (not (contains? b-fts %))) names)
-     :removed (filterv #(and (contains? b-fts %) (not (contains? a-fts %))) names)
+        names (sort (set/union (set (keys b-fts)) (set (keys a-fts))))
+        added (filterv #(and (contains? a-fts %) (not (contains? b-fts %))) names)
+        removed (filterv #(and (contains? b-fts %) (not (contains? a-fts %))) names)
+        scope-added (filterv #(scope-touched? after scope-prods %) added)
+        scope-removed (filterv #(scope-touched? before scope-prods %) removed)]
+    {:added (filterv (complement (set scope-added)) added)
+     :removed (filterv (complement (set scope-removed)) removed)
      :changed (into (sorted-map)
                     (keep (fn [n]
                             (when (and (contains? b-fts n) (contains? a-fts n))
@@ -286,7 +332,35 @@
                                 (when (not= b-anc a-anc)
                                   [n {:added (-> a-anc (set/difference b-anc) sort vec)
                                       :removed (-> b-anc (set/difference a-anc) sort vec)}])))))
-                    names)}))
+                    names)
+     :scope (sort (concat scope-added scope-removed))}))
+
+(defn- diff-units
+  "`{:added [...] :removed [...] :changed {repo {:before … :after …}}}` over
+   each manifest's `:analysis-run :units` (the source units a composed unit
+   was built from), matched by `:repo`. `:added`/`:removed` are the repos
+   supplying units on one side only; `:changed` repos whose `:variant` or
+   `:sha` differs carry each side's entry. A ruleset unit records no `:units`,
+   so the key is empty there."
+  [before after]
+  (let [b-units (get-in before [:manifest :analysis-run :units])
+        a-units (get-in after [:manifest :analysis-run :units])
+        by-repo (fn [units] (into {} (map (juxt :repo identity)) units))
+        b-by-repo (by-repo b-units)
+        a-by-repo (by-repo a-units)
+        repos (sort (set/union (set (keys b-by-repo)) (set (keys a-by-repo))))]
+    {:added (filterv #(and (contains? a-by-repo %) (not (contains? b-by-repo %))) repos)
+     :removed (filterv #(and (contains? b-by-repo %) (not (contains? a-by-repo %))) repos)
+     :changed (into (sorted-map)
+                    (keep (fn [repo]
+                            (when (and (contains? b-by-repo repo)
+                                       (contains? a-by-repo repo))
+                              (let [b-entry (get b-by-repo repo)
+                                    a-entry (get a-by-repo repo)]
+                                (when (not= (select-keys b-entry [:variant :sha])
+                                            (select-keys a-entry [:variant :sha]))
+                                  [repo {:before b-entry :after a-entry}])))))
+                    repos)}))
 
 (defn- diff-edges
   "`{:gained [...] :lost [...]}` — dep-graph pairs present on exactly one
@@ -337,9 +411,11 @@
     :before / :after  each side's provenance (sha, branch, working tree,
                       `:variant`, scope fields)
     :scope            namespaces claimed on only one side, with their
-                      productions and edges
+                      productions, edges, and fact types
     :productions      `:added`, `:removed`, and `:changed {name #{tag}}`
     :fact-types       added, removed, and `:ancestors` changes
+    :units            the source units each composition was built from,
+                      matched by `:repo` (empty for ruleset units)
     :edges            dep-graph pairs `:gained` and `:lost`
 
    Shape skew is refused before any comparison. A diff of a unit against
@@ -350,13 +426,16 @@
         scope-nses (set/union (set (:only-before namespaces))
                               (set (:only-after namespaces)))
         scope (diff-scope before after namespaces)
-        productions (diff-productions before after scope-nses)]
+        scope-prods (set (:productions scope))
+        productions (diff-productions before after scope-nses)
+        fact-types (diff-fact-types before after scope-prods)]
     {:before (provenance-of (:manifest before))
      :after (provenance-of (:manifest after))
-     :scope scope
+     :scope (assoc scope :fact-types (:scope fact-types))
      :productions productions
-     :fact-types (diff-fact-types before after)
-     :edges (diff-edges before after (set (:productions scope)))}))
+     :fact-types (select-keys fact-types [:added :removed :changed])
+     :units (diff-units before after)
+     :edges (diff-edges before after scope-prods)}))
 
 ;; ===========================================================================
 ;; text rendering
@@ -366,6 +445,14 @@
   "`repo`, or `repo@<variant path>` for a variant unit."
   [{:keys [repo variant]}]
   (str repo (when (seq variant) (str "@" (layout/variant->path variant)))))
+
+(defn- ->unit-side-text
+  "One side of a `:units :changed` entry as `<variant path> <short-sha>` — the
+   variant path absent for a mainline source unit."
+  [{:keys [variant sha]}]
+  (let [variant-path (when (seq variant) (layout/variant->path variant))]
+    (str (if variant-path (str variant-path " ") "")
+         (layout/->short-sha sha))))
 
 (defn- provenance-line
   "`before <handle> <sha> (<branch>, <working-tree>)`."
@@ -379,7 +466,7 @@
 
 (defn- empty-diff?
   "Whether `d` reports no change in any key."
-  [{:keys [productions fact-types edges scope]}]
+  [{:keys [productions fact-types edges scope units]}]
   (every? empty?
           [(:added productions)
            (:removed productions)
@@ -390,7 +477,10 @@
            (:gained edges)
            (:lost edges)
            (get-in scope [:namespaces :only-before])
-           (get-in scope [:namespaces :only-after])]))
+           (get-in scope [:namespaces :only-after])
+           (:added units)
+           (:removed units)
+           (:changed units)]))
 
 (defn- section-lines
   "One report section as lines: `header` followed by one `line-fn` line per
@@ -404,56 +494,73 @@
 (defn ->text
   "The compact rendering of a `diff` value: two provenance lines, one count
    line per section, then each non-empty section — one line per name,
-   `changed` lines carrying their tags. A diff with no changes prints the
+   `changed` lines carrying their tags. A composed side adds a `units:` count
+   line and a `changed units:` section. A diff with no changes prints the
    provenance lines and `no differences`."
-  [{:keys [before after productions fact-types edges scope] :as d}]
-  (str/join "\n"
-            (cond-> (into [(provenance-line :before before)
-                           (provenance-line :after after)
-                           (format "productions: %d added, %d removed, %d changed"
-                                   (count (:added productions))
-                                   (count (:removed productions))
-                                   (count (:changed productions)))
-                           (format "fact-types: %d added, %d removed, %d changed"
-                                   (count (:added fact-types))
-                                   (count (:removed fact-types))
-                                   (count (:changed fact-types)))
-                           (format "edges: %d gained, %d lost"
-                                   (count (:gained edges))
-                                   (count (:lost edges)))
-                           (format "scope: %d namespaces, %d productions, %d edges"
-                                   (+ (count (get-in scope [:namespaces :only-before]))
-                                      (count (get-in scope [:namespaces :only-after])))
-                                   (count (:productions scope))
-                                   (count (:edges scope)))]
-                          (mapcat section-lines)
-                          [["added productions:" (:added productions)
-                            (fn [n] (str "  + " n))]
-                           ["removed productions:" (:removed productions)
-                            (fn [n] (str "  - " n))]
-                           ["changed productions:" (:changed productions)
-                            (fn [[n tags]]
-                              (format "  ~ %s [%s]" n (->> tags sort (map name) (str/join " "))))]
-                           ["added fact-types:" (:added fact-types)
-                            (fn [n] (str "  + " n))]
-                           ["removed fact-types:" (:removed fact-types)
-                            (fn [n] (str "  - " n))]
-                           ["changed fact-types:" (:changed fact-types)
-                            (fn [[n {:keys [added removed]}]]
-                              (format "  ~ %s (+%d -%d ancestors)" n (count added) (count removed)))]
-                           ["gained edges:" (:gained edges)
-                            (fn [[up down]] (format "  + %s -> %s" up down))]
-                           ["lost edges:" (:lost edges)
-                            (fn [[up down]] (format "  - %s -> %s" up down))]
-                           ["scope namespaces (only before):" (get-in scope [:namespaces :only-before])
-                            (fn [n] (str "  " n))]
-                           ["scope namespaces (only after):" (get-in scope [:namespaces :only-after])
-                            (fn [n] (str "  " n))]
-                           ["scope productions:" (:productions scope)
-                            (fn [n] (str "  " n))]
-                           ["scope edges:" (:edges scope)
-                            (fn [[up down]] (format "  %s -> %s" up down))]])
-              (empty-diff? d) (conj "no differences"))))
+  [{:keys [before after productions fact-types edges scope units] :as d}]
+  (let [composed? (or (some? (:mode before)) (some? (:mode after)))
+        count-lines (cond-> [(format "productions: %d added, %d removed, %d changed"
+                                     (count (:added productions))
+                                     (count (:removed productions))
+                                     (count (:changed productions)))
+                             (format "fact-types: %d added, %d removed, %d changed"
+                                     (count (:added fact-types))
+                                     (count (:removed fact-types))
+                                     (count (:changed fact-types)))
+                             (format "edges: %d gained, %d lost"
+                                     (count (:gained edges))
+                                     (count (:lost edges)))
+                             (format "scope: %d namespaces, %d productions, %d edges, %d fact-types"
+                                     (+ (count (get-in scope [:namespaces :only-before]))
+                                        (count (get-in scope [:namespaces :only-after])))
+                                     (count (:productions scope))
+                                     (count (:edges scope))
+                                     (count (:fact-types scope)))]
+                      composed?
+                      (conj (format "units: %d added, %d removed, %d changed"
+                                    (count (:added units))
+                                    (count (:removed units))
+                                    (count (:changed units)))))
+        sections [["added productions:" (:added productions)
+                   (fn [n] (str "  + " n))]
+                  ["removed productions:" (:removed productions)
+                   (fn [n] (str "  - " n))]
+                  ["changed productions:" (:changed productions)
+                   (fn [[n tags]]
+                     (format "  ~ %s [%s]" n (->> tags sort (map name) (str/join " "))))]
+                  ["added fact-types:" (:added fact-types)
+                   (fn [n] (str "  + " n))]
+                  ["removed fact-types:" (:removed fact-types)
+                   (fn [n] (str "  - " n))]
+                  ["changed fact-types:" (:changed fact-types)
+                   (fn [[n {:keys [added removed]}]]
+                     (format "  ~ %s (+%d -%d ancestors)" n (count added) (count removed)))]
+                  ["gained edges:" (:gained edges)
+                   (fn [[up down]] (format "  + %s -> %s" up down))]
+                  ["lost edges:" (:lost edges)
+                   (fn [[up down]] (format "  - %s -> %s" up down))]
+                  ["scope namespaces (only before):" (get-in scope [:namespaces :only-before])
+                   (fn [n] (str "  " n))]
+                  ["scope namespaces (only after):" (get-in scope [:namespaces :only-after])
+                   (fn [n] (str "  " n))]
+                  ["scope productions:" (:productions scope)
+                   (fn [n] (str "  " n))]
+                  ["scope edges:" (:edges scope)
+                   (fn [[up down]] (format "  %s -> %s" up down))]
+                  ["scope fact-types:" (:fact-types scope)
+                   (fn [n] (str "  " n))]
+                  ["changed units:" (:changed units)
+                   (fn [[repo {:keys [before after]}]]
+                     (format "  ~ %s %s -> %s" repo
+                             (->unit-side-text before)
+                             (->unit-side-text after)))]]]
+    (str/join "\n"
+              (cond-> (into (into [(provenance-line :before before)
+                                   (provenance-line :after after)]
+                                  count-lines)
+                            (mapcat section-lines)
+                            sections)
+                (empty-diff? d) (conj "no differences")))))
 
 ;; ===========================================================================
 ;; one production's before/after

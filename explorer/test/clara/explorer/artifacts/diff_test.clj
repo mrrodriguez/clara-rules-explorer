@@ -55,8 +55,7 @@
                               [:rhs {:rhs-form "(a)"} {:rhs-form "(b)"}]
                               [:doc {:doc "d1"} {:doc "d2"}]
                               [:props {:props {:a 1}} {:props {:a 2}}]
-                              [:resolution {:resolution {:insert :full}} {:resolution {:insert :none}}]
-                              [:unit {:unit nil} {:unit "r"}]]]
+                              [:resolution {:resolution {:insert :full}} {:resolution {:insert :none}}]]]
     (testing (format "tag %s fires when only its field differs" tag)
       (let [b (with-prods (unit {}) {"a.ns/p" (prod before)})
             a (with-prods (unit {}) {"a.ns/p" (prod after)})
@@ -120,14 +119,152 @@
       (is (= [["a.ns/up" "b.ns/down"]] (get-in result [:scope :edges]))))))
 
 (deftest fact-types-test
-  (let [b (unit {:fact-types (sorted-map ":a/gone" {:ancestors #{}}
+  (let [prods {"a.ns/p" (prod {:ns "a.ns"
+                               :lhs-types [":a/gone" ":a/both" ":a/new"]})}
+        b (unit {:productions (into (sorted-map) prods)
+                 :fact-types (sorted-map ":a/gone" {:ancestors #{}}
                                          ":a/both" {:ancestors #{"j/Object"}})})
-        a (unit {:fact-types (sorted-map ":a/new" {:ancestors #{}}
+        a (unit {:productions (into (sorted-map) prods)
+                 :fact-types (sorted-map ":a/new" {:ancestors #{}}
                                          ":a/both" {:ancestors #{"j/Object" "j/Serial"}})})
         fts (:fact-types (d/diff b a))]
     (is (= [":a/new"] (:added fts)))
     (is (= [":a/gone"] (:removed fts)))
-    (is (= {":a/both" {:added ["j/Serial"] :removed []}} (:changed fts)))))
+    (is (= {":a/both" {:added ["j/Serial"] :removed []}} (:changed fts)))
+    (is (empty? (get-in (d/diff b a) [:scope :fact-types])))))
+
+(deftest units-diff-test
+  (testing "same productions at different source coordinates: no production tags, every repo changed"
+    (let [mk (fn [units unit-key]
+               (unit {:manifest {:repo "composed"
+                                 :source {:sha "aaa" :working-tree "clean"}
+                                 :analysis-run {:mode :compose
+                                                :namespaces []
+                                                :units units}}
+                      :productions (sorted-map "a.ns/p" (prod {:unit unit-key}))}))
+          b (mk [{:repo "r" :sha "1111111"}] "r")
+          a (mk [{:repo "r" :variant [[:ref "feature/x"]] :sha "2222222"}]
+                "r@ref=feature%2Fx")
+          result (d/diff b a)]
+      (is (empty? (get-in result [:productions :changed])))
+      (is (= {:before {:repo "r" :sha "1111111"}
+              :after {:repo "r" :variant [[:ref "feature/x"]] :sha "2222222"}}
+             (get-in result [:units :changed "r"])))
+      (is (empty? (get-in result [:units :added])))
+      (is (empty? (get-in result [:units :removed])))
+      (let [text (d/->text result)]
+        (is (str/includes? text "units: 0 added, 0 removed, 1 changed"))
+        (is (str/includes? text "~ r 1111111 -> ref=feature%2Fx 2222222")))))
+  (testing "a repo supplying units on one side only is added or removed"
+    (let [mk (fn [units]
+               (unit {:manifest {:repo "composed"
+                                 :source {:sha "aaa" :working-tree "clean"}
+                                 :analysis-run {:mode :compose
+                                                :namespaces []
+                                                :units units}}}))
+          b (mk [{:repo "r" :sha "1111111"} {:repo "gone" :sha "0000000"}])
+          a (mk [{:repo "r" :sha "1111111"} {:repo "s" :sha "3333333"}])
+          result (d/diff b a)]
+      (is (= ["s"] (get-in result [:units :added])))
+      (is (= ["gone"] (get-in result [:units :removed])))
+      (is (empty? (get-in result [:units :changed])))))
+  (testing "two ruleset units: :units empty and ->text unchanged"
+    (let [b (with-prods (unit {}) {"a.ns/p" (prod {:rhs-form "(a)"})})
+          a (with-prods (unit {}) {"a.ns/p" (prod {:rhs-form "(b)"})})
+          result (d/diff b a)]
+      (is (empty? (get-in result [:units :added])))
+      (is (empty? (get-in result [:units :removed])))
+      (is (empty? (get-in result [:units :changed])))
+      (is (not (str/includes? (d/->text result) "units:"))))))
+
+(deftest scope-fact-types-test
+  (testing "a fact type only a scope-only namespace touches lands under :scope"
+    (let [b (unit {:manifest {:repo "r" :source {:working-tree "clean"}
+                              :analysis-run {:namespaces ["orders.rules"]}}
+                   :productions (sorted-map
+                                 "orders.rules/order-total" (prod {:ns "orders.rules"
+                                                                   :insert-types [":orders/order-total"]}))
+                   :fact-types (sorted-map ":orders/order-total" {:ancestors #{}})})
+          a (unit {:manifest {:repo "r" :source {:working-tree "clean"}
+                              :analysis-run {:namespaces ["orders.rules" "promo.overrides"]}}
+                   :productions (sorted-map
+                                 "orders.rules/order-total" (prod {:ns "orders.rules"
+                                                                   :insert-types [":orders/order-total"]})
+                                 "promo.overrides/flag-big-order" (prod {:ns "promo.overrides"
+                                                                         :lhs-types [":orders/order-total"]
+                                                                         :insert-types [":promo/big-order"]}))
+                   :fact-types (sorted-map ":orders/order-total" {:ancestors #{}}
+                                           ":promo/big-order" {:ancestors #{}})})
+          result (d/diff b a)]
+      (is (= [":promo/big-order"] (get-in result [:scope :fact-types])))
+      (is (empty? (get-in result [:fact-types :added])))
+      (is (empty? (get-in result [:fact-types :removed])))))
+  (testing "a shared production matching an ancestor keeps the type in :fact-types"
+    (let [shared {"audit.rules/log-flag" (prod {:ns "audit.rules"
+                                                :lhs-types [":flag/any"]})}
+          b (unit {:manifest {:repo "r" :source {:working-tree "clean"}
+                              :analysis-run {:namespaces ["audit.rules"]}}
+                   :productions (into (sorted-map) shared)
+                   :fact-types (sorted-map ":flag/any" {:ancestors #{}})})
+          a (unit {:manifest {:repo "r" :source {:working-tree "clean"}
+                              :analysis-run {:namespaces ["audit.rules" "promo.overrides"]}}
+                   :productions (into (sorted-map)
+                                      (assoc shared
+                                             "promo.overrides/flag-big-order"
+                                             (prod {:ns "promo.overrides"
+                                                    :insert-types [":promo/big-order"]})))
+                   :fact-types (sorted-map ":flag/any" {:ancestors #{}}
+                                           ":promo/big-order" {:ancestors #{":flag/any"}})})
+          result (d/diff b a)]
+      (is (= [":promo/big-order"] (get-in result [:fact-types :added])))
+      (is (empty? (get-in result [:scope :fact-types])))))
+  (testing "a shared production inserting a descendant keeps the type in :fact-types"
+    (let [shared {"shared/p" (prod {:ns "shared" :insert-types [":promo/big-order"]})}
+          b (unit {:manifest {:repo "r" :source {:working-tree "clean"}
+                              :analysis-run {:namespaces ["shared"]}}
+                   :productions (into (sorted-map) shared)
+                   :fact-types (sorted-map ":promo/big-order" {:ancestors #{":flag/any"}})})
+          a (unit {:manifest {:repo "r" :source {:working-tree "clean"}
+                              :analysis-run {:namespaces ["shared"]}}
+                   :productions (into (sorted-map) shared)
+                   :fact-types (sorted-map ":flag/any" {:ancestors #{}}
+                                           ":promo/big-order" {:ancestors #{":flag/any"}})})
+          result (d/diff b a)]
+      (is (= [":flag/any"] (get-in result [:fact-types :added])))
+      (is (empty? (get-in result [:scope :fact-types])))))
+  (testing "a removed type is judged against the before side"
+    (let [b (unit {:manifest {:repo "r" :source {:working-tree "clean"}
+                              :analysis-run {:namespaces ["orders.rules" "promo.overrides"]}}
+                   :productions (sorted-map
+                                 "orders.rules/order-total" (prod {:ns "orders.rules"
+                                                                   :insert-types [":orders/order-total"]})
+                                 "promo.overrides/flag-big-order" (prod {:ns "promo.overrides"
+                                                                         :insert-types [":promo/big-order"]}))
+                   :fact-types (sorted-map ":orders/order-total" {:ancestors #{}}
+                                           ":promo/big-order" {:ancestors #{}})})
+          a (unit {:manifest {:repo "r" :source {:working-tree "clean"}
+                              :analysis-run {:namespaces ["orders.rules"]}}
+                   :productions (sorted-map
+                                 "orders.rules/order-total" (prod {:ns "orders.rules"
+                                                                   :insert-types [":orders/order-total"]}))
+                   :fact-types (sorted-map ":orders/order-total" {:ancestors #{}})})
+          result (d/diff b a)]
+      (is (= [":promo/big-order"] (get-in result [:scope :fact-types])))
+      (is (empty? (get-in result [:fact-types :removed])))))
+  (testing "a type touched by both a scope and a shared production stays in :fact-types"
+    (let [b (unit {:manifest {:repo "r" :source {:working-tree "clean"}
+                              :analysis-run {:namespaces ["shared"]}}
+                   :productions (sorted-map
+                                 "shared/p" (prod {:ns "shared" :lhs-types [":t"]}))})
+          a (unit {:manifest {:repo "r" :source {:working-tree "clean"}
+                              :analysis-run {:namespaces ["shared" "scope"]}}
+                   :productions (sorted-map
+                                 "shared/p" (prod {:ns "shared" :lhs-types [":t"]})
+                                 "scope/q" (prod {:ns "scope" :insert-types [":t"]}))
+                   :fact-types (sorted-map ":t" {:ancestors #{}})})
+          result (d/diff b a)]
+      (is (= [":t"] (get-in result [:fact-types :added])))
+      (is (empty? (get-in result [:scope :fact-types]))))))
 
 (deftest shape-skew-refusal-test
   (let [b (unit {:shape #{:nodes}})
@@ -191,11 +328,11 @@
     (testing "before and after for each changed field, including both :rhs-form texts"
       (let [detail (d/rule-detail b a "a.ns/p")]
         (is (= "a.ns/p" (:name detail)) "exact name resolves")
-        (is (= [:rhs :unit] (:tags detail)))
+        (is (= [:rhs] (:tags detail)) "unit attribution is not a change")
         (is (= "(a)" (get-in detail [:before :rhs-form])))
         (is (= "(b)" (get-in detail [:after :rhs-form])))
         (let [text (d/rule-detail-text detail)]
-          (is (str/includes? text "a.ns/p [rhs unit]"))
+          (is (str/includes? text "a.ns/p [rhs]"))
           (is (str/includes? text "before: \"(a)\""))
           (is (str/includes? text "after:  \"(b)\"")))))
     (testing "substring matching, as the report's `rule` does"
@@ -267,11 +404,12 @@
                "clara.explorer.test.rules.loan-outcome-notices/notice-approved-app"
                "clara.explorer.test.rules.loan-outcome-notices/notice-denied-app"}
              (set (get-in result [:scope :productions])))))
-    (testing "shared productions carry :unit attribution on the composed side"
-      (is (contains? (get-in result [:productions :changed])
-                     "clara.explorer.test.rules.loan-app-rules/app-outcome-approved?"))
-      (is (= #{:unit}
-             (get-in result [:productions :changed
-                             "clara.explorer.test.rules.loan-app-rules/app-outcome-approved?"])))
+    (testing "shared productions carry no change tags — :unit is attribution, not a change"
+      (is (empty? (get-in result [:productions :changed])))
       (is (empty? (get-in result [:productions :added])))
-      (is (empty? (get-in result [:productions :removed]))))))
+      (is (empty? (get-in result [:productions :removed]))))
+    (testing "the composed side's source units are reported under :units"
+      (is (= ["loan-app-ruleset" "loan-disposition-ruleset"]
+             (get-in result [:units :added])))
+      (is (empty? (get-in result [:units :removed])))
+      (is (empty? (get-in result [:units :changed]))))))

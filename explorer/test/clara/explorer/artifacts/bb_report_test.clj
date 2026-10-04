@@ -294,7 +294,7 @@
         (let [out (run app "diff" composed)]
           (is (str/includes? out "scope namespaces (only after):"))
           (is (str/includes? out "clara.explorer.test.rules.loan-outcome-notices"))
-          (is (str/includes? out "app-outcome-approved? [unit]"))))
+          (is (str/includes? out "units: 2 added, 0 removed, 0 changed"))))
       (testing "--edn prints the diff value"
         (let [result (edn/read-string (run disposition "diff" variant "--edn"))]
           (is (= "loan-disposition-ruleset" (get-in result [:before :repo])))
@@ -302,9 +302,7 @@
           (is (empty? (get-in result [:productions :changed])))))
       (testing "--rule prints one production's before and after"
         (let [out (run app "diff" composed "--rule" "digest-doc-meta")]
-          (is (str/includes? out "digest-doc-meta-rule [unit]"))
-          (is (str/includes? out "before: nil"))
-          (is (str/includes? out "after:  \"loan-app-ruleset\""))))
+          (is (str/includes? out "digest-doc-meta-rule (unchanged)"))))
       (testing "a missing after dir fails loudly"
         (let [{:keys [exit out err]}
               (shell/sh "bb" (str report-script) app "diff" (str (io/file root "nope")))]
