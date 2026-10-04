@@ -194,6 +194,16 @@
         (let [out (run-report "production" "a.ns/full-rule" "--annotations")]
           (is (str/includes? out "(->fact :a/one x)"))))
 
+      (testing "`production --annotations --file memory` reads the memory layer"
+        (spit (io/file (:dir *artifact-opts*) "memory-annotations.edn")
+              (pr-str {:id :memory
+                       :source {:generated-by "bb-report-test"
+                                :derived-from "session working memory"}
+                       :annotations {"a.ns/full-rule"
+                                     {:clara-rules/insert-types [:a/memory-only-type]}}}))
+        (let [out (run-report "production" "a.ns/full-rule" "--annotations" "--file" "memory")]
+          (is (str/includes? out ":a/memory-only-type"))))
+
       (testing "`summary` counts the whole expanded merge, not just the rules
                 stored inline — all four are there, three of them by reference"
         (is (str/includes? (run-report "summary") "rules: 4")))
@@ -207,7 +217,7 @@
             (is (str/includes? out sub)))
           (is (str/includes? out "<type>"))
           (is (str/includes? out "<fq-name>"))
-          (is (str/includes? out "--file auto|agent|merged"))
+          (is (str/includes? out "--file auto|memory|agent|merged"))
           (is (str/includes? out "status --checkout PATH"))))
 
       (testing "`producers` groups a multi-type match into per-type blocks"

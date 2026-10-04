@@ -41,8 +41,10 @@
 
 (def ^:private artifact-files
   "The `--file` values, mapped to the filenames `layout/artifact-files` gives
-  their roles. Only the three an annotation-reading subcommand may be pointed at."
-  (into {} (map (fn [k] [(name k) (layout/artifact-files k)])) [:auto :agent :merged]))
+  their roles. The annotation layers an annotation-reading subcommand may be
+  pointed at — auto, memory, agent — plus the merged fold."
+  (into {} (map (fn [k] [(name k) (layout/artifact-files k)]))
+        [:auto :memory :agent :merged]))
 
 (def ^:private analysis-dir-name
   "The analysis is a DIRECTORY split by access pattern — a scan opens
@@ -564,7 +566,7 @@
 
 (def ^:private usage-line
   "The invocation skeleton, printed first by `help`."
-  "usage: bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|agent|merged] [--checkout PATH [--ref REF]] [--root PATH] [--edn] [--part lhs|rhs|props]")
+  "usage: bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged] [--checkout PATH [--ref REF]] [--root PATH] [--edn] [--part lhs|rhs|props]")
 
 (def ^:private subcommands
   "The subcommand menu as `[name signature description]`, in dispatch order;
@@ -580,7 +582,7 @@
    ["curated" "" "what the agent overlay changed vs auto-gen"]
    ["layers" "[<fq-name>]" "the fold: layers + per-key provenance"]
    ["status" "[--checkout]" "is this unit current? (needs only the manifest)"]
-   ["digest" "[<key> …]" "registry-digest.edn: summary + counts, or select-keys"]
+   ["digest" "[<key> …]" "registry-digest.edn of a federation dir: summary + counts, or select-keys"]
    ["diff" "<after-dir>" "production-level diff of this unit vs <after-dir> (--edn, --rule NAME)"]
    ["help" "" "this help"]])
 
@@ -595,7 +597,7 @@
   (println "hierarchy resolve it exact-first, then substring. <fq-name> likewise")
   (println "falls back to substring search.")
   (println)
-  (println "--file auto|agent|merged picks the annotations file for the")
+  (println "--file auto|memory|agent|merged picks the annotations file for the")
   (println "annotation-reading subcommands (default merged; gaps defaults to auto).")
   (println)
   (println "status checks one unit directory (a source, variant, or composed unit)")
@@ -817,14 +819,14 @@
   No keys prints `:summary` then one line per remaining top-level key with its
   element count; keys print `(select-keys digest keys)` — pprint by default,
   EDN with `--edn`. A key may be `coverage` or `:coverage`; an unknown key
-  dies, listing the keys present. Only `federate/persist!` writes this file,
-  so a plain ruleset unit has none."
+  dies, listing the keys present. The file is written only by
+  `federate/persist!`, into a federation output directory — no unit has one."
   [target opts key-args]
   (let [f (digest-file target)]
     (when-not (fs/exists? f)
       (die (str "Missing " (layout/artifact-files :registry-digest) " — " (str f))
-           "Only federation writes it (clara.explorer.artifacts.federate/persist!);"
-           "a plain ruleset unit never has one."))
+           "It is written only by clara.explorer.artifacts.federate/persist!, into a federation"
+           "output directory that also holds registry-index.edn. A unit — ruleset or composed — never has one."))
     (let [digest (read-edn f (fs/file-name f))
           ks (mapv #(keyword (str/replace (str %) #"^:" "")) key-args)
           present (set (keys digest))

@@ -217,8 +217,9 @@ bb "$S" "$D" digest                       # registry digest: summary + per-key c
 bb "$S" "$D" digest coverage              # select-keys off registry-digest.edn
 ```
 
-For `digest`, `$D` is the directory `federate/persist!` wrote
-`registry-digest.edn` into — beside the units it federated, not inside one.
+For `digest`, `$D` is a federation output directory — the explicit `:dir`
+`federate/persist!` wrote `registry-index.edn` and `registry-digest.edn` into,
+beside the units it federated, not inside one.
 
 Five subcommands never open the analysis at all — `summary`, `gaps`,
 `types`, `curated`, and `layers` read only the annotation layers. `producers`,
@@ -242,10 +243,10 @@ name prints what it resolved to; one that lands on several lists the options and
 closes over all of them. Fact types may be written `:foo/bar` or `foo/bar`, and
 rule names fall back to substring matching the same way.
 
-`--file auto|agent|merged` picks which annotations the annotation-reading
+`--file auto|memory|agent|merged` picks which annotations the annotation-reading
 subcommands use. Default is `merged`, except `gaps`, which defaults to `auto`
 because the deterministic baseline is the real work list. `production
---annotations` reads it too.
+--annotations` reads it too; `memory` is the runtime-proven delta.
 
 `diff` compares two unit-shaped directories — two ruleset units, a unit and
 its variant, or two composed units — production by production: which rules and
