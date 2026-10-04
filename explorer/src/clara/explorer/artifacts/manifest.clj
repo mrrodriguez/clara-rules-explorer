@@ -170,8 +170,9 @@
 
   `opts` is a `schema/ManifestOptions`; its `:root`/`:dir`/`:repo`/`:variant`/
   `:canonical?` resolve the directory through `store/get-out-dir`, the same way
-  every other artifact does."
-  [opts :- schema/ManifestOptions]
+  every other artifact does. Its `:manifest-fn`, when given, is called on the
+  finished manifest with `{:dir …}` and what it returns is written."
+  [{:keys [manifest-fn] :as opts} :- schema/ManifestOptions]
   ;; The whole opts map, so `:variant`/`:canonical?` land the manifest in the
   ;; same directory as the layers it describes rather than at the mainline base.
   (let [dir (store/get-out-dir opts)
@@ -181,10 +182,12 @@
         file (io/file dir (:manifest store/artifact-files))
         fresh (->manifest (assoc opts :out-dir dir))
         existing (read-existing file)
-        manifest (if existing
-                   (-> fresh
-                       (assoc :created (get existing :created (:created fresh)))
-                       (assoc :history (vec (concat (get existing :history []) (:history fresh)))))
-                   fresh)]
+        manifest (cond-> fresh
+                   existing
+                   (assoc :created (get existing :created (:created fresh))
+                          :history (vec (concat (get existing :history []) (:history fresh))))
+
+                   manifest-fn
+                   (manifest-fn {:dir dir}))]
     (edn-io/write-edn-file! file manifest)
     (str file)))

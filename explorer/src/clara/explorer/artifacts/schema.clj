@@ -625,6 +625,23 @@
   it, a run with no explicit `:namespaces` and no `:session` records none."
   (s/=> [(s/cond-pre s/Str s/Symbol)] {s/Any s/Any}))
 
+(s/defschema ManifestContext
+  "What a `:manifest-fn` is called with beside the manifest: the `:dir` it is
+  written to and, for a composition, `:sources`: each source unit's `UnitRef`
+  and its whole manifest as the registry read it (nil when it has none), in the
+  order of the manifest's `:analysis-run :units`."
+  {:dir s/Str
+   (s/optional-key :sources) [{:unit {s/Keyword s/Any}
+                               :manifest (s/maybe {s/Keyword s/Any})}]})
+
+(s/defschema ManifestFn
+  "The `:manifest-fn` hook: `(fn [manifest ManifestContext] -> manifest)`, called
+  on the finished manifest (`:created` preserved, `:history` appended) just
+  before it is written. What it returns is what is written, so it may add or
+  change anything; keeping the keys readers rely on intact (`:source`,
+  `:analysis-run`, `:staleness`) is the caller's to get right."
+  (s/=> {s/Keyword s/Any} {s/Keyword s/Any} ManifestContext))
+
 (s/defschema ManifestOptions
   "What the provenance manifest is built from: `ArtifactOpts` for where it lands,
   `ProvenanceOpts` for who wrote it, plus the run's own description of itself.
@@ -636,7 +653,9 @@
   caller can know, such as the git state of its own tooling. `:analysis-run` is
   merged into the `:analysis-run` block rather than over it, so a caller can
   state its `:method` / `:session-build` / `:scope` without restating the parts
-  this namespace derives.
+  this namespace derives. `:manifest-fn` (a `ManifestFn`) is the last word, for
+  what a merge cannot say, e.g. enriching each `:analysis-run :units` entry from
+  its source unit's manifest.
 
   `:repo` is **required**, where `ArtifactOpts` has it optional. A manifest is a
   claim about a named body of rules; writing one that silently describes the
@@ -653,6 +672,7 @@
           (s/optional-key :change) s/Str
           (s/optional-key :blocks) {s/Keyword s/Any}
           (s/optional-key :analysis-run) {s/Keyword s/Any}
+          (s/optional-key :manifest-fn) ManifestFn
           (s/optional-key :out-dir) s/Str}))
 
 ;; ===========================================================================
@@ -701,7 +721,8 @@
 
   `:units` is the ordered source selection. `:generated-by` is required by
   `ProvenanceOpts`; `:analysis-run` is merged into the manifest's
-  `:analysis-run` block as the seam for recording the composition."
+  `:analysis-run` block as the seam for recording the composition.
+  `:manifest-fn` is `ManifestOptions`' hook, its context carrying `:sources`."
   (merge (dissoc ArtifactOpts
                  (s/optional-key :repo)
                  (s/optional-key :root))
@@ -709,7 +730,8 @@
          {:root s/Str
           :repo s/Str
           :units [UnitRef]
-          (s/optional-key :analysis-run) {s/Keyword s/Any}}))
+          (s/optional-key :analysis-run) {s/Keyword s/Any}
+          (s/optional-key :manifest-fn) ManifestFn}))
 
 (s/defschema ComposePersistResult
   "What `flow/compose-persist!` returns: the output dir, the layer ids that
@@ -734,7 +756,8 @@
   `clara.explorer.artifacts.registry/discover` records per unit: its
   `UnitRef`, the resolved `:dir`, the artifact roles present, the slim
   `:dropped` key set (the merge's shape), the layer ids the manifest records,
-  the manifest's `:created` / `:sha` / `:history` head, and — for an aggregate
+  the manifest's `:created` / `:sha` / `:history` head and the whole manifest
+  as read (`:manifest`), and — for an aggregate
   unit — the manifest's `:analysis-run :mode` and the units it was composed
   from (`:analysis-run :units`). A variant whose directory disagrees with its
   manifest's `:variant` carries a `:variant-mismatch`. Absence of `:mode`
@@ -749,6 +772,7 @@
           (s/optional-key :slim-dropped) (s/maybe #{s/Keyword})
           (s/optional-key :layer-ids) (s/maybe {s/Keyword s/Any})
           (s/optional-key :manifest-head) {s/Keyword s/Any}
+          (s/optional-key :manifest) {s/Keyword s/Any}
           (s/optional-key :mode) s/Any
           (s/optional-key :composed-from) [UnitRef]
           (s/optional-key :variant-mismatch) VariantMismatch}))

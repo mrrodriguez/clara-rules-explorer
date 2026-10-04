@@ -388,6 +388,18 @@
              :created (:created head)}
       (:variant unit) (assoc :variant (:variant unit)))))
 
+(defn- ->sources-manifest-fn
+  "`manifest-fn` with each source unit's ref and manifest added to its context
+  as `:sources`, in `units` order, the order of `:analysis-run :units`. The
+  registry read those manifests already, so the hook reads no file."
+  [reg units manifest-fn]
+  (let [sources (mapv (fn [unit]
+                        {:unit unit
+                         :manifest (:manifest (registry/unit-info reg unit))})
+                      units)]
+    (fn [manifest context]
+      (manifest-fn manifest (assoc context :sources sources)))))
+
 (defn- ->source-staleness
   "`{unit-key {:sha … :created …}}` — the per-source shas a composed unit's
   staleness is judged against. Derived from the enriched `:analysis-run :units`
@@ -419,13 +431,14 @@
    `review-when-any-source-sha-drifts` policy with the per-source shas, so a
    reader holding only the directory can answer \"is this current?\" — a
    composed unit is stale as soon as any of its N independently-moving sources
-   has moved.
+   has moved. A caller's `:manifest-fn` gets each source unit's manifest as its
+   context's `:sources`, e.g. to copy a field of each onto its `:units` entry.
 
    Output placement follows `ArtifactOpts`: `:dir` when given, else
    `<:root>/<:repo>`. `:root` is the source registry root (and default output
    root); `:repo` is the composed unit's registry-relative identity and default
    subdir."
-  [{:keys [root units analysis-run]
+  [{:keys [root units analysis-run manifest-fn]
     :as opts} :- schema/ComposePersistOptions]
   (let [reg (registry/->registry {:root root :units units})
         analysis (compose/->composed-analysis reg units)
@@ -445,13 +458,15 @@
        digest-file
        (digest/->rulebase-analysis-digest analysis))
       (let [manifest-file (manifest/write-manifest!
-                           (assoc opts
-                                  :analysis-run (merge {:mode :compose
-                                                        :units composed-units}
-                                                       analysis-run)
-                                  :blocks {:staleness
-                                           {:policy "review-when-any-source-sha-drifts"
-                                            :sources (->source-staleness composed-units)}}))]
+                           (cond-> (assoc opts
+                                          :analysis-run (merge {:mode :compose
+                                                                :units composed-units}
+                                                               analysis-run)
+                                          :blocks {:staleness
+                                                   {:policy "review-when-any-source-sha-drifts"
+                                                    :sources (->source-staleness composed-units)}})
+                             manifest-fn
+                             (assoc :manifest-fn (->sources-manifest-fn reg units manifest-fn))))]
         {:dir (store/get-out-dir opts)
          :layers (mapv :id (:layers merged))
          :rule-count (count (:annotations merged))

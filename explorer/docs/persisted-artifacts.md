@@ -344,7 +344,13 @@ per callsite in the layers, not counted here.
 `artifacts/manifest.clj` knows the artifact set, the run's own checkout and the
 runtime. Anything else — the git state of a host's tooling, how the session was
 built, what scope it covers — arrives through two seams: `:blocks`, merged into
-the manifest whole, and `:analysis-run`, merged into that block.
+the manifest whole, and `:analysis-run`, merged into that block. What a merge
+cannot say goes through `:manifest-fn`, `(fn [manifest context] -> manifest)`,
+called on the finished manifest just before it is written; its return value is
+what is written. `context` holds the `:dir`, and for a composition `:sources`:
+each source unit's ref and manifest, in `:analysis-run :units` order, so a host
+can copy a field of each source's manifest onto its entry without reading a
+file.
 
 ### `:source :branch` names the remote branch — or nothing
 
