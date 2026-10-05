@@ -4,6 +4,7 @@
             [clara.explorer.core :as core]
             [clara.explorer.memory :as memory]
             [clara.explorer.serialize :as serialize]
+            [clara.explorer.test.rules.accumulator-relations-test-rules :as accr]
             [clara.explorer.test.rules.loan-app-facts :as laf]
             [clara.explorer.test.rules.loan-app-rules]
             [clara.explorer.test.rules.loan-doc-rules]
@@ -651,7 +652,7 @@
      :review-task-2      (find-id "ReviewTask" #(= "app-2" (:app-id %)))}))
 
 (deftest test-memory-relations-matches-condition-of
-  (let [{:keys [analysis application-1 application-2 document-check-1
+  (let [{:keys [analysis application-1 application-2 manual-hold document-check-1
                 review-closed-1 review-task-2]}
         (->memory-relations-facts)]
     (is (some? application-1))
@@ -665,6 +666,9 @@
         (is (= (fact-relation-names analysis application-1 :matches-condition-of)
                (fact-relation-names analysis application-2 :matches-condition-of))
             "both applications match the same conditions")))
+
+    (testing "a negated-only fact matches no positive condition"
+      (is (= [] (fact-relation-names analysis manual-hold :matches-condition-of))))
 
     (testing "DocumentCheck reaches document-check-passed's join (the :test fails after)"
       (is (= ["document-check-passed"]
@@ -718,7 +722,17 @@
                       (r/insert (mrr/->Application "app-1" 7)
                                 (mrr/->Application "app-2" 7))
                       (r/fire-rules))
-          analysis (memory/->memory-analysis session)]
+          analysis (memory/->memory-analysis session)
+          application? #(= "clara.explorer.test.rules.memory_relations_test_rules.Application"
+                           (get-in % [:type :name]))
+          applications (filter application? (vals (:facts analysis)))]
+      (doseq [fact applications]
+        (is (= ["ready-for-review" "documents-complete" "offers-within-limit" "open-review-task"]
+               (mapv #(last (str/split (:name %) #"/")) (:supports-insertions-of fact)))
+            "clean session supports-insertions-of is every rule that fired")
+        (is (= ["applications-without-hold"]
+               (mapv #(last (str/split (:name %) #"/")) (:supports-results-of fact)))
+            "clean session supports-results-of is the hold query"))
       (doseq [[_id fact] (:facts analysis)]
         (is (every? #(= "rule" (:type %)) (:supports-insertions-of fact))
             "supports-insertions-of carries only rules")
@@ -727,3 +741,38 @@
         (is (empty? (:blocks-condition-of fact)) "no negation blocks a clean session")
         (is (empty? (:blocking-candidate-of fact))
             "no negation candidates in a clean session")))))
+
+;; ---------------------------------------------------------------------------
+;; Accumulator relations — the accumulator-relations-test-rules fixture
+;; ---------------------------------------------------------------------------
+
+(def ^:private accr-type-ns
+  "Class-name namespace prefix for the accumulator fixture record types."
+  "clara.explorer.test.rules.accumulator_relations_test_rules.")
+
+(defn- ->accumulator-relations-analysis
+  "Builds the accumulator fixture analysis: one Start that seeds an inserted
+   accumulator-input fact read only by accumulator `:from` conditions."
+  []
+  (memory/->memory-analysis
+   (-> (r/mk-session 'clara.explorer.test.rules.accumulator-relations-test-rules)
+       (r/insert (accr/->Start :g1 0))
+       (r/fire-rules))))
+
+(deftest test-accumulator-input-fact-relations
+  (let [analysis (->accumulator-relations-analysis)
+        accum-source (some (fn [[_id fact]]
+                             (when (= (str accr-type-ns "AccumSource")
+                                      (get-in fact [:type :name]))
+                               fact))
+                           (:facts analysis))]
+    (is (some? accum-source)
+        "an inserted accumulator-input fact is retained in :facts")
+    (is (= ["accumulate-sources" "accumulate-over-threshold"]
+           (mapv #(last (str/split (:name %) #"/"))
+                 (:matches-condition-of accum-source)))
+        "accumulator :from inputs match both accumulate node types")
+    (is (= #{"accumulate-sources" "accumulate-over-threshold"}
+           (set (map #(last (str/split (:name %) #"/"))
+                     (:supports-insertions-of accum-source))))
+        "accumulator :from inputs support the rules that accumulated them")))

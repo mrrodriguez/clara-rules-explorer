@@ -803,8 +803,8 @@ productions".  The fact-type detail groups instances by the same relations.
 | Key | A fact is in it when | Productions |
 |---|---|---|
 | `supports-insertions-of` | it is in an activation whose recorded logical insertions include one still in working memory | rules |
-| `supports-results-of` | it supports a current result | queries |
-| `matches-condition-of` | it passes a positive condition's own constraints, the ones that need no other condition's bindings | rules, queries |
+| `supports-results-of` | it supports a current result (accumulator `:from` inputs included) | queries |
+| `matches-condition-of` | it passes a positive condition's own constraints, the ones that need no other condition's bindings (accumulator `:from` inputs included) | rules, queries |
 | `blocks-condition-of` | it matches a negated condition **and** blocks a partial match waiting at that node | rules, queries |
 | `blocking-candidate-of` | it matches a negated condition, but blocks no partial match there now | rules, queries |
 
@@ -839,10 +839,10 @@ These are documented rather than fixed:
 - **`:test` conditions hold no facts.**  `matches-condition-of` shows a fact
   reached the rule, not that the test was what stopped it.
 - **`:matches-condition-of` is condition-local.**  It says the fact passes that
-  condition's own constraints, not that it joined the facts before it.
-- **Accumulator conditions** (including `:exists`) are a follow-up: their facts
-  are read from accumulate memory into `matches-condition-of` once the read is
-  checked against both accumulate node types.
+  condition's own constraints, not that it joined the facts before it.  For an
+  accumulator `:from`, a fact is condition-local by passing the `:from` type and
+  alpha constraints; a join-filter accumulator still lists candidate facts that
+  the token filter would reject.
 
 ---
 

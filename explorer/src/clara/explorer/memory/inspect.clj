@@ -18,6 +18,8 @@
             [clojure.set :as set]
             [schema.core :as s])
   (:import [clara.rules.engine
+            AccumulateNode
+            AccumulateWithJoinFilterNode
             ISystemFact
             ProductionNode
             QueryNode
@@ -55,7 +57,8 @@
    :type (s/enum "rule" "query")})
 
 (s/defschema NodeRelations
-  "Facts classified by how they participate in a beta node's element memory."
+  "Facts classified by how they participate in beta-node memory (join,
+   negation, and accumulate nodes)."
   {:matches-condition-of [FactProduction]
    :blocks-condition-of [FactProduction]
    :blocking-candidate-of [FactProduction]})
@@ -92,8 +95,8 @@
    carry `:facts-accumulated` (the facts the accumulator ran over) in addition
    to `:fact` (the accumulated result)."
   [session tokens]
-  (let [{:keys [memory]} (eng/components session)
-        id-to-node (get-in (eng/components session) [:rulebase :id-to-node])]
+  (let [{:keys [memory rulebase]} (eng/components session)
+        id-to-node (:id-to-node rulebase)]
     (vec
      (for [{:keys [matches bindings] :as token} tokens]
        {:matches (vec
@@ -128,6 +131,11 @@
   (or (instance? NegationNode node)
       (instance? NegationWithJoinFilterNode node)))
 
+(defn- accumulate-node?
+  [node]
+  (or (instance? AccumulateNode node)
+      (instance? AccumulateWithJoinFilterNode node)))
+
 (defn- production-node?
   [node]
   (instance? ProductionNode node))
@@ -157,6 +165,29 @@
   [memory node]
   (mem/get-tokens-all memory node))
 
+(defn- ->accumulated-facts
+  "Facts held in `node`'s accumulate memory (the accumulator `:from` inputs).
+   `AccumulateNode` stores `[facts reduced]` pairs, so the facts are the pair's
+   first element; `AccumulateWithJoinFilterNode` stores the candidate facts
+   vector directly."
+  [memory node]
+  (for [{:keys [result]} (mem/get-accum-reduced-complete memory node)]
+    (if (instance? AccumulateNode node)
+      (first result)
+      result)))
+
+(defn- token->match-facts
+  "Facts a token's condition matches are actually about: accumulator conditions
+   contribute their `:from` inputs (via `eng/token->matching-elements`); every
+   other condition contributes its own fact."
+  [memory id-to-node token]
+  (for [[fact node-id] (:matches token)
+        :let [node (id-to-node node-id)]
+        fact (if (:accum-condition node)
+               (eng/token->matching-elements node memory token)
+               [fact])]
+    fact))
+
 (defn- negation-element-blocks?
   "True when `element` blocks at least one waiting token at negation `node`.
    `token-groups` is the node's waiting tokens grouped by join bindings
@@ -176,32 +207,17 @@
 
 ;; --- Working-memory accuracy ----------------------------------------------
 
-(defn- ->wrapped-facts-from-alphas
-  "Wrapped user-visible facts held in alpha memory."
+(defn- ->wrapped-facts-from-alpha-memory
+  "Wrapped user-visible facts held in alpha memory — the beta-node element
+   memory of join and negation nodes."
   [memory]
-  (->> (:alpha-memory memory)
-       vals
-       (mapcat vals)
-       (mapcat identity)
-       (map :fact)
-       (filter fact-visible?)
-       (map platform/fact-id-wrap)
-       (into #{})))
-
-(defn- ->wrapped-facts-from-matches
-  "Wrapped user-visible facts present in production nodes' activation-token
-   matches (accumulator inputs included)."
-  [memory rulebase]
-  (->> (for [rule-node (:production-nodes rulebase)
-             {:keys [matches] :as token} (keys (mem/get-insertions-all memory rule-node))
-             [fact node-id] matches
-             :let [node (get (:id-to-node rulebase) node-id)
-                   accum (when (:accum-condition node)
-                           (eng/token->matching-elements node memory token))]
-             fact (if (and (some? accum) (coll? accum)) accum [fact])
-             :when (fact-visible? fact)]
-         (platform/fact-id-wrap fact))
-       (into #{})))
+  (into #{}
+        (comp (mapcat vals)
+              (mapcat identity)
+              (map :fact)
+              (filter fact-visible?)
+              (map platform/fact-id-wrap))
+        (vals (:alpha-memory memory))))
 
 (defn- ->insertion-record-facts
   "Wrapped user-visible facts named by a logical insertion record."
@@ -214,16 +230,24 @@
          (platform/fact-id-wrap fact))
        (into #{})))
 
-(defn- ->element-memory-facts
-  "Wrapped facts held by a join/negation node's element memory — the facts with
-   definite presence in working memory."
+(defn- ->wrapped-facts-from-accum-memory
+  "Wrapped user-visible facts held in accumulate-node memory (the accumulator
+   `:from` inputs)."
   [memory rulebase]
   (into #{}
-        (mapcat (fn [[_id node]]
-                  (when (or (join-node? node) (negation-node? node))
-                    (map (comp platform/fact-id-wrap :fact)
-                         (get-node-elements memory node)))))
-        (:id-to-node rulebase)))
+        (for [node (vals (:id-to-node rulebase))
+              :when (accumulate-node? node)
+              fact-group (->accumulated-facts memory node)
+              fact fact-group
+              :when (fact-visible? fact)]
+          (platform/fact-id-wrap fact))))
+
+(defn- ->beta-memory-facts
+  "Wrapped user-visible facts with definite presence in beta-node memory:
+   join/negation element memory plus accumulate-node memory."
+  [memory rulebase]
+  (set/union (->wrapped-facts-from-alpha-memory memory)
+             (->wrapped-facts-from-accum-memory memory rulebase)))
 
 (defn- alpha-accepts-fact?
   "True when at least one alpha node's activation accepts `fact`."
@@ -238,25 +262,25 @@
 
 (defn- ->fact-retained-pred
   "Returns `(fn [fact] bool)` — whether `fact` is still in working memory.
-   A fact is retained when held by a join/negation node's element memory, or
-   accepted by no alpha node (presence undecidable, so kept).  False only when
-   absent from element memory yet some alpha node would accept it — i.e. it was
-   retracted."
+   A fact is retained when held by beta-node memory (join/negation element
+   memory or accumulate-node memory), or accepted by no alpha node (presence
+   undecidable, so kept).  False only when absent from beta-node memory yet some
+   alpha node would accept it — i.e. it was retracted."
   [get-alphas-fn memory rulebase]
-  (let [present-facts (->element-memory-facts memory rulebase)]
+  (let [present-facts (->beta-memory-facts memory rulebase)]
     (fn [fact]
       (or (contains? present-facts (platform/fact-id-wrap fact))
           (not (alpha-accepts-fact? get-alphas-fn fact))))))
 
 (defn- ->wrapped-all-facts
   "Accurate set of wrapped user-visible facts in working memory: the union of
-   alpha memory, token matches, and logical insertion records, minus
-   insertion-record facts that have since been retracted."
+   beta-node memory (join/negation element memory and accumulate-node memory)
+   and logical insertion records, minus insertion-record facts that have since
+   been retracted."
   [memory rulebase get-alphas-fn]
   (let [insertion-facts (->insertion-record-facts memory rulebase)
         fact-retained? (->fact-retained-pred get-alphas-fn memory rulebase)
-        union (set/union (->wrapped-facts-from-alphas memory)
-                         (->wrapped-facts-from-matches memory rulebase)
+        union (set/union (->beta-memory-facts memory rulebase)
                          insertion-facts)]
     (into #{}
           (remove (fn [wrapped]
@@ -319,17 +343,19 @@
 
 (s/defn ->insertion-support-pairs :- [FactProduction]
   "`FactProduction` entries for facts in a rule activation whose recorded
-   logical insertions still contain at least one retained fact."
+   logical insertions still contain at least one retained fact.  Accumulator
+   conditions contribute their `:from` inputs, matching `->result-support-pairs`."
   [session]
   (let [{:keys [get-alphas-fn memory rulebase]} (eng/components session)
-        fact-retained? (->fact-retained-pred get-alphas-fn memory rulebase)]
+        fact-retained? (->fact-retained-pred get-alphas-fn memory rulebase)
+        id-to-node (:id-to-node rulebase)]
     (vec
      (for [rule-node (:production-nodes rulebase)
            :let [rule (:production rule-node)]
            token (keys (mem/get-insertions-all memory rule-node))
            :let [insertions (mapcat identity (mem/get-insertions memory rule-node token))]
            :when (some fact-retained? insertions)
-           [fact _node-id] (:matches token)
+           fact (token->match-facts memory id-to-node token)
            :when (fact-visible? fact)]
        {:fact (platform/fact-id-wrap fact)
         :production rule
@@ -352,7 +378,7 @@
 ;; --- Beta-node relation classification -------------------------------------
 
 (s/defn ->node-relation-pairs :- NodeRelations
-  "Classifies each fact in a beta node's element memory by how it participates
+  "Classifies each fact in a beta node's memory by how it participates
    (see `NodeRelations`)."
   [session]
   (let [{:keys [memory rulebase]} (eng/components session)]
@@ -386,6 +412,19 @@
                                        :type type}))))
                    acc
                    (get-node-elements memory node)))
+
+         (accumulate-node? node)
+         (let [productions (->descendant-terminal-productions node)]
+           (reduce (fn [acc fact]
+                     (update acc :matches-condition-of
+                             into (for [{:keys [production type]} productions]
+                                    {:fact (platform/fact-id-wrap fact)
+                                     :production production
+                                     :type type})))
+                   acc
+                   (for [fact-group (->accumulated-facts memory node)
+                         fact fact-group]
+                     fact)))
 
          :else acc))
      {:matches-condition-of []

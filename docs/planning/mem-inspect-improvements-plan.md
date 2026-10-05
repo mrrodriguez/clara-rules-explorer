@@ -144,9 +144,9 @@ its instances by production, exactly as `used-by` is grouped today.
 | Key | A fact is in it when | Productions | Read from |
 |---|---|---|---|
 | `:supports-insertions-of` | it is in an activation whose recorded logical insertions include one still in working memory | rules | production node insertion records (§4.2 adds the "still in working memory" part) |
-| `:in-results-of` | it is in a current result | queries | query node tokens |
-| `:matches-condition-of` | it passes a positive condition's own constraints, the ones that need no other condition's bindings | rules, queries | join node element memory |
-| `:blocks` | it matches a negated condition **and** blocks a partial match waiting at that node | rules, queries | negation node elements and tokens |
+| `:supports-results-of` | it is in a current result (accumulator `:from` inputs included) | queries | query node tokens |
+| `:matches-condition-of` | it passes a positive condition's own constraints, the ones that need no other condition's bindings | rules, queries | join node element memory and accumulate-node memory |
+| `:blocks-condition-of` | it matches a negated condition **and** blocks a partial match waiting at that node | rules, queries | negation node elements and tokens |
 | `:blocking-candidate-of` | it matches a negated condition, but blocks no partial match there now | rules, queries | negation node elements and tokens |
 
 **Why two keys replace `used-by`.** For a rule the relation is "supports its insertions". For a
@@ -162,7 +162,7 @@ insertion for it. So:
   fact that is gone. §4.2 stops counting such a record, which is what makes the name
   `:supports-insertions-of` true.
 
-**`:blocks` versus `:blocking-candidate-of`.** Both can be computed exactly from memory a restored
+**`:blocks-condition-of` versus `:blocking-candidate-of`.** Both can be computed exactly from memory a restored
 session already has. Clara keeps a negation node's waiting tokens even while they are blocked,
 and keys tokens and elements by the same join bindings:
 
@@ -177,16 +177,16 @@ A candidate is a fact that **would** block a partial match that matches it, if o
 
 ### 3.1 The fixture under the proposal
 
-Observed with a prototype of §4.3 on the scenario in §2. The `:supports-insertions-of` column for
+Observed with §4.3 on the scenario in §2. The `:supports-insertions-of` column for
 app-1 applies §4.2: `ReviewTask` app-1 is absent from alpha memory.
 
 | Fact | `used-by` today | Proposed |
 |---|---|---|
 | `Application` app-1 | `[open-review-task]` | `:supports-insertions-of []`; `:matches-condition-of` all seven productions |
-| `Application` app-2 | `[documents-complete offers-within-limit open-review-task]` | `:supports-insertions-of` the same three; `:in-results-of []` (the hold blocks the query); `:matches-condition-of` all seven |
-| `ManualHold` | `[]` | `:blocks [ready-for-review applications-without-hold]` |
-| `MissingDocument` app-1 | `[]` | `:blocks [documents-complete]` |
-| `LoanOffer` app-1, apr 9 | `[]` | `:blocks [offers-within-limit]` |
+| `Application` app-2 | `[documents-complete offers-within-limit open-review-task]` | `:supports-insertions-of` the same three; `:supports-results-of []` (the hold blocks the query); `:matches-condition-of` all seven |
+| `ManualHold` | `[]` | `:blocks-condition-of [ready-for-review applications-without-hold]` |
+| `MissingDocument` app-1 | `[]` | `:blocks-condition-of [documents-complete]` |
+| `LoanOffer` app-1, apr 9 | `[]` | `:blocks-condition-of [offers-within-limit]` |
 | `LoanOffer` app-2, apr 5 | `[]` | `:blocking-candidate-of [offers-within-limit]` |
 | `DocumentCheck` app-1, `:failed` | `[]` | `:matches-condition-of [document-check-passed]` |
 | `ReviewClosed` app-1 | `[]` | `:matches-condition-of [close-review-task]` |
@@ -197,17 +197,17 @@ app-1 applies §4.2: `ReviewTask` app-1 is absent from alpha memory.
 
 ### 4.1 Split and rename `used-by`
 
-- Replace the fact's `:used-by` with `:supports-insertions-of` (rule refs) and `:in-results-of`
-  (query refs). Do the same for the fact-type grouping.
-- Keep `:used-by` for one release as a deprecated alias: the union of the two, unchanged in
-  content. Mark it deprecated in the schema and in `docs/explorer-graph-api.md`.
+- Replace the fact's `:used-by` with `:supports-insertions-of` (rule refs) and
+  `:supports-results-of` (query refs). Do the same for the fact-type grouping.
+- Remove `:used-by` entirely (no deprecated alias); the two new keys supersede it.
 - Update the UI types and pages to the new keys.
 - Leave the rulebase fact type's `used-by-rules` and `used-by-queries` alone. They mean what they
   say.
 
 ### 4.2 Drop stale insertion records
 
-A fact in an insertion record **is present** if it is in some alpha memory. **It was retracted** if
+A fact in an insertion record **is present** if it is held by beta-node memory — join/negation
+element memory or accumulate-node memory (accumulator `:from` inputs). **It was retracted** if
 some alpha node would accept it but none holds it; re-run that node's `activation` on the fact to
 tell. If no alpha node accepts it, presence cannot be decided. Keep it, and say so in the docs.
 
@@ -223,28 +223,32 @@ Walk `:id-to-node`. A node's productions are the production and query nodes reac
   `:matches-condition-of`.
 - **Negation nodes** (`NegationNode`, `NegationWithJoinFilterNode`): group the tokens and the
   elements by join bindings, the node's `:binding-keys` taken from each `:bindings`. Then apply
-  the table in §3 → `:blocks`, or else `:blocking-candidate-of`.
-- **Accumulate nodes** (which include `:exists`): follow-up. Read the accumulated facts from
-  accumulate memory into `:matches-condition-of`, once the read is checked against both
-  accumulate node types.
+  the table in §3 → `:blocks-condition-of`, or else `:blocking-candidate-of`.
+- **Accumulate nodes** (`AccumulateNode`, `AccumulateWithJoinFilterNode`, which include
+  `:exists`): read the accumulated facts from accumulate memory into
+  `:matches-condition-of`; the join-filter variant still contributes every candidate fact
+  (condition-local, not token-filtered).
 
 Don't build this on `inspect`'s `:condition-matches`. It keys by condition, so equal conditions in
 different productions merge, and the node, and with it the production, is lost. It also never
-looks at tokens, so it cannot tell `:blocks` from a candidate.
+looks at tokens, so it cannot tell `:blocks-condition-of` from a candidate.
 
 ### 4.4 API and docs
 
 New `ProductionDep` lists on the session fact and the fact-type role groups. In
 `docs/explorer-graph-api.md`, one definition per key, worded as in §3, plus §6's limits.
 
-## 5. Tests (`memory_test.clj`, fixture in §2)
+## 5. Tests (`inspect_test.clj`, `memory_test.clj`, fixtures in §2 and the accumulator fixture)
 
 - Each row of §3.1 is one assertion on the relation it names.
-- `:blocks` and `:blocking-candidate-of` are disjoint for each fact and production.
-- The `:used-by` alias equals the union of `:supports-insertions-of` and `:in-results-of`.
+- `:blocks-condition-of` and `:blocking-candidate-of` are disjoint for each fact and production.
 - `ReviewTask` app-1 is absent from `:facts`; `ReviewTask` app-2 is present.
-- A session with no negated, failed or retracted facts has `:supports-insertions-of` and
-  `:in-results-of` equal to today's `:used-by`, split by production type.
+- A session with no negated, failed or retracted facts has `:supports-insertions-of` equal to the
+  rules that fired (rule-only) and `:supports-results-of` equal to the query that matched
+  (query-only).
+- An inserted accumulator-input fact read only by an accumulator `:from` condition is retained in
+  `:facts`, appears in `:matches-condition-of` for both accumulate node types, and supports the
+  rules that accumulated it.
 
 ## 6. Limits, documented rather than fixed
 
@@ -258,9 +262,11 @@ New `ProductionDep` lists on the session fact and the fact-type role groups. In
 - **`:test` conditions hold no facts.** `:matches-condition-of` shows `DocumentCheck` reached
   `document-check-passed`, but not that the test was what stopped it.
 - **`:matches-condition-of` is condition-local.** It says the fact passes that condition's own
-  constraints, not that it joined the facts before it.
+  constraints, not that it joined the facts before it.  For an accumulator `:from`, a fact is
+  condition-local by passing the `:from` type and alpha constraints; a join-filter accumulator
+  still lists candidate facts that the token filter would reject.
 
 ## 7. Order
 
-§4.3 is additive and can land first. §4.1 is the breaking rename, softened by the alias. §4.2 is
-independent of both. The fixture and the §5 tests land with whichever change they cover.
+§4.3 is additive and can land first. §4.1 is the breaking rename (no deprecated alias). §4.2 is
+independent of both. The fixtures and the §5 tests land with whichever change they cover.

@@ -4,13 +4,17 @@
   (:require [clara.rules :as r]
             [clara.rules.platform :as platform]
             [clara.explorer.memory.inspect :as inspect]
+            [clara.explorer.test.rules.accumulator-relations-test-rules :as accr]
             [clara.explorer.test.rules.loan-app-facts :as laf]
             [clara.explorer.test.rules.loan-doc-rules]
             [clara.explorer.test.rules.memory-relations-test-rules :as mrr]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [schema.test :as st])
-  (:import [clara.explorer.test.rules.memory_relations_test_rules
+  (:import [clara.explorer.test.rules.accumulator_relations_test_rules
+            Start
+            AccumSource]
+           [clara.explorer.test.rules.memory_relations_test_rules
             Application
             ManualHold
             LoanOffer
@@ -45,6 +49,14 @@
   (-> (r/mk-session 'clara.explorer.test.rules.memory-relations-test-rules)
       (r/insert (mrr/->Application "app-1" 7)
                 (mrr/->Application "app-2" 7))
+      (r/fire-rules)))
+
+(defn- ->accumulator-session
+  "The accumulator-relations fixture session: one Start that seeds an inserted
+   accumulator-input fact read only by accumulator `:from` conditions."
+  []
+  (-> (r/mk-session 'clara.explorer.test.rules.accumulator-relations-test-rules)
+      (r/insert (accr/->Start :g1 0))
       (r/fire-rules)))
 
 (defn- short-name
@@ -166,6 +178,30 @@
                   set))))
     (testing "every entry is a query"
       (is (every? #(= "query" (:type %)) entries)))))
+
+(deftest test-accumulator-relations
+  (let [session (->accumulator-session)
+        facts (inspect/get-all-facts session)
+        relations (inspect/->node-relation-pairs session)
+        accum-source? #(instance? AccumSource %)
+        start? #(instance? Start %)]
+    (testing "an inserted accumulator-input fact is retained in working memory"
+      (is (some #(and (instance? AccumSource %) (= :g1 (:group %))) facts)))
+    (testing "accumulator :from inputs are matches-condition-of for both node types"
+      (is (= #{"accumulate-sources" "accumulate-over-threshold"}
+             (fact-entry-names relations :matches-condition-of accum-source?))))
+    (testing "the accumulator rule's first condition is also matched"
+      (is (= #{"insert-accum-source" "accumulate-sources" "accumulate-over-threshold"}
+             (fact-entry-names relations :matches-condition-of start?))))))
+
+(deftest test-insertion-support-pairs-include-accumulator-inputs
+  (let [entries (inspect/->insertion-support-pairs (->accumulator-session))]
+    (testing "accumulator :from inputs support the rules that accumulated them"
+      (is (= #{"accumulate-sources" "accumulate-over-threshold"}
+             (->> entries
+                  (filter #(instance? AccumSource (entry->fact %)))
+                  (map (comp short-name :production))
+                  set))))))
 
 ;; --- node relations --------------------------------------------------------
 

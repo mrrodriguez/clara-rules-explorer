@@ -99,7 +99,8 @@
                   {})))
 
 (defn- ->supports-results-of-index
-  "`{fact-id [ProductionDep]}` — queries whose current results the fact supports."
+  "`{fact-id [clara.explorer.server.api/ProductionDep]}` — queries whose current
+   results the fact supports."
   [query-matches get-fact-id production-order-key-fn]
   (->fact-id-dep-pairs->index
    (for [{:keys [fact production type]} (mem-inspect/->result-support-pairs query-matches)
@@ -109,8 +110,9 @@
    production-order-key-fn))
 
 (defn- ->supports-insertions-of-index
-  "`{fact-id [ProductionDep]}` — rules whose activation includes the fact and
-   whose recorded logical insertions still contain at least one retained fact."
+  "`{fact-id [clara.explorer.server.api/ProductionDep]}` — rules whose activation
+   includes the fact and whose recorded logical insertions still contain at
+   least one retained fact."
   [session get-fact-id production-order-key-fn]
   (->fact-id-dep-pairs->index
    (for [{:keys [fact production type]} (mem-inspect/->insertion-support-pairs session)
