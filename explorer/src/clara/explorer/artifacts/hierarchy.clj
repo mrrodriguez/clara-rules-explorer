@@ -10,11 +10,11 @@
   `:inserted-by-rules` / `:retracted-by-rules` close over ancestors.
 
    `union-ancestors` / `closed-ancestors` / `hierarchy-order` repair the cross-unit ancestor sets
-  `clara.explorer.artifacts.compose` and
-  `clara.explorer.artifacts.federate` share: `:ancestors` is a transitive closure computed
+  `clara.explorer.artifacts.compose` shares: `:ancestors` is a transitive closure computed
   on the classpath each analysis had, so two units can hold different ancestor sets for one type
-  name and both are locally correct. The repair is the same in both: union every unit's edge set,
-  re-close transitively, order deepest-first, and record disagreements rather than pick a winner.")
+  name and both are locally correct. The repair is the same throughout: union every unit's edge
+  set, re-close transitively, order deepest-first, and record disagreements rather than pick a
+  winner.")
 
 (defn ->descendants
   "Transpose of a closed ancestor map `{type-name #{ancestor-name …}}` into

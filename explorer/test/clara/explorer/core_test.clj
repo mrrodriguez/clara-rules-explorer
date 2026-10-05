@@ -785,7 +785,8 @@
                         (swap! calls inc)
                         (try (clojure.core/ancestors t) (catch Throwable _ nil)))
           session (->hierarchy-session {:ancestors-fn counting-fn})
-          analysis (core/->rulebase-analysis session (hierarchy-annotations session))
+          analysis (core/->rulebase-analysis session (hierarchy-annotations session)
+                                             {:declared-tags-fn (constantly [])})
           fact-types (:fact-types analysis)
           expected (count (into #{}
                                 (concat (keys fact-types)
@@ -793,6 +794,32 @@
                                                 (vals fact-types)))))]
       (is (= expected @calls)
           "once per distinct raw type in consumed∪produced ∪ their ancestors"))))
+
+(deftest test-declared-tags-registered-and-not-known
+  (testing "a declared tag is registered even when no production mentions it, and is not in the known set"
+    (let [tam {'a-rule {:consumed-types [:used/type] :produced-types [] :retract-types #{} :ns-name 'a.ns}}
+          ancestors-fn (fn [t] (if (= t :declared/child) #{:declared/parent} #{}))
+          idx (ft/->ancestors-index tam ancestors-fn [{:name 'a-rule}] [:declared/child])]
+      (is (contains? idx ":declared/child")
+          "declared tag registered even though no production uses it")
+      (is (= [":declared/parent"] (get-in idx [":declared/child" :ancestors]))
+          "declared tag's own ancestors are recorded")
+      (is (not (contains? (ft/get-known-type-names tam) ":declared/child"))
+          "declared-only tags are not in the known set"))))
+
+(deftest test-declared-tags-fn-override
+  (testing "the :declared-tags-fn override replaces the global-hierarchy default"
+    (let [custom (fn [t]
+                   (if (= t :clara.explorer.core-test/override-descendant)
+                     #{:clara.explorer.test.rules.loan-hierarchy-rules/supporting-document
+                       :clara.explorer.test.rules.loan-hierarchy-rules/loan-document
+                       :clara.explorer.test.rules.loan-hierarchy-rules/base-document}
+                     (try (clojure.core/ancestors t) (catch Throwable _ nil))))
+          session (->hierarchy-session {:ancestors-fn custom})
+          analysis (core/->rulebase-analysis session (hierarchy-annotations session)
+                                             {:declared-tags-fn (constantly [:clara.explorer.core-test/override-descendant])})]
+      (is (some? (fact-type-by-name analysis ":clara.explorer.core-test/override-descendant"))
+          "the override's declared tag is registered and reached as a descendant of a consumed type"))))
 
 (deftest test-ancestors-mixed-kind
   (testing "Custom ancestors-fn with mixed kinds serializes kind-explicitly and orders on strings"
@@ -817,7 +844,8 @@
                'prod-b {:consumed-types ['join] :produced-types [] :retract-types #{} :ns-name 'clara.explorer.test.rules.loan-app-rules})
           idx (ft/->ancestors-index tam
                                     (fn [_] #{})
-                                    [{:name 'prod-a} {:name 'prod-b}])]
+                                    [{:name 'prod-a} {:name 'prod-b}]
+                                    [])]
       (is (= {"clojure.string/join" {:ancestors [] :ns nil}}
              idx)
           "The first (load-order) production's serialization is canonical; the divergent symbol[...] one is dropped")

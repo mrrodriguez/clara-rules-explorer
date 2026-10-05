@@ -12,13 +12,13 @@
   - `->text`: the compact rendering of a `diff` value
   - `rule-detail` / `rule-detail-text`: one changed production's before/after
 
-  A diff of a unit against itself is empty in every key, as with
-  `clara.explorer.artifacts.federate/diff`. What the diff does not answer:
-  renames (one removed + one added), meaning (an `:rhs` tag says the text
-  changed, not what it does at runtime), and per-build name stamps (names
-  compare verbatim)."
+  A diff of a unit against itself is empty in every key. What the diff does
+  not answer: renames (one removed + one added), meaning (an `:rhs` tag says
+  the text changed, not what it does at runtime), and per-build name stamps
+  (names compare verbatim)."
   (:require
    [clara.explorer.artifacts.layout :as layout]
+   [clara.explorer.artifacts.cross-unit :as cross-unit]
    [clojure.edn :as edn]
    [clojure.set :as set]
    [clojure.string :as str]))
@@ -71,28 +71,37 @@
                     [dim (get-in entry [det-key :resolution])]))))
         layout/detection-keys-by-dimension))
 
+(defn- ->production-entry
+  "One production's compared fields from the already-read parts. `name` is an
+  exact key of `:rules`/`:queries` merged; `conditions`, `details`, and `anns`
+  may be nil when the caller did not read them, which reads as nil (or `{}`
+  for `:resolution`, which `resolution-of` builds from an absent annotations
+  map)."
+  [index conditions details anns name]
+  (let [rules (:rules index)
+        queries (:queries index)
+        entry (get (merge queries rules) name)]
+    {:kind (if (contains? queries name) :query :rule)
+     :ns (:ns entry)
+     :lhs-types (vec (:lhs-types entry))
+     :insert-types (vec (:insert-types entry))
+     :retract-types (vec (:retract-types entry))
+     :lhs (get-in conditions [name :lhs])
+     :rhs-form (get-in details [name :rhs-form])
+     :doc (get-in details [name :doc])
+     :props (get-in details [name :props])
+     :resolution (resolution-of anns name)
+     :unit (:unit entry)}))
+
 (defn- productions-of
   "Every production (rules and queries) as one flat map of the compared
   fields, keyed by name. Queries carry no `:insert-types`/`:retract-types` on
   disk, which read as `[]`; composed productions carry `:unit`."
   [index conditions details anns]
-  (let [rules (:rules index)
-        queries (:queries index)]
-    (into (sorted-map)
-          (map (fn [[name entry]]
-                 [name
-                  {:kind (if (contains? queries name) :query :rule)
-                   :ns (:ns entry)
-                   :lhs-types (vec (:lhs-types entry))
-                   :insert-types (vec (:insert-types entry))
-                   :retract-types (vec (:retract-types entry))
-                   :lhs (get-in conditions [name :lhs])
-                   :rhs-form (get-in details [name :rhs-form])
-                   :doc (get-in details [name :doc])
-                   :props (get-in details [name :props])
-                   :resolution (resolution-of anns name)
-                   :unit (:unit entry)}]))
-          (merge queries rules))))
+  (into (sorted-map)
+        (map (fn [[name _entry]]
+               [name (->production-entry index conditions details anns name)]))
+        (merge (:queries index) (:rules index))))
 
 (defn- edges-of
   "The dep-graph as `#{[upstream downstream]}` pairs. Only `:upstream` is on
@@ -112,7 +121,7 @@
   "Every production's compared fields from unit dir `dir`: the production
   files (index, conditions, details, merged annotations) without the
   dep-graph, fact-types, manifest, or shape. For `rule-detail`, which needs
-  no full `diff` — the report's `--rule` path reads only this."
+  no full `diff` — the report's `--production` path reads only this."
   [dir]
   (let [dir (str dir)
         analysis-dir (str dir "/" (:rulebase-analysis layout/artifact-files))
@@ -124,6 +133,38 @@
                (read-layer-stack dir)))]
     (productions-of index (read-part analysis-dir :conditions)
                     (read-part analysis-dir :details) anns)))
+
+(defn read-production
+  "One production's compared fields from unit dir `dir`, by resolved `name`
+  (an exact key of `:rules`/`:queries` merged). `parts` names the fields the
+  caller needs — a set of `productions-of` keys, or `:all` for the whole
+  record. Only the parts those fields live in are read:
+  `production-conditions.edn` for `:lhs`, `production-details.edn` for
+  `:rhs-form`/`:doc`/`:props`, and the merged annotations for `:resolution`;
+  `production-index.edn` is always read, for the index fields. A `--part lhs`
+  read therefore never opens `production-details.edn` or the annotations."
+  [dir name parts]
+  (let [dir (str dir)
+        analysis-dir (str dir "/" (:rulebase-analysis layout/artifact-files))
+        index (read-part analysis-dir :index)
+        all (merge (:queries index) (:rules index))
+        name (if (contains? all name)
+               name
+               (throw (ex-info (format "No production matches %s" (pr-str name))
+                               {:name name})))
+        all-fields? (= parts :all)
+        need? (fn [k] (or all-fields? (contains? parts k)))
+        conditions (when (need? :lhs) (read-part analysis-dir :conditions))
+        details (when (some need? [:rhs-form :doc :props])
+                  (read-part analysis-dir :details))
+        anns (when (need? :resolution)
+               (:annotations
+                (layout/expand-merged-annotations
+                 (read-edn-or-throw (str dir "/" (:merged layout/artifact-files))
+                                    "merged annotations")
+                 (read-layer-stack dir))))
+        entry (->production-entry index conditions details anns name)]
+    (if all-fields? entry (select-keys entry parts))))
 
 (defn read-unit
   "The values `diff` compares, read from unit dir `dir`: the manifest (for
@@ -210,7 +251,7 @@
    `key` is the field in a production value; `set?` compares
    order-insensitively — the type lists (`:lhs-types`, `:insert-types`,
    `:retract-types`) are sets to the diff. `:rhs` is the tag for the
-   `:rhs-form` field. One spec, so the tag set and the `--rule` detail cannot
+   `:rhs-form` field. One spec, so the tag set and the `--production` detail cannot
    disagree on what counts as a change."
   [[:kind :kind false]
    [:lhs-types :lhs-types true]
@@ -414,17 +455,51 @@
      :productions productions
      :edges edges}))
 
+(defn- ->entry-points-of
+  "One side's entry-point types as a flat set, from its productions and fact
+  types — the same definition `clara.explorer.artifacts.cross-unit` computes."
+  [productions fact-types]
+  (cross-unit/all-entry-points
+   {:rules (into {} (filter (fn [[_ p]] (= :rule (:kind p)))) productions)
+    :queries (into {} (filter (fn [[_ p]] (= :query (:kind p)))) productions)}
+   fact-types))
+
+(defn- consumers-in-scope-only?
+  "Whether every production consuming `ft` on this side lives in a scope-only
+  namespace — a coordinate difference, not a real entry-point change."
+  [productions scope-nses ft]
+  (let [nses (keep (fn [[_ p]] (when (some #{ft} (:lhs-types p)) (:ns p))) productions)]
+    (and (seq nses)
+         (every? #(contains? scope-nses (str %)) nses))))
+
+(defn- diff-entry-points
+  "`{:added […] :resolved […] :scope […]}` — types that are entry points only
+  after, or only before. A type whose consumers all live in scope-only
+  namespaces is reported under `:scope` rather than as a real change."
+  [before after scope-nses]
+  (let [b-eps (->entry-points-of (:productions before) (:fact-types before))
+        a-eps (->entry-points-of (:productions after) (:fact-types after))
+        added (set/difference a-eps b-eps)
+        resolved (set/difference b-eps a-eps)
+        scope (set (concat
+                    (filter #(consumers-in-scope-only? (:productions after) scope-nses %) added)
+                    (filter #(consumers-in-scope-only? (:productions before) scope-nses %) resolved)))]
+    {:added (sort (set/difference added scope))
+     :resolved (sort (set/difference resolved scope))
+     :scope (sort scope)}))
+
 (defn diff
-  "Diff two `read-unit` values — `before`, then `after`, matching
-   `clara.explorer.artifacts.federate/diff`. A pure function of the two
-   values. Reports:
+  "Diff two `read-unit` values — `before`, then `after`. A pure function of the
+   two values. Reports:
 
     :before / :after  each side's provenance (sha, branch, working tree,
                       `:variant`, scope fields)
     :scope            namespaces claimed on only one side, with their
-                      productions, edges, and fact types
+                      productions, edges, fact types, and entry points
     :productions      `:added`, `:removed`, and `:changed {name #{tag}}`
     :fact-types       added, removed, and `:ancestors` changes
+    :entry-points     types that are entry points only after (`:added`) or
+                      only before (`:resolved`)
     :units            when both sides are compositions, the source units
                       each was built from, matched by `:repo`; else nil
     :edges            dep-graph pairs `:gained` and `:lost`
@@ -439,12 +514,16 @@
         scope (diff-scope before after namespaces)
         scope-prods (set (:productions scope))
         productions (diff-productions before after scope-nses)
-        fact-types (diff-fact-types before after scope-prods)]
+        fact-types (diff-fact-types before after scope-prods)
+        entry-points (diff-entry-points before after scope-nses)]
     {:before (provenance-of (:manifest before))
      :after (provenance-of (:manifest after))
-     :scope (assoc scope :fact-types (:scope fact-types))
+     :scope (assoc scope
+                   :fact-types (:scope fact-types)
+                   :entry-points (:scope entry-points))
      :productions productions
      :fact-types (select-keys fact-types [:added :removed :changed])
+     :entry-points (select-keys entry-points [:added :resolved])
      :units (diff-units before after)
      :edges (diff-edges before after scope-prods)}))
 
@@ -477,7 +556,7 @@
 
 (defn- empty-diff?
   "Whether `d` reports no change in any key."
-  [{:keys [productions fact-types edges scope units]}]
+  [{:keys [productions fact-types edges scope units entry-points]}]
   (every? empty?
           [(:added productions)
            (:removed productions)
@@ -485,6 +564,9 @@
            (:added fact-types)
            (:removed fact-types)
            (:changed fact-types)
+           (:added entry-points)
+           (:resolved entry-points)
+           (get-in scope [:entry-points])
            (:gained edges)
            (:lost edges)
            (get-in scope [:namespaces :only-before])
@@ -508,7 +590,7 @@
    `changed` lines carrying their tags. Two compositions add a `units:` count
    line and a `changed units:` section. A diff with no changes prints the
    provenance lines and `no differences`."
-  [{:keys [before after productions fact-types edges scope units] :as d}]
+  [{:keys [before after productions fact-types edges scope units entry-points] :as d}]
   (let [count-lines (cond-> [(format "productions: %d added, %d removed, %d changed"
                                      (count (:added productions))
                                      (count (:removed productions))
@@ -517,15 +599,19 @@
                                      (count (:added fact-types))
                                      (count (:removed fact-types))
                                      (count (:changed fact-types)))
+                             (format "entry-points: %d added, %d resolved"
+                                     (count (:added entry-points))
+                                     (count (:resolved entry-points)))
                              (format "edges: %d gained, %d lost"
                                      (count (:gained edges))
                                      (count (:lost edges)))
-                             (format "scope: %d namespaces, %d productions, %d edges, %d fact-types"
+                             (format "scope: %d namespaces, %d productions, %d edges, %d fact-types, %d entry-points"
                                      (+ (count (get-in scope [:namespaces :only-before]))
                                         (count (get-in scope [:namespaces :only-after])))
                                      (count (:productions scope))
                                      (count (:edges scope))
-                                     (count (:fact-types scope)))]
+                                     (count (:fact-types scope))
+                                     (count (get-in scope [:entry-points])))]
                       units
                       (conj (format "units: %d added, %d removed, %d changed"
                                     (count (:added units))
@@ -545,6 +631,10 @@
                   ["changed fact-types:" (:changed fact-types)
                    (fn [[n {:keys [added removed]}]]
                      (format "  ~ %s (+%d -%d ancestors)" n (count added) (count removed)))]
+                  ["added entry-points:" (:added entry-points)
+                   (fn [n] (str "  + " n))]
+                  ["resolved entry-points:" (:resolved entry-points)
+                   (fn [n] (str "  - " n))]
                   ["gained edges:" (:gained edges)
                    (fn [[up down]] (format "  + %s -> %s" up down))]
                   ["lost edges:" (:lost edges)
@@ -558,6 +648,8 @@
                   ["scope edges:" (:edges scope)
                    (fn [[up down]] (format "  %s -> %s" up down))]
                   ["scope fact-types:" (:fact-types scope)
+                   (fn [n] (str "  " n))]
+                  ["scope entry-points:" (get-in scope [:entry-points])
                    (fn [n] (str "  " n))]
                   ["changed units:" (:changed units)
                    (fn [[repo {:keys [before after]}]]
@@ -598,7 +690,7 @@
    `{:productions …}` maps holding `read-productions` output:
    `{:name … :tags […] :before {…} :after {…}}`, either side nil when the
    production exists only on the other. Substring matching, as the report's
-   `rule` subcommand does."
+   `production` subcommand does."
   [before after name*]
   (let [productions (into (sorted-map)
                           (merge (:productions before) (:productions after)))

@@ -4,7 +4,7 @@ The registry is the plural side of persistence. Where
 [`persisted-artifacts.md`](persisted-artifacts.md) documents **one** artifact
 set — a *unit* — and its files, this doc is the architecture of combining
 **many** units: how a caller-named selection becomes one queryable value, and
-why the library offers three merge modes rather than one.
+why the library offers two merge modes rather than one.
 
 Read `persisted-artifacts.md` first if you do not already know what a unit, a
 layer, a slim analysis, or the manifest are; this doc assumes that vocabulary.
@@ -17,8 +17,7 @@ this set of sets look like as one rulebase*.
 Every unit is addressed by `:repo` and optionally `:variant`; the **join key
 between units is the fact type name**. Two units using one name for two
 different things produce a wrong join, and nothing here can detect that. It is
-the assumption the whole registry states and does not verify — the hierarchy
-`:conflicts` and per-type `:declared-in` are what a host reads to check it.
+the assumption the whole registry states and does not verify.
 
 Everything the registry answers is a projection over three relations derivable
 from any production set, closed through the fact-type hierarchy:
@@ -29,26 +28,25 @@ from any production set, closed through the fact-type hierarchy:
 | **consumes** | a rule's `:lhs-types` | descendants — matching `T` is reached by every descendant of `T` |
 | **retracts** | a rule's `:retract-types` | coupling only — a retract changes the fact set but does not supply it |
 
-The composed dep-graph, the federated fact-type index, unit edges, entry
-points, orphans, `diff`, and `grade` are all joins or set-differences over
-these three relations. Retraction is deliberately not *production*:
-`federate/->index` records it as coupling (`:retracted-by`, unit edges) but
-never as supply (`:producers`, `:entry-points`, `:orphans`).
+The composed dep-graph, unit edges, entry points, and `diff` are all joins or
+set-differences over these three relations. Retraction is deliberately not
+*production*: unit edges record it as coupling but never as supply.
 
 ## The hierarchy is per-unit, and repair is step one
 
 `:ancestors` is a transitive closure computed by the ancestors fn on the
 classpath each unit's analysis had. A `derive` that lives in a component one
 unit did not load is absent from that unit, so two units can hold different
-ancestor sets for one type name and both be locally correct. Measured on a
-10-unit registry: 99 of the 393 fact-type names present in more than one unit
-disagree.
+ancestor sets for one type name and both be locally correct.
 
-Both merge modes repair this the same way, in
-`clara.explorer.artifacts.hierarchy`: union every unit's ancestor edge
-set (`union-ancestors`), re-close transitively (`closed-ancestors`), transpose
-(`->descendants`), order deepest-first (`hierarchy-order`), and record the
-disagreements under `:hierarchy :conflicts` rather than pick a winner.
+Composition repairs this in `clara.explorer.artifacts.hierarchy`: union every
+unit's ancestor edge set (`union-ancestors`), re-close transitively
+(`closed-ancestors`), transpose (`->descendants`), and order deepest-first
+(`hierarchy-order`). It records no conflicts — `derive` is additive, so units
+that saw different subsets of one hierarchy do not disagree, and the union is
+the answer. The union is complete because analysis records every declared
+hierarchy edge (see `fact-types` Part A in `core/->rulebase-analysis`), not
+just the edges a unit's productions happened to touch.
 
 The two closure directions are the one thing that is easy to get wrong, because
 an unclosed inverse is a wrong answer that nothing flags: inverting
@@ -60,7 +58,7 @@ named, in one place:
 - `clara.explorer.artifacts.hierarchy/descendant-closure` — the set a
   *matcher* of `base-types` is reached by.
 
-## Three merge modes, three invariants
+## Two merge modes, two invariants
 
 The modes are not one function with a flag. Each asserts a different
 relationship between the selected units, and collapsing them would lose exactly
@@ -70,20 +68,15 @@ the distinction the registry exists to draw.
 | --- | --- | --- |
 | **fold layers** | `compose/fold-layers` | union semantics; no collision concept. Layer ids are qualified `<repo>[@<variant>]/<layer-id>` so `:provenance` names whose layer claimed what. |
 | **compose** | `compose/->composed-analysis` | the caller asserts the units are components of ONE rulebase. Productions merge by fq name, a name claimed by two units is refused, and the dep-graph is recomputed so cross-unit edges exist. |
-| **federate** | `federate/->index` | the caller asserts the units are NOT claimed to compose. Productions stay per-unit; disagreements are recorded (`:hierarchy :conflicts`), never resolved. |
-
-A host typically uses all three in sequence: fold layers within each unit,
-federate to see which units interact, compose the subset it decides really is
-one rulebase.
 
 `flow/compose-persist!` and the server's `:registry` mode are both the compose
 mode wearing a different face: the first materializes it as a normal
 single-unit directory for the offline babashka report, the second serves it
-rehydrated over HTTP. Neither is a fourth mode.
+rehydrated over HTTP. Neither is a third mode.
 
 ## The pass structure
 
-The two analysis-consuming modes share one preamble, in
+The compose mode's preamble lives in
 `clara.explorer.artifacts.selection/->selection`:
 
 ```
@@ -95,19 +88,14 @@ selection (caller-named, ordered)
   → coverage                          (scoped namespaces + unknown-namespaces)
 ```
 
-`->selection` returns
-`{:analyses :ancestors :descendants :hierarchy-conflicts :coverage}` — one value
-both modes consume. Compose takes `:analyses` + `:ancestors` and merges
-productions; federate takes the whole thing and builds its per-unit relation
-maps.
+`->selection` returns `{:analyses :ancestors :descendants :coverage}`.
+Compose takes `:analyses` + `:ancestors` and merges productions; the same value
+also supplies the composed manifest's `:coverage`, so the units are read once.
 
-The derivation/projection split is what keeps each mode small: `federate`
-builds the three relations once (its internal production-maps pass), then
-`:fact-types`, `:unit-edges`, `:entry-points`, `:orphans`, `diff`, and `grade`
-are projections over them. Compose's dep-graph is the same producer→consumer
-join at production granularity, over the same closed `:ancestors`.
+Compose's dep-graph is the producer→consumer join at production granularity,
+over the same closed `:ancestors`.
 
-## The two output values
+## The output value
 
 - **`compose/->composed-analysis`** returns one slim `RulebaseAnalysis`, each
   production tagged `:unit` naming its source unit — the only key composition
@@ -118,13 +106,8 @@ join at production granularity, over the same closed `:ancestors`.
   that directory comes from `compose/->standard-role-layers`, which flattens
   each unit's layers to the three standard roles.
 
-- **`federate/->index`** returns an index value. It is computed, not persisted:
-  reading the units and building it is ~0.16s for a 10-unit registry, so
-  nothing is written on the path to an answer. `federate/persist!` +
-  `federate/read-index` / `federate/read-digest` exist only for handing a file
-  to a reader; `federate/->digest` reduces the index to what fits in a head.
-  `federate/diff` compares two indexes (the variant-vs-mainline question);
-  `federate/grade` checks the union against a composed reference.
+  Cross-unit questions over that directory are answered by the bb report's
+  `units`, `unit-edges`, and `entry-points` subcommands, and by `diff`.
 
 ## Namespace map
 
@@ -135,7 +118,7 @@ join at production granularity, over the same closed `:ancestors`.
 | `hierarchy` | union / re-close / transpose / order of ancestor maps; the two named closures |
 | `rehydrate` | slim's inverse: rebuild the recomputable reverse directions |
 | `compose` | `fold-layers`, `->standard-role-layers`, `->composed-analysis` (`union-fact-types` lives in `clara.explorer.artifacts.shared.compose`) |
-| `federate` | `->index` + query fns, `diff`, `grade`, `->digest`, `persist!` / `read-*` |
+| `cross-unit` | `entry-points` and `unit-edges` over a composed analysis, shared by the report and `diff` |
 | `flow` | `generate` → `persist!` (single unit) and `compose-persist!` (composed unit) |
 | `slim` / `parts` / `compact` / `digest` / `manifest` | one unit's on-disk shape — see `persisted-artifacts.md` |
 

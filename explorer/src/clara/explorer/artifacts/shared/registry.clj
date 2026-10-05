@@ -23,9 +23,8 @@
   because the compose merge recomputes it over the merged productions.
   `:unresolved` and `:slim` pass through.
 
-  Without a filter the analysis is returned unchanged. Both
-  `clara.explorer.artifacts.federate/->index` and the compose merge
-  apply this when they read a unit for a merge, so a `UnitRef` narrowed to a
+  Without a filter the analysis is returned unchanged. The compose merge
+  applies this when it reads a unit for a merge, so a `UnitRef` narrowed to a
   subset of a unit's namespaces excludes the productions outside that subset."
   [analysis unit]
   (if-let [nses (:namespaces unit)]

@@ -314,10 +314,9 @@
 
 (defn source-units
   "The units of `registry` with no aggregate `:mode` — the source units a
-  federation is usually asking about. Excludes compositions and captured
+  composition is usually built from. Excludes compositions and captured
   whole-rulebase units, which describe the same productions as the units they
-  overlap and would silently double-count them in
-  `clara.explorer.artifacts.federate/->index`."
+  overlap and would silently double-count them in a merge."
   [^Registry registry]
   (into [] (remove #(aggregate-unit? registry %)) (units registry)))
 

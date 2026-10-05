@@ -34,6 +34,7 @@
    [clara.explorer.artifacts.registry :as registry]
    [clara.explorer.artifacts.shared.compose :as shared-compose]
    [clara.explorer.artifacts.shared.registry :as shared-registry]
+   [clara.explorer.artifacts.shared.selection :as shared-selection]
    [clara.explorer.artifacts.store :as store]
    [clojure.walk :as walk]))
 
@@ -119,7 +120,7 @@
    `:namespaces` filter first; the resulting layer then carries the standard
    role `:id` so it can be written as a normal single-unit layer file.
    Unit-level provenance is deliberately left out of the returned layers — it
-   belongs in the manifest / federated sidecar — so the on-disk shape is
+   belongs in the manifest — so the on-disk shape is
    indistinguishable from any other unit's. A narrowed fold records the
    per-unit filter under `:source :namespaces`, so a reader of the persisted
    layer can tell a scoped set from a whole one.
@@ -150,6 +151,24 @@
 ;; composed analysis (delegates to the shared, bb-loadable implementation)
 ;; ===========================================================================
 
+(defn ->selection
+  "The `shared.selection/->selection` value for `registry` + `selection`, with
+  the JVM registry's capabilities. `compose-persist!` computes it once and
+  shares it between the composition and the manifest's `:coverage`, so the
+  units are read once."
+  [registry selection]
+  (shared-selection/->selection
+   {:read-analysis #(registry/read-analysis registry %)
+    :assert-compatible! #(registry/assert-compatible! registry %)}
+   selection))
+
+(defn ->composed-analysis-from-selection
+  "`->composed-analysis` over an already-computed selection value (from
+  `->selection`), so a caller that already holds the selection does not
+  re-read the units."
+  [selection-value selection]
+  (shared-compose/->composed-analysis-from-selection selection-value selection))
+
 (defn ->composed-analysis
   "One slim `RulebaseAnalysis` over the selected units, which the caller asserts
   are components of ONE rulebase — delegates to
@@ -160,7 +179,4 @@
   merged set, and each production gains `:unit`. Rehydrate the result to
   rebuild the inverses over the whole composition."
   [registry selection]
-  (shared-compose/->composed-analysis
-   {:read-analysis #(registry/read-analysis registry %)
-    :assert-compatible! #(registry/assert-compatible! registry %)}
-   selection))
+  (->composed-analysis-from-selection (->selection registry selection) selection))

@@ -261,12 +261,8 @@
 (s/defschema ArtifactKey
   "Which of a run's artifacts. The keys of
   `clara.explorer.artifacts.store/artifact-files`, which holds the
-  filename for each — `artifacts.schema-test` pins the two in step.
-
-  `:registry-index` / `:registry-digest` are registry-level, written beside
-  units rather than inside one — see `layout/unit-artifact-files`."
-  (s/enum :auto :memory :agent :merged :rulebase-analysis :rulebase-analysis-digest :manifest
-          :registry-index :registry-digest))
+  filename for each — `artifacts.schema-test` pins the two in step."
+  (s/enum :auto :memory :agent :merged :rulebase-analysis :rulebase-analysis-digest :manifest))
 
 (s/defschema AnalysisPartKey
   "Which file of the `merged-rulebase-analysis/` directory. The keys of
@@ -700,9 +696,8 @@
 
   `:namespaces`, when present, narrows the unit to the named namespaces for the
   merge — a filter the caller supplies, not a claim about what the unit covers.
-  A namespace the caller names but no selected unit covers is reported by
-  `clara.explorer.artifacts.federate`'s `:coverage
-  :unknown-namespaces`.
+  A namespace the caller names but no selected unit covers is recorded under the
+  composed manifest's `:coverage :unknown-namespaces`.
 
   Addressed by the same pair
   `clara.explorer.artifacts.store/get-out-dir` already resolves."
@@ -712,7 +707,6 @@
 
 (s/defschema ComposePersistOptions
   "Options for `clara.explorer.artifacts.flow/compose-persist!`.
-
   `:root` is the registry root the source `:units` are read from, and — absent an
   explicit `:dir` — the root the composed unit is written under. `:repo` is the
   composed unit's registry-relative identity (the manifest's `:repo`) and its

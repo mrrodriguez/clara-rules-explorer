@@ -3,7 +3,7 @@
 ;; reader: layers, callsites, resolution, curation, provenance. Each subcommand
 ;; reads only the artifact parts it needs.
 ;;
-;;   bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|agent|merged]
+;;   bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged]
 ;;
 ;; The subcommand menu, signatures, and options are enumerated by the
 ;; `subcommands` and `usage-line` vars below, and printed by the `help`
@@ -28,6 +28,7 @@
 
 (require '[clara.explorer.artifacts.layout :as layout]
          '[clara.explorer.artifacts.hierarchy :as hierarchy]
+         '[clara.explorer.artifacts.cross-unit :as cross-unit]
          '[clara.explorer.artifacts.diff :as diff]
          '[clara.explorer.artifacts.status :as status])
 
@@ -41,8 +42,10 @@
 
 (def ^:private artifact-files
   "The `--file` values, mapped to the filenames `layout/artifact-files` gives
-  their roles. Only the three an annotation-reading subcommand may be pointed at."
-  (into {} (map (fn [k] [(name k) (layout/artifact-files k)])) [:auto :agent :merged]))
+  their roles. The annotation layers an annotation-reading subcommand may be
+  pointed at — auto, memory, agent — plus the merged fold."
+  (into {} (map (fn [k] [(name k) (layout/artifact-files k)]))
+        [:auto :memory :agent :merged]))
 
 (def ^:private analysis-dir-name
   "The analysis is a DIRECTORY split by access pattern — a scan opens
@@ -416,16 +419,17 @@
 (defn- find-key [m name*]
   (when-let [k (find-key-name m name*)] (get m k)))
 
-(defn- rule
-  "One rule's whole annotation. Callsites arrive complete whichever file this
-  read — a layer holds them outright, and the merge resolves to the layer that
-  does. `:unit` — which component a composed rule came from — lives on the
-  production, so it is read from production-index.edn when present."
-  [anns index name*]
-  (when-let [k (find-key-name anns name*)]
-    (when-let [u (get-in index [:rules k :unit])]
-      (println "unit:" u))
-    (pprint/pprint (get anns k))))
+(defn- print-production-annotation
+  "One production's annotation — the merged annotation map, callsites whole.
+  `name` is already resolved over rules and queries; a production with no
+  annotation reads as a note. `:unit` — which component a composed production
+  came from — lives on the production entry in `productions`."
+  [anns productions name]
+  (when-let [u (get-in productions [name :unit])]
+    (println "unit:" u))
+  (if-let [a (get anns name)]
+    (pprint/pprint a)
+    (println "no annotation for" name)))
 
 (defn- edges
   "One production's dep-graph neighbors, both directions.
@@ -563,7 +567,7 @@
 
 (def ^:private usage-line
   "The invocation skeleton, printed first by `help`."
-  "usage: bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|agent|merged] [--checkout PATH [--ref REF]] [--root PATH] [--edn]")
+  "usage: bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged] [--checkout PATH [--ref REF]] [--root PATH] [--edn] [--part lhs|rhs|props]")
 
 (def ^:private subcommands
   "The subcommand menu as `[name signature description]`, in dispatch order;
@@ -574,12 +578,15 @@
    ["producers" "<type>" "rules inserting <type> or a descendant"]
    ["consumers" "<type>" "rules with <type> or an ancestor on LHS"]
    ["hierarchy" "<type>" "that type's ancestors and descendants"]
-   ["rule" "<fq-name>" "one rule's full annotation (+ :unit)"]
+   ["production" "<fq-name>" "one production's record; --part lhs|rhs|props, --annotations"]
    ["edges" "<fq-name>" "dep-graph upstream/downstream"]
+   ["units" "" "composed unit: source units + coverage"]
+   ["unit-edges" "[<unit>]" "cross-unit producer->consumer edges (composed only)"]
+   ["entry-points" "[<unit>]" "consumed types no rule produces"]
    ["curated" "" "what the agent overlay changed vs auto-gen"]
    ["layers" "[<fq-name>]" "the fold: layers + per-key provenance"]
    ["status" "[--checkout]" "is this unit current? (needs only the manifest)"]
-   ["diff" "<after-dir>" "production-level diff of this unit vs <after-dir> (--edn, --rule NAME)"]
+   ["diff" "<after-dir>" "production-level diff of this unit vs <after-dir> (--edn, --production NAME)"]
    ["help" "" "this help"]])
 
 (defn- help []
@@ -593,13 +600,83 @@
   (println "hierarchy resolve it exact-first, then substring. <fq-name> likewise")
   (println "falls back to substring search.")
   (println)
-  (println "--file auto|agent|merged picks the annotations file for the")
+  (println "--file auto|memory|agent|merged picks the annotations file for the")
   (println "annotation-reading subcommands (default merged; gaps defaults to auto).")
   (println)
   (println "status checks one unit directory (a source, variant, or composed unit)")
   (println "reading only its rules-inspect-manifest.edn:")
   (doseq [row status-usage-rows]
     (apply print-flag-row row)))
+
+;; ---------------------------------------------------------------------------
+;; production — one production's joined record
+;; ---------------------------------------------------------------------------
+
+(defn- production-part-field
+  "The production field a `--part` value names: `:lhs` and `:props` map to
+  themselves, `:rhs` to `:rhs-form`."
+  [part]
+  (case part
+    :lhs :lhs
+    :rhs :rhs-form
+    :props :props))
+
+(defn- print-production-part
+  "One analysis field of a production record: the string `:rhs-form` raw,
+  the data fields pretty-printed."
+  [field record]
+  (let [v (get record field)]
+    (if (string? v) (println v) (pprint/pprint v))))
+
+(defn- print-production
+  "One production's joined record as text: the index fields, `:resolution`,
+  and `:doc`, then `:lhs` one condition per entry, then `:rhs-form`."
+  [record]
+  (print-field "kind" (name (:kind record)))
+  (print-field "ns" (str (:ns record)))
+  (when-let [u (:unit record)]
+    (print-field "unit" (str u)))
+  (print-field "lhs-types" (str/join ", " (map str (:lhs-types record))))
+  (print-field "insert-types" (str/join ", " (map str (:insert-types record))))
+  (print-field "retract-types" (str/join ", " (map str (:retract-types record))))
+  (print-field "resolution" (pr-str (:resolution record)))
+  (print-field "doc" (str (:doc record)))
+  (println "lhs:")
+  (doseq [c (:lhs record)]
+    (pprint/pprint c))
+  (println "rhs-form:")
+  (println (:rhs-form record)))
+
+(defn- production-report
+  "`production <fq-name>` over unit dir `dir`: one production's joined record
+  from `diff/read-production` — or, with `--annotations`, the merged annotation
+  for that name. `--part lhs|rhs|props` prints one analysis field; `--edn`
+  prints the whole record; otherwise the text view prints the index fields,
+  `:lhs`, and `:rhs-form`. `--file` picks the annotation file for
+  `--annotations`."
+  [dir name* opts anns productions]
+  (let [part (some-> (:part opts) keyword)
+        field (some-> part production-part-field)
+        annotations? (:annotations opts)]
+    (when (and part annotations?)
+      (die "--part and --annotations are mutually exclusive"))
+    (when (and (:file opts) (not annotations?))
+      (die "--file needs --annotations"))
+    (when (and part (not (contains? #{:lhs :rhs :props} part)))
+      (die "--part must be lhs, rhs, or props"))
+    (if annotations?
+      (print-production-annotation @anns productions name*)
+      (let [needed (cond
+                     field #{field}
+                     (:edn opts) :all
+                     :else #{:kind :ns :unit :lhs-types :insert-types :retract-types
+                             :resolution :doc :lhs :rhs-form})
+            record (try (diff/read-production dir name* needed)
+                        (catch Exception e (die (ex-message e))))]
+        (cond
+          field (print-production-part field record)
+          (:edn opts) (pprint/pprint record)
+          :else (print-production record))))))
 
 ;; ---------------------------------------------------------------------------
 ;; status — is this unit current?
@@ -614,7 +691,9 @@
    :checkout {:coerce :string}
    :ref {:coerce :string}
    :root {:coerce :string}
-   :rule {:coerce :string}
+   :production {:coerce :string}
+   :part {:coerce :string}
+   :annotations {:coerce :boolean}
    :edn {:coerce :boolean}})
 
 (defn- parse-args
@@ -701,26 +780,133 @@
       (pprint/pprint result)
       (print-status result))))
 
-(defn- rule-report
-  "`diff <after-dir> --rule NAME`: one production's before/after. Reads only
-  the production files of each unit — never the dep-graph, fact-types,
+;; ---------------------------------------------------------------------------
+;; cross-unit readings over a (composed) analysis
+;; ---------------------------------------------------------------------------
+
+(defn- manifest-of
+  "The unit manifest, read only when a cross-unit subcommand needs it."
+  [dir]
+  (read-edn (fs/file dir (layout/artifact-files :manifest)) (layout/artifact-files :manifest)))
+
+(defn- unit-key-of [u]
+  (str (:repo u) (when (seq (:variant u)) (str "@" (layout/variant->path (:variant u))))))
+
+(defn- unit-keys-of [manifest]
+  (mapv unit-key-of (get-in manifest [:analysis-run :units])))
+
+(defn- resolve-unit
+  "The full unit key `arg` names: an exact key, else the `:repo` that exactly
+  one source unit has. Anything else dies, listing the keys."
+  [unit-keys arg]
+  (cond
+    (some #{arg} unit-keys) arg
+    :else
+    (let [matches (filterv #(= arg (first (str/split % #"@"))) unit-keys)]
+      (case (count matches)
+        0 (die "No unit matches" arg "— units:" (str/join ", " unit-keys))
+        1 (do (println "Resolved" arg "->" (first matches)) (first matches))
+        (die "Ambiguous unit" arg "—" (count matches) "units:" (str/join ", " matches))))))
+
+(defn- print-unit-edges
+  [edges]
+  (doseq [[[p c] {:keys [via rules]}] edges]
+    (println (format "%s -> %s  (%d rules)  via %s" p c rules (str/join ", " (sort via))))))
+
+(defn- units-report
+  "`units`: one line per source unit (key, sha, production count), then the
+  manifest's :coverage one line per key. Composed units only."
+  [dir index manifest-delay opts]
+  (let [manifest @manifest-delay]
+    (when (not= :compose (get-in manifest [:analysis-run :mode]))
+      (die "units needs a composed unit — this unit's :analysis-run :mode is"
+           (pr-str (get-in manifest [:analysis-run :mode]))))
+    (let [units (get-in manifest [:analysis-run :units])
+          counts (frequencies (keep :unit (concat (vals (:rules index)) (vals (:queries index)))))
+          summary (mapv (fn [u]
+                          (let [k (unit-key-of u)]
+                            {:unit k :sha (:sha u) :productions (get counts k 0)}))
+                        units)
+          coverage (:coverage manifest)]
+      (if (:edn opts)
+        (pprint/pprint {:units summary :coverage coverage})
+        (do
+          (doseq [{:keys [unit sha productions]} summary]
+            (println (format "%s  %s  %d productions" unit (or sha "") productions)))
+          (println)
+          (if (every? (comp empty? val) coverage)
+            (println "every namespace in scope is covered")
+            (doseq [[k v] (sort-by key coverage)]
+              (println (str (name k) ": " (if (coll? v) (str/join ", " v) (str v)))))))))))
+
+(defn- unit-edges-report
+  "`unit-edges [<unit>]`: cross-unit producer->consumer edges. Composed units
+  only; with `<unit>`, only that unit's edges in `feeds` / `fed by` groups."
+  [dir index dep-graph fact-types manifest-delay opts arg]
+  (let [manifest @manifest-delay]
+    (when (not= :compose (get-in manifest [:analysis-run :mode]))
+      (die "unit-edges needs a composed unit — this unit's :analysis-run :mode is"
+           (pr-str (get-in manifest [:analysis-run :mode]))))
+    (let [edges (cross-unit/unit-edges index dep-graph fact-types)
+          selected (when arg (resolve-unit (unit-keys-of manifest) arg))]
+      (cond
+        (:edn opts) (pprint/pprint (if selected
+                                     {:feeds (into (sorted-map)
+                                                   (filter (fn [[[p _] _]] (= p selected)))
+                                                   edges)
+                                      :fed-by (into (sorted-map)
+                                                    (filter (fn [[[_ c] _]] (= c selected)))
+                                                    edges)}
+                                     edges))
+        selected (do
+                   (println "feeds:")
+                   (print-unit-edges (into (sorted-map) (filter (fn [[[p _] _]] (= p selected))) edges))
+                   (println "fed by:")
+                   (print-unit-edges (into (sorted-map) (filter (fn [[[_ c] _]] (= c selected))) edges)))
+        :else (print-unit-edges edges)))))
+
+(defn- entry-points-report
+  "`entry-points [<unit>]`: types some production matches that no rule in the
+  unit produces, grouped by consuming unit with a consumer count. The manifest
+  delay is forced only when a `<unit>` arg needs resolving."
+  [dir index fact-types manifest-delay opts arg]
+  (let [eps (cross-unit/entry-points index fact-types)
+        selected (when arg (resolve-unit (unit-keys-of @manifest-delay) arg))
+        view (cond
+               selected {selected (get eps selected {})}
+               (and (contains? eps nil) (= 1 (count eps))) (get eps nil)
+               :else eps)]
+    (if (:edn opts)
+      (pprint/pprint view)
+      (if (every? number? (vals view))
+        (doseq [[ft n] view]
+          (println (str ft "  (" n " production" (when (> n 1) "s") ")")))
+        (doseq [[unit types] view]
+          (println unit)
+          (doseq [[ft n] types]
+            (println (str "  " ft "  (" n " production" (when (> n 1) "s") ")"))))))))
+
+(defn- diff-production-report
+  "`diff <after-dir> --production NAME`: one production's before/after. Reads
+  only the production files of each unit — never the dep-graph, fact-types,
   manifest, or shape — and never runs the full `diff`. As EDN with `--edn`."
   [before-dir after-dir opts]
   (let [before (try {:productions (diff/read-productions before-dir)}
                      (catch Exception e (die (ex-message e))))
         after (try {:productions (diff/read-productions after-dir)}
                     (catch Exception e (die (ex-message e))))
-        detail (try (diff/rule-detail before after (:rule opts))
+        detail (try (diff/rule-detail before after (:production opts))
                      (catch Exception e (die (ex-message e))))]
     (if (:edn opts)
       (pprint/pprint detail)
       (println (diff/rule-detail-text detail)))))
 
 (defn- diff-report-full
-  "`diff <after-dir> [--edn] [--rule NAME]` over unit dir `before-dir`: presentation
+  "`diff <after-dir> [--edn] [--production NAME]` over unit dir `before-dir`: presentation
    over `diff/diff`, which reads both units' `merged-rulebase-analysis/`
    and merged annotations and nothing else; `--edn` prints the `diff` value.
-   (`--rule` never reaches here — the dispatcher sends it to `rule-report`.)"
+   (`--production` never reaches here — the dispatcher sends it to
+   `diff-production-report`.)"
   [before-dir after-dir opts]
   (let [before (try (diff/read-unit before-dir)
                      (catch Exception e (die (ex-message e))))
@@ -733,12 +919,13 @@
       (println (diff/->text d)))))
 
 (defn- diff-report
-  "`diff <after-dir> [--edn] [--rule NAME]`: `--rule` prints one production's
-  before/after via `rule-report` — which reads only the production files and
-  never runs the full `diff` — while the full report reads both units whole."
+  "`diff <after-dir> [--edn] [--production NAME]`: `--production` prints one
+  production's before/after via `diff-production-report` — which reads only the
+  production files and never runs the full `diff` — while the full report
+  reads both units whole."
   [before-dir after-dir opts]
-  (if (:rule opts)
-    (rule-report before-dir after-dir opts)
+  (if (:production opts)
+    (diff-production-report before-dir after-dir opts)
     (diff-report-full before-dir after-dir opts)))
 
 (let [{:keys [opts positionals]} (parse-args *command-line-args*)
@@ -755,35 +942,47 @@
           (status target opts)))
 
     (= cmd "diff")
-    (do (reject-flags opts #{:edn :rule})
+    (do (reject-flags opts #{:edn :production})
         (if (nil? arg)
           (die "diff needs two unit dirs: bb annotations_report.bb <before-dir> diff <after-dir>")
           (diff-report target arg opts)))
 
     :else
-    (do (reject-flags opts #{:file})
-        (let [cmd (or cmd "summary")
-          ;; `gaps` is about the deterministic baseline, so it defaults to auto.
-          which (or (:file opts) (if (= "gaps" cmd) "auto" "merged"))
-          paths (resolve-paths target which)
-          dir (:dir paths)
-          anns (delay (read-annotations (:annotations paths) (str which " annotations") dir))
-          auto (delay (read-annotations (:auto paths) (artifact-files "auto") dir))
-          agent (delay (read-annotations (:agent paths) (artifact-files "agent") dir))
-          merged (delay (read-merged paths))
-          analysis-part (->analysis-part dir)
-          index (delay (analysis-part :index))
-          fact-types (delay (analysis-part :fact-types))]
-      (case cmd
-        "summary" (summary @anns)
-        "gaps" (gaps @anns)
-        "types" (types @anns)
-        "producers" (if arg (producers @anns @fact-types arg) (die "producers needs a fact type"))
-        "consumers" (if arg (consumers @index @fact-types arg)
-                        (die "consumers needs a fact type"))
-        "hierarchy" (if arg (hierarchy @fact-types arg) (die "hierarchy needs a fact type"))
-        "rule" (if arg (rule @anns @index arg) (die "rule needs a rule name"))
-        "edges" (if arg (edges (analysis-part :dep-graph) arg) (die "edges needs a rule name"))
-        "curated" (curated @auto @agent)
-        "layers" (layers @merged arg)
-        (die "Unknown subcommand:" cmd))))))
+    (let [cmd (or cmd "summary")]
+      (reject-flags opts (cond
+                           (= cmd "production") #{:edn :part :annotations :file}
+                           (#{"units" "unit-edges" "entry-points"} cmd) #{:edn}
+                           :else #{:file}))
+      (let [;; `gaps` is about the deterministic baseline, so it defaults to auto.
+            which (or (:file opts) (if (= "gaps" cmd) "auto" "merged"))
+            paths (resolve-paths target which)
+            dir (:dir paths)
+            anns (delay (read-annotations (:annotations paths) (str which " annotations") dir))
+            auto (delay (read-annotations (:auto paths) (artifact-files "auto") dir))
+            agent (delay (read-annotations (:agent paths) (artifact-files "agent") dir))
+            merged (delay (read-merged paths))
+            analysis-part (->analysis-part dir)
+            index (delay (analysis-part :index))
+            fact-types (delay (analysis-part :fact-types))
+            manifest-delay (delay (manifest-of dir))]
+        (case cmd
+          "summary" (summary @anns)
+          "gaps" (gaps @anns)
+          "types" (types @anns)
+          "producers" (if arg (producers @anns @fact-types arg) (die "producers needs a fact type"))
+          "consumers" (if arg (consumers @index @fact-types arg)
+                          (die "consumers needs a fact type"))
+          "hierarchy" (if arg (hierarchy @fact-types arg) (die "hierarchy needs a fact type"))
+          "production" (if arg
+                         (let [idx @index
+                               all (merge (:queries idx) (:rules idx))
+                               resolved (or (find-key-name all arg) (System/exit 1))]
+                           (production-report dir resolved opts anns all))
+                         (die "production needs a production name"))
+          "edges" (if arg (edges (analysis-part :dep-graph) arg) (die "edges needs a rule name"))
+          "units" (units-report dir @index manifest-delay opts)
+          "unit-edges" (unit-edges-report dir @index (analysis-part :dep-graph) @fact-types manifest-delay opts arg)
+          "entry-points" (entry-points-report dir @index @fact-types manifest-delay opts arg)
+          "curated" (curated @auto @agent)
+          "layers" (layers @merged arg)
+          (die "Unknown subcommand:" cmd))))))

@@ -30,6 +30,14 @@
   (or (-> session-or-rulebase utils/get-rulebase :get-alphas-fn meta :ancestors-fn)
       clojure.core/ancestors))
 
+(defn- default-declared-tags
+  "The tags with parents in the global hierarchy — every tag a `derive` named
+  as a child. This is the complete declared-edge set for the default
+  hierarchy `clojure.core/ancestors` reads, so a tag whose child no production
+  mentions still reaches `ft/->ancestors-index`."
+  []
+  (keys (:parents @#'clojure.core/global-hierarchy)))
+
 (defn- ->memoized-ancestors
   "Returns a memoized fn mapping a raw fact type to its set of ancestor raw
    types.  Never returns nil: a nil or throwing ancestors-fn result degrades
@@ -381,8 +389,9 @@
    dynamic binding."
   [session-or-rulebase
    annotations
-   {:keys [include-lhs-form?]
-    :or {include-lhs-form? true}}]
+   {:keys [include-lhs-form? declared-tags-fn]
+    :or {include-lhs-form? true
+         declared-tags-fn default-declared-tags}}]
   (let [{:keys [productions id-to-node] :as rulebase} (utils/get-rulebase session-or-rulebase)
         ;; Normalize the LHS once, up front, so every downstream pass
         ;; (fact-type extraction, binding augmentation, serialization) works
@@ -398,9 +407,10 @@
 
         ancestors-fn (extract-ancestors-fn rulebase)
         ancestors-set-fn (->memoized-ancestors ancestors-fn)
+        declared-tags (declared-tags-fn)
         type-analysis-map (->type-analysis-map productions production-annotation-map)
         known-set (ft/get-known-type-names type-analysis-map)
-        ancestors-index (ft/->ancestors-index type-analysis-map ancestors-set-fn productions)
+        ancestors-index (ft/->ancestors-index type-analysis-map ancestors-set-fn productions declared-tags)
 
         dep-graph (->dep-graph type-analysis-map ancestors-set-fn)
         production-map (->production-map productions)
@@ -484,7 +494,11 @@
      Pass `pr-str` for a cheap non-pretty-printing alternative.
    - `:include-lhs-form?` — when false, omit the per-production `:lhs-form`
      pretty-printed string (the persistence path slims it away before
-     writing). Defaults to true."
+     writing). Defaults to true.
+   - `:declared-tags-fn` — (fn [] coll) of raw fact-type tags a `derive` named
+     as a child. Defaults to the global hierarchy's `:parents` keys; override
+     it for a session built over a custom hierarchy, so every declared edge is
+     recorded even when no production mentions its child."
   ([session-or-rulebase annotations]
    (->rulebase-analysis session-or-rulebase annotations nil))
   ([session-or-rulebase annotations opts]

@@ -17,7 +17,8 @@
    :used-by-queries
    :used-by-rules
    :clara.explorer.internal/normalized},
-  :unknown-fact-types #{"clojure.lang.Associative"
+  :unknown-fact-types #{"clara.explorer.test.rules.loan_app_rules.ApplicationOutcome"
+   "clojure.lang.Associative"
    "clojure.lang.Counted"
    "clojure.lang.IHashEq"
    "clojure.lang.IKeywordLookup"

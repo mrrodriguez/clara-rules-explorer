@@ -29,26 +29,19 @@
   "Artifact filenames, by role. The roles are
   `clara.explorer.artifacts.schema/ArtifactKey`.
 
-  `:rulebase-analysis` is a DIRECTORY, not a file — see `part-files`.
-
-  The last two are registry-level, not per-unit: a federated index and its
-  digest are written beside the units, not inside one."
+  `:rulebase-analysis` is a DIRECTORY, not a file — see `part-files`."
   {:auto "auto-gen-annotations.edn"
    :memory "memory-annotations.edn"
    :agent "agent-annotations.edn"
    :merged "merged-annotations.edn"
    :rulebase-analysis "merged-rulebase-analysis"
    :rulebase-analysis-digest "rulebase-analysis-digest.edn"
-   :manifest "rules-inspect-manifest.edn"
-   :registry-index "registry-index.edn"
-   :registry-digest "registry-digest.edn"})
+   :manifest "rules-inspect-manifest.edn"})
 
 (def unit-artifact-files
-  "The artifact roles a single unit has — `artifact-files` minus the
-  registry-level pair, which is written beside units rather than inside one.
-  `clara.explorer.artifacts.registry` reads presence off this subset,
-  and `clara.explorer.artifacts.manifest` lists it, so a registry
-  index never shows up as a unit's own artifact."
+  "The artifact roles a single unit has — the whole of `artifact-files`, each
+  role per-unit. `clara.explorer.artifacts.registry` reads presence off this
+  subset, and `clara.explorer.artifacts.manifest` lists it."
   (select-keys artifact-files
                [:auto :memory :agent :merged :rulebase-analysis
                 :rulebase-analysis-digest :manifest]))

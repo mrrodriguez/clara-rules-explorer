@@ -27,6 +27,7 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [clara.explorer.artifacts.flow :as ann]
+   [clara.explorer.artifacts.diff :as diff]
    [clara.explorer.artifacts.store :as store]
    [clara.explorer.artifacts.test-fixtures :as fixtures
     :refer [*artifact-opts* generated-annotations stub-rulebase]]
@@ -66,6 +67,56 @@
                "a.ns/gap-rule" {:upstream #{"a.ns/full-rule"}}}
    :unresolved []})
 
+(def ^:private production-analysis
+  "A `RulebaseAnalysis` exercising `production`: a `[:not …]` group, an
+  accumulator, a plain leaf rule, and a query — plus a name shared substring
+  (`rule`) for ambiguity."
+  {:rules
+   {"a.ns/full-rule"
+    {:name "a.ns/full-rule" :ns "a.ns"
+     :lhs [{:condition-type :not
+            :children [{:type ":a/one" :constraints "[]"
+                        :bindings {:binding-keys [] :new-bindings [:?x]}}]
+            :bindings {:binding-keys [] :new-bindings []}}]
+     :lhs-types [":a/one"]
+     :insert-types [":a/two"]
+     :retract-types []
+     :rhs-form "(insert! x)"
+     :doc "negation rule"}
+    "a.ns/accum-rule"
+    {:name "a.ns/accum-rule" :ns "a.ns"
+     :lhs [{:accumulator {:form "max" :some-initial-value? false}
+            :from {:type ":a/one" :constraints "[]"
+                   :bindings {:binding-keys [] :new-bindings [:?x]}}
+            :result-binding :?m
+            :bindings {:binding-keys [] :new-bindings []}}]
+     :lhs-types [":a/one"]
+     :insert-types []
+     :retract-types []
+     :rhs-form "(insert! (->Fact :a/two {}))"
+     :doc "accumulator rule"}
+    "a.ns/plain-rule"
+    {:name "a.ns/plain-rule" :ns "a.ns"
+     :lhs [{:type ":a/two" :constraints "[]"
+            :bindings {:binding-keys [] :new-bindings []}}]
+     :lhs-types [":a/two"]
+     :insert-types []
+     :retract-types []
+     :rhs-form "(println :x)"
+     :doc "plain rule"}}
+   :queries
+   {"a.ns/a-query"
+    {:name "a.ns/a-query" :ns "a.ns"
+     :lhs [{:type ":a/one" :constraints "[]"
+            :bindings {:binding-keys [] :new-bindings [:?x]}}]
+     :lhs-types [":a/one"]
+     :rhs-form nil
+     :doc "a query"}}
+   :fact-types {":a/one" {:name ":a/one" :ns nil :ancestors []}
+                ":a/two" {:name ":a/two" :ns nil :ancestors []}}
+   :dep-graph {}
+   :unresolved []})
+
 (defn- run-report
   "The script's stdout for one subcommand, over the test's own artifact dir."
   [& args]
@@ -74,10 +125,18 @@
     (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
     out))
 
-(defn- write-artifacts! []
-  (with-redefs [core/->rulebase-analysis (fn [_ _ _] analysis)]
-    (ann/persist! {:layer (store/->generated-layer *artifact-opts* generated-annotations)}
-                  (assoc *artifact-opts* :session stub-rulebase))))
+(defn- run-report-raw
+  "The script's `{:exit :out :err}` for one invocation over the test's own
+  artifact dir, without asserting success — for the failure cases."
+  [& args]
+  (apply shell/sh "bb" (str report-script) (:dir *artifact-opts*) args))
+
+(defn- write-artifacts!
+  ([] (write-artifacts! analysis))
+  ([the-analysis]
+   (with-redefs [core/->rulebase-analysis (fn [_ _ _] the-analysis)]
+     (ann/persist! {:layer (store/->generated-layer *artifact-opts* generated-annotations)}
+                   (assoc *artifact-opts* :session stub-rulebase)))))
 
 (deftest bb-report-reads-what-this-repo-writes-test
   (if-not (runnable?)
@@ -119,6 +178,12 @@
           (is (str/includes? out "a.ns/full-rule"))
           (is (str/includes? out "a.ns/gap-rule"))))
 
+      (testing "`entry-points` on a ruleset unit prints consumed types no rule produces"
+        (let [out (run-report "entry-points")]
+          (is (str/includes? out ":a/one"))
+          (is (str/includes? out "(1 production)"))
+          (is (not (str/includes? out ":a/two")))))
+
       (testing "`layers` goes through the whole merged-annotations decode, so its
                 per-key origin tally must match what the JVM reader rebuilds from
                 the same files"
@@ -130,10 +195,20 @@
             (is (str/includes? out (format "%5d  %s" n (pr-str origin)))
                 (str "origin tally disagrees for " (pr-str origin))))))
 
-      (testing "`rule` resolves a reference into the layer, so a by-reference
+      (testing "`production --annotations` resolves a reference into the layer, so a by-reference
                 rule still prints its callsite evidence"
-        (let [out (run-report "rule" "a.ns/full-rule")]
+        (let [out (run-report "production" "a.ns/full-rule" "--annotations")]
           (is (str/includes? out "(->fact :a/one x)"))))
+
+      (testing "`production --annotations --file memory` reads the memory layer"
+        (spit (io/file (:dir *artifact-opts*) "memory-annotations.edn")
+              (pr-str {:id :memory
+                       :source {:generated-by "bb-report-test"
+                                :derived-from "session working memory"}
+                       :annotations {"a.ns/full-rule"
+                                     {:clara-rules/insert-types [:a/memory-only-type]}}}))
+        (let [out (run-report "production" "a.ns/full-rule" "--annotations" "--file" "memory")]
+          (is (str/includes? out ":a/memory-only-type"))))
 
       (testing "`summary` counts the whole expanded merge, not just the rules
                 stored inline — all four are there, three of them by reference"
@@ -143,11 +218,12 @@
         (let [out (run-report "help")]
           (is (str/includes? out "usage: bb annotations_report.bb"))
           (doseq [sub ["summary" "gaps" "types" "producers" "consumers"
-                       "hierarchy" "rule" "edges" "curated" "layers" "status" "diff" "help"]]
+                       "hierarchy" "production" "edges" "units" "unit-edges"
+                       "entry-points" "curated" "layers" "status" "diff" "help"]]
             (is (str/includes? out sub)))
           (is (str/includes? out "<type>"))
           (is (str/includes? out "<fq-name>"))
-          (is (str/includes? out "--file auto|agent|merged"))
+          (is (str/includes? out "--file auto|memory|agent|merged"))
           (is (str/includes? out "status --checkout PATH"))))
 
       (testing "`producers` groups a multi-type match into per-type blocks"
@@ -205,6 +281,28 @@
       (testing "edges reads the composed dep-graph across units"
         (let [out (run "edges" notice-approved)]
           (is (str/includes? out app-approved))))
+
+      (testing "units lists each source unit and its coverage"
+        (let [out (run "units")]
+          (is (str/includes? out "loan-app-ruleset"))
+          (is (str/includes? out "loan-disposition-ruleset"))
+          (is (str/includes? out "productions"))
+          (is (str/includes? out "every namespace in scope is covered"))))
+
+      (testing "unit-edges lists the cross-unit edge"
+        (let [out (run "unit-edges")]
+          (is (str/includes? out "loan-app-ruleset -> loan-disposition-ruleset"))
+          (is (str/includes? out "via :loan-app/application-outcome"))))
+
+      (testing "unit-edges resolves a bare repo and lists its feeds/fed-by"
+        (let [out (run "unit-edges" "loan-app-ruleset")]
+          (is (str/includes? out "feeds:"))
+          (is (str/includes? out "fed by:"))))
+
+      (testing "entry-points groups by consuming unit"
+        (let [out (run "entry-points")]
+          (is (str/includes? out "loan-app-ruleset"))
+          (is (str/includes? out "production"))))
 
       (testing "layers reports the flattened standard layers"
         (let [out (run "layers")]
@@ -301,31 +399,36 @@
           (is (= "loan-disposition-ruleset" (get-in result [:before :repo])))
           (is (= [[:ref "feature/new-tax"]] (get-in result [:after :variant])))
           (is (empty? (get-in result [:productions :changed])))))
-      (testing "--rule prints one production's before and after"
-        (let [out (run app "diff" composed "--rule" "digest-doc-meta")]
+      (testing "--production prints one production's before and after"
+        (let [out (run app "diff" composed "--production" "digest-doc-meta")]
           (is (str/includes? out "digest-doc-meta-rule (unchanged)"))))
+      (testing "--rule is rejected as an unknown flag"
+        (let [{:keys [exit out err]}
+              (shell/sh "bb" (str report-script) app "diff" composed "--rule" "digest-doc-meta")]
+          (is (not (zero? exit)))
+          (is (str/includes? (str out err) "Unknown option: --rule"))))
       (testing "a missing after dir fails loudly"
         (let [{:keys [exit out err]}
               (shell/sh "bb" (str report-script) app "diff" (str (io/file root "nope")))]
           (is (not (zero? exit)))
           (is (str/includes? (str out err) "missing unit manifest")))))))
 
-(deftest bb-report-diff-rule-skips-full-diff-test
+(deftest bb-report-diff-production-skips-full-diff-test
   (if-not (runnable?)
-    (println "SKIPPING bb-report-diff-rule-skips-full-diff-test — babashka is not on PATH, or the script moved:"
+    (println "SKIPPING bb-report-diff-production-skips-full-diff-test — babashka is not on PATH, or the script moved:"
              (str report-script))
     (do
       (write-artifacts!)
       ;; The temp unit carries no manifest; write a minimal one so the full
       ;; read gets past it. dep-graph.edn serves only the full diff: removing
-      ;; it must break the full report while --rule still answers.
+      ;; it must break the full report while --production still answers.
       (spit (io/file (:dir *artifact-opts*) "rules-inspect-manifest.edn")
             (pr-str {:repo "tmp"}))
       (io/delete-file (io/file (:dir *artifact-opts*) "merged-rulebase-analysis" "dep-graph.edn"))
       (let [dir (:dir *artifact-opts*)]
-        (testing "--rule answers without the dep-graph"
+        (testing "--production answers without the dep-graph"
           (let [{:keys [exit out err]}
-                (shell/sh "bb" (str report-script) dir "diff" dir "--rule" "full-rule")]
+                (shell/sh "bb" (str report-script) dir "diff" dir "--production" "full-rule")]
             (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
             (is (str/includes? out "a.ns/full-rule"))))
         (testing "the full diff still needs it"
@@ -333,6 +436,62 @@
                 (shell/sh "bb" (str report-script) dir "diff" dir)]
             (is (not (zero? exit)))
             (is (str/includes? (str out err) "dep-graph"))))))))
+
+(deftest bb-report-production-test
+  (if-not (runnable?)
+    (println "SKIPPING bb-report-production-test — babashka is not on PATH, or the script moved:"
+             (str report-script))
+    (do
+      (write-artifacts! production-analysis)
+
+      (testing "`production --part lhs` shows a :not condition and its children; --annotations does not"
+        (let [out (run-report "production" "a.ns/full-rule" "--part" "lhs")]
+          (is (str/includes? out ":condition-type :not"))
+          (is (str/includes? out ":type \":a/one\"")))
+        (let [out (run-report "production" "a.ns/full-rule" "--annotations")]
+          (is (not (str/includes? out ":condition-type")))))
+
+      (testing "an accumulator condition carries :accumulator :from :result-binding"
+        (let [out (run-report "production" "a.ns/accum-rule" "--part" "lhs")]
+          (is (str/includes? out ":accumulator"))
+          (is (str/includes? out ":from"))
+          (is (str/includes? out ":result-binding"))))
+
+      (testing "a query resolves and prints kind query"
+        (let [result (edn/read-string (run-report "production" "a.ns/a-query" "--edn"))]
+          (is (= :query (:kind result))))
+        (is (str/includes? (run-report "production" "a.ns/a-query") "kind")))
+
+      (testing "a query has no annotation"
+        (let [out (run-report "production" "a.ns/a-query" "--annotations")]
+          (is (str/includes? out "no annotation for a.ns/a-query"))))
+
+      (testing "--part and --annotations are mutually exclusive"
+        (let [{:keys [exit out err]}
+              (run-report-raw "production" "a.ns/full-rule" "--part" "lhs" "--annotations")]
+          (is (not (zero? exit)))
+          (is (str/includes? (str out err) "mutually exclusive"))))
+
+      (testing "a unique substring prints Resolved; several list and exit non-zero"
+        (let [out (run-report "production" "accum")]
+          (is (str/includes? out "Resolved accum -> a.ns/accum-rule")))
+        (let [{:keys [exit out err]} (run-report-raw "production" "rule")]
+          (is (not (zero? exit)))
+          (is (str/includes? (str out err) "Ambiguous — 3 matches:"))
+          (is (str/includes? (str out err) "a.ns/full-rule"))))
+
+      (testing "--edn equals the productions-of entry for the same name"
+        (let [expected (get (diff/read-productions (:dir *artifact-opts*)) "a.ns/full-rule")
+              actual (edn/read-string (run-report "production" "a.ns/full-rule" "--edn"))]
+          (is (= expected actual))))
+
+      (testing "--part lhs never reads production-details.edn"
+        (io/delete-file (io/file (:dir *artifact-opts*) "merged-rulebase-analysis" "production-details.edn"))
+        (let [out (run-report "production" "a.ns/full-rule" "--part" "lhs")]
+          (is (str/includes? out ":condition-type :not")))
+        (let [{:keys [exit out err]} (run-report-raw "production" "a.ns/full-rule" "--part" "rhs")]
+          (is (not (zero? exit)))
+          (is (str/includes? (str out err) "production-details.edn")))))))
 
 (def ^:private status-today
   (str (java.time.LocalDate/now)))
