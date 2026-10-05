@@ -11,10 +11,11 @@
   holds `rules-inspect-manifest.edn`, the one artifact every complete set has and
   the one that says what the rest of the set is.
 
-  The single reserved root-level directory is `_variants/`: a path under it
-  splits into a repo (segments before the first `<axis>=…` segment) and a
-  variant (that segment and everything after); any other path is a mainline
-  unit whose repo is the whole path.
+  Two root-level directories are reserved. A path under `_variants/` splits into
+  a repo (segments before the first `<axis>=…` segment) and a variant (that
+  segment and everything after); a path under `_compose/` is a composition
+  whose repo is the whole path; any other path is a mainline unit whose repo is
+  the whole path.
 
   The library discovers and reads. It never decides *which* sets belong together
   or *what a set means* — every entry point takes the selection explicitly, the
@@ -85,51 +86,21 @@
 ;; discovery
 ;; ===========================================================================
 
-(defn- canonical-path
-  ^String [^File f]
-  (.getCanonicalPath f))
-
-(defn- under-root?
-  [^String root-path ^String dir-path]
-  (or (= root-path dir-path)
-      (str/starts-with? dir-path (str root-path File/separator))))
-
-(defn- relative-segments
-  "Path segments of `dir` under `root`, or nil when `dir` is not under `root`."
-  [root ^File dir]
-  (let [rp (canonical-path (io/file root))
-        dp (canonical-path dir)]
-    (when (under-root? rp dp)
-      (-> (subs dp (min (count dp) (count rp)))
-          (str/split (re-pattern (java.util.regex.Pattern/quote File/separator)))
-          (->> (remove str/blank?))
-          vec))))
-
 (defn- manifest-file
   ^File [^File dir]
   (io/file dir (:manifest layout/artifact-files)))
 
-(defn- unit-dir?
-  "A directory is a unit iff it holds `rules-inspect-manifest.edn`."
-  [^File dir]
-  (.isFile (manifest-file dir)))
-
 (defn- discover-unit-refs
-  "Every unit under `root`, mainline and `_variants/` variants alike, as refs.
-  Directories are walked arbitrarily deep, so a host groups its units however it
-  likes. The split is `layout/segments->unit-ref` — shared with the babashka
-  editor client — and a path it cannot parse (a directory renamed or created
-  outside the `<axis>=<value>` scheme) is skipped rather than thrown."
+  "Every unit under `root`, mainline, `_variants/` variants and `_compose/`
+  compositions alike, as refs. `layout/find-unit-dirs` finds them, and
+  `layout/segments->unit-ref` reads each address; a path it cannot parse (a
+  directory renamed or created outside the `<axis>=<value>` scheme) is skipped
+  rather than thrown."
   [root]
-  (let [root-file (io/file root)]
-    (when-not (.isDirectory root-file)
-      (throw (ex-info (format "Registry root is not a directory: %s" root) {:root root})))
-    (->> (file-seq root-file)
-         (filter #(.isDirectory ^File %))
-         (filter unit-dir?)
-         (keep #(some-> (relative-segments root %) layout/segments->unit-ref))
-         (sort-by shared-registry/unit-key)
-         vec)))
+  (->> (layout/find-unit-dirs root)
+       (keep (comp layout/segments->unit-ref :segments))
+       (sort-by shared-registry/unit-key)
+       vec))
 
 ;; ===========================================================================
 ;; unit info
@@ -144,6 +115,18 @@
   (edn-io/read-edn-file (io/file dir
                                  (:rulebase-analysis layout/artifact-files)
                                  (:meta parts/part-files))))
+
+(defn- assert-compose-mode!
+  "A unit under `layout/compose-subdir` must carry `:analysis-run :mode :compose`
+  in its manifest. The path says what the unit is and the manifest says what
+  wrote it; a disagreement is a misfiled directory, not something to guess
+  through."
+  [{:keys [repo]} mode]
+  (when (and (str/starts-with? repo (str layout/compose-subdir "/"))
+             (not= :compose mode))
+    (throw (ex-info (format "Unit %s is under %s/ but its manifest mode is %s, not :compose"
+                            repo layout/compose-subdir (pr-str mode))
+                    {:repo repo :mode mode}))))
 
 (s/defn ^:private ->unit-info :- schema/UnitInfo
   "What `discover` records per unit: the ref, the resolved dir, present
@@ -168,6 +151,7 @@
         manifest (read-manifest-file (io/file dir))
         meta (read-meta-file (io/file dir))
         mode (get-in manifest [:analysis-run :mode])
+        _ (assert-compose-mode! ref mode)
         composed-from (not-empty (mapv unit-ref (get-in manifest [:analysis-run :units])))
         path-variant (:variant ref)
         manifest-variant (:variant manifest)
@@ -208,7 +192,7 @@
 (s/defn discover :- Registry
   "Discover every unit under `:root` — a directory holding
   `rules-inspect-manifest.edn`, with `_variants/` children read as `:variant`
-  units of their repo."
+  units of their repo and `_compose/` children as compositions."
   [{:keys [root]} :- {:root s/Str}]
   (->registry {:root root :units (discover-unit-refs root)}))
 

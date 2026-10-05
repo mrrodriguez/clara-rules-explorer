@@ -38,8 +38,7 @@
    [clara.explorer.test.rules.loan-app-rules]
    [clara.explorer.test.rules.loan-doc-queries]
    [clara.explorer.test.rules.loan-doc-rules]
-   [clara.explorer.test.rules.loan-outcome-notices]
-   [clojure.java.io :as io]))
+   [clara.explorer.test.rules.loan-outcome-notices]))
 
 (set! *warn-on-reflection* true)
 
@@ -138,15 +137,19 @@
   "The checked-in example rulesets, in generation order."
   [loan-app-ruleset loan-disposition-ruleset])
 
+(def composed-example-name
+  "The name of the checked-in composed unit, under `_compose/`."
+  "loan-app-plus-disposition")
+
 (def composed-example-repo
   "The repo (registry-relative path) of the checked-in composed unit."
-  "composed/loan-app-plus-disposition")
+  (layout/->compose-repo composed-example-name))
 
 (def composed-example
   "The composed unit persisted from the two source rulesets — the same merge
    `compose-test` and `compose-persist-test` exercise. Checked in so
    `make regen-artifacts` pins the materialized composition byte-for-byte."
-  {:repo composed-example-repo
+  {:name composed-example-name
    :units [{:repo "loan-app-ruleset"}
            {:repo "loan-disposition-ruleset"}]
    :analysis-run
@@ -219,16 +222,14 @@
   "Compose the source rulesets under `root` into one unit-shaped directory and
    return the summary. Runs after `persist-ruleset!` for both sources, since
    `flow/compose-persist!` reads them back off disk."
-  [root {:keys [repo units analysis-run]}]
-  (let [dir (str (io/file root repo))
-        opts {:root root
-              :repo repo
-              :dir dir
+  [root {:keys [units analysis-run] compose-name :name}]
+  (let [opts {:root root
+              :name compose-name
               :generated-by example-generated-by
               :units units}
-        {:keys [rule-count manifest]} (flow/compose-persist!
-                                       (assoc opts :analysis-run analysis-run))]
-    {:repo repo
+        {:keys [dir rule-count manifest]} (flow/compose-persist!
+                                           (assoc opts :analysis-run analysis-run))]
+    {:repo (layout/->compose-repo compose-name)
      :dir dir
      :rule-count rule-count
      :manifest manifest}))

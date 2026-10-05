@@ -10,7 +10,8 @@
   "The string handle for a unit ref: `<repo>`, or `<repo>@<encoded variant path>`
   for a variant unit. The variant is encoded with `layout/variant->path`, so a
   `@` or `/` inside a value never breaks the split a reader does on the last
-  `@`. A `UnitRef` map is not a comparable map key under the library's own
+  `@`. A composition's key is its `_compose/<name>` repo and nothing more; its
+  name may hold `@`, so a reader checks the prefix before splitting. A `UnitRef` map is not a comparable map key under the library's own
   `sorted-map` convention, so maps keyed by unit use this."
   [{:keys [repo variant]}]
   (str repo (when (seq variant) (str "@" (layout/variant->path variant)))))

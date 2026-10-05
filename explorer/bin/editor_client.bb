@@ -74,21 +74,14 @@
   `{:root … :units […]}` for either the babashka client or a running server's
   `:registry` config.
 
-  Discovery is the directory walk the editors previously did themselves: find
-  every `rules-inspect-manifest.edn` and name the unit by its directory
-  relative to the root. The registry split has one owner
-  (`layout/segments->unit-ref`, shared with the JVM walk); this script supplies
-  only the babashka directory walk and the EDN serialization."
+  The walk is `layout/find-unit-dirs` and the address split
+  `layout/segments->unit-ref`, the same pair the JVM registry uses; this script
+  supplies only the EDN serialization."
   [root]
-  (let [root-file (fs/canonicalize root)]
-    (when-not (fs/directory? root-file)
-      (throw (ex-info (format "Registry root is not a directory: %s" root) {:root root})))
-    (->> (fs/glob root-file "**/rules-inspect-manifest.edn")
-         (keep (fn [manifest]
-                 (let [rel (fs/unixify (fs/relativize root-file (fs/parent manifest)))]
-                   (->unit-entry (str/split rel #"/")))))
-         (sort-by :key)
-         vec)))
+  (->> (layout/find-unit-dirs root)
+       (keep (comp ->unit-entry :segments))
+       (sort-by :key)
+       vec))
 
 (defn- read-part-or-nil
   "One part of the unit's split `merged-rulebase-analysis/` directory, or nil when the part is

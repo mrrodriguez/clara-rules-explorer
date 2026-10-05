@@ -438,7 +438,7 @@
 
 (deftest checked-in-composed-diff-test
   (let [before (example-unit "loan-app-ruleset")
-        after (example-unit "composed" "loan-app-plus-disposition")
+        after (example-unit "_compose" "loan-app-plus-disposition")
         result (d/diff before after)]
     (testing "the disposition namespace lands under :scope"
       (is (= ["clara.explorer.test.rules.loan-outcome-notices"]
