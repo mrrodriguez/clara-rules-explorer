@@ -3,6 +3,7 @@
   babashka `status` report share, plus the variant segment encoding both read."
   (:require
    [clara.explorer.artifacts.layout :as layout]
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
 (set! *warn-on-reflection* true)
@@ -46,6 +47,25 @@
     (is (= {:repo "_compose/env=dev/refs=a@b+c@d"}
            (layout/segments->unit-ref ["_compose" "env=dev" "refs=a@b+c@d"])))
     (is (nil? (layout/segments->unit-ref ["_compose"])))))
+
+(deftest find-unit-dirs-test
+  (let [root (str (java.nio.file.Files/createTempDirectory
+                   "layout-walk" (make-array java.nio.file.attribute.FileAttribute 0)))
+        write! (fn [& segments]
+                 (let [f (apply io/file root (concat segments [(:manifest layout/artifact-files)]))]
+                   (io/make-parents f)
+                   (spit f "{}")))]
+    (write! "a")
+    (write! "g" "b")
+    (write! "_variants" "a" "ref=x")
+    (write! "_compose" "env=dev" "n")
+    (.mkdirs (io/file root "empty" "deeper"))
+    (testing "every manifest-holding directory, with its segments relative to the root"
+      (is (= #{["a"] ["g" "b"] ["_variants" "a" "ref=x"] ["_compose" "env=dev" "n"]}
+             (into #{} (map :segments) (layout/find-unit-dirs root)))))
+    (testing "a root that is not a directory is refused"
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (layout/find-unit-dirs (str (io/file root "nope"))))))))
 
 (deftest ->compose-repo-test
   (is (= "_compose/env=dev/x" (layout/->compose-repo "env=dev/x")))

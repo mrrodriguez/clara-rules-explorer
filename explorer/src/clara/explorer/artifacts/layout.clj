@@ -19,7 +19,10 @@
   callers keep reading the name in its natural home. Those are aliases of these;
   this namespace is the definition."
   (:require
-   [clojure.string :as str]))
+   [clojure.java.io :as io]
+   [clojure.string :as str])
+  (:import
+   (java.io File)))
 
 ;; ===========================================================================
 ;; filenames
@@ -293,8 +296,8 @@
     containing `=` makes it nil, so a hand-made directory is never read as the
     start of a variant.
 
-  Shared by `clara.explorer.artifacts.registry`'s walk and the babashka editor
-  client's `--list-units`, so the two runtimes cannot drift on the split."
+  The split of the paths `find-unit-dirs` returns, shared by every walk of a
+  registry so no two can drift on it."
   [segments]
   (condp = (first segments)
     variants-subdir (segments->variant-unit-ref (subvec segments 1))
@@ -302,6 +305,46 @@
                      {:repo (str/join "/" segments)})
     (when-not (some #(str/includes? % "=") segments)
       {:repo (str/join "/" segments)})))
+
+(defn- ->relative-segments
+  "Path segments of `dir` under the canonical `root-path`, or nil when `dir`
+  (canonicalized, so a symlink resolves first) is not under it."
+  [^String root-path ^File dir]
+  (let [dir-path (.getCanonicalPath dir)]
+    (when (or (= root-path dir-path)
+              (str/starts-with? dir-path (str root-path File/separator)))
+      (->> (str/split (subs dir-path (count root-path))
+                      (re-pattern (java.util.regex.Pattern/quote File/separator)))
+           (remove str/blank?)
+           vec))))
+
+(defn- list-subdirectories
+  "The directories directly under `dir`. Files are dropped here, so the walk
+  never looks at an artifact's contents."
+  [^File dir]
+  (filter #(.isDirectory ^File %) (.listFiles dir)))
+
+(defn find-unit-dirs
+  "Every unit directory under `root`, as `{:dir File :segments [...]}` in walk
+  order: a directory is a unit iff it holds the `:manifest` artifact, and
+  `:segments` is its path relative to the canonical root. Directories are walked
+  arbitrarily deep, so a host groups its units however it likes.
+
+  This is the one walk the JVM registry, the babashka editor client, and a host
+  walking the same registry share. What a path means is
+  `segments->unit-ref`'s, and whether a path it cannot parse is skipped or
+  refused is the caller's. Throws when `root` is not a directory."
+  [root]
+  (let [root-file (io/file root)]
+    (when-not (.isDirectory root-file)
+      (throw (ex-info (format "Registry root is not a directory: %s" root) {:root root})))
+    (let [root-path (.getCanonicalPath root-file)]
+      (into []
+            (comp (filter #(.isFile (io/file ^File % (:manifest artifact-files))))
+                  (keep (fn [^File dir]
+                          (when-let [segments (->relative-segments root-path dir)]
+                            {:dir dir :segments segments}))))
+            (tree-seq (fn [^File dir] (.isDirectory dir)) list-subdirectories root-file)))))
 
 (defn write-variant
   "The full decoded `:variant` for a write: the caller's host axes plus the
