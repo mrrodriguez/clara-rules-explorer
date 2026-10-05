@@ -2607,7 +2607,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -2624,7 +2624,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -2700,7 +2700,7 @@
 					],
 					"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 					"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-					"ns": "",
+					"ns": "clara.explorer.test.rules.loan-doc-rules",
 					"type": "query"
 				}
 			],
@@ -2720,7 +2720,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -2737,7 +2737,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -2833,7 +2833,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -2850,7 +2850,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -2926,7 +2926,7 @@
 					],
 					"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 					"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-					"ns": "",
+					"ns": "clara.explorer.test.rules.loan-doc-rules",
 					"type": "query"
 				},
 				{
@@ -2944,7 +2944,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -2961,7 +2961,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -3055,7 +3055,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -3072,7 +3072,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -3166,7 +3166,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -3183,7 +3183,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -3277,7 +3277,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -3294,7 +3294,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -3388,7 +3388,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -3405,7 +3405,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -3499,7 +3499,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -3516,7 +3516,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -3614,7 +3614,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -3631,7 +3631,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -3725,7 +3725,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -3742,7 +3742,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -3836,7 +3836,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -3853,7 +3853,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -3947,7 +3947,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								}
 							],
@@ -3964,7 +3964,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 									"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-doc-rules",
 									"type": "query"
 								},
 								{
@@ -4512,7 +4512,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 									"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-app-rules",
 									"type": "query"
 								}
 							],
@@ -4535,7 +4535,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 									"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-app-rules",
 									"type": "query"
 								}
 							],
@@ -4595,7 +4595,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 									"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-app-rules",
 									"type": "query"
 								}
 							],
@@ -4618,7 +4618,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 									"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-app-rules",
 									"type": "query"
 								}
 							],
@@ -4683,7 +4683,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 									"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-app-rules",
 									"type": "query"
 								}
 							],
@@ -4706,7 +4706,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 									"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-app-rules",
 									"type": "query"
 								}
 							],
@@ -4721,7 +4721,7 @@
 					],
 					"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 					"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-					"ns": "",
+					"ns": "clara.explorer.test.rules.loan-app-rules",
 					"type": "query"
 				}
 			],
@@ -4768,7 +4768,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 									"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-app-rules",
 									"type": "query"
 								}
 							],
@@ -4791,7 +4791,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 									"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-app-rules",
 									"type": "query"
 								}
 							],
@@ -4853,7 +4853,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 									"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-app-rules",
 									"type": "query"
 								}
 							],
@@ -4876,7 +4876,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 									"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-app-rules",
 									"type": "query"
 								}
 							],
@@ -4936,7 +4936,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 									"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-app-rules",
 									"type": "query"
 								}
 							],
@@ -4959,7 +4959,7 @@
 								{
 									"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 									"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-									"ns": "",
+									"ns": "clara.explorer.test.rules.loan-app-rules",
 									"type": "query"
 								}
 							],
@@ -4974,7 +4974,7 @@
 					],
 					"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 					"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-					"ns": "",
+					"ns": "clara.explorer.test.rules.loan-app-rules",
 					"type": "query"
 				}
 			],
@@ -6138,7 +6138,7 @@
 				{
 					"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 					"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-					"ns": "",
+					"ns": "clara.explorer.test.rules.loan-doc-rules",
 					"type": "query"
 				}
 			],
@@ -6155,7 +6155,7 @@
 				{
 					"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 					"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-					"ns": "",
+					"ns": "clara.explorer.test.rules.loan-doc-rules",
 					"type": "query"
 				},
 				{
@@ -6383,7 +6383,7 @@
 				{
 					"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 					"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-					"ns": "",
+					"ns": "clara.explorer.test.rules.loan-app-rules",
 					"type": "query"
 				}
 			],
@@ -6406,7 +6406,7 @@
 				{
 					"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 					"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-					"ns": "",
+					"ns": "clara.explorer.test.rules.loan-app-rules",
 					"type": "query"
 				}
 			],
@@ -6670,7 +6670,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 								"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-app-rules",
 								"type": "query"
 							}
 						],
@@ -6693,7 +6693,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 								"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-app-rules",
 								"type": "query"
 							}
 						],
@@ -6734,7 +6734,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 								"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-doc-rules",
 								"type": "query"
 							}
 						],
@@ -6751,7 +6751,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 								"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-doc-rules",
 								"type": "query"
 							},
 							{
@@ -6875,7 +6875,7 @@
 						{
 							"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 							"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-							"ns": "",
+							"ns": "clara.explorer.test.rules.loan-app-rules",
 							"type": "query"
 						}
 					],
@@ -6898,7 +6898,7 @@
 						{
 							"id": "clara.explorer.test.rules.loan-app-rules-find-app-outcome-hu5hfc7u",
 							"name": "clara.explorer.test.rules.loan-app-rules/find-app-outcome",
-							"ns": "",
+							"ns": "clara.explorer.test.rules.loan-app-rules",
 							"type": "query"
 						}
 					],
@@ -7055,7 +7055,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 								"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-doc-rules",
 								"type": "query"
 							}
 						],
@@ -7072,7 +7072,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 								"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-doc-rules",
 								"type": "query"
 							},
 							{
@@ -7267,7 +7267,7 @@
 						{
 							"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 							"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-							"ns": "",
+							"ns": "clara.explorer.test.rules.loan-doc-rules",
 							"type": "query"
 						}
 					],
@@ -7284,7 +7284,7 @@
 						{
 							"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 							"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-							"ns": "",
+							"ns": "clara.explorer.test.rules.loan-doc-rules",
 							"type": "query"
 						},
 						{
@@ -8849,7 +8849,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 								"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-doc-rules",
 								"type": "query"
 							}
 						],
@@ -8866,7 +8866,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 								"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-doc-rules",
 								"type": "query"
 							},
 							{
@@ -8997,7 +8997,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 								"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-doc-rules",
 								"type": "query"
 							}
 						],
@@ -9014,7 +9014,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 								"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-doc-rules",
 								"type": "query"
 							},
 							{
@@ -9141,7 +9141,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 								"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-doc-rules",
 								"type": "query"
 							}
 						],
@@ -9158,7 +9158,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 								"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-doc-rules",
 								"type": "query"
 							},
 							{
@@ -9285,7 +9285,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 								"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-doc-rules",
 								"type": "query"
 							}
 						],
@@ -9302,7 +9302,7 @@
 							{
 								"id": "clara.explorer.test.rules.loan-doc-rules-find-document-check-3e151gkt",
 								"name": "clara.explorer.test.rules.loan-doc-rules/find-document-check",
-								"ns": "",
+								"ns": "clara.explorer.test.rules.loan-doc-rules",
 								"type": "query"
 							},
 							{

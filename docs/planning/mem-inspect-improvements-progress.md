@@ -44,8 +44,13 @@ Status: **done** — all changes landed and verified.
   `:supports-insertions-of` and `:in-results-of` fully supersede it, so there is
   no transitional surface.  The top-level memory-analysis `:used-by` index was
   removed too.
-- Query production deps carry `:ns ""` today (clara-rules `Query` schema has no
-  `:ns-name`).  Preserved so the committed demo data does not churn.
+- Query production deps previously carried `:ns ""` (clara-rules' `Query`
+  schema has no `:ns-name`).  Fixed: `->production-dep` now derives the
+  namespace from the production name via the shared
+  `serialize/production-ns-name-sym` (also delegated to by
+  `core/get-production-ns-name-sym`), so session query deps carry the same
+  `:ns` as the static analysis side.  Demo data churn from this is accepted —
+  correctness over byte-stability.
 - §4.2 "retained" = `->fact-retained-pred`: a fact is kept when held by a
   join/negation node's element memory **or** accepted by no alpha node (presence
   undecidable).  Only facts absent from element memory yet alpha-acceptable are

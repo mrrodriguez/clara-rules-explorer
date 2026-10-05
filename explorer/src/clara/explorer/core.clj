@@ -132,13 +132,8 @@
               empty?))))
 
 (defn- get-production-ns-name-sym
-  [{p-name :name p-ns-name :ns-name}]
-  (or p-ns-name
-      (when-let [derived-ns-str (cond
-                                  (string? p-name) (-> p-name symbol namespace)
-                                  (symbol? p-name) (namespace p-name)
-                                  (keyword? p-name) (namespace p-name))]
-        (symbol derived-ns-str))))
+  [production]
+  (serialize/production-ns-name-sym production))
 
 (defn- production-summary
   "Builds a summary map for a single production (rule or query).

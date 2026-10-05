@@ -88,13 +88,13 @@
 
 (defn- ->production-dep
   "ProductionDep for a rule or query map (see
-   `clara.explorer.server.api/ProductionDep`).  `:ns` is `(str (:ns-name …))`;
-   the underlying clara-rules query schema has no `:ns-name`, so query deps
-   carry `\"\"`."
-  [{p-name :name p-ns-name :ns-name} p-type]
-  {:name p-name
-   :id (serialize/route-id (str p-name))
-   :ns (str p-ns-name)
+   `clara.explorer.server.api/ProductionDep`).  `:ns` is derived via
+   `serialize/production-ns-name-sym`, which falls back to the production's
+   fully-qualified `:name` when `:ns-name` is absent (queries)."
+  [production p-type]
+  {:name (:name production)
+   :id   (-> production :name str serialize/route-id)
+   :ns   (-> production serialize/production-ns-name-sym str)
    :type p-type})
 
 (defn- ->fact-id-dep-pairs->index

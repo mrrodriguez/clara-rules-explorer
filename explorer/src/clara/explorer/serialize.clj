@@ -94,6 +94,19 @@
    `clara.explorer.server.api/ProductionDep` entries across an analysis build."
   (memoize route-id*))
 
+(defn production-ns-name-sym
+  "The namespace symbol owning a production (rule or query).  Uses `:ns-name`
+   when present; otherwise derives it from the fully-qualified `:name`.
+   clara-rules' `Query` schema has no `:ns-name`, so queries rely on the name
+   derivation."
+  [{p-name :name p-ns-name :ns-name}]
+  (or p-ns-name
+      (when-let [derived-ns-str (cond
+                                  (string? p-name) (-> p-name symbol namespace)
+                                  (symbol? p-name) (namespace p-name)
+                                  (keyword? p-name) (namespace p-name))]
+        (symbol derived-ns-str))))
+
 (defn serialize-type-ref
   "Serializes a raw fact type into a `clara.explorer.server.api/TypeReference` map
    for JSON output:
