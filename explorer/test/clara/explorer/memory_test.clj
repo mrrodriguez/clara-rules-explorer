@@ -375,7 +375,7 @@
       (is (some? (get fact-types "clara.explorer.test.rules.loan_app_facts.AllGivenDocuments"))))))
 
 (deftest test-accumulator-input-facts-retained
-  (testing "A root fact read only by an accumulator condition is present, not dropped as retracted (§4.2)"
+  (testing "A root fact read only by an accumulator condition is present, not dropped as retracted"
     (let [session (-> (->test-session)
                       (r/insert (laf/map->Application {:app-id "app-1"})
                                 (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card}))
@@ -595,17 +595,18 @@
       (is (contains? analysis :fact-types)))))
 
 ;; ---------------------------------------------------------------------------
-;; Working-memory relations — §2 fixture, §3.1 / §5 assertions
+;; Working-memory relations — the memory-relations-test-rules fixture
 ;; ---------------------------------------------------------------------------
 
 (def ^:private mrr-type-ns
-  "Class-name namespace prefix for the §2 fixture record types (hyphens in the
-   ns munge to underscores in the record class name)."
+  "Class-name namespace prefix for the memory-relations fixture record types
+   (hyphens in the ns munge to underscores in the record class name)."
   "clara.explorer.test.rules.memory_relations_test_rules.")
 
 (defn- ->memory-relations-session
-  "Builds the §2 fixture session: both applications, the negated/blocking facts,
-   a failed document check, and a review close that retracts app-1's task."
+  "Builds the memory-relations fixture session: both applications, the
+   negated/blocking facts, a failed document check, and a review close that
+   retracts app-1's task."
   []
   (-> (r/mk-session 'clara.explorer.test.rules.memory-relations-test-rules)
       (r/insert (mrr/->Application "app-1" 7)

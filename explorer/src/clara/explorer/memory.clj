@@ -130,8 +130,8 @@
 (defn- ->supports-insertions-of-index
   "`{fact-id [ProductionDep]}` — rules whose activation includes the fact and
    whose recorded logical insertions still contain at least one retained fact
-   (§4.2: an activation whose only insertion was retracted with `retract!`
-   supports nothing).  `fact-retained?` is `->fact-retained-pred`."
+   (an activation whose only insertion was retracted with `retract!` supports
+   nothing).  `fact-retained?` is `->fact-retained-pred`."
   [session get-id production-order-key-fn fact-retained?]
   (let [{:keys [memory rulebase]} (eng/components session)]
     (->fact-id-dep-pairs->index
@@ -325,7 +325,7 @@
 
 (defn- present-facts-wrapped
   "Set of wrapped facts held by a join/negation node's element memory — the
-   facts currently in working memory (§4.2's \"in some alpha memory\")."
+   facts currently in working memory."
   [session]
   (let [{:keys [memory rulebase]} (eng/components session)]
     (into #{}
@@ -347,9 +347,9 @@
 
 (defn- ->fact-retained-pred
   "Returns a predicate: true when a fact is still in working memory — held by
-   element memory (present) or accepted by no alpha node (presence undecidable
-   → kept, §4.2).  False only when absent from element memory yet some alpha
-   node would accept it — i.e. it was retracted."
+   element memory (present) or accepted by no alpha node (presence undecidable,
+   so kept).  False only when absent from element memory yet some alpha node
+   would accept it — i.e. it was retracted."
   [get-alphas-fn present-facts]
   (fn [fact]
     (or (contains? present-facts (platform/fact-id-wrap fact))
@@ -367,7 +367,7 @@
 (defn- filter-retracted-facts
   "Drops from `all-facts` the facts an insertion record still names but that
    are no longer in working memory: an RHS `retract!` removes the fact from
-   alpha memory but leaves the inserting production's record in place (§4.2).
+   alpha memory but leaves the inserting production's record in place.
    Facts not named by any insertion record are kept regardless."
   [all-facts insertion-facts fact-retained?]
   (into []
@@ -377,7 +377,7 @@
         all-facts))
 
 (defn- negation-element-blocks?
-  "True when `element` blocks at least one waiting token at `node` (§3):
+  "True when `element` blocks at least one waiting token at `node`:
    no join bindings → any waiting token; joined on bindings → a token sharing
    the node's join bindings; join filter → a token sharing join bindings for
    which `join-filter-fn` returns bindings."
