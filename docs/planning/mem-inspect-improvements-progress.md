@@ -76,3 +76,17 @@ Status: **in progress** — contract settled, implementation done except demo re
   (§4.3 follow-up, pending).
 - Node relations skip facts the fact table cannot describe (nil / ISystemFact):
   `get-id` returns nil and the relation accumulator drops them.
+- **Vendor removed, new boundary `clara.explorer.memory.inspect`.**  The
+  vendored `clara.explorer.vendor.tools.inspect` was deleted.  A new
+  `clara.explorer.memory.inspect` ns owns working-memory semantics only, keyed
+  by clara-rules' production/query records and fact wrappers, with **no**
+  explorer index info (ProductionDep, route-id, ordering, known-set), so it
+  could move upstream.  Its public surface is the nine functions
+  `clara.explorer.memory` actually consumes — `get-all-facts`,
+  `get-root-facts`, `get-insertions`, `get-rule-matches`, `get-query-matches`,
+  `->insertion-support-pairs`, `->result-support-pairs`, `->node-relation-pairs`,
+  and `match->facts` — plus the `Explanation` record.  Node taxonomy, node
+  memory readers, retention, and token→`Explanation` conversion are private
+  helpers to be promoted if a future caller needs them.  `clara.explorer.memory`
+  now only maps that raw view to the explorer API shape and no longer imports
+  any engine node types.
