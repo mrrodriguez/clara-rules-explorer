@@ -34,6 +34,8 @@ are no ids on disk; the name is the handle.
 
 <root>/_variants/<repo>/          a variant unit, under the one root-level holder
   <axis>=<value>/…/ref=<ref>/     the host's axes, then the checkout ref
+
+<root>/_compose/<name>/           a composition of other units, under the one root-level holder
 ```
 
 A run writes `<root>/<repo>/` only when the host marks its axes canonical
@@ -45,6 +47,11 @@ in `:source :working-tree` as always. `_variants/` is a single root-level
 holder, so a host that keeps variants out of version control ignores one path.
 Segment values percent-encode `%`, `/`, `@`, and `+` (`/` is how git branch
 names survive a level separator).
+
+`_compose/` holds every composition (see `flow/compose-persist!`). Its `<name>`
+is a `/`-joined path the caller picks, opaque to the library: it may hold `=`,
+`@`, and `+` (e.g. `env=dev/refs=a@main+b@main`) because the prefix, not the
+name, says what the unit is. The unit's `:repo` is `_compose/<name>`.
 
 **Start with `rulebase-analysis-digest.edn`.** It is the only artifact meant to
 be read whole: counts, per-namespace rule and query totals, the
@@ -437,10 +444,13 @@ Four namespaces answer that, all under
 - **`registry`** — discovers and reads N units under a root, as a value. A
   directory is a **unit** iff it holds `rules-inspect-manifest.edn`, the one
   artifact every complete set has; its `:repo` is its path relative to the
-  root. The one reserved root-level directory is `_variants/`: a path under it
+  root. Two root-level directories are reserved. A path under `_variants/`
   splits into a repo (segments before the first `<axis>=…` segment) and a
   variant (that segment and everything after), named by the decoded
-  `[axis value]` vector ending in `[:ref …]`. Discovery also compares each
+  `[axis value]` vector ending in `[:ref …]`. A path under `_compose/` is a
+  composition whose `:repo` is the whole path; its name is opaque, and its
+  manifest must carry `:analysis-run :mode :compose` or discovery throws.
+  Discovery also compares each
   variant unit's decoded path with its manifest's `:variant` and reports a
   directory where they differ (a hand rename), via
   `registry/get-variant-mismatches`.
@@ -499,7 +509,7 @@ it is a composition:
 
 (flow/compose-persist!
   {:root "rules-annos"
-   :repo "composed/loan-app-plus-disposition"
+   :name "loan-app-plus-disposition"
    :units [{:repo "loan-app-ruleset"}
            {:repo "loan-disposition-ruleset"}]
    :generated-by "me"})

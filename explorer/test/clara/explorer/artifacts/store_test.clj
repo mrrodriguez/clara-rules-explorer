@@ -91,10 +91,13 @@
 
 (deftest out-dir-repo-validation-test
   (testing "a repo path that cannot round-trip through discovery is refused"
-    (doseq [repo ["a=b" "a/../b" "a//b" "a/./b"]]
+    (doseq [repo ["a=b" "a/../b" "a//b" "a/./b" "_variants/a" "_compose"]]
       (is (thrown? clojure.lang.ExceptionInfo
                    (store/get-out-dir {:root "/r" :repo repo}))
           (str "expected a throw for repo " (pr-str repo)))))
+  (testing "a composition's name may hold `=` and `@`"
+    (is (= "/r/_compose/env=dev/refs=a@b"
+           (store/get-out-dir {:root "/r" :repo "_compose/env=dev/refs=a@b"}))))
   (testing "an explicit :dir wins, so a bad repo beside it is irrelevant"
     (is (= "/tmp/annos" (store/get-out-dir {:dir "/tmp/annos" :repo "a=b"})))))
 

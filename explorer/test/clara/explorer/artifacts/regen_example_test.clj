@@ -115,7 +115,7 @@
         (testing "generation returns the source rulesets and composed unit"
           (is (= (set source-repos)
                  (set (map :repo (:rulesets result)))))
-          (is (= (:repo example/composed-example)
+          (is (= example/composed-example-repo
                  (get-in result [:composed :repo]))))
         (testing "the single-ns disposition ruleset has no memory layer"
           (let [disposition (first (filter #(= "loan-disposition-ruleset" (:repo %))

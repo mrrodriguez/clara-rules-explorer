@@ -708,10 +708,11 @@
 (s/defschema ComposePersistOptions
   "Options for `clara.explorer.artifacts.flow/compose-persist!`.
   `:root` is the registry root the source `:units` are read from, and — absent an
-  explicit `:dir` — the root the composed unit is written under. `:repo` is the
-  composed unit's registry-relative identity (the manifest's `:repo`) and its
-  default output subdir. `:dir` overrides the output location without changing
-  `:repo`'s identity claim, so the two are independent.
+  explicit `:dir` — the root the composed unit is written under. `:name` is the
+  composition's name, a `/`-joined path under `_compose/`; the composed unit's
+  `:repo` (the manifest's `:repo`, and its default output subdir) is
+  `_compose/<name>`. `:dir` overrides the output location without changing that
+  identity claim, so the two are independent.
 
   `:units` is the ordered source selection. `:generated-by` is required by
   `ProvenanceOpts`; `:analysis-run` is merged into the manifest's
@@ -722,7 +723,7 @@
                  (s/optional-key :root))
          ProvenanceOpts
          {:root s/Str
-          :repo s/Str
+          :name s/Str
           :units [UnitRef]
           (s/optional-key :analysis-run) {s/Keyword s/Any}
           (s/optional-key :manifest-fn) ManifestFn}))

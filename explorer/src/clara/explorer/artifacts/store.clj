@@ -160,26 +160,21 @@
   curated overlay over both. See `layout/layer-artifacts`."
   layout/layer-artifacts)
 
-(def variants-subdir
-  "The root-level directory holding every repo's variant units. See
-  `layout/variants-subdir`."
-  layout/variants-subdir)
-
 (def ^:private axis-name-re
   "A host axis name: `[a-z0-9][a-z0-9-]*`. `ref` is reserved and refused below."
   #"[a-z0-9][a-z0-9-]*")
 
 (defn- validate-repo!
   "Refuse a `:repo` path that cannot round-trip through discovery or that would
-  escape the root: a blank segment, a `.` or `..` segment, or an `=` in any
-  segment (discovery reads the first `=` segment as the start of a variant)."
+  escape the root: a blank segment, a `.` or `..` segment, or a path
+  `layout/segments->unit-ref` does not read back as this same repo (an `=` in a
+  mainline segment, or a path under `_variants/`)."
   [repo]
-  (doseq [seg (str/split (str repo) #"/")]
-    (when (or (str/blank? seg)
-              (contains? #{"." ".."} seg)
-              (str/includes? seg "="))
+  (let [segments (str/split (str repo) #"/")]
+    (when (or (some #(or (str/blank? %) (contains? #{"." ".."} %)) segments)
+              (not= {:repo (str repo)} (layout/segments->unit-ref segments)))
       (throw (ex-info (format "Bad repo path: %s" (str repo))
-                      {:repo (str repo) :segment seg})))))
+                      {:repo (str repo)})))))
 
 (defn- validate-variant!
   "Refuse a caller-supplied host `:variant` (no `ref` pair): a non-keyword or

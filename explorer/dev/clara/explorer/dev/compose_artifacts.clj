@@ -6,12 +6,12 @@
 ;; `-m` finds the namespace; :test supplies the `test-resources` registry the
 ;; example reads from:
 ;;   clojure -M:test:dev -m compose-artifacts \
-;;     '{:root "test-resources/rules-annos" :repo "composed/demo" :units [{:repo "loan-app-ruleset"} {:repo "loan-disposition-ruleset"}] :generated-by "me"}'
+;;     '{:root "test-resources/rules-annos" :name "demo" :units [{:repo "loan-app-ruleset"} {:repo "loan-disposition-ruleset"}] :generated-by "me"}'
 ;;
 ;; Single-quoting the map keeps the shell from touching its `"..."`, so it needs
 ;; no escaping. As an alternative to `-m`, the argument may be passed as a
 ;; literal map via `-e`, alongside an inline EDN string or an .edn file path:
-;;   clojure -M:test:dev -e '(compose-artifacts/-main {:root "test-resources/rules-annos" :repo "composed/demo" :units [{:repo "loan-app-ruleset"} {:repo "loan-disposition-ruleset"}] :generated-by "me"})'
+;;   clojure -M:test:dev -e '(compose-artifacts/-main {:root "test-resources/rules-annos" :name "demo" :units [{:repo "loan-app-ruleset"} {:repo "loan-disposition-ruleset"}] :generated-by "me"})'
 ;;
 ;; The function itself is clara.explorer.artifacts.flow/compose-persist!,
 ;; so this namespace only reads the argument and reports what was written.
@@ -46,7 +46,7 @@
   [& args]
   (when (empty? args)
     (println "usage: compose-artifacts <edn-opts-map | edn-string | edn-file>")
-    (println "  keys: :root :repo :units :generated-by [:dir] [:analysis-run]")
+    (println "  keys: :root :name :units :generated-by [:dir] [:analysis-run]")
     (System/exit 1))
   (let [{:keys [dir layers rule-count manifest]}
         (flow/compose-persist! (read-opts (first args)))]

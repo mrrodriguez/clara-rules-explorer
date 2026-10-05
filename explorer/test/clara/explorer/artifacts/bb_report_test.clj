@@ -262,7 +262,7 @@
              (str report-script))
     (let [opts (assoc *artifact-opts*
                       :root (registry-root)
-                      :repo "composed/demo"
+                      :name "demo"
                       :units [{:repo "loan-app-ruleset"}
                               {:repo "loan-disposition-ruleset"}])
           _ (ann/compose-persist! opts)
@@ -378,7 +378,7 @@
           variant (str (io/file root "_variants" "loan-disposition-ruleset"
                                 "ref=feature%2Fnew-tax"))
           app (str (io/file root "loan-app-ruleset"))
-          composed (str (io/file root "composed" "loan-app-plus-disposition"))
+          composed (str (io/file root "_compose" "loan-app-plus-disposition"))
           run (fn [& args]
                 (let [{:keys [exit out err]} (apply shell/sh "bb" (str report-script) args)]
                   (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))

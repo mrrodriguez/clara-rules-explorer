@@ -32,6 +32,7 @@
    [clara.explorer.annotations.merge :as ann.merge]
    [clara.explorer.artifacts.compose :as compose]
    [clara.explorer.artifacts.digest :as digest]
+   [clara.explorer.artifacts.layout :as layout]
    [clara.explorer.artifacts.manifest :as manifest]
    [clara.explorer.artifacts.registry :as registry]
    [clara.explorer.artifacts.schema :as schema]
@@ -437,12 +438,17 @@
    context's `:sources`, e.g. to copy a field of each onto its `:units` entry.
 
    Output placement follows `ArtifactOpts`: `:dir` when given, else
-   `<:root>/<:repo>`. `:root` is the source registry root (and default output
-   root); `:repo` is the composed unit's registry-relative identity and default
+   `<:root>/_compose/<:name>`. `:root` is the source registry root (and default
+   output root); `:name` is the composition's name, which `layout/->compose-repo`
+   turns into the composed unit's registry-relative identity and default
    subdir."
   [{:keys [root units analysis-run manifest-fn]
-    :as opts} :- schema/ComposePersistOptions]
-  (let [reg (registry/->registry {:root root :units units})
+    compose-name :name
+    :as options} :- schema/ComposePersistOptions]
+  (let [opts (-> options
+                 (dissoc :name)
+                 (assoc :repo (layout/->compose-repo compose-name)))
+        reg (registry/->registry {:root root :units units})
         sel (compose/->selection reg units)
         analysis (compose/->composed-analysis-from-selection sel units)
         role-layers (compose/->standard-role-layers reg units)
