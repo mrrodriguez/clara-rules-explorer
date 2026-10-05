@@ -113,9 +113,9 @@ async function scrapeSession(ruleIds, queryIds) {
 	for (const detail of Object.values(factTypeDetails)) {
 		collectFactIds(detail['inserted-from']);
 		collectFactIds(detail['supports-insertions-of']);
-		collectFactIds(detail['in-results-of']);
+		collectFactIds(detail['supports-results-of']);
 		collectFactIds(detail['matches-condition-of']);
-		collectFactIds(detail['blocks']);
+		collectFactIds(detail['blocks-condition-of']);
 		collectFactIds(detail['blocking-candidate-of']);
 	}
 

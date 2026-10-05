@@ -311,9 +311,9 @@ export interface SessionFact {
 	'is-root'?: boolean;
 	'inserted-from'?: ProductionReference[];
 	'supports-insertions-of'?: ProductionReference[];
-	'in-results-of'?: ProductionReference[];
+	'supports-results-of'?: ProductionReference[];
 	'matches-condition-of'?: ProductionReference[];
-	blocks?: ProductionReference[];
+	'blocks-condition-of'?: ProductionReference[];
 	'blocking-candidate-of'?: ProductionReference[];
 }
 
@@ -333,9 +333,9 @@ export interface SessionFactTypeDetail {
 	ids: number[];
 	'inserted-from': SessionFactGroup[];
 	'supports-insertions-of': SessionFactGroup[];
-	'in-results-of': SessionFactGroup[];
+	'supports-results-of': SessionFactGroup[];
 	'matches-condition-of': SessionFactGroup[];
-	blocks: SessionFactGroup[];
+	'blocks-condition-of': SessionFactGroup[];
 	'blocking-candidate-of': SessionFactGroup[];
 }
 

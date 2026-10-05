@@ -115,8 +115,8 @@
                                             vec)))
                   {})))
 
-(defn- ->in-results-of-index
-  "`{fact-id [ProductionDep]}` — queries whose current results include the fact."
+(defn- ->supports-results-of-index
+  "`{fact-id [ProductionDep]}` — queries whose current results the fact supports."
   [query-matches get-id production-order-key-fn]
   (->fact-id-dep-pairs->index
    (for [[query explanations] query-matches
@@ -185,9 +185,9 @@
            get-fact-id
            origin-map
            supports-insertions-of-index
-           in-results-of-index
+           supports-results-of-index
            matches-condition-of-index
-           blocks-index
+           blocks-condition-of-index
            blocking-candidate-of-index
            known-set
            prune-fn]}]
@@ -228,9 +228,9 @@
                                   :is-root (boolean (some #(identical? fact %) root-facts))
                                   :inserted-from (get origin-map id [])
                                   :supports-insertions-of (get supports-insertions-of-index id [])
-                                  :in-results-of (get in-results-of-index id [])
+                                  :supports-results-of (get supports-results-of-index id [])
                                   :matches-condition-of (get matches-condition-of-index id [])
-                                  :blocks (get blocks-index id [])
+                                  :blocks-condition-of (get blocks-condition-of-index id [])
                                   :blocking-candidate-of (get blocking-candidate-of-index id [])}])))
                     sorted-facts)]
     {:facts facts
@@ -269,9 +269,9 @@
    the fact's own `role-key` vector."
   [:inserted-from
    :supports-insertions-of
-   :in-results-of
+   :supports-results-of
    :matches-condition-of
-   :blocks
+   :blocks-condition-of
    :blocking-candidate-of])
 
 (defn- ->fact-type-index
@@ -355,12 +355,26 @@
     (or (contains? present-facts (platform/fact-id-wrap fact))
         (not (alpha-accepts-fact? get-alphas-fn fact)))))
 
+(defn- insertion-record-facts-wrapped
+  "Set of wrapped facts named by an insertion record (`inspect`'s `:insertions`)."
+  [insertions]
+  (into #{}
+        (map platform/fact-id-wrap)
+        (for [[_rule rule-insertions] insertions
+              {:keys [fact]} rule-insertions]
+          fact)))
+
 (defn- filter-retracted-facts
   "Drops from `all-facts` the facts an insertion record still names but that
    are no longer in working memory: an RHS `retract!` removes the fact from
-   alpha memory but leaves the inserting production's record in place (§4.2)."
-  [all-facts fact-retained?]
-  (into [] (filter fact-retained?) all-facts))
+   alpha memory but leaves the inserting production's record in place (§4.2).
+   Facts not named by any insertion record are kept regardless."
+  [all-facts insertion-facts fact-retained?]
+  (into []
+        (remove (fn [fact]
+                  (and (contains? insertion-facts (platform/fact-id-wrap fact))
+                       (not (fact-retained? fact)))))
+        all-facts))
 
 (defn- negation-element-blocks?
   "True when `element` blocks at least one waiting token at `node` (§3):
@@ -378,10 +392,11 @@
            (get token-groups join-bindings)))))
 
 (defn- ->node-relation-pairs
-  "Walks `:id-to-node` and returns `{:matches-condition-of [pairs] :blocks [pairs]
-   :blocking-candidate-of [pairs]}` — each pair `[fact-id dep]`.  Join-node
-   elements contribute to `:matches-condition-of`; negation-node elements
-   contribute to `:blocks` or `:blocking-candidate-of`."
+  "Walks `:id-to-node` and returns `{:matches-condition-of [pairs]
+   :blocks-condition-of [pairs] :blocking-candidate-of [pairs]}` — each pair
+   `[fact-id dep]`.  Join-node elements contribute to `:matches-condition-of`;
+   negation-node elements contribute to `:blocks-condition-of` or
+   `:blocking-candidate-of`."
   [id-to-node memory get-id]
   (reduce
    (fn [acc [_id node]]
@@ -412,7 +427,7 @@
                                                          env
                                                          element
                                                          token-groups)
-                             :blocks
+                             :blocks-condition-of
                              :blocking-candidate-of)]
               (if (nil? fact-id)
                 acc
@@ -422,19 +437,20 @@
 
        :else acc))
    {:matches-condition-of []
-    :blocks []
+    :blocks-condition-of []
     :blocking-candidate-of []}
    id-to-node))
 
 (defn- ->node-relation-maps
-  "`{:matches-condition-of {fact-id [dep]} :blocks … :blocking-candidate-of …}`
-   from `->node-relation-pairs`, deps distinct and production-order sorted."
+  "`{:matches-condition-of {fact-id [dep]} :blocks-condition-of …
+   :blocking-candidate-of …}` from `->node-relation-pairs`, deps distinct and
+   production-order sorted."
   [id-to-node memory get-id production-order-key-fn]
   (let [pairs (->node-relation-pairs id-to-node memory get-id)]
     {:matches-condition-of (->fact-id-dep-pairs->index (:matches-condition-of pairs)
                                                        production-order-key-fn)
-     :blocks (->fact-id-dep-pairs->index (:blocks pairs)
-                                         production-order-key-fn)
+     :blocks-condition-of (->fact-id-dep-pairs->index (:blocks-condition-of pairs)
+                                                      production-order-key-fn)
      :blocking-candidate-of (->fact-id-dep-pairs->index (:blocking-candidate-of pairs)
                                                         production-order-key-fn)}))
 
@@ -567,7 +583,9 @@
 
          present-facts (present-facts-wrapped session)
          fact-retained? (->fact-retained-pred get-alphas-fn present-facts)
+         insertion-facts (insertion-record-facts-wrapped insertions)
          all-facts (filter-retracted-facts (:all-facts inspection)
+                                           insertion-facts
                                            fact-retained?)
          all-facts-wrapped (->wrapped-fact-set all-facts)
          prune-fn (serialize/memoizing-prune-fns)
@@ -579,9 +597,9 @@
                                                                       get-fact-id
                                                                       production-order-key-fn
                                                                       fact-retained?)
-         in-results-of-index (->in-results-of-index query-matches
-                                                    get-fact-id
-                                                    production-order-key-fn)
+         supports-results-of-index (->supports-results-of-index query-matches
+                                                                get-fact-id
+                                                                production-order-key-fn)
          node-relations (->node-relation-maps id-to-node
                                               memory
                                               get-fact-id
@@ -596,9 +614,9 @@
                                    :get-fact-id get-fact-id
                                    :origin-map origin-map
                                    :supports-insertions-of-index supports-insertions-of-index
-                                   :in-results-of-index in-results-of-index
+                                   :supports-results-of-index supports-results-of-index
                                    :matches-condition-of-index (:matches-condition-of node-relations)
-                                   :blocks-index (:blocks node-relations)
+                                   :blocks-condition-of-index (:blocks-condition-of node-relations)
                                    :blocking-candidate-of-index (:blocking-candidate-of node-relations)
                                    :known-set known-set
                                    :prune-fn prune-fn})

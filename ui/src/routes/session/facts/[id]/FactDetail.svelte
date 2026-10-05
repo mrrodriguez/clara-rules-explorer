@@ -18,9 +18,9 @@
 	type RelationKey =
 		| 'inserted-from'
 		| 'supports-insertions-of'
-		| 'in-results-of'
+		| 'supports-results-of'
 		| 'matches-condition-of'
-		| 'blocks'
+		| 'blocks-condition-of'
 		| 'blocking-candidate-of';
 
 	interface RelationCategory {
@@ -44,10 +44,10 @@
 			emptyMessage: 'This fact supports no rule insertions.'
 		},
 		{
-			title: 'In Results Of',
+			title: 'Supports Results Of',
 			icon: 'bi-list-check',
-			key: 'in-results-of',
-			emptyMessage: 'This fact is in no query results.'
+			key: 'supports-results-of',
+			emptyMessage: 'This fact supports no query results.'
 		},
 		{
 			title: 'Matches Condition Of',
@@ -56,10 +56,10 @@
 			emptyMessage: 'This fact passes no positive condition.'
 		},
 		{
-			title: 'Blocks',
+			title: 'Blocks Condition Of',
 			icon: 'bi-x-octagon',
-			key: 'blocks',
-			emptyMessage: 'This fact blocks no negated condition.'
+			key: 'blocks-condition-of',
+			emptyMessage: 'This fact blocks the condition of nothing.'
 		},
 		{
 			title: 'Blocking Candidate Of',

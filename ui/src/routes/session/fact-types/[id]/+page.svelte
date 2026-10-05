@@ -33,9 +33,9 @@
 					},
 					{
 						icon: 'bi-list-check',
-						label: 'In Results Of',
-						groups: detail['in-results-of'] || [],
-						emptyMessage: 'These instances are in no query results.'
+						label: 'Supports Results Of',
+						groups: detail['supports-results-of'] || [],
+						emptyMessage: 'These instances support no query results.'
 					},
 					{
 						icon: 'bi-filter-circle',
@@ -45,9 +45,9 @@
 					},
 					{
 						icon: 'bi-x-octagon',
-						label: 'Blocks',
-						groups: detail['blocks'] || [],
-						emptyMessage: 'These instances block no negated condition.'
+						label: 'Blocks Condition Of',
+						groups: detail['blocks-condition-of'] || [],
+						emptyMessage: 'These instances block the condition of nothing.'
 					},
 					{
 						icon: 'bi-dash-circle',

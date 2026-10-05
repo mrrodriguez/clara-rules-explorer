@@ -374,6 +374,18 @@
       (is (nil? (get fact-types "java.lang.Boolean")) "Boolean should not be in fact types")
       (is (some? (get fact-types "clara.explorer.test.rules.loan_app_facts.AllGivenDocuments"))))))
 
+(deftest test-accumulator-input-facts-retained
+  (testing "A root fact read only by an accumulator condition is present, not dropped as retracted (§4.2)"
+    (let [session (-> (->test-session)
+                      (r/insert (laf/map->Application {:app-id "app-1"})
+                                (laf/map->RequiredDocument {:app-id "app-1" :doc-type :id-card}))
+                      (r/fire-rules))
+          analysis (memory/->memory-analysis session)
+          fact-type-names (set (map (comp :name :type) (vals (:facts analysis))))]
+      (is (contains? fact-type-names "clara.explorer.test.rules.loan_app_facts.RequiredDocument")
+          "RequiredDocument (accumulator :from input) must be retained in :facts")
+      (is (contains? fact-type-names "clara.explorer.test.rules.loan_app_facts.Application")))))
+
 (deftest test-session-id-indexes
   (testing "Memory-analyses expose id→name reverse indexes that resolve every id"
     (let [app (laf/map->Application {:app-id "app-1"})
@@ -668,13 +680,13 @@
         (->memory-relations-facts)]
     (testing "ManualHold blocks ready-for-review and the hold query"
       (is (= ["ready-for-review" "applications-without-hold"]
-             (fact-relation-names analysis manual-hold :blocks))))
+             (fact-relation-names analysis manual-hold :blocks-condition-of))))
     (testing "MissingDocument blocks only its own application's rule"
       (is (= ["documents-complete"]
-             (fact-relation-names analysis missing-document-1 :blocks))))
+             (fact-relation-names analysis missing-document-1 :blocks-condition-of))))
     (testing "LoanOffer over the limit blocks; under the limit is only a candidate"
       (is (= ["offers-within-limit"]
-             (fact-relation-names analysis loan-offer-9 :blocks)))
+             (fact-relation-names analysis loan-offer-9 :blocks-condition-of)))
       (is (= ["offers-within-limit"]
              (fact-relation-names analysis loan-offer-5 :blocking-candidate-of))))))
 
@@ -689,8 +701,8 @@
 (deftest test-memory-relations-blocks-disjoint
   (let [{:keys [analysis]} (->memory-relations-facts)]
     (doseq [[_id fact] (:facts analysis)]
-      (is (empty? (filter (set (:blocks fact)) (:blocking-candidate-of fact)))
-          "blocks and blocking-candidate-of are disjoint for every fact"))))
+      (is (empty? (filter (set (:blocks-condition-of fact)) (:blocking-candidate-of fact)))
+          "blocks-condition-of and blocking-candidate-of are disjoint for every fact"))))
 
 (deftest test-memory-relations-retracted-fact-absent
   (let [{:keys [analysis]} (->memory-relations-facts)
@@ -709,8 +721,8 @@
       (doseq [[_id fact] (:facts analysis)]
         (is (every? #(= "rule" (:type %)) (:supports-insertions-of fact))
             "supports-insertions-of carries only rules")
-        (is (every? #(= "query" (:type %)) (:in-results-of fact))
-            "in-results-of carries only queries")
-        (is (empty? (:blocks fact)) "no negation blocks a clean session")
+        (is (every? #(= "query" (:type %)) (:supports-results-of fact))
+            "supports-results-of carries only queries")
+        (is (empty? (:blocks-condition-of fact)) "no negation blocks a clean session")
         (is (empty? (:blocking-candidate-of fact))
             "no negation candidates in a clean session")))))

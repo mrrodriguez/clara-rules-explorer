@@ -231,9 +231,9 @@
    :is-root                 s/Bool
    :inserted-from           [ProductionDep]
    :supports-insertions-of  [ProductionDep]
-   :in-results-of           [ProductionDep]
+   :supports-results-of     [ProductionDep]
    :matches-condition-of    [ProductionDep]
-   :blocks                  [ProductionDep]
+   :blocks-condition-of     [ProductionDep]
    :blocking-candidate-of   [ProductionDep]})
 
 (s/defschema FactMatch
@@ -266,9 +266,9 @@
    :count                   s/Int
    :inserted-from           [FactTypeRoleGroup]
    :supports-insertions-of  [FactTypeRoleGroup]
-   :in-results-of           [FactTypeRoleGroup]
+   :supports-results-of     [FactTypeRoleGroup]
    :matches-condition-of    [FactTypeRoleGroup]
-   :blocks                  [FactTypeRoleGroup]
+   :blocks-condition-of     [FactTypeRoleGroup]
    :blocking-candidate-of   [FactTypeRoleGroup]
    :ids                     [s/Int]})
 

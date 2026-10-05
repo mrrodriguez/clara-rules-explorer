@@ -737,9 +737,9 @@ All instances of a specific fact type, grouped by origin and usage.
 | `ids` | int[] | All fact IDs of this type |
 | `inserted-from` | object[] | Facts grouped by their origin rule (or `"Root Facts (External)"`); each group carries `name`/`id`/`type` |
 | `supports-insertions-of` | object[] | Facts grouped by the rule whose activation includes them and still has a retained logical insertion; each group carries `name`/`id`/`type`/`ns` |
-| `in-results-of` | object[] | Facts grouped by the query whose current results include them; each group carries `name`/`id`/`type`/`ns` |
+| `supports-results-of` | object[] | Facts grouped by the query whose current results the fact supports; each group carries `name`/`id`/`type`/`ns` |
 | `matches-condition-of` | object[] | Facts grouped by the production whose positive condition they pass; each group carries `name`/`id`/`type`/`ns` |
-| `blocks` | object[] | Facts grouped by the production whose negated condition they satisfy and block; each group carries `name`/`id`/`type`/`ns` |
+| `blocks-condition-of` | object[] | Facts grouped by the production whose negated condition they satisfy and block; each group carries `name`/`id`/`type`/`ns` |
 | `blocking-candidate-of` | object[] | Facts grouped by the production whose negated condition they satisfy without currently blocking; each group carries `name`/`id`/`type`/`ns` |
 
 **Response** `404`: `{ "error": "Fact type not found in session" }`
@@ -764,11 +764,11 @@ A single fact instance with its lineage and usage.
   "supports-insertions-of": [
     { "name": "my.ns/check-app", "id": "my.ns.check-app-h8i9j1k2", "ns": "my.ns", "type": "rule" }
   ],
-  "in-results-of": [],
+  "supports-results-of": [],
   "matches-condition-of": [
     { "name": "my.ns/check-app", "id": "my.ns.check-app-h8i9j1k2", "ns": "my.ns", "type": "rule" }
   ],
-  "blocks": [],
+  "blocks-condition-of": [],
   "blocking-candidate-of": []
 }
 ```
@@ -782,9 +782,9 @@ A single fact instance with its lineage and usage.
 | `is-root` | boolean | True if inserted externally (not by a rule) |
 | `inserted-from` | ProductionDep[] | Rules that inserted this fact |
 | `supports-insertions-of` | ProductionDep[] | Rules whose activation includes this fact and still has a retained logical insertion (see [Working-memory relations](#working-memory-relations)) |
-| `in-results-of` | ProductionDep[] | Queries whose current results include this fact |
+| `supports-results-of` | ProductionDep[] | Queries whose current results this fact supports |
 | `matches-condition-of` | ProductionDep[] | Rules/queries whose positive condition this fact passes (condition-local, see limits) |
-| `blocks` | ProductionDep[] | Rules/queries whose negated condition this fact satisfies and whose partial match it blocks |
+| `blocks-condition-of` | ProductionDep[] | Rules/queries whose negated condition this fact satisfies and whose partial match it blocks |
 | `blocking-candidate-of` | ProductionDep[] | Rules/queries whose negated condition this fact satisfies but whose partial match it does not currently block |
 
 **Response** `404`: `{ "error": "Fact not found in session" }`
@@ -803,13 +803,13 @@ productions".  The fact-type detail groups instances by the same relations.
 | Key | A fact is in it when | Productions |
 |---|---|---|
 | `supports-insertions-of` | it is in an activation whose recorded logical insertions include one still in working memory | rules |
-| `in-results-of` | it is in a current result | queries |
+| `supports-results-of` | it supports a current result | queries |
 | `matches-condition-of` | it passes a positive condition's own constraints, the ones that need no other condition's bindings | rules, queries |
-| `blocks` | it matches a negated condition **and** blocks a partial match waiting at that node | rules, queries |
+| `blocks-condition-of` | it matches a negated condition **and** blocks a partial match waiting at that node | rules, queries |
 | `blocking-candidate-of` | it matches a negated condition, but blocks no partial match there now | rules, queries |
 
 **Why two keys.**  For a rule the relation is "supports its insertions"; for a
-query, which has no RHS, it is "is in its results".  Those are different
+query, which has no RHS, it is "supports its results".  Those are different
 claims, so they have different names.
 
 **How `retract!` fits in.**  An RHS `retract!` is not truth-maintained and Clara
@@ -819,7 +819,7 @@ another activation inserted leaves that activation's insertion record pointing
 at a gone fact; such a record is dropped from `supports-insertions-of` and the
 retracted fact is dropped from the fact list.
 
-**`:blocks` versus `:blocking-candidate-of`.**  Both are computed from memory a
+**`:blocks-condition-of` versus `:blocking-candidate-of`.**  Both are computed from memory a
 restored session already has — Clara keeps a negation node's waiting tokens
 even while blocked, keyed by the same join bindings as its elements.  A fact
 blocks a token when it shares the node's join bindings (and, for a join-filter
@@ -916,7 +916,7 @@ Activity view for a query.
         "data": { "app-id": "app-1", "status": "approved" },
         "is-root": false,
         "inserted-from": [],
-        "in-results-of": [ { "name": "my.ns/find-app-outcome", "id": "...", "ns": "my.ns", "type": "query" } ]
+        "supports-results-of": [ { "name": "my.ns/find-app-outcome", "id": "...", "ns": "my.ns", "type": "query" } ]
       },
       "bindings": [
         { "?outcome": { ... }, "?app-id": "app-1" }
