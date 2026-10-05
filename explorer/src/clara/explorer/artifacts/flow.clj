@@ -427,7 +427,9 @@
 
    The manifest records the composition in its own terms: each
    `:analysis-run :units` entry carries the source's `:sha` / `:created` (the
-   state that was composed), `:coverage` records the `:unknown-namespaces` the selection named but no unit covered (an open map a host can add to via `:manifest-fn`), and `:staleness` names the
+   state that was composed), `:coverage` records the `:unknown-namespaces` the
+   selection named but no unit covered (an open map a host can add to via
+   `:manifest-fn`), and `:staleness` names the
    `review-when-any-source-sha-drifts` policy with the per-source shas, so a
    reader holding only the directory can answer \"is this current?\" — a
    composed unit is stale as soon as any of its N independently-moving sources

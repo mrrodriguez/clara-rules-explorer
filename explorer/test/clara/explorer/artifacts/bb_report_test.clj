@@ -402,6 +402,11 @@
       (testing "--production prints one production's before and after"
         (let [out (run app "diff" composed "--production" "digest-doc-meta")]
           (is (str/includes? out "digest-doc-meta-rule (unchanged)"))))
+      (testing "--rule is rejected as an unknown flag"
+        (let [{:keys [exit out err]}
+              (shell/sh "bb" (str report-script) app "diff" composed "--rule" "digest-doc-meta")]
+          (is (not (zero? exit)))
+          (is (str/includes? (str out err) "Unknown option: --rule"))))
       (testing "a missing after dir fails loudly"
         (let [{:keys [exit out err]}
               (shell/sh "bb" (str report-script) app "diff" (str (io/file root "nope")))]

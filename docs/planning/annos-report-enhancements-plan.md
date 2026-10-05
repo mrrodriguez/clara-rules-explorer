@@ -1,6 +1,11 @@
 # `annotations_report.bb` enhancements
 
-Status: **proposal**. Scope: `explorer/bin/annotations_report.bb`, the bb-loadable artifact
+> **Superseded.** See [`annos-report-changes-plan.md`](annos-report-changes-plan.md):
+> it replaces Part A (`digest`) and removes federation; Part B (`production`)
+> landed and stands. The `digest` / `federate` / `rule`-flag material below is
+> history, not current.
+
+Status: **proposal** (superseded). Scope: `explorer/bin/annotations_report.bb`, the bb-loadable artifact
 namespaces it requires, `test/clara/explorer/artifacts/bb_report_test.clj`, and the
 `annotations_report.bb` section of `explorer/docs/persisted-artifacts.md`. No artifact change.
 

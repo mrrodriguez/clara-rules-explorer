@@ -705,13 +705,6 @@
    (s/optional-key :variant) Variant
    (s/optional-key :namespaces) [(s/cond-pre s/Str s/Symbol)]})
 
-(s/defschema CoverageBlock
-  "The manifest's `:coverage` block for a composed unit: `:unknown-namespaces`
-  are the namespaces a unit's `:namespaces` filter named that no selected unit
-  covers. Open — a host's own coverage gaps ride alongside the computed keys."
-  {:unknown-namespaces [s/Str]
-   s/Keyword s/Any})
-
 (s/defschema ComposePersistOptions
   "Options for `clara.explorer.artifacts.flow/compose-persist!`.
   `:root` is the registry root the source `:units` are read from, and — absent an

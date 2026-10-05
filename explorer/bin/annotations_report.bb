@@ -816,59 +816,62 @@
 (defn- units-report
   "`units`: one line per source unit (key, sha, production count), then the
   manifest's :coverage one line per key. Composed units only."
-  [dir index manifest opts]
-  (when (not= :compose (get-in manifest [:analysis-run :mode]))
-    (die "units needs a composed unit — this unit's :analysis-run :mode is"
-         (pr-str (get-in manifest [:analysis-run :mode]))))
-  (let [units (get-in manifest [:analysis-run :units])
-        counts (frequencies (keep :unit (concat (vals (:rules index)) (vals (:queries index)))))
-        summary (mapv (fn [u]
-                        (let [k (unit-key-of u)]
-                          {:unit k :sha (:sha u) :productions (get counts k 0)}))
-                      units)
-        coverage (:coverage manifest)]
-    (if (:edn opts)
-      (pprint/pprint {:units summary :coverage coverage})
-      (do
-        (doseq [{:keys [unit sha productions]} summary]
-          (println (format "%s  %s  %d productions" unit (or sha "") productions)))
-        (println)
-        (if (every? (comp empty? val) coverage)
-          (println "every namespace in scope is covered")
-          (doseq [[k v] (sort-by key coverage)]
-            (println (str (name k) ": " (if (coll? v) (str/join ", " v) (str v))))))))))
+  [dir index manifest-delay opts]
+  (let [manifest @manifest-delay]
+    (when (not= :compose (get-in manifest [:analysis-run :mode]))
+      (die "units needs a composed unit — this unit's :analysis-run :mode is"
+           (pr-str (get-in manifest [:analysis-run :mode]))))
+    (let [units (get-in manifest [:analysis-run :units])
+          counts (frequencies (keep :unit (concat (vals (:rules index)) (vals (:queries index)))))
+          summary (mapv (fn [u]
+                          (let [k (unit-key-of u)]
+                            {:unit k :sha (:sha u) :productions (get counts k 0)}))
+                        units)
+          coverage (:coverage manifest)]
+      (if (:edn opts)
+        (pprint/pprint {:units summary :coverage coverage})
+        (do
+          (doseq [{:keys [unit sha productions]} summary]
+            (println (format "%s  %s  %d productions" unit (or sha "") productions)))
+          (println)
+          (if (every? (comp empty? val) coverage)
+            (println "every namespace in scope is covered")
+            (doseq [[k v] (sort-by key coverage)]
+              (println (str (name k) ": " (if (coll? v) (str/join ", " v) (str v)))))))))))
 
 (defn- unit-edges-report
   "`unit-edges [<unit>]`: cross-unit producer->consumer edges. Composed units
   only; with `<unit>`, only that unit's edges in `feeds` / `fed by` groups."
-  [dir index dep-graph fact-types manifest opts arg]
-  (when (not= :compose (get-in manifest [:analysis-run :mode]))
-    (die "unit-edges needs a composed unit — this unit's :analysis-run :mode is"
-         (pr-str (get-in manifest [:analysis-run :mode]))))
-  (let [edges (cross-unit/unit-edges index dep-graph fact-types)
-        selected (when arg (resolve-unit (unit-keys-of manifest) arg))]
-    (cond
-      (:edn opts) (pprint/pprint (if selected
-                                   {:feeds (into (sorted-map)
-                                                 (filter (fn [[[p _] _]] (= p selected)))
-                                                 edges)
-                                    :fed-by (into (sorted-map)
-                                                  (filter (fn [[[_ c] _]] (= c selected)))
-                                                  edges)}
-                                   edges))
-      selected (do
-                 (println "feeds:")
-                 (print-unit-edges (into (sorted-map) (filter (fn [[[p _] _]] (= p selected))) edges))
-                 (println "fed by:")
-                 (print-unit-edges (into (sorted-map) (filter (fn [[[_ c] _]] (= c selected))) edges)))
-      :else (print-unit-edges edges))))
+  [dir index dep-graph fact-types manifest-delay opts arg]
+  (let [manifest @manifest-delay]
+    (when (not= :compose (get-in manifest [:analysis-run :mode]))
+      (die "unit-edges needs a composed unit — this unit's :analysis-run :mode is"
+           (pr-str (get-in manifest [:analysis-run :mode]))))
+    (let [edges (cross-unit/unit-edges index dep-graph fact-types)
+          selected (when arg (resolve-unit (unit-keys-of manifest) arg))]
+      (cond
+        (:edn opts) (pprint/pprint (if selected
+                                     {:feeds (into (sorted-map)
+                                                   (filter (fn [[[p _] _]] (= p selected)))
+                                                   edges)
+                                      :fed-by (into (sorted-map)
+                                                    (filter (fn [[[_ c] _]] (= c selected)))
+                                                    edges)}
+                                     edges))
+        selected (do
+                   (println "feeds:")
+                   (print-unit-edges (into (sorted-map) (filter (fn [[[p _] _]] (= p selected))) edges))
+                   (println "fed by:")
+                   (print-unit-edges (into (sorted-map) (filter (fn [[[_ c] _]] (= c selected))) edges)))
+        :else (print-unit-edges edges)))))
 
 (defn- entry-points-report
   "`entry-points [<unit>]`: types some production matches that no rule in the
-  unit produces, grouped by consuming unit with a consumer count."
-  [dir index fact-types manifest opts arg]
+  unit produces, grouped by consuming unit with a consumer count. The manifest
+  delay is forced only when a `<unit>` arg needs resolving."
+  [dir index fact-types manifest-delay opts arg]
   (let [eps (cross-unit/entry-points index fact-types)
-        selected (when arg (resolve-unit (unit-keys-of @manifest) arg))
+        selected (when arg (resolve-unit (unit-keys-of @manifest-delay) arg))
         view (cond
                selected {selected (get eps selected {})}
                (and (contains? eps nil) (= 1 (count eps))) (get eps nil)
@@ -961,7 +964,7 @@
             analysis-part (->analysis-part dir)
             index (delay (analysis-part :index))
             fact-types (delay (analysis-part :fact-types))
-            manifest (delay (manifest-of dir))]
+            manifest-delay (delay (manifest-of dir))]
         (case cmd
           "summary" (summary @anns)
           "gaps" (gaps @anns)
@@ -977,9 +980,9 @@
                            (production-report dir resolved opts anns all))
                          (die "production needs a production name"))
           "edges" (if arg (edges (analysis-part :dep-graph) arg) (die "edges needs a rule name"))
-          "units" (units-report dir @index @manifest opts)
-          "unit-edges" (unit-edges-report dir @index (analysis-part :dep-graph) @fact-types @manifest opts arg)
-          "entry-points" (entry-points-report dir @index @fact-types manifest opts arg)
+          "units" (units-report dir @index manifest-delay opts)
+          "unit-edges" (unit-edges-report dir @index (analysis-part :dep-graph) @fact-types manifest-delay opts arg)
+          "entry-points" (entry-points-report dir @index @fact-types manifest-delay opts arg)
           "curated" (curated @auto @agent)
           "layers" (layers @merged arg)
           (die "Unknown subcommand:" cmd))))))

@@ -38,7 +38,6 @@ Status: **done**.
 - [x] `shared.selection`: drop `:hierarchy-conflicts` / `->ancestor-conflicts`
 - [x] `layout`: remove `:registry-index` / `:registry-digest`
 - [x] Reword docstrings that name `federate`
-- [x] Delete `annos-report-enhancements-plan.md` + `annos-report-enhancements-progress.md`
 
 ## Docs
 

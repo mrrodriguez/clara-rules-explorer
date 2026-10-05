@@ -1,5 +1,10 @@
 # `annotations_report.bb` enhancements — progress
 
+> **Superseded.** See
+> [`annos-report-changes-progress.md`](annos-report-changes-progress.md):
+> Part A (`digest`) and its tests were removed there; Part B (`production`)
+> landed and stands.
+
 Tracks work against [`annos-report-enhancements-plan.md`](annos-report-enhancements-plan.md).
 
 Status: **done** (with a deviation from the plan — see Part B).
