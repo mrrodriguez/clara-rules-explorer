@@ -30,6 +30,28 @@
   (testing "a segment without '=' is refused"
     (is (thrown? clojure.lang.ExceptionInfo (layout/path->variant "nope")))))
 
+(deftest segments->unit-ref-test
+  (testing "a mainline unit's repo is its whole path"
+    (is (= {:repo "a"} (layout/segments->unit-ref ["a"])))
+    (is (= {:repo "g/a"} (layout/segments->unit-ref ["g" "a"]))))
+  (testing "a mainline segment with `=` is not a unit"
+    (is (nil? (layout/segments->unit-ref ["a" "env=dev"]))))
+  (testing "`_variants/` splits at the first `=` segment"
+    (is (= {:repo "a" :variant [[:env "dev"] [:ref "main"]]}
+           (layout/segments->unit-ref ["_variants" "a" "env=dev" "ref=main"])))
+    (is (nil? (layout/segments->unit-ref ["_variants" "a"])))
+    (is (nil? (layout/segments->unit-ref ["_variants" "env=dev" "ref=main"]))))
+  (testing "`_compose/` takes the whole path as the repo and leaves the name opaque"
+    (is (= {:repo "_compose/x"} (layout/segments->unit-ref ["_compose" "x"])))
+    (is (= {:repo "_compose/env=dev/refs=a@b+c@d"}
+           (layout/segments->unit-ref ["_compose" "env=dev" "refs=a@b+c@d"])))
+    (is (nil? (layout/segments->unit-ref ["_compose"])))))
+
+(deftest ->compose-repo-test
+  (is (= "_compose/env=dev/x" (layout/->compose-repo "env=dev/x")))
+  (is (= {:repo (layout/->compose-repo "env=dev/x")}
+         (layout/segments->unit-ref ["_compose" "env=dev" "x"]))))
+
 (deftest write-variant-test
   (testing "mainline is nil only when canonical and on the default branch"
     (is (nil? (layout/write-variant [] true

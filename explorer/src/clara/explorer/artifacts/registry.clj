@@ -145,6 +145,18 @@
                                  (:rulebase-analysis layout/artifact-files)
                                  (:meta parts/part-files))))
 
+(defn- assert-compose-mode!
+  "A unit under `layout/compose-subdir` must carry `:analysis-run :mode :compose`
+  in its manifest. The path says what the unit is and the manifest says what
+  wrote it; a disagreement is a misfiled directory, not something to guess
+  through."
+  [{:keys [repo]} mode]
+  (when (and (str/starts-with? repo (str layout/compose-subdir "/"))
+             (not= :compose mode))
+    (throw (ex-info (format "Unit %s is under %s/ but its manifest mode is %s, not :compose"
+                            repo layout/compose-subdir (pr-str mode))
+                    {:repo repo :mode mode}))))
+
 (s/defn ^:private ->unit-info :- schema/UnitInfo
   "What `discover` records per unit: the ref, the resolved dir, present
   artifacts, the slim `:dropped` shape, the manifest's layer ids, the
@@ -168,6 +180,7 @@
         manifest (read-manifest-file (io/file dir))
         meta (read-meta-file (io/file dir))
         mode (get-in manifest [:analysis-run :mode])
+        _ (assert-compose-mode! ref mode)
         composed-from (not-empty (mapv unit-ref (get-in manifest [:analysis-run :units])))
         path-variant (:variant ref)
         manifest-variant (:variant manifest)
@@ -208,7 +221,7 @@
 (s/defn discover :- Registry
   "Discover every unit under `:root` — a directory holding
   `rules-inspect-manifest.edn`, with `_variants/` children read as `:variant`
-  units of their repo."
+  units of their repo and `_compose/` children as compositions."
   [{:keys [root]} :- {:root s/Str}]
   (->registry {:root root :units (discover-unit-refs root)}))
 

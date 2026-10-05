@@ -49,7 +49,7 @@
       .getPath))
 
 (defn- composed-unit-dir []
-  (io/file (registry-root) "composed" "loan-app-plus-disposition"))
+  (io/file (registry-root) "_compose" "loan-app-plus-disposition"))
 
 (def ^:private selection
   {:root (registry-root)
@@ -96,8 +96,8 @@
     (let [{:keys [exit out err]}
           (shell/sh "bb" (str editor-client-script) "--list-units" (registry-root))]
       (is (zero? exit) (str "editor_client.bb --list-units exited " exit ": " err))
-      (is (= [{:key "composed/loan-app-plus-disposition"
-               :entry "{:repo \"composed/loan-app-plus-disposition\"}"}
+      (is (= [{:key "_compose/loan-app-plus-disposition"
+               :entry "{:repo \"_compose/loan-app-plus-disposition\"}"}
               {:key "loan-app-ruleset"
                :entry "{:repo \"loan-app-ruleset\"}"}
               {:key "loan-disposition-ruleset"

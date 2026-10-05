@@ -252,27 +252,54 @@
                         (decode-value (subs segment (inc i)))]))))
         (str/split (str path) #"/")))
 
+(def compose-subdir
+  "The single root-level directory holding every composition, so a composed unit
+  is recognized by its path alone — the one place a composition's name may
+  contain `=` or `@` without being read as a variant or a variant separator."
+  "_compose")
+
+(defn ->compose-repo
+  "The `:repo` of the composition named `compose-name`: `_compose/<name>`. The
+  name is a non-blank `/`-joined path whose segments are opaque to this library
+  — it never splits one on `=` or `@`."
+  [compose-name]
+  (str compose-subdir "/" compose-name))
+
+(defn- segments->variant-unit-ref
+  "`_variants/<repo>/<axis>=<value>/…` segments (without the leading
+  `_variants`) → `{:repo :variant}`, or nil when they do not split into a repo
+  and an all-`=` variant."
+  [segments]
+  (let [vi (first (keep-indexed (fn [i seg] (when (str/includes? seg "=") i)) segments))]
+    (when (and vi
+               (seq (subvec segments 0 vi))
+               (every? #(str/includes? % "=") (subvec segments vi)))
+      {:repo (str/join "/" (subvec segments 0 vi))
+       :variant (path->variant (str/join "/" (subvec segments vi)))})))
+
 (defn segments->unit-ref
   "Registry-relative path segments → `{:repo …}` or `{:repo … :variant …}`, or
-  nil when the path is under `_variants/` but does not parse as repo + variant.
+  nil when the path is not a unit's place in the registry.
 
-  A path starting with `_variants/` splits into a repo (every segment before the
-  first `<axis>=…` segment) and a variant (that segment and everything after),
-  and every variant segment must contain `=`. Any other path is a mainline unit
-  whose repo is the whole path; a mainline segment containing `=` is refused
-  (nil), since discovery would otherwise read it as the start of a variant.
+  The first segment picks the grammar:
+
+  - `_variants`: a repo (every segment before the first `<axis>=…` segment) and
+    a variant (that segment and everything after), where every variant segment
+    must contain `=`. nil when it does not split that way.
+  - `_compose`: a composition. The repo is the whole path and every segment
+    after the prefix is the composition's name, so `=` and `@` are free in it.
+    nil when no name follows the prefix.
+  - anything else: a mainline unit whose repo is the whole path. A segment
+    containing `=` makes it nil, so a hand-made directory is never read as the
+    start of a variant.
 
   Shared by `clara.explorer.artifacts.registry`'s walk and the babashka editor
   client's `--list-units`, so the two runtimes cannot drift on the split."
   [segments]
-  (if (= variants-subdir (first segments))
-    (let [rest (subvec segments 1)
-          vi (first (keep-indexed (fn [i seg] (when (str/includes? seg "=") i)) rest))]
-      (when (and vi
-                 (seq (subvec rest 0 vi))
-                 (every? #(str/includes? % "=") (subvec rest vi)))
-        {:repo (str/join "/" (subvec rest 0 vi))
-         :variant (path->variant (str/join "/" (subvec rest vi)))}))
+  (condp = (first segments)
+    variants-subdir (segments->variant-unit-ref (subvec segments 1))
+    compose-subdir (when (> (count segments) 1)
+                     {:repo (str/join "/" segments)})
     (when-not (some #(str/includes? % "=") segments)
       {:repo (str/join "/" segments)})))
 

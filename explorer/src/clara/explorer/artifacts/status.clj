@@ -189,12 +189,15 @@
 ;; ===========================================================================
 
 (defn- parse-unit-key
-  "`repo[@variant path]` back into `{:repo :variant}`. Splits on the last `@`,
-  so a `@` inside a value never appears literally (values encode `@`); the
-  variant half decodes via `layout/path->variant`."
+  "`repo[@variant path]` back into `{:repo :variant}`. A composition's key is its
+  whole path (`layout/compose-subdir` names its name freely, `@` included), so
+  it is never split. Any other key splits on the last `@`, since values encode
+  `@`; the variant half decodes via `layout/path->variant`."
   [unit-key]
-  (let [s (str unit-key)]
-    (if-let [i (str/last-index-of s "@")]
+  (let [s (str unit-key)
+        i (when-not (str/starts-with? s (str layout/compose-subdir "/"))
+            (str/last-index-of s "@"))]
+    (if i
       {:repo (subs s 0 i)
        :variant (layout/path->variant (subs s (inc i)))}
       {:repo s})))

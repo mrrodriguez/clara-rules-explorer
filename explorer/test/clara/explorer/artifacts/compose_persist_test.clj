@@ -34,7 +34,7 @@
 (deftest compose-persist-writes-a-single-unit-dir-test
   (let [opts (assoc *artifact-opts*
                     :root (registry-root)
-                    :repo "composed/demo"
+                    :name "demo"
                     :units [{:repo "loan-app-ruleset"}
                             {:repo "loan-disposition-ruleset"}])
         result (flow/compose-persist! opts)]
@@ -72,7 +72,7 @@
     (testing "the manifest records the composition"
       (let [manifest (edn-io/read-edn-file (store/get-artifact-file :manifest opts))
             units (get-in manifest [:analysis-run :units])]
-        (is (= "composed/demo" (:repo manifest)))
+        (is (= "_compose/demo" (:repo manifest)))
         (is (= :compose (get-in manifest [:analysis-run :mode])))
         (is (= ["loan-app-ruleset" "loan-disposition-ruleset"]
                (mapv :repo units)))
@@ -90,7 +90,7 @@
 (deftest compose-persist-carries-variant-sources-test
   (let [opts (assoc *artifact-opts*
                     :root (registry-root)
-                    :repo "composed/demo-variant-mix"
+                    :name "demo-variant-mix"
                     :units [{:repo "loan-app-ruleset"}
                             {:repo "loan-disposition-ruleset" :variant [[:ref "feature/new-tax"]]}])
         _ (flow/compose-persist! opts)
@@ -112,7 +112,7 @@
 (deftest compose-persist-manifest-fn-sees-each-source-manifest-test
   (let [opts (assoc *artifact-opts*
                     :root (registry-root)
-                    :repo "composed/demo-hook"
+                    :name "demo-hook"
                     :units [{:repo "loan-app-ruleset"}
                             {:repo "loan-disposition-ruleset" :variant [[:ref "feature/new-tax"]]}]
                     :manifest-fn (fn [manifest {:keys [sources]}]
@@ -140,7 +140,7 @@
   (testing "a fully covered selection records an empty unknown-namespaces vector"
     (let [opts (assoc *artifact-opts*
                       :root (registry-root)
-                      :repo "composed/coverage-clean"
+                      :name "coverage-clean"
                       :units [{:repo "loan-app-ruleset"}
                               {:repo "loan-disposition-ruleset"}])
           _ (flow/compose-persist! opts)
@@ -152,7 +152,7 @@
   (testing "a filter naming a namespace no unit covers records it"
     (let [opts (assoc *artifact-opts*
                       :root (registry-root)
-                      :repo "composed/coverage-gap"
+                      :name "coverage-gap"
                       :units [{:repo "loan-app-ruleset"
                                :namespaces ["clara.explorer.test.rules.loan-app-rules"
                                             "clara.explorer.test.rules.nope"]}])
@@ -165,7 +165,7 @@
   (testing "a :manifest-fn addition under :coverage is kept"
     (let [opts (assoc *artifact-opts*
                       :root (registry-root)
-                      :repo "composed/coverage-host"
+                      :name "coverage-host"
                       :units [{:repo "loan-app-ruleset"}]
                       :manifest-fn (fn [manifest _]
                                      (assoc-in manifest [:coverage :host-gap] ["my.ns"])))

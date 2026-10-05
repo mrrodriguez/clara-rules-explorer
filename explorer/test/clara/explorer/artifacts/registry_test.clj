@@ -289,6 +289,19 @@
        (seq composed-from) (assoc-in [:analysis-run :units] composed-from)))
     (str dir)))
 
+(deftest discover-reads-compose-subdir-test
+  (with-temp-root
+    (fn [root]
+      (write-unit! root "src" #{:nodes :id})
+      (write-aggregate-unit! root "_compose/env=dev/refs=src@main" :compose [{:repo "src"}])
+      (testing "a composition whose name holds `=` and `@` is a unit of its own"
+        (is (= #{{:repo "src"} {:repo "_compose/env=dev/refs=src@main"}}
+               (set (registry/units (registry/discover {:root root}))))))
+      (testing "a unit under `_compose/` whose manifest is not a composition is refused"
+        (write-aggregate-unit! root "_compose/stray" :captured-session nil)
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not :compose"
+                              (registry/discover {:root root})))))))
+
 (deftest discover-records-aggregate-mode-and-composed-from-test
   (with-temp-root
     (fn [root]
