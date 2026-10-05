@@ -178,6 +178,12 @@
           (is (str/includes? out "a.ns/full-rule"))
           (is (str/includes? out "a.ns/gap-rule"))))
 
+      (testing "`entry-points` on a ruleset unit prints consumed types no rule produces"
+        (let [out (run-report "entry-points")]
+          (is (str/includes? out ":a/one"))
+          (is (str/includes? out "(1 production)"))
+          (is (not (str/includes? out ":a/two")))))
+
       (testing "`layers` goes through the whole merged-annotations decode, so its
                 per-key origin tally must match what the JVM reader rebuilds from
                 the same files"
@@ -212,8 +218,8 @@
         (let [out (run-report "help")]
           (is (str/includes? out "usage: bb annotations_report.bb"))
           (doseq [sub ["summary" "gaps" "types" "producers" "consumers"
-                       "hierarchy" "production" "edges" "curated" "layers"
-                       "status" "digest" "diff" "help"]]
+                       "hierarchy" "production" "edges" "units" "unit-edges"
+                       "entry-points" "curated" "layers" "status" "diff" "help"]]
             (is (str/includes? out sub)))
           (is (str/includes? out "<type>"))
           (is (str/includes? out "<fq-name>"))
@@ -275,6 +281,28 @@
       (testing "edges reads the composed dep-graph across units"
         (let [out (run "edges" notice-approved)]
           (is (str/includes? out app-approved))))
+
+      (testing "units lists each source unit and its coverage"
+        (let [out (run "units")]
+          (is (str/includes? out "loan-app-ruleset"))
+          (is (str/includes? out "loan-disposition-ruleset"))
+          (is (str/includes? out "productions"))
+          (is (str/includes? out "every namespace in scope is covered"))))
+
+      (testing "unit-edges lists the cross-unit edge"
+        (let [out (run "unit-edges")]
+          (is (str/includes? out "loan-app-ruleset -> loan-disposition-ruleset"))
+          (is (str/includes? out "via :loan-app/application-outcome"))))
+
+      (testing "unit-edges resolves a bare repo and lists its feeds/fed-by"
+        (let [out (run "unit-edges" "loan-app-ruleset")]
+          (is (str/includes? out "feeds:"))
+          (is (str/includes? out "fed by:"))))
+
+      (testing "entry-points groups by consuming unit"
+        (let [out (run "entry-points")]
+          (is (str/includes? out "loan-app-ruleset"))
+          (is (str/includes? out "production"))))
 
       (testing "layers reports the flattened standard layers"
         (let [out (run "layers")]
@@ -371,8 +399,8 @@
           (is (= "loan-disposition-ruleset" (get-in result [:before :repo])))
           (is (= [[:ref "feature/new-tax"]] (get-in result [:after :variant])))
           (is (empty? (get-in result [:productions :changed])))))
-      (testing "--rule prints one production's before and after"
-        (let [out (run app "diff" composed "--rule" "digest-doc-meta")]
+      (testing "--production prints one production's before and after"
+        (let [out (run app "diff" composed "--production" "digest-doc-meta")]
           (is (str/includes? out "digest-doc-meta-rule (unchanged)"))))
       (testing "a missing after dir fails loudly"
         (let [{:keys [exit out err]}
@@ -380,22 +408,22 @@
           (is (not (zero? exit)))
           (is (str/includes? (str out err) "missing unit manifest")))))))
 
-(deftest bb-report-diff-rule-skips-full-diff-test
+(deftest bb-report-diff-production-skips-full-diff-test
   (if-not (runnable?)
-    (println "SKIPPING bb-report-diff-rule-skips-full-diff-test — babashka is not on PATH, or the script moved:"
+    (println "SKIPPING bb-report-diff-production-skips-full-diff-test — babashka is not on PATH, or the script moved:"
              (str report-script))
     (do
       (write-artifacts!)
       ;; The temp unit carries no manifest; write a minimal one so the full
       ;; read gets past it. dep-graph.edn serves only the full diff: removing
-      ;; it must break the full report while --rule still answers.
+      ;; it must break the full report while --production still answers.
       (spit (io/file (:dir *artifact-opts*) "rules-inspect-manifest.edn")
             (pr-str {:repo "tmp"}))
       (io/delete-file (io/file (:dir *artifact-opts*) "merged-rulebase-analysis" "dep-graph.edn"))
       (let [dir (:dir *artifact-opts*)]
-        (testing "--rule answers without the dep-graph"
+        (testing "--production answers without the dep-graph"
           (let [{:keys [exit out err]}
-                (shell/sh "bb" (str report-script) dir "diff" dir "--rule" "full-rule")]
+                (shell/sh "bb" (str report-script) dir "diff" dir "--production" "full-rule")]
             (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
             (is (str/includes? out "a.ns/full-rule"))))
         (testing "the full diff still needs it"
@@ -403,70 +431,6 @@
                 (shell/sh "bb" (str report-script) dir "diff" dir)]
             (is (not (zero? exit)))
             (is (str/includes? (str out err) "dep-graph"))))))))
-
-(def ^:private fixture-digest
-  "A `registry-digest.edn` payload for the `digest` subcommand, including an
-  extra key under `:coverage` a host may have added."
-  {:summary {:unit-count 2 :fact-type-count 3 :unit-edge-count 1
-             :entry-point-count 1 :orphan-count 0 :hierarchy-conflict-count 0}
-   :scope {:units [{:repo "a"}] :namespaces ["a.ns"] :label "demo"}
-   :coverage {:units [{:repo "a" :namespaces []}]
-              :unknown-namespaces ["x.ns"]
-              :extra-host-key "extra-value"}
-   :hierarchy-conflicts {}
-   :unit-edges {"a/rule" {:upstream #{"b/rule"}}}
-   :entry-points {":a/one" #{"a/rule"}}
-   :orphans {":a/two" #{"b/rule"}}
-   :provenance {"a" {:sha "abc"}}})
-
-(defn- write-digest! [dir]
-  (spit (io/file dir "registry-digest.edn") (pr-str fixture-digest)))
-
-(deftest bb-report-digest-test
-  (if-not (runnable?)
-    (println "SKIPPING bb-report-digest-test — babashka is not on PATH, or the script moved:"
-             (str report-script))
-    (let [dir (str (io/file (:dir *artifact-opts*) "fed"))
-          run (fn [& args]
-                (apply shell/sh "bb" (str report-script) dir args))]
-      (.mkdirs (io/file dir))
-      (write-digest! dir)
-
-      (testing "no key prints :summary then per-key element counts"
-        (let [{:keys [exit out]} (run "digest")]
-          (is (zero? exit))
-          (is (str/includes? out "unit-count"))
-          (is (str/includes? out "coverage: 3"))
-          (is (str/includes? out "hierarchy-conflicts: 0"))
-          (is (str/includes? out "unit-edges: 1"))))
-
-      (testing "keys select exactly those keys; :coverage and coverage agree"
-        (let [out (:out (run "digest" "coverage" "hierarchy-conflicts"))]
-          (is (str/includes? out ":coverage"))
-          (is (str/includes? out ":hierarchy-conflicts"))
-          (is (not (str/includes? out ":unit-edges"))))
-        (is (= (:out (run "digest" ":coverage"))
-               (:out (run "digest" "coverage")))))
-
-      (testing "an unknown key fails and lists the keys present"
-        (let [{:keys [exit out err]} (run "digest" "nope")]
-          (is (not (zero? exit)))
-          (is (str/includes? (str out err) "Not in the digest: :nope"))
-          (is (str/includes? (str out err) ":coverage"))
-          (is (str/includes? (str out err) ":summary"))))
-
-      (testing "a directory with no digest fails naming the file"
-        (let [empty-dir (str (io/file (:dir *artifact-opts*) "no-digest"))]
-          (.mkdirs (io/file empty-dir))
-          (let [{:keys [exit out err]} (shell/sh "bb" (str report-script) empty-dir "digest")]
-            (is (not (zero? exit)))
-            (is (str/includes? (str out err) "registry-digest.edn"))
-            (is (str/includes? (str out err) "federate/persist!")))))
-
-      (testing "an extra key under :coverage is printed unchanged"
-        (let [out (:out (run "digest" "coverage"))]
-          (is (str/includes? out "extra-host-key"))
-          (is (str/includes? out "extra-value")))))))
 
 (deftest bb-report-production-test
   (if-not (runnable?)

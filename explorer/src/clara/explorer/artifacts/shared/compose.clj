@@ -63,7 +63,7 @@
 (defn union-fact-types
   "Merge slim fact-type maps from multiple units. Per name, `:ancestors` is the
   union of every unit's ancestor edge set, re-closed transitively and ordered
-  deepest-first — the same closure the federated index computes, via
+  deepest-first — the same closure composition computes, via
   `clara.explorer.artifacts.hierarchy`. `:ns` comes from the first
   unit that has the name."
   [fact-type-maps]
@@ -136,18 +136,13 @@
                        (apply set/union (map #(get-in % [:slim :dropped]) analyses)))
    :unknown-fact-types (apply set/union (map #(get-in % [:slim :unknown-fact-types]) analyses))})
 
-(defn ->composed-analysis
-  "One slim `clara.explorer.artifacts.schema/RulebaseAnalysis` over the selected units, which the caller asserts
-  are components of ONE rulebase. `caps` is the same capabilities map
-  `clara.explorer.artifacts.shared.selection/->selection` takes. Each unit is
-  narrowed to its `:namespaces` filter first; rules/queries merge by fq name
-  (collision refused), fact types merge per name with ancestors unioned, the
-  dep-graph is recomputed over the merged set, and each production gains
-  `:unit`. Rehydrate the result to rebuild the inverses over the whole
-  composition."
-  [caps selection]
-  (let [sel (shared-selection/->selection caps selection)
-        analyses (mapv #(get (:analyses sel) (shared-registry/unit-key %)) selection)
+(defn ->composed-analysis-from-selection
+  "The composed slim analysis for an already-computed `sel` — a
+  `shared.selection/->selection` value over `selection`. `->composed-analysis`
+  computes the selection first; this exists so a caller that also needs the
+  selection (e.g. its `:coverage`) reads the units once and hands it in."
+  [sel selection]
+  (let [analyses (mapv #(get (:analyses sel) (shared-registry/unit-key %)) selection)
         rules (merge-production-map analyses selection :rules)
         queries (merge-production-map analyses selection :queries)
         fact-types (->fact-type-map (map :fact-types analyses) (:ancestors sel))
@@ -158,3 +153,17 @@
      :dep-graph dep-graph
      :unresolved (vec (mapcat :unresolved analyses))
      :slim (->composed-slim analyses)}))
+
+(defn ->composed-analysis
+  "One slim `clara.explorer.artifacts.schema/RulebaseAnalysis` over the selected units, which the caller asserts
+  are components of ONE rulebase. `caps` is the same capabilities map
+  `clara.explorer.artifacts.shared.selection/->selection` takes. Each unit is
+  narrowed to its `:namespaces` filter first; rules/queries merge by fq name
+  (collision refused), fact types merge per name with ancestors unioned, the
+  dep-graph is recomputed over the merged set, and each production gains
+  `:unit`. Rehydrate the result to rebuild the inverses over the whole
+  composition."
+  [caps selection]
+  (->composed-analysis-from-selection
+   (shared-selection/->selection caps selection)
+   selection))

@@ -11,13 +11,10 @@
   This namespace supplies the JVM registry's capabilities: memoized
   `read-analysis` and the shape-skew `assert-compatible!`.
 
-  `clara.explorer.artifacts.compose` and
-  `clara.explorer.artifacts.federate` both consume this: it is the
-  selection preamble the two modes used to each perform for themselves. Both
-  need the same per-unit narrowed analyses, the same
-  `registry/assert-compatible!` refusal of shape skew, and the same unioned
-  hierarchy. `federate` additionally reads the hierarchy conflicts and the
-  coverage report; `compose` reads the closed ancestors for its fact-type merge.
+  `clara.explorer.artifacts.compose` consumes this: it is the
+  selection preamble the merge mode needs — the per-unit narrowed analyses, the
+  same `registry/assert-compatible!` refusal of shape skew, and the same
+  unioned hierarchy for its fact-type merge and the manifest's coverage.
 
   Nothing here decides which units belong together — the selection arrives named
   and ordered, and this namespace returns a value describing it."

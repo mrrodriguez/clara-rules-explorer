@@ -19,6 +19,7 @@
    :inserted-by-rules},
   :unknown-fact-types #{"clojure.lang.IKeywordLookup"
    "clojure.lang.IPersistentCollection"
+   "clara.explorer.test.rules.loan_app_rules.ApplicationOutcome"
    "clojure.lang.Counted"
    "clojure.lang.IMeta"
    "java.lang.Iterable"

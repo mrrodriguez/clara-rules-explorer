@@ -1,6 +1,24 @@
 {":loan-app/application-outcome" {:ns "loan-app",
   :name ":loan-app/application-outcome",
   :ancestors []},
+ "clara.explorer.test.rules.loan_app_rules.ApplicationOutcome" {:ns "clara.explorer.test.rules.loan_app_rules",
+  :name "clara.explorer.test.rules.loan_app_rules.ApplicationOutcome",
+  :ancestors [":loan-app/application-outcome"
+   "clojure.lang.IHashEq"
+   "clojure.lang.IKeywordLookup"
+   "clojure.lang.IObj"
+   "clojure.lang.IMeta"
+   "clojure.lang.IPersistentMap"
+   "clojure.lang.Associative"
+   "clojure.lang.Counted"
+   "clojure.lang.ILookup"
+   "clojure.lang.IPersistentCollection"
+   "clojure.lang.IRecord"
+   "clojure.lang.Seqable"
+   "java.io.Serializable"
+   "java.lang.Iterable"
+   "java.lang.Object"
+   "java.util.Map"]},
  "clara.explorer.test.rules.loan_outcome_notices.ApprovalNotice" {:ns "clara.explorer.test.rules.loan_outcome_notices",
   :name "clara.explorer.test.rules.loan_outcome_notices.ApprovalNotice",
   :ancestors ["clojure.lang.IHashEq"

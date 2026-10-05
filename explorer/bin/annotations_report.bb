@@ -3,7 +3,7 @@
 ;; reader: layers, callsites, resolution, curation, provenance. Each subcommand
 ;; reads only the artifact parts it needs.
 ;;
-;;   bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|agent|merged]
+;;   bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged]
 ;;
 ;; The subcommand menu, signatures, and options are enumerated by the
 ;; `subcommands` and `usage-line` vars below, and printed by the `help`
@@ -28,6 +28,7 @@
 
 (require '[clara.explorer.artifacts.layout :as layout]
          '[clara.explorer.artifacts.hierarchy :as hierarchy]
+         '[clara.explorer.artifacts.cross-unit :as cross-unit]
          '[clara.explorer.artifacts.diff :as diff]
          '[clara.explorer.artifacts.status :as status])
 
@@ -579,11 +580,13 @@
    ["hierarchy" "<type>" "that type's ancestors and descendants"]
    ["production" "<fq-name>" "one production's record; --part lhs|rhs|props, --annotations"]
    ["edges" "<fq-name>" "dep-graph upstream/downstream"]
+   ["units" "" "composed unit: source units + coverage"]
+   ["unit-edges" "[<unit>]" "cross-unit producer->consumer edges (composed only)"]
+   ["entry-points" "[<unit>]" "consumed types no rule produces"]
    ["curated" "" "what the agent overlay changed vs auto-gen"]
    ["layers" "[<fq-name>]" "the fold: layers + per-key provenance"]
    ["status" "[--checkout]" "is this unit current? (needs only the manifest)"]
-   ["digest" "[<key> …]" "registry-digest.edn of a federation dir: summary + counts, or select-keys"]
-   ["diff" "<after-dir>" "production-level diff of this unit vs <after-dir> (--edn, --rule NAME)"]
+   ["diff" "<after-dir>" "production-level diff of this unit vs <after-dir> (--edn, --production NAME)"]
    ["help" "" "this help"]])
 
 (defn- help []
@@ -688,7 +691,7 @@
    :checkout {:coerce :string}
    :ref {:coerce :string}
    :root {:coerce :string}
-   :rule {:coerce :string}
+   :production {:coerce :string}
    :part {:coerce :string}
    :annotations {:coerce :boolean}
    :edn {:coerce :boolean}})
@@ -707,20 +710,6 @@
        :positionals (get-in (meta result) [:org.babashka/cli :args])})
     (catch Exception e
       (die (ex-message e)))))
-
-(defn- normalize-command-line-args
-  "Strip a leading `:` from tokens after the `digest` subcommand, before
-  `parse-args` sees them. `digest` keys may be written `:coverage`, and
-  `babashka.cli` stops parsing flags once it meets a colon token — which would
-  swallow a following `--edn`. `digest` is the only subcommand whose positional
-  args a flag may legally follow, so the strip is scoped to it."
-  [args]
-  (let [v (vec args)]
-    (if (and (> (count v) 1) (= "digest" (second v)))
-      (into (subvec v 0 2)
-            (map #(str/replace (str %) #"^:" ""))
-            (subvec v 2))
-      v)))
 
 (defn- reject-flags
   "Die when `opts` holds a flag outside `allowed` (a set of flag keys)."
@@ -792,79 +781,129 @@
       (print-status result))))
 
 ;; ---------------------------------------------------------------------------
-;; digest — the federated registry digest, selected by key
+;; cross-unit readings over a (composed) analysis
 ;; ---------------------------------------------------------------------------
 
-(defn- element-count
-  "The count of elements in a digest value: collections count their entries,
-  nil counts zero, and a scalar is one element."
-  [v]
+(defn- manifest-of
+  "The unit manifest, read only when a cross-unit subcommand needs it."
+  [dir]
+  (read-edn (fs/file dir (layout/artifact-files :manifest)) (layout/artifact-files :manifest)))
+
+(defn- unit-key-of [u]
+  (str (:repo u) (when (seq (:variant u)) (str "@" (layout/variant->path (:variant u))))))
+
+(defn- unit-keys-of [manifest]
+  (mapv unit-key-of (get-in manifest [:analysis-run :units])))
+
+(defn- resolve-unit
+  "The full unit key `arg` names: an exact key, else the `:repo` that exactly
+  one source unit has. Anything else dies, listing the keys."
+  [unit-keys arg]
   (cond
-    (nil? v) 0
-    (coll? v) (count v)
-    :else 1))
+    (some #{arg} unit-keys) arg
+    :else
+    (let [matches (filterv #(= arg (first (str/split % #"@"))) unit-keys)]
+      (case (count matches)
+        0 (die "No unit matches" arg "— units:" (str/join ", " unit-keys))
+        1 (do (println "Resolved" arg "->" (first matches)) (first matches))
+        (die "Ambiguous unit" arg "—" (count matches) "units:" (str/join ", " matches))))))
 
-(defn- digest-file
-  "The `registry-digest.edn` beside `target`: a directory names it directly, a
-  file names its parent directory."
-  [target]
-  (let [dir (cond
-              (fs/directory? target) target
-              (fs/regular-file? target) (fs/parent target)
-              :else (die "No such dir or file:" (str target)))]
-    (fs/file dir (layout/artifact-files :registry-digest))))
+(defn- print-unit-edges
+  [edges]
+  (doseq [[[p c] {:keys [via rules]}] edges]
+    (println (format "%s -> %s  (%d rules)  via %s" p c rules (str/join ", " (sort via))))))
 
-(defn- digest-report
-  "`digest [<key> …]`: `registry-digest.edn` in `target`, selected by key.
-  No keys prints `:summary` then one line per remaining top-level key with its
-  element count; keys print `(select-keys digest keys)` — pprint by default,
-  EDN with `--edn`. A key may be `coverage` or `:coverage`; an unknown key
-  dies, listing the keys present. The file is written only by
-  `federate/persist!`, into a federation output directory — no unit has one."
-  [target opts key-args]
-  (let [f (digest-file target)]
-    (when-not (fs/exists? f)
-      (die (str "Missing " (layout/artifact-files :registry-digest) " — " (str f))
-           "It is written only by clara.explorer.artifacts.federate/persist!, into a federation"
-           "output directory that also holds registry-index.edn. A unit — ruleset or composed — never has one."))
-    (let [digest (read-edn f (fs/file-name f))
-          ks (mapv #(keyword (str/replace (str %) #"^:" "")) key-args)
-          present (set (keys digest))
-          missing (remove present ks)]
-      (when (seq missing)
-        (die (str "Not in the digest: " (str/join ", " (map #(str ":" (name %)) missing)))
-             (str "Present keys: " (str/join ", " (sort (map #(str ":" (name %)) (keys digest)))))))
-      (if (seq ks)
-        (let [selected (select-keys digest ks)]
-          (if (:edn opts)
-            (prn selected)
-            (pprint/pprint selected)))
-        (do
-          (pprint/pprint (:summary digest))
-          (println)
-          (doseq [[k v] (sort-by key (dissoc digest :summary))]
-            (println (str (name k) ": " (element-count v)))))))))
+(defn- units-report
+  "`units`: one line per source unit (key, sha, production count), then the
+  manifest's :coverage one line per key. Composed units only."
+  [dir index manifest opts]
+  (when (not= :compose (get-in manifest [:analysis-run :mode]))
+    (die "units needs a composed unit — this unit's :analysis-run :mode is"
+         (pr-str (get-in manifest [:analysis-run :mode]))))
+  (let [units (get-in manifest [:analysis-run :units])
+        counts (frequencies (keep :unit (concat (vals (:rules index)) (vals (:queries index)))))
+        summary (mapv (fn [u]
+                        (let [k (unit-key-of u)]
+                          {:unit k :sha (:sha u) :productions (get counts k 0)}))
+                      units)
+        coverage (:coverage manifest)]
+    (if (:edn opts)
+      (pprint/pprint {:units summary :coverage coverage})
+      (do
+        (doseq [{:keys [unit sha productions]} summary]
+          (println (format "%s  %s  %d productions" unit (or sha "") productions)))
+        (println)
+        (if (every? (comp empty? val) coverage)
+          (println "every namespace in scope is covered")
+          (doseq [[k v] (sort-by key coverage)]
+            (println (str (name k) ": " (if (coll? v) (str/join ", " v) (str v))))))))))
 
-(defn- rule-report
-  "`diff <after-dir> --rule NAME`: one production's before/after. Reads only
-  the production files of each unit — never the dep-graph, fact-types,
+(defn- unit-edges-report
+  "`unit-edges [<unit>]`: cross-unit producer->consumer edges. Composed units
+  only; with `<unit>`, only that unit's edges in `feeds` / `fed by` groups."
+  [dir index dep-graph fact-types manifest opts arg]
+  (when (not= :compose (get-in manifest [:analysis-run :mode]))
+    (die "unit-edges needs a composed unit — this unit's :analysis-run :mode is"
+         (pr-str (get-in manifest [:analysis-run :mode]))))
+  (let [edges (cross-unit/unit-edges index dep-graph fact-types)
+        selected (when arg (resolve-unit (unit-keys-of manifest) arg))]
+    (cond
+      (:edn opts) (pprint/pprint (if selected
+                                   {:feeds (into (sorted-map)
+                                                 (filter (fn [[[p _] _]] (= p selected)))
+                                                 edges)
+                                    :fed-by (into (sorted-map)
+                                                  (filter (fn [[[_ c] _]] (= c selected)))
+                                                  edges)}
+                                   edges))
+      selected (do
+                 (println "feeds:")
+                 (print-unit-edges (into (sorted-map) (filter (fn [[[p _] _]] (= p selected))) edges))
+                 (println "fed by:")
+                 (print-unit-edges (into (sorted-map) (filter (fn [[[_ c] _]] (= c selected))) edges)))
+      :else (print-unit-edges edges))))
+
+(defn- entry-points-report
+  "`entry-points [<unit>]`: types some production matches that no rule in the
+  unit produces, grouped by consuming unit with a consumer count."
+  [dir index fact-types manifest opts arg]
+  (let [eps (cross-unit/entry-points index fact-types)
+        selected (when arg (resolve-unit (unit-keys-of @manifest) arg))
+        view (cond
+               selected {selected (get eps selected {})}
+               (and (contains? eps nil) (= 1 (count eps))) (get eps nil)
+               :else eps)]
+    (if (:edn opts)
+      (pprint/pprint view)
+      (if (every? number? (vals view))
+        (doseq [[ft n] view]
+          (println (str ft "  (" n " production" (when (> n 1) "s") ")")))
+        (doseq [[unit types] view]
+          (println unit)
+          (doseq [[ft n] types]
+            (println (str "  " ft "  (" n " production" (when (> n 1) "s") ")"))))))))
+
+(defn- diff-production-report
+  "`diff <after-dir> --production NAME`: one production's before/after. Reads
+  only the production files of each unit — never the dep-graph, fact-types,
   manifest, or shape — and never runs the full `diff`. As EDN with `--edn`."
   [before-dir after-dir opts]
   (let [before (try {:productions (diff/read-productions before-dir)}
                      (catch Exception e (die (ex-message e))))
         after (try {:productions (diff/read-productions after-dir)}
                     (catch Exception e (die (ex-message e))))
-        detail (try (diff/rule-detail before after (:rule opts))
+        detail (try (diff/rule-detail before after (:production opts))
                      (catch Exception e (die (ex-message e))))]
     (if (:edn opts)
       (pprint/pprint detail)
       (println (diff/rule-detail-text detail)))))
 
 (defn- diff-report-full
-  "`diff <after-dir> [--edn] [--rule NAME]` over unit dir `before-dir`: presentation
+  "`diff <after-dir> [--edn] [--production NAME]` over unit dir `before-dir`: presentation
    over `diff/diff`, which reads both units' `merged-rulebase-analysis/`
    and merged annotations and nothing else; `--edn` prints the `diff` value.
-   (`--rule` never reaches here — the dispatcher sends it to `rule-report`.)"
+   (`--production` never reaches here — the dispatcher sends it to
+   `diff-production-report`.)"
   [before-dir after-dir opts]
   (let [before (try (diff/read-unit before-dir)
                      (catch Exception e (die (ex-message e))))
@@ -877,16 +916,17 @@
       (println (diff/->text d)))))
 
 (defn- diff-report
-  "`diff <after-dir> [--edn] [--rule NAME]`: `--rule` prints one production's
-  before/after via `rule-report` — which reads only the production files and
-  never runs the full `diff` — while the full report reads both units whole."
+  "`diff <after-dir> [--edn] [--production NAME]`: `--production` prints one
+  production's before/after via `diff-production-report` — which reads only the
+  production files and never runs the full `diff` — while the full report
+  reads both units whole."
   [before-dir after-dir opts]
-  (if (:rule opts)
-    (rule-report before-dir after-dir opts)
+  (if (:production opts)
+    (diff-production-report before-dir after-dir opts)
     (diff-report-full before-dir after-dir opts)))
 
-(let [{:keys [opts positionals]} (parse-args (normalize-command-line-args *command-line-args*))
-      [target cmd arg & key-args] positionals]
+(let [{:keys [opts positionals]} (parse-args *command-line-args*)
+      [target cmd arg] positionals]
   (cond
     (or (= "help" target) (= "help" cmd)) (help)
 
@@ -898,19 +938,18 @@
           (die "status takes no positional arg")
           (status target opts)))
 
-    (= cmd "digest")
-    (do (reject-flags opts #{:edn})
-        (digest-report target opts (if arg (cons arg key-args) [])))
-
     (= cmd "diff")
-    (do (reject-flags opts #{:edn :rule})
+    (do (reject-flags opts #{:edn :production})
         (if (nil? arg)
           (die "diff needs two unit dirs: bb annotations_report.bb <before-dir> diff <after-dir>")
           (diff-report target arg opts)))
 
     :else
     (let [cmd (or cmd "summary")]
-      (reject-flags opts (if (= cmd "production") #{:edn :part :annotations :file} #{:file}))
+      (reject-flags opts (cond
+                           (= cmd "production") #{:edn :part :annotations :file}
+                           (#{"units" "unit-edges" "entry-points"} cmd) #{:edn}
+                           :else #{:file}))
       (let [;; `gaps` is about the deterministic baseline, so it defaults to auto.
             which (or (:file opts) (if (= "gaps" cmd) "auto" "merged"))
             paths (resolve-paths target which)
@@ -921,7 +960,8 @@
             merged (delay (read-merged paths))
             analysis-part (->analysis-part dir)
             index (delay (analysis-part :index))
-            fact-types (delay (analysis-part :fact-types))]
+            fact-types (delay (analysis-part :fact-types))
+            manifest (delay (manifest-of dir))]
         (case cmd
           "summary" (summary @anns)
           "gaps" (gaps @anns)
@@ -937,6 +977,9 @@
                            (production-report dir resolved opts anns all))
                          (die "production needs a production name"))
           "edges" (if arg (edges (analysis-part :dep-graph) arg) (die "edges needs a rule name"))
+          "units" (units-report dir @index @manifest opts)
+          "unit-edges" (unit-edges-report dir @index (analysis-part :dep-graph) @fact-types @manifest opts arg)
+          "entry-points" (entry-points-report dir @index @fact-types manifest opts arg)
           "curated" (curated @auto @agent)
           "layers" (layers @merged arg)
           (die "Unknown subcommand:" cmd))))))

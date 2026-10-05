@@ -383,11 +383,40 @@
   [& segments]
   (d/read-unit (str (apply io/file (registry-root) segments))))
 
+(deftest entry-points-section-test
+  (let [fts {":x/t" {:ancestors []} ":x/out" {:ancestors []}}
+        producer-prods {"p/consumer" (prod {:lhs-types [":x/t"] :ns "a.ns"})
+                        "p/producer" (prod {:insert-types [":x/t"] :ns "a.ns"})}
+        consumer-only {"p/consumer" (prod {:lhs-types [":x/t"] :ns "a.ns"})}]
+    (testing "removing the only producer of a consumed type gives :added"
+      (let [b (with-prods (unit {:fact-types fts}) producer-prods)
+            a (with-prods (unit {:fact-types fts}) consumer-only)
+            eps (:entry-points (d/diff b a))]
+        (is (= [":x/t"] (:added eps)))
+        (is (empty? (:resolved eps)))))
+    (testing "the reverse gives :resolved"
+      (let [b (with-prods (unit {:fact-types fts}) consumer-only)
+            a (with-prods (unit {:fact-types fts}) producer-prods)
+            eps (:entry-points (d/diff b a))]
+        (is (= [":x/t"] (:resolved eps)))
+        (is (empty? (:added eps)))))
+    (testing "a scope-only consumer goes under :scope :entry-points"
+      (let [b (with-prods (unit {:fact-types fts})
+                {"p/producer" (prod {:insert-types [":x/t"] :ns "a.ns"})})
+            a (with-prods (unit {:manifest {:repo "r"
+                                            :source {:sha "b" :working-tree "clean"}
+                                            :analysis-run {:namespaces ["a.ns" "b.ns"]}}
+                                 :fact-types fts})
+                {"b.ns/consumer" (prod {:lhs-types [":x/t"] :ns "b.ns"})})
+            result (d/diff b a)]
+        (is (empty? (:added (:entry-points result))))
+        (is (= [":x/t"] (get-in result [:scope :entry-points])))))))
+
 (deftest read-productions-agrees-with-read-unit-test
   (let [dir (str (io/file (registry-root) "loan-app-ruleset"))]
     (is (= (:productions (d/read-unit dir))
            (d/read-productions dir))
-        "the --rule path reads the same production values as the full path")))
+        "the --production path reads the same production values as the full path")))
 
 (deftest checked-in-variant-diff-test
   (let [before (example-unit "loan-disposition-ruleset")

@@ -88,23 +88,6 @@
 ;; the unioned hierarchy
 ;; ===========================================================================
 
-(defn- ->ancestor-conflicts
-  "The fact types whose ancestor sets differ between units: `{ft {unit #{ft}}}`.
-  A single set (or units that agree) is no conflict and is not recorded."
-  [analyses-by-unit]
-  (let [per-ft (reduce (fn [acc [uk analysis]]
-                         (reduce-kv (fn [acc ft {:keys [ancestors]}]
-                                      (assoc-in acc [ft uk] (set ancestors)))
-                                    acc
-                                    (:fact-types analysis)))
-                       {}
-                       analyses-by-unit)]
-    (into (sorted-map)
-          (keep (fn [[ft unit-sets]]
-                  (when (> (count (into #{} (vals unit-sets))) 1)
-                    [ft unit-sets])))
-          per-ft)))
-
 ;; ===========================================================================
 ;; the selection
 ;; ===========================================================================
@@ -117,7 +100,6 @@
                          unit's `:namespaces` filter
     :ancestors          the unioned, transitively re-closed ancestor map
     :descendants        its transpose
-    :hierarchy-conflicts  `{ft {unit-key #{ft}}}` where units disagree
     :coverage           `{:units [unit-key] :namespaces {unit-key [ns]}
                           :unknown-namespaces [ns]}`
 
@@ -146,7 +128,6 @@
       {:analyses analyses
        :ancestors ancestors
        :descendants (hierarchy/->descendants ancestors)
-       :hierarchy-conflicts (->ancestor-conflicts analyses)
        :coverage {:units (mapv shared-registry/unit-key selection)
                   :namespaces (->namespaces covered-by-unit selection)
                   :unknown-namespaces (->unknown-namespaces covered-by-unit selection)}})))

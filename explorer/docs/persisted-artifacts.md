@@ -123,7 +123,7 @@ across every rule opens one file instead of all of them.
 | `production-index.edn` | `:name` `:ns` `:lhs-types` `:insert-types` `:retract-types` + the flags | almost everything |
 | `production-conditions.edn` | `:lhs` — the condition trees | per-condition work: polarity, join bindings |
 | `production-details.edn` | `:rhs-form` `:doc` `:props` `:notes` `:params` | a single production you have already picked |
-| `fact-types.edn` | the hierarchy — `:ancestors` and the rest | anything type-directed |
+| `fact-types.edn` | the hierarchy — `:ancestors` and the rest, including every declared `derive` edge (see below) | anything type-directed |
 | `dep-graph.edn` | `:upstream` per production | producer→consumer edges |
 | `meta.edn` | `:slim` + `:unresolved` | orientation; see below |
 
@@ -144,6 +144,11 @@ never looks at.
 
 Every part file is written even when empty, so the directory is the same shape on
 every run and a reader never branches on which files exist.
+
+`fact-types.edn` records every *declared* hierarchy edge — each tag a `derive`
+named as a child, with its ancestors — not just the edges a unit's productions
+happen to touch. That is what lets composition union a complete hierarchy when
+one unit declares an edge only transitively.
 
 ## What is not on disk, and why
 
@@ -210,16 +215,17 @@ bb "$S" "$D" hierarchy :loan/applicant    # that type's ancestors + descendants 
 bb "$S" "$D" production some.ns/some-rule # one production's full record; --part lhs|rhs|props (index+conditions+details)
 bb "$S" "$D" production some.ns/some-rule --annotations  # one production's raw annotation
 bb "$S" "$D" edges some.ns/some-rule      # up/downstream             (dep-graph)
+bb "$S" "$D" units                        # composed unit: source units + coverage  (manifest + index)
+bb "$S" "$D" unit-edges [<unit>]          # cross-unit producer->consumer edges  (index + dep-graph + fact-types)
+bb "$S" "$D" entry-points [<unit>]        # consumed types no rule produces  (index + fact-types)
 bb "$S" "$D" curated                      # what the overlay changed vs the baseline
 bb "$S" "$D" layers                       # the fold + per-key provenance
 bb "$S" "$D" diff "$AFTER"               # production-level diff of this unit vs $AFTER
-bb "$S" "$D" digest                       # registry digest: summary + per-key counts
-bb "$S" "$D" digest coverage              # select-keys off registry-digest.edn
 ```
 
-For `digest`, `$D` is a federation output directory — the explicit `:dir`
-`federate/persist!` wrote `registry-index.edn` and `registry-digest.edn` into,
-beside the units it federated, not inside one.
+`units` and `unit-edges` read a composed unit (a ruleset unit fails);
+`entry-points` works on either. `<unit>` is a full unit key (`repo@variant`) or
+an unambiguous bare `:repo`.
 
 Five subcommands never open the analysis at all — `summary`, `gaps`,
 `types`, `curated`, and `layers` read only the annotation layers. `producers`,
@@ -236,6 +242,9 @@ annotations only for the full record's `:resolution`; `--part lhs` never opens
 `production-details.edn` or the annotations. With `--annotations` it prints the
 merged annotation for that production instead — a production with no annotation
 says so — and `--file` picks which annotation file that read uses.
+`units` reads the composed manifest plus `production-index.edn`; `unit-edges`
+reads `production-index.edn`, `dep-graph.edn`, and `fact-types.edn`;
+`entry-points` reads `production-index.edn` and `fact-types.edn`.
 
 `producers`, `consumers`, and `hierarchy` resolve a fact type against the names
 in `fact-types.edn` — exact first, then substring. A substring that lands on one
@@ -252,9 +261,11 @@ because the deterministic baseline is the real work list. `production
 its variant, or two composed units — production by production: which rules and
 queries were added or removed, which changed and how (`:lhs`, `:rhs-form`,
 types, `:resolution`), which fact types appeared or lost ancestors, and which
-dep-graph edges were gained or lost. `:unit` attribution is not a change: it
-is the source unit that carried a production, not part of its identity, so it
-stays in `--edn` / `--rule` output but never tags a changed production. Two
+dep-graph edges were gained or lost, and which types became or stopped being
+entry points (a consumed type with no producer). `:unit` attribution is not a
+change: it is the source unit that carried a production, not part of its
+identity, so it stays in `--edn` / `--production` output but never tags a
+changed production. Two
 composed units instead get a `units` section comparing each manifest's
 `:analysis-run :units` by repo — which source units were added, removed, or
 changed (variant or sha). Any other unit records no source units, so a
@@ -263,10 +274,10 @@ parts plus their merged annotations, and refuses units with differing
 `:slim :dropped` shapes, since those do not hold the same keys. Namespaces
 present on only one side are reported under `scope`, never as added or
 removed; `scope` also lists the fact types only scope-only namespaces touch,
-through the `:ancestors` hierarchy. `--rule NAME` (substring matching, as
-`rule` does) prints one production's before and after per changed field;
-`--edn` prints the diff value. `--rule` reads only the production files and
-skips the full diff, so it answers even when the dep-graph, fact-types, or
+through the `:ancestors` hierarchy. `--production NAME` (substring matching, as
+`production` does) prints one production's before and after per changed field;
+`--edn` prints the diff value. `--production` reads only the production files
+and skips the full diff, so it answers even when the dep-graph, fact-types, or
 shape are absent. Three things it does not answer: a renamed production shows
 as one removed and one added; an `:rhs` tag says the text changed, not what it
 does at runtime; names compare verbatim, so per-build stamps get no useful
@@ -322,10 +333,11 @@ From babashka or anything else, `clojure.edn/read-string` over the one file is
 enough — the artifacts are plain EDN with no tagged literals, and
 `clara.explorer.artifacts.layout` gives you the filenames.
 
-Two values already have a reader, so reach for it before `bb -e`: `digest
-<key>` selects keys of `registry-digest.edn` (the federated digest), and
+Some values already have a reader, so reach for it before `bb -e`:
 `production <fq-name>` joins one production's record from the three
-`production-*` files, with `--part lhs|rhs|props` to open only one field.
+`production-*` files (with `--part lhs|rhs|props` to open only one field),
+`units` / `unit-edges` / `entry-points` answer the cross-unit questions over a
+composed unit, and `diff` answers the before/after question.
 
 Two things not to do:
 
@@ -419,7 +431,7 @@ under review, one per captured session — and the questions worth asking
 span them: *who consumes the type this set produces*, *what does this variant do
 to the others*, *what does this set of sets look like as one rulebase*.
 
-Five namespaces answer that, all under
+Four namespaces answer that, all under
 `clara.explorer.artifacts.*`:
 
 - **`registry`** — discovers and reads N units under a root, as a value. A
@@ -438,7 +450,7 @@ Five namespaces answer that, all under
   `:analysis-run :mode` (as `:mode`) and `:analysis-run :units` (as
   `:composed-from`); absence of `:mode` marks a source unit.
   `registry/aggregate-unit?` and `registry/source-units` turn that marker into
-  the selection a federation usually wants (the source units, no compositions
+  the selection a composition usually wants (the source units, no compositions
   or captured whole-rulebase units), beside `units-with-analysis`.
 - **`rehydrate`** — the inverse of `slim`. Rebuilds the reverse directions a
   persisted analysis drops because they are recomputable: fact-type
@@ -457,28 +469,11 @@ Five namespaces answer that, all under
   before folding (via `registry/narrow-annotations`), so a scoped merge serves
   and persists only the scope's annotations; `->standard-role-layers` records
   the per-unit filter under the layer's `:source :namespaces`.
-- **`federate`** — the union mode. `->index` builds a queryable value over
-  units that share a fact-type vocabulary but are NOT claimed to compose: the
-  globally re-closed hierarchy (with `:conflicts` where units disagree),
-  per-type producers/consumers with polarity, cross-unit `:unit-edges`, entry
-  points, and orphans. A `UnitRef` may carry a `:namespaces` filter that
-  narrows the unit's scope; requested namespaces no selected unit covers are
-  reported under `:coverage :unknown-namespaces`. `impact-of`,
-  `producers-of`, `dependents-of`, `paths-between`, and
-  `unit-dependency-graph` answer over it; `->digest` + `persist!` write
-  `registry-index.edn` / `registry-digest.edn` to an explicit `:dir`, and
-  `read-index` / `read-digest` read them back. `->index` and `persist!` accept
-  a caller `:label` recorded into the index's `:scope`, so a persisted index
-  names its question without depending on its directory. `diff` compares two
-  indexes over overlapping unit sets — the variant-vs-mainline question —
-  reporting selection, edge, fact-type, entry-point, orphan, and hierarchy
-  differences. `grade` checks the union against a composed reference (a
-  captured session or monolithic run). `->index` refuses a selection that
-  mixes aggregate and
-  source units (an aggregate describes the same productions as the units it
-  overlaps, so both would silently double-count), and always refuses an
-  aggregate whose `:composed-from` names another selected unit.
-- **`selection`** — the shared preamble both merge modes consume: read each
+- **`cross-unit`** — the pure readings over a composed analysis: `entry-points`
+  (consumed types no rule produces) and `unit-edges` (cross-unit
+  producer→consumer edges), shared by the bb report's `units` / `unit-edges` /
+  `entry-points` subcommands and by `diff`'s `entry-points` section.
+- **`selection`** — the shared preamble the compose mode consumes: read each
   unit's analysis (refusing shape skew and absent analysis), narrow it to its
   `:namespaces` filter, and union the hierarchy plus coverage in one pass
   (`selection/->selection`).
@@ -518,10 +513,12 @@ layer files; the manifest's `:analysis-run :mode :compose` and `:units` are
 exactly the aggregate marker `registry/unit-info` reads back, so a composed
 unit is not mistaken for a source unit when discovered again. Each `:units`
 entry also carries its source's `:sha` and `:created` (and `:variant` when
-present), and `:staleness` names the `review-when-any-source-sha-drifts` policy
-with those per-source shas — so a reader holding only the directory can answer
-"is this current?" for a composition that is stale as soon as any of its N
-independently-moving sources has moved.
+present), `:coverage` records the `:unknown-namespaces` the selection named
+but no unit covered (an open map a host can add to), and `:staleness` names the
+`review-when-any-source-sha-drifts` policy with those per-source shas — so a
+reader holding only the directory can answer "is this current?" for a
+composition that is stale as soon as any of its N independently-moving sources
+has moved.
 
 ## Related
 

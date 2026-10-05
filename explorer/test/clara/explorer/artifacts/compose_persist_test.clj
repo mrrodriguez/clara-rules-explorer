@@ -135,3 +135,42 @@
       (is (= ["loan-app-ruleset" "loan-disposition-ruleset"] (mapv :source-repo units))))
     (testing "the composition's own entries are still there to enrich"
       (is (every? #(and (:sha %) (:created %)) units)))))
+
+(deftest compose-persist-records-coverage-test
+  (testing "a fully covered selection records an empty unknown-namespaces vector"
+    (let [opts (assoc *artifact-opts*
+                      :root (registry-root)
+                      :repo "composed/coverage-clean"
+                      :units [{:repo "loan-app-ruleset"}
+                              {:repo "loan-disposition-ruleset"}])
+          _ (flow/compose-persist! opts)
+          coverage (-> (store/get-artifact-file :manifest opts)
+                       edn-io/read-edn-file
+                       :coverage)]
+      (is (= {:unknown-namespaces []} coverage))))
+
+  (testing "a filter naming a namespace no unit covers records it"
+    (let [opts (assoc *artifact-opts*
+                      :root (registry-root)
+                      :repo "composed/coverage-gap"
+                      :units [{:repo "loan-app-ruleset"
+                               :namespaces ["clara.explorer.test.rules.loan-app-rules"
+                                            "clara.explorer.test.rules.nope"]}])
+          _ (flow/compose-persist! opts)
+          coverage (-> (store/get-artifact-file :manifest opts)
+                       edn-io/read-edn-file
+                       :coverage)]
+      (is (= ["clara.explorer.test.rules.nope"] (:unknown-namespaces coverage)))))
+
+  (testing "a :manifest-fn addition under :coverage is kept"
+    (let [opts (assoc *artifact-opts*
+                      :root (registry-root)
+                      :repo "composed/coverage-host"
+                      :units [{:repo "loan-app-ruleset"}]
+                      :manifest-fn (fn [manifest _]
+                                     (assoc-in manifest [:coverage :host-gap] ["my.ns"])))
+          _ (flow/compose-persist! opts)
+          coverage (-> (store/get-artifact-file :manifest opts)
+                       edn-io/read-edn-file
+                       :coverage)]
+      (is (= ["my.ns"] (:host-gap coverage))))))

@@ -427,7 +427,7 @@
 
    The manifest records the composition in its own terms: each
    `:analysis-run :units` entry carries the source's `:sha` / `:created` (the
-   state that was composed), and `:staleness` names the
+   state that was composed), `:coverage` records the `:unknown-namespaces` the selection named but no unit covered (an open map a host can add to via `:manifest-fn`), and `:staleness` names the
    `review-when-any-source-sha-drifts` policy with the per-source shas, so a
    reader holding only the directory can answer \"is this current?\" — a
    composed unit is stale as soon as any of its N independently-moving sources
@@ -441,7 +441,8 @@
   [{:keys [root units analysis-run manifest-fn]
     :as opts} :- schema/ComposePersistOptions]
   (let [reg (registry/->registry {:root root :units units})
-        analysis (compose/->composed-analysis reg units)
+        sel (compose/->selection reg units)
+        analysis (compose/->composed-analysis-from-selection sel units)
         role-layers (compose/->standard-role-layers reg units)
         standard-layers (mapv (fn [[_ layer]] layer) role-layers)
         composed-units (mapv #(->composed-unit-provenance reg %) units)]
@@ -464,7 +465,10 @@
                                                                analysis-run)
                                           :blocks {:staleness
                                                    {:policy "review-when-any-source-sha-drifts"
-                                                    :sources (->source-staleness composed-units)}})
+                                                    :sources (->source-staleness composed-units)}
+                                                   :coverage
+                                                   {:unknown-namespaces
+                                                    (get-in sel [:coverage :unknown-namespaces])}})
                              manifest-fn
                              (assoc :manifest-fn (->sources-manifest-fn reg units manifest-fn))))]
         {:dir (store/get-out-dir opts)

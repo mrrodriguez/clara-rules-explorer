@@ -154,12 +154,40 @@
             direct-per-raw-type
             all-ancestors)))
 
+(defn- register-declared-tags
+  "Adds an entry for every tag in `declared-tags` that no production already
+  registered, as an additional root *before* ancestor expansion. Declared tags
+  are the children of `derive` edges — by default the global hierarchy's
+  `:parents` keys — and a tag whose child no production mentions would
+  otherwise vanish from the index, which is exactly the edge composition needs
+  to union. They are keywords or classes, so serialization is ns-independent
+  and a nil ns context is sufficient, as in `register-hierarchy-ancestors`."
+  [acc {:keys [resolve-memo ancestors-set-fn warned-types]} declared-tags]
+  (reduce (fn [acc raw-tag]
+            (if (contains? acc raw-tag)
+              acc
+              (register-ancestors-entry acc
+                                        {:resolve-memo resolve-memo
+                                         :ancestors-set-fn ancestors-set-fn
+                                         :warned-types warned-types
+                                         :ns-name nil
+                                         :raw-type raw-tag})))
+          acc
+          declared-tags))
+
 (defn ->ancestors-index
   "Builds {serialized-type-name {:ancestors [hierarchy-ordered serialized
    ancestor-name ...] :ns <best-effort namespace>}} for every raw type
-   appearing in any production's consumed/produced types.  Each raw type is
-   serialized in its production's ns context; raw ancestors come from the
-   memoized ancestor-set fn and are serialized with the same context.
+   appearing in any production's consumed/produced types, plus every declared
+   hierarchy tag in `declared-tags`. Each raw type is serialized in its
+   production's ns context; raw ancestors come from the memoized ancestor-set
+   fn and are serialized with the same context.
+
+   `declared-tags` are the tags a `derive` named as a child (by default the
+   global hierarchy's `:parents` keys). They are registered even when no
+   production mentions them, so a `derive` edge survives analysis and
+   composition can union it — otherwise a unit that declares an edge only
+   transitively drops it from the composed hierarchy.
 
    Productions are iterated in load order, so a raw type that serializes
    differently under different nses (unresolved symbols) is canonically keyed
@@ -167,7 +195,7 @@
    Divergence logs a warning and keeps the first serialization (localized
    degradation; the type's other serializations still surface via the
    per-production rule summaries and the known-set)."
-  [type-analysis-map ancestors-set-fn productions]
+  [type-analysis-map ancestors-set-fn productions declared-tags]
   (let [resolve-memo (memoize (fn [ns-name t] (serialize/resolve-type ns-name t)))
         warned-types (atom #{})
         direct-per-raw-type
@@ -179,6 +207,12 @@
                                              (get type-analysis-map (:name production))))
                 {}
                 productions)
+        direct-per-raw-type
+        (register-declared-tags direct-per-raw-type
+                                {:resolve-memo resolve-memo
+                                 :ancestors-set-fn ancestors-set-fn
+                                 :warned-types warned-types}
+                                declared-tags)
         full-per-raw-type
         (register-hierarchy-ancestors {:direct-per-raw-type direct-per-raw-type
                                        :resolve-memo resolve-memo
