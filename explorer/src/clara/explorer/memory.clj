@@ -8,7 +8,15 @@
             [clara.explorer.fact-types :as ft]
             [clara.explorer.serialize :as serialize]
             [clara.explorer.utils :as utils]
-            [clojure.tools.logging :as log]))
+            [clojure.tools.logging :as log])
+  (:import [clara.rules.engine
+            ExpressionJoinNode
+            HashJoinNode
+            NegationNode
+            NegationWithJoinFilterNode
+            ProductionNode
+            QueryNode
+            RootJoinNode]))
 
 (defn- deterministic-fact-str
   "Returns a deterministic pr-str representation of a fact for stable sorting.
@@ -41,11 +49,11 @@
        (map-indexed (fn [i p] [(:name p) i]))
        (into {})))
 
-(defn- get-all-facts-wrapped
-  [{:keys [all-facts] :as _inspection}]
+(defn- ->wrapped-fact-set
+  [facts]
   (into #{}
         (map platform/fact-id-wrap)
-        all-facts))
+        facts))
 
 (defn- get-fact-type-order
   [{:keys [productions] :as _rulebase}]
@@ -78,44 +86,65 @@
   (fn [{p-name :name :as _production-meta}]
     (get production-order p-name Integer/MAX_VALUE)))
 
-(defn- ->used-by-index
-  [inspection get-id production-order-key-fn]
-  (let [{:keys [rule-matches query-matches]} inspection
-        rule-match-facts
-        (for [[rule explanations] rule-matches
-              explanation explanations
-              match (:matches explanation)
-              fact (extract-match-facts match)
-              :when fact]
-          [(get-id fact) {:name (:name rule)
-                          :id (serialize/route-id (str (:name rule)))
-                          :ns (str (:ns-name rule))
-                          :type "rule"}])
+(defn- ->production-dep
+  "ProductionDep for a rule or query map (see
+   `clara.explorer.server.api/ProductionDep`).  `:ns` is `(str (:ns-name …))`;
+   the underlying clara-rules query schema has no `:ns-name`, so query deps
+   carry `\"\"`."
+  [{p-name :name p-ns-name :ns-name} p-type]
+  {:name p-name
+   :id (serialize/route-id (str p-name))
+   :ns (str p-ns-name)
+   :type p-type})
 
-        query-match-facts
-        (for [[query explanations] query-matches
-              explanation explanations
-              match (:matches explanation)
-              fact (extract-match-facts match)
-              :when fact]
-          [(get-id fact) {:name (:name query)
-                          :id (serialize/route-id (str (:name query)))
-                          :ns (str (:ns-name query))
-                          :type "query"}])
+(defn- ->fact-id-dep-pairs->index
+  "Folds `[fact-id dep]` pairs into `{fact-id [dep …]}` with deps distinct and
+   sorted by production order (then name, so equal-load-order query deps are
+   deterministic).  nil fact-ids (facts the fact table cannot describe) are
+   dropped."
+  [pairs production-order-key-fn]
+  (->> pairs
+       (reduce (fn [acc [fact-id dep]]
+                 (if (nil? fact-id)
+                   acc
+                   (update acc fact-id (fnil conj #{}) dep)))
+               {})
+       (reduce-kv (fn [acc fact-id deps]
+                    (assoc acc fact-id (->> deps
+                                            (sort-by (juxt production-order-key-fn :name))
+                                            vec)))
+                  {})))
 
-        add-fact-id-matches
-        (fn add-fact-id-matches [used-by-index fact-id id-match-pairs]
-          (assoc used-by-index
-                 fact-id
-                 (->> (map second id-match-pairs)
-                      distinct
-                      (sort-by production-order-key-fn)
-                      vec)))]
+(defn- ->in-results-of-index
+  "`{fact-id [ProductionDep]}` — queries whose current results include the fact."
+  [query-matches get-id production-order-key-fn]
+  (->fact-id-dep-pairs->index
+   (for [[query explanations] query-matches
+         explanation explanations
+         match (:matches explanation)
+         fact (extract-match-facts match)
+         :when fact]
+     [(get-id fact) (->production-dep query "query")])
+   production-order-key-fn))
 
-    (->> rule-match-facts
-         (concat query-match-facts)
-         (group-by first)
-         (reduce-kv add-fact-id-matches {}))))
+(defn- ->supports-insertions-of-index
+  "`{fact-id [ProductionDep]}` — rules whose activation includes the fact and
+   whose recorded logical insertions still contain at least one retained fact
+   (§4.2: an activation whose only insertion was retracted with `retract!`
+   supports nothing).  `fact-retained?` is `->fact-retained-pred`."
+  [session get-id production-order-key-fn fact-retained?]
+  (let [{:keys [memory rulebase]} (eng/components session)]
+    (->fact-id-dep-pairs->index
+     (for [rule-node (:production-nodes rulebase)
+           :let [rule (:production rule-node)
+                 dep (->production-dep rule "rule")]
+           token (keys (mem/get-insertions-all memory rule-node))
+           :let [insertions (mapcat identity
+                                    (mem/get-insertions memory rule-node token))]
+           :when (some fact-retained? insertions)
+           [fact _node-id] (:matches token)]
+       [(get-id fact) dep])
+     production-order-key-fn)))
 
 (defn- insertion-id+rule-pairs
   "`([fact-id rule] …)`, one pair per insertion in `inspect`'s `:insertions`.
@@ -131,11 +160,8 @@
     [id rule]))
 
 (defn- ->origin
-  [{p-name :name p-ns-name :ns-name}]
-  {:name p-name
-   :id (serialize/route-id (str p-name))
-   :ns (str p-ns-name)
-   :type "rule"})
+  [p]
+  (->production-dep p "rule"))
 
 (defn- ->origin-map
   "`{fact-id [origin …]}` — the rules that inserted each fact."
@@ -158,7 +184,11 @@
            root-facts
            get-fact-id
            origin-map
-           used-by-index
+           supports-insertions-of-index
+           in-results-of-index
+           matches-condition-of-index
+           blocks-index
+           blocking-candidate-of-index
            known-set
            prune-fn]}]
   (let [raw-types (reduce (fn [acc wrapped]
@@ -197,21 +227,27 @@
                                   :data (prune-fn fact)
                                   :is-root (boolean (some #(identical? fact %) root-facts))
                                   :inserted-from (get origin-map id [])
-                                  :used-by (get used-by-index id [])}])))
+                                  :supports-insertions-of (get supports-insertions-of-index id [])
+                                  :in-results-of (get in-results-of-index id [])
+                                  :matches-condition-of (get matches-condition-of-index id [])
+                                  :blocks (get blocks-index id [])
+                                  :blocking-candidate-of (get blocking-candidate-of-index id [])}])))
                     sorted-facts)]
     {:facts facts
      :raw-types raw-types}))
 
 (defn- group-instances-by-role
-  "Groups instances of a fact type by their origin (inserted-from) or usage (used-by)."
+  "Groups instances of a fact type by a production relation (`role-key`).
+   `:inserted-from` substitutes a root group when a fact has no origin; every
+   other role reads the fact's `role-key` vector directly (empty → no group)."
   [instances role-key production-order-key-fn]
   (->> (for [inst instances
-             role (case role-key
-                    :inserted-from (let [origins (:inserted-from inst)]
-                                     (if (empty? origins)
-                                       [{:name "Root Facts (External)" :type "root"}]
-                                       origins))
-                    :used-by (:used-by inst))]
+             role (if (= role-key :inserted-from)
+                    (let [origins (:inserted-from inst)]
+                      (if (empty? origins)
+                        [{:name "Root Facts (External)" :type "root"}]
+                        origins))
+                    (get inst role-key))]
          (assoc role :fact inst))
        (group-by (juxt :name :type))
        (map (fn [[[name type] items]]
@@ -227,24 +263,180 @@
                     (production-order-key-fn entry))))
        vec))
 
+(def ^:private session-relation-role-keys
+  "Production-relation role keys on a SessionFact, in fact-type-grouping order.
+   `:inserted-from` is special-cased for root groups; every other key groups by
+   the fact's own `role-key` vector."
+  [:inserted-from
+   :supports-insertions-of
+   :in-results-of
+   :matches-condition-of
+   :blocks
+   :blocking-candidate-of])
+
 (defn- ->fact-type-index
   [fact-table production-order-key-fn]
-  (letfn [(add-fact-type-instance-data [m fact-type-name instances]
+  (letfn [(role-groups [instances role-key]
+            (group-instances-by-role instances role-key production-order-key-fn))
+          (add-fact-type-instance-data [m fact-type-name instances]
             (assoc m fact-type-name
-                   {:name fact-type-name
-                    :id (serialize/route-id fact-type-name)
-                    :ns (:ns (first instances))
-                    :count (count instances)
-                    :inserted-from (group-instances-by-role instances
-                                                            :inserted-from
-                                                            production-order-key-fn)
-                    :used-by (group-instances-by-role instances
-                                                      :used-by
-                                                      production-order-key-fn)
-                    :ids (mapv :id instances)}))]
+                   (into {:name fact-type-name
+                          :id (serialize/route-id fact-type-name)
+                          :ns (:ns (first instances))
+                          :count (count instances)
+                          :ids (mapv :id instances)}
+                         (map (fn [role-key]
+                                [role-key (role-groups instances role-key)]))
+                         session-relation-role-keys)))]
     (->> (vals fact-table)
          (group-by (comp :name :type))
          (reduce-kv add-fact-type-instance-data {}))))
+
+(defn- join-node?
+  [node]
+  (or (instance? RootJoinNode node)
+      (instance? HashJoinNode node)
+      (instance? ExpressionJoinNode node)))
+
+(defn- negation-node?
+  [node]
+  (or (instance? NegationNode node)
+      (instance? NegationWithJoinFilterNode node)))
+
+(defn- terminal-node->production-dep
+  "ProductionDep for a ProductionNode/QueryNode, or nil for other nodes."
+  [node]
+  (cond
+    (instance? ProductionNode node) (->production-dep (:production node) "rule")
+    (instance? QueryNode node) (->production-dep (:query node) "query")))
+
+(defn- descendant-production-deps
+  "ProductionDeps for every terminal node reachable from `node` through `:children`."
+  [node]
+  (->> node
+       (tree-seq (comp seq :children) :children)
+       (keep terminal-node->production-dep)))
+
+(defn- element-memory-facts
+  "Wrapped facts held by a join/negation node's element memory."
+  [memory node]
+  (map (comp platform/fact-id-wrap :fact)
+       (mem/get-elements-all memory node)))
+
+(defn- present-facts-wrapped
+  "Set of wrapped facts held by a join/negation node's element memory — the
+   facts currently in working memory (§4.2's \"in some alpha memory\")."
+  [session]
+  (let [{:keys [memory rulebase]} (eng/components session)]
+    (into #{}
+          (mapcat (fn [[_id node]]
+                    (when (or (join-node? node) (negation-node? node))
+                      (element-memory-facts memory node))))
+          (:id-to-node rulebase))))
+
+(defn- alpha-accepts-fact?
+  "True when at least one alpha node's activation accepts `fact` (returns bindings)."
+  [get-alphas-fn fact]
+  (boolean
+   (some (fn [[alpha-nodes _]]
+           (some (fn [node]
+                   (when-let [bindings ((:activation node) fact (:env node))]
+                     bindings))
+                 alpha-nodes))
+         (get-alphas-fn [fact]))))
+
+(defn- ->fact-retained-pred
+  "Returns a predicate: true when a fact is still in working memory — held by
+   element memory (present) or accepted by no alpha node (presence undecidable
+   → kept, §4.2).  False only when absent from element memory yet some alpha
+   node would accept it — i.e. it was retracted."
+  [get-alphas-fn present-facts]
+  (fn [fact]
+    (or (contains? present-facts (platform/fact-id-wrap fact))
+        (not (alpha-accepts-fact? get-alphas-fn fact)))))
+
+(defn- filter-retracted-facts
+  "Drops from `all-facts` the facts an insertion record still names but that
+   are no longer in working memory: an RHS `retract!` removes the fact from
+   alpha memory but leaves the inserting production's record in place (§4.2)."
+  [all-facts fact-retained?]
+  (into [] (filter fact-retained?) all-facts))
+
+(defn- negation-element-blocks?
+  "True when `element` blocks at least one waiting token at `node` (§3):
+   no join bindings → any waiting token; joined on bindings → a token sharing
+   the node's join bindings; join filter → a token sharing join bindings for
+   which `join-filter-fn` returns bindings."
+  [node join-filter-fn env element token-groups]
+  (let [binding-keys (:binding-keys node)
+        join-bindings (select-keys (:bindings element) binding-keys)]
+    (boolean
+     (some (fn [token]
+             (if join-filter-fn
+               (boolean (join-filter-fn token (:fact element) (:bindings element) env))
+               true))
+           (get token-groups join-bindings)))))
+
+(defn- ->node-relation-pairs
+  "Walks `:id-to-node` and returns `{:matches-condition-of [pairs] :blocks [pairs]
+   :blocking-candidate-of [pairs]}` — each pair `[fact-id dep]`.  Join-node
+   elements contribute to `:matches-condition-of`; negation-node elements
+   contribute to `:blocks` or `:blocking-candidate-of`."
+  [id-to-node memory get-id]
+  (reduce
+   (fn [acc [_id node]]
+     (cond
+       (join-node? node)
+       (let [deps (descendant-production-deps node)]
+         (reduce (fn [acc element]
+                   (let [fact-id (get-id (:fact element))]
+                     (if (nil? fact-id)
+                       acc
+                       (update acc :matches-condition-of
+                               into (for [dep deps] [fact-id dep])))))
+                 acc
+                 (mem/get-elements-all memory node)))
+
+       (negation-node? node)
+       (let [deps (descendant-production-deps node)
+             join-filter-fn (:join-filter-fn node)
+             env (get-in node [:condition :env])
+             binding-keys (:binding-keys node)
+             token-groups (group-by #(select-keys (:bindings %) binding-keys)
+                                    (mem/get-tokens-all memory node))]
+         (reduce
+          (fn [acc element]
+            (let [fact-id (get-id (:fact element))
+                  relation (if (negation-element-blocks? node
+                                                         join-filter-fn
+                                                         env
+                                                         element
+                                                         token-groups)
+                             :blocks
+                             :blocking-candidate-of)]
+              (if (nil? fact-id)
+                acc
+                (update acc relation into (for [dep deps] [fact-id dep])))))
+          acc
+          (mem/get-elements-all memory node)))
+
+       :else acc))
+   {:matches-condition-of []
+    :blocks []
+    :blocking-candidate-of []}
+   id-to-node))
+
+(defn- ->node-relation-maps
+  "`{:matches-condition-of {fact-id [dep]} :blocks … :blocking-candidate-of …}`
+   from `->node-relation-pairs`, deps distinct and production-order sorted."
+  [id-to-node memory get-id production-order-key-fn]
+  (let [pairs (->node-relation-pairs id-to-node memory get-id)]
+    {:matches-condition-of (->fact-id-dep-pairs->index (:matches-condition-of pairs)
+                                                       production-order-key-fn)
+     :blocks (->fact-id-dep-pairs->index (:blocks pairs)
+                                         production-order-key-fn)
+     :blocking-candidate-of (->fact-id-dep-pairs->index (:blocking-candidate-of pairs)
+                                                        production-order-key-fn)}))
 
 (defn- ->id-name-index
   "Reverse index {route-id(name) → name} for a collection of serialized
@@ -366,21 +558,34 @@
 
          {:keys [get-alphas-fn rulebase]} (eng/components session)
          {:keys [fact-type-fn]} (meta get-alphas-fn)
+         {:keys [id-to-node]} rulebase
+         memory (-> session eng/components :memory)
 
          production-order (get-production-order rulebase)
          fact-type-order (get-fact-type-order rulebase)
+         production-order-key-fn (->production-order-key-fn production-order)
 
-         all-facts-wrapped (get-all-facts-wrapped inspection)
+         present-facts (present-facts-wrapped session)
+         fact-retained? (->fact-retained-pred get-alphas-fn present-facts)
+         all-facts (filter-retracted-facts (:all-facts inspection)
+                                           fact-retained?)
+         all-facts-wrapped (->wrapped-fact-set all-facts)
          prune-fn (serialize/memoizing-prune-fns)
          sorted-facts (sort-facts all-facts-wrapped fact-type-fn fact-type-order prune-fn)
          id-map (->id-map sorted-facts)
          get-fact-id (fn get-fact-id [fact] (.get ^java.util.IdentityHashMap id-map fact))
 
-         production-order-key-fn (->production-order-key-fn production-order)
-
-         used-by-index (->used-by-index inspection
-                                        get-fact-id
-                                        production-order-key-fn)
+         supports-insertions-of-index (->supports-insertions-of-index session
+                                                                      get-fact-id
+                                                                      production-order-key-fn
+                                                                      fact-retained?)
+         in-results-of-index (->in-results-of-index query-matches
+                                                    get-fact-id
+                                                    production-order-key-fn)
+         node-relations (->node-relation-maps id-to-node
+                                              memory
+                                              get-fact-id
+                                              production-order-key-fn)
          origin-map (->origin-map insertions
                                   get-fact-id
                                   production-order-key-fn)
@@ -390,7 +595,11 @@
                                    :root-facts root-facts
                                    :get-fact-id get-fact-id
                                    :origin-map origin-map
-                                   :used-by-index used-by-index
+                                   :supports-insertions-of-index supports-insertions-of-index
+                                   :in-results-of-index in-results-of-index
+                                   :matches-condition-of-index (:matches-condition-of node-relations)
+                                   :blocks-index (:blocks node-relations)
+                                   :blocking-candidate-of-index (:blocking-candidate-of node-relations)
                                    :known-set known-set
                                    :prune-fn prune-fn})
          fact-type-index (->fact-type-index (:facts fact-table)
@@ -414,7 +623,6 @@
       ;; which would double-serialize (phantom string-kinded fact types).
       ;; Stripped from the served memory-analysis in api.clj.
       :fact-raw-types    (:raw-types fact-table)
-      :used-by           used-by-index
       :origin            origin-map
       :rule-matches      rule-match-index
       :query-matches     query-match-index
@@ -429,7 +637,7 @@
   "Re-derives the per-fact :type :known flag of an existing memory-analysis from
    `known-set` (serialized fact-type names), without re-inspecting the session.
    Re-stamps every fact entry wherever it appears — :facts, the rule/query match
-   indices, and the :fact-types inserted-from/used-by role grouping — still
+   indices, and the :fact-types production-relation role groupings — still
    O(total fact entries), far cheaper than a fresh memory-analysis.  Used by the
    cache build to reuse a memory-analysis produced during memory enrichment
    (which is built with an empty known-set)."
@@ -454,9 +662,10 @@
                   (update qm :matches stamp-matches)))
         (update :fact-types update-vals
                 (fn [entry]
-                  (-> entry
-                      (update :inserted-from stamp-roles)
-                      (update :used-by stamp-roles)))))))
+                  (reduce (fn [e role-key]
+                            (update e role-key stamp-roles))
+                          entry
+                          session-relation-role-keys))))))
 
 (defn get-rule-activity
   "Returns a unified activity map for a rule: {:matches [...] :inserted-facts [...]}"

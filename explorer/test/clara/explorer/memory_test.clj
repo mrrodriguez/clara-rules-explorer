@@ -10,6 +10,7 @@
             [clara.explorer.test.rules.nil-safety-test-rules :as nil-safety]
             [clara.explorer.test.rules.equal-fact-test-rules :as equal-facts]
             [clara.explorer.test.rules.match-uniqueness-test-rules :as mu]
+            [clara.explorer.test.rules.memory-relations-test-rules :as mrr]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [schema.test :as st]))
@@ -61,8 +62,8 @@
       (is (= 2 (count instances)) "Both equal facts should be in the memory-analysis")
       (is (not= (first (keys instances)) (second (keys instances))) "They must have different IDs"))))
 
-(deftest test-used-by-index
-  (testing "Used-by index correctly identifies rules using a fact"
+(deftest test-supports-insertions-of-index
+  (testing "Supports-insertions-of index correctly identifies rules whose activation includes a fact"
     (let [app (laf/map->Application {:app-id "app-1"})
           session (-> (->test-session)
                       (r/insert app)
@@ -70,10 +71,10 @@
           memory-analysis (memory/->memory-analysis session)
           app-data (serialize/prune-fns app)
           fact-id (some (fn [[id f]] (when (= (:data f) app-data) id)) (:facts memory-analysis))
-          used-by (get-in memory-analysis [:used-by fact-id])]
+          supports-insertions-of (get-in memory-analysis [:facts fact-id :supports-insertions-of])]
 
-      (is (seq used-by) "Fact should be used by some rules/queries")
-      (is (some #(= (:name %) "clara.explorer.test.rules.loan-doc-rules/collect-app-req-docs") used-by)))))
+      (is (seq supports-insertions-of) "Fact should support some rule insertions")
+      (is (some #(= (:name %) "clara.explorer.test.rules.loan-doc-rules/collect-app-req-docs") supports-insertions-of)))))
 
 (deftest test-origin-map
   (testing "Origin map correctly identifies the rule that inserted a fact"
@@ -107,17 +108,17 @@
           fact (some #(when (= (:data %) app-data) %) (vals (:facts memory-analysis)))]
       (is (some? fact))
       (is (vector? (:inserted-from fact)))
-      (is (vector? (:used-by fact)))
+      (is (vector? (:supports-insertions-of fact)))
       (is (empty? (:inserted-from fact)) "Root fact should have no origins in origin-map")
-      (is (seq (:used-by fact)) "Fact should be used by rules/queries")
+      (is (seq (:supports-insertions-of fact)) "Fact should support some rule insertions")
 
       ;; 2. Verify Rule-Centric Index
       (let [type-info (get-in memory-analysis [:fact-types "clara.explorer.test.rules.loan_app_facts.Application"])]
         (is (seq (:inserted-from type-info)) "Type info should have rule-centric inserted-from")
         (is (= "Root Facts (External)" (:name (first (:inserted-from type-info)))))
         (is (= "root" (:type (first (:inserted-from type-info)))))
-        (is (seq (:used-by type-info)) "Type info should have rule-centric used-by")
-        (let [usage (first (:used-by type-info))]
+        (is (seq (:supports-insertions-of type-info)) "Type info should have rule-centric supports-insertions-of")
+        (let [usage (first (:supports-insertions-of type-info))]
           (is (string? (:name usage)))
           (is (string? (:type usage)))
           (is (seq (:facts usage))))))))
@@ -150,7 +151,7 @@
           (is (map? (:data fact)) "Match fact should have :data (the fact's own value)")
           (is (contains? fact :is-root) "Match fact should have :is-root")
           (is (vector? (:inserted-from fact)) "Match fact should have :inserted-from")
-          (is (vector? (:used-by fact)) "Match fact should have :used-by")))
+          (is (vector? (:supports-insertions-of fact)) "Match fact should have :supports-insertions-of")))
 
       ;; 2. Verify Query Activity
       (let [query-name "clara.explorer.test.rules.loan-doc-rules/find-document-check"
@@ -189,7 +190,7 @@
       (is (every? #(contains? (:fact %) :data) matches) "Every match fact should have :data")
       (is (every? #(contains? (:fact %) :is-root) matches) "Every match fact should have :is-root")
       (is (every? #(contains? (:fact %) :inserted-from) matches) "Every match fact should have :inserted-from")
-      (is (every? #(contains? (:fact %) :used-by) matches) "Every match fact should have :used-by")
+      (is (every? #(contains? (:fact %) :supports-insertions-of) matches) "Every match fact should have :supports-insertions-of")
       ;; Verify types match the actual facts
       (let [types (set (map (comp :name :type :fact) matches))]
         (is (contains? types "clara.explorer.test.rules.loan_app_facts.Application")
@@ -580,3 +581,136 @@
       (is (map? analysis))
       (is (contains? analysis :rules))
       (is (contains? analysis :fact-types)))))
+
+;; ---------------------------------------------------------------------------
+;; Working-memory relations — §2 fixture, §3.1 / §5 assertions
+;; ---------------------------------------------------------------------------
+
+(def ^:private mrr-type-ns
+  "Class-name namespace prefix for the §2 fixture record types (hyphens in the
+   ns munge to underscores in the record class name)."
+  "clara.explorer.test.rules.memory_relations_test_rules.")
+
+(defn- ->memory-relations-session
+  "Builds the §2 fixture session: both applications, the negated/blocking facts,
+   a failed document check, and a review close that retracts app-1's task."
+  []
+  (-> (r/mk-session 'clara.explorer.test.rules.memory-relations-test-rules)
+      (r/insert (mrr/->Application "app-1" 7)
+                (mrr/->Application "app-2" 7)
+                (mrr/->ManualHold :hold)
+                (mrr/->MissingDocument "app-1" :paystub)
+                (mrr/->LoanOffer "app-1" 9)
+                (mrr/->LoanOffer "app-2" 5)
+                (mrr/->DocumentCheck "app-1" :failed)
+                (mrr/->ReviewClosed "app-1"))
+      (r/fire-rules)))
+
+(defn- find-mrr-fact-id
+  "Finds a fixture fact's id by its short record-type name and a `:data` predicate."
+  [memory-analysis short-type pred]
+  (some (fn [[id fact]]
+          (when (and (= (str mrr-type-ns short-type) (get-in fact [:type :name]))
+                     (pred (:data fact)))
+            id))
+        (:facts memory-analysis)))
+
+(defn- fact-relation-names
+  "Short production names of a fact's `rel-key` relation, in order."
+  [memory-analysis fact-id rel-key]
+  (mapv (fn [dep] (last (str/split (:name dep) #"/")))
+        (get-in memory-analysis [:facts fact-id rel-key])))
+
+(defn- ->memory-relations-facts
+  "Returns `{:analysis …}` plus each fixture fact's id, keyed by label."
+  []
+  (let [analysis (memory/->memory-analysis (->memory-relations-session))
+        find-id (partial find-mrr-fact-id analysis)]
+    {:analysis           analysis
+     :application-1      (find-id "Application" #(= "app-1" (:app-id %)))
+     :application-2      (find-id "Application" #(= "app-2" (:app-id %)))
+     :manual-hold        (find-id "ManualHold" (constantly true))
+     :missing-document-1 (find-id "MissingDocument" #(= "app-1" (:app-id %)))
+     :loan-offer-9       (find-id "LoanOffer" #(= 9 (:apr %)))
+     :loan-offer-5       (find-id "LoanOffer" #(= 5 (:apr %)))
+     :document-check-1   (find-id "DocumentCheck" #(= "app-1" (:app-id %)))
+     :review-closed-1    (find-id "ReviewClosed" (constantly true))
+     :review-task-2      (find-id "ReviewTask" #(= "app-2" (:app-id %)))}))
+
+(deftest test-memory-relations-matches-condition-of
+  (let [{:keys [analysis application-1 application-2 document-check-1
+                review-closed-1 review-task-2]}
+        (->memory-relations-facts)]
+    (is (some? application-1))
+    (is (some? application-2))
+
+    (testing "Application matches the condition of all seven productions that read it"
+      (let [expected #{"ready-for-review" "documents-complete" "offers-within-limit"
+                       "document-check-passed" "audit-application" "open-review-task"
+                       "applications-without-hold"}]
+        (is (= expected (set (fact-relation-names analysis application-1 :matches-condition-of))))
+        (is (= (fact-relation-names analysis application-1 :matches-condition-of)
+               (fact-relation-names analysis application-2 :matches-condition-of))
+            "both applications match the same conditions")))
+
+    (testing "DocumentCheck reaches document-check-passed's join (the :test fails after)"
+      (is (= ["document-check-passed"]
+             (fact-relation-names analysis document-check-1 :matches-condition-of))))
+
+    (testing "ReviewClosed and the surviving ReviewTask match close-review-task"
+      (is (= ["close-review-task"]
+             (fact-relation-names analysis review-closed-1 :matches-condition-of)))
+      (is (= ["close-review-task"]
+             (fact-relation-names analysis review-task-2 :matches-condition-of))))))
+
+(deftest test-memory-relations-blocks
+  (let [{:keys [analysis manual-hold missing-document-1 loan-offer-9 loan-offer-5]}
+        (->memory-relations-facts)]
+    (testing "ManualHold blocks ready-for-review and the hold query"
+      (is (= ["ready-for-review" "applications-without-hold"]
+             (fact-relation-names analysis manual-hold :blocks))))
+    (testing "MissingDocument blocks only its own application's rule"
+      (is (= ["documents-complete"]
+             (fact-relation-names analysis missing-document-1 :blocks))))
+    (testing "LoanOffer over the limit blocks; under the limit is only a candidate"
+      (is (= ["offers-within-limit"]
+             (fact-relation-names analysis loan-offer-9 :blocks)))
+      (is (= ["offers-within-limit"]
+             (fact-relation-names analysis loan-offer-5 :blocking-candidate-of))))))
+
+(deftest test-memory-relations-supports-insertions-of
+  (let [{:keys [analysis application-1 application-2]} (->memory-relations-facts)]
+    (testing "app-1's only activation (open-review-task) had its insertion retracted"
+      (is (= [] (fact-relation-names analysis application-1 :supports-insertions-of))))
+    (testing "app-2 supports every rule that fired and left a retained insertion"
+      (is (= ["documents-complete" "offers-within-limit" "open-review-task"]
+             (fact-relation-names analysis application-2 :supports-insertions-of))))))
+
+(deftest test-memory-relations-blocks-disjoint
+  (let [{:keys [analysis]} (->memory-relations-facts)]
+    (doseq [[_id fact] (:facts analysis)]
+      (is (empty? (filter (set (:blocks fact)) (:blocking-candidate-of fact)))
+          "blocks and blocking-candidate-of are disjoint for every fact"))))
+
+(deftest test-memory-relations-retracted-fact-absent
+  (let [{:keys [analysis]} (->memory-relations-facts)
+        review-task-1 (find-mrr-fact-id analysis "ReviewTask" #(= "app-1" (:app-id %)))
+        review-task-2 (find-mrr-fact-id analysis "ReviewTask" #(= "app-2" (:app-id %)))]
+    (is (nil? review-task-1) "ReviewTask app-1 was retracted and is absent from :facts")
+    (is (some? review-task-2) "ReviewTask app-2 is present")))
+
+(deftest test-memory-relations-clean-session-split
+  (testing "Without negated, failed or retracted facts the two keys split cleanly by production type"
+    (let [session (-> (r/mk-session 'clara.explorer.test.rules.memory-relations-test-rules)
+                      (r/insert (mrr/->Application "app-1" 7)
+                                (mrr/->Application "app-2" 7))
+                      (r/fire-rules))
+          analysis (memory/->memory-analysis session)]
+      (doseq [[_id fact] (:facts analysis)]
+        (is (every? #(= "rule" (:type %)) (:supports-insertions-of fact))
+            "supports-insertions-of carries only rules")
+        (is (every? #(= "query" (:type %)) (:in-results-of fact))
+            "in-results-of carries only queries")
+        (is (empty? (:blocks fact)) "no negation blocks a clean session")
+        (is (empty? (:blocking-candidate-of fact))
+            "no negation candidates in a clean session")))))

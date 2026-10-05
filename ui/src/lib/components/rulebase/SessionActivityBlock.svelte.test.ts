@@ -9,8 +9,7 @@ const fact: SessionFact = {
 	type: { name: ':t/config', id: ':t/config', known: true },
 	data: { name: 'c1' },
 	'is-root': true,
-	'inserted-from': [],
-	'used-by': []
+	'inserted-from': []
 };
 
 const match: FactMatch = {
@@ -19,8 +18,7 @@ const match: FactMatch = {
 		type: { name: ':t/item', id: ':t/item', known: true },
 		data: { tag: 'a' },
 		'is-root': true,
-		'inserted-from': [],
-		'used-by': []
+		'inserted-from': []
 	},
 	bindings: [{ '?config': { name: 'c1' }, '?item': { tag: 'a' } }]
 };

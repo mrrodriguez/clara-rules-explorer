@@ -10,7 +10,6 @@ function makeFact(overrides: Partial<SessionFact> = {}): SessionFact {
 		data: { tag: 'a' },
 		'is-root': true,
 		'inserted-from': [],
-		'used-by': [],
 		...overrides
 	};
 }

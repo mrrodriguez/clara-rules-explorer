@@ -310,7 +310,11 @@ export interface SessionFact {
 	data: unknown;
 	'is-root'?: boolean;
 	'inserted-from'?: ProductionReference[];
-	'used-by'?: ProductionReference[];
+	'supports-insertions-of'?: ProductionReference[];
+	'in-results-of'?: ProductionReference[];
+	'matches-condition-of'?: ProductionReference[];
+	blocks?: ProductionReference[];
+	'blocking-candidate-of'?: ProductionReference[];
 }
 
 export interface SessionFactGroup {
@@ -328,7 +332,11 @@ export interface SessionFactTypeDetail {
 	count: number;
 	ids: number[];
 	'inserted-from': SessionFactGroup[];
-	'used-by': SessionFactGroup[];
+	'supports-insertions-of': SessionFactGroup[];
+	'in-results-of': SessionFactGroup[];
+	'matches-condition-of': SessionFactGroup[];
+	blocks: SessionFactGroup[];
+	'blocking-candidate-of': SessionFactGroup[];
 }
 
 export type SessionFactTypeInstancesResponse = SessionFactTypeDetail;

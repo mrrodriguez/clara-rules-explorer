@@ -79,7 +79,7 @@
           (is (= "clara.explorer.test.rules.loan_app_facts.Application"
                  (get-in body [:type :name])))
           (is (= "app-1" (get-in body [:data :app-id])))
-          (is (contains? body :used-by)))))))
+          (is (contains? body :supports-insertions-of)))))))
 
 (deftest test-session-rules-activations
   (let [handler (->handler)]
