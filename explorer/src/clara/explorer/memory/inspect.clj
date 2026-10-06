@@ -88,7 +88,39 @@
 
 (defn- dissoc-gen-bindings
   [bindings]
-  (into {} (remove gen-binding? bindings)))
+  (into {} (remove gen-binding?) bindings))
+
+(defn- ->match-condition
+  "Condition structure for an explanation entry of `node`: accumulator metadata for
+  accumulate nodes, type plus constraints otherwise."
+  [{:keys [accum-condition condition] :as _node}]
+  (if accum-condition
+    (let [{:keys [accumulator from] :as _accum} accum-condition
+          {:keys [type constraints original-constraints] :as _from} from]
+      {:accumulator accumulator
+       :from {:type type
+              :constraints (or (seq original-constraints) constraints)}})
+    (let [{:keys [type constraints original-constraints] :as _condition} condition]
+      {:type type
+       :constraints (or (seq original-constraints) constraints)})))
+
+(defn- ->token-match
+  "Single condition-match entry for `[fact node-id]` in `token`."
+  [memory id-to-node token [fact node-id]]
+  (let [node (id-to-node node-id)
+        condition (->match-condition node)]
+    (if (:accum-condition node)
+      {:fact fact
+       :condition condition
+       :facts-accumulated (eng/token->matching-elements node memory token)}
+      {:fact fact
+       :condition condition})))
+
+(defn- ->token-explanation
+  "`Explanation` map for a single result/activation `token`."
+  [memory id-to-node {:keys [matches bindings] :as token}]
+  {:matches (mapv #(->token-match memory id-to-node token %) matches)
+   :bindings (dissoc-gen-bindings bindings)})
 
 (defn- tokens->explanations
   "Converts tokens to `Explanation` maps, one per token.  Accumulator conditions
@@ -96,27 +128,8 @@
    to `:fact` (the accumulated result)."
   [session tokens]
   (let [{:keys [memory rulebase]} (eng/components session)
-        id-to-node (:id-to-node rulebase)]
-    (vec
-     (for [{:keys [matches bindings] :as token} tokens]
-       {:matches (vec
-                  (for [[fact node-id] matches
-                        :let [node (id-to-node node-id)
-                              condition (if (:accum-condition node)
-                                          {:accumulator (get-in node [:accum-condition :accumulator])
-                                           :from {:type (get-in node [:accum-condition :from :type])
-                                                  :constraints (or (seq (get-in node [:accum-condition :from :original-constraints]))
-                                                                   (get-in node [:accum-condition :from :constraints]))}}
-                                          {:type (:type (:condition node))
-                                           :constraints (or (seq (:original-constraints (:condition node)))
-                                                            (:constraints (:condition node)))})]]
-                    (if (:accum-condition node)
-                      {:fact fact
-                       :condition condition
-                       :facts-accumulated (eng/token->matching-elements node memory token)}
-                      {:fact fact
-                       :condition condition})))
-        :bindings (dissoc-gen-bindings bindings)}))))
+        {:keys [id-to-node]} rulebase]
+    (mapv #(->token-explanation memory id-to-node %) tokens)))
 
 ;; --- Node taxonomy ---------------------------------------------------------
 
@@ -145,8 +158,8 @@
   (instance? QueryNode node))
 
 (defn- ->descendant-terminal-productions
-  "`{:production <record> :type \"rule\"|\"query\"}` maps for the terminal
-   (production/query) nodes reachable from `node` through `:children`."
+  "Returns a vec of maps with `:production` and `:type` entries for the terminal (production/query)
+  nodes reachable from `node` through `:children`."
   [node]
   (->> node
        (tree-seq (comp seq :children) :children)
@@ -156,7 +169,7 @@
                  (query-node? n) {:production (:query n) :type "query"})))))
 
 (defn- get-node-elements
-  "Element entries (`{:fact … :bindings …}`) held by a beta node's element memory."
+  "Element entries, maps with keys `:fact` and `:bindings`, held by a beta node's element memory."
   [memory node]
   (mem/get-elements-all memory node))
 
@@ -180,85 +193,94 @@
   "Facts a token's condition matches are actually about: accumulator conditions
    contribute their `:from` inputs (via `eng/token->matching-elements`); every
    other condition contributes its own fact."
-  [memory id-to-node token]
-  (for [[fact node-id] (:matches token)
-        :let [node (id-to-node node-id)]
-        fact (if (:accum-condition node)
-               (eng/token->matching-elements node memory token)
-               [fact])]
-    fact))
+  [memory id-to-node {:keys [matches] :as token}]
+  (into [] (mapcat (fn [[fact node-id]]
+                     (let [{:keys [accum-condition] :as node} (id-to-node node-id)]
+                       (if accum-condition
+                         (eng/token->matching-elements node memory token)
+                         [fact]))))
+        matches))
 
 (defn- negation-element-blocks?
-  "True when `element` blocks at least one waiting token at negation `node`.
-   `token-groups` is the node's waiting tokens grouped by join bindings
-   (`(select-keys (:bindings token) (:binding-keys node))`); a join-filter
-   negation additionally requires the node's join filter to accept the pair."
-  [node element token-groups]
-  (let [binding-keys (:binding-keys node)
-        join-bindings (select-keys (:bindings element) binding-keys)
-        join-filter-fn (:join-filter-fn node)
-        env (get-in node [:condition :env])]
-    (boolean
-     (some (fn [token]
-             (if join-filter-fn
-               (boolean (join-filter-fn token (:fact element) (:bindings element) env))
-               true))
-           (get token-groups join-bindings)))))
+  "True when `element` blocks at least one waiting token at negation `node`. `token-groups` is the
+  node's waiting tokens grouped by join bindings. A join-filter negation additionally requires the
+  node's join filter to accept the pair."
+  [{:keys [binding-keys join-filter-fn condition] :as _node}
+   {:keys [bindings fact] :as _element}
+   token-groups]
+  (let [join-bindings (select-keys bindings binding-keys)
+        {:keys [env]} condition]
+    (->> join-bindings
+         (get token-groups)
+         (some (fn [token]
+                 (or (not join-filter-fn)
+                     (join-filter-fn token fact bindings env))))
+         boolean)))
 
 ;; --- Working-memory accuracy ----------------------------------------------
 
 (defn- ->wrapped-facts-from-alpha-memory
   "Wrapped user-visible facts held in alpha memory — the beta-node element
    memory of join and negation nodes."
-  [memory]
-  (into #{}
-        (comp (mapcat vals)
-              (mapcat identity)
-              (map :fact)
-              (filter fact-visible?)
-              (map platform/fact-id-wrap))
-        (vals (:alpha-memory memory))))
+  [{:keys [alpha-memory] :as _memory}]
+  (->> alpha-memory
+       vals
+       (into #{}
+             (comp (mapcat vals)
+                   (mapcat identity)
+                   (map :fact)
+                   (filter fact-visible?)
+                   (map platform/fact-id-wrap)))))
+
+(defn- ->rule-insertion-record-facts
+  "Wrapped user-visible facts named by `rule-node`'s logical insertion records."
+  [memory rule-node]
+  (->> rule-node
+       (mem/get-insertions-all memory)
+       (keys)
+       (into [] (comp (mapcat #(mem/get-insertions memory rule-node %))
+                      cat
+                      (filter fact-visible?)
+                      (map platform/fact-id-wrap)))))
 
 (defn- ->insertion-record-facts
   "Wrapped user-visible facts named by a logical insertion record."
-  [memory rulebase]
-  (->> (for [rule-node (:production-nodes rulebase)
-             token (keys (mem/get-insertions-all memory rule-node))
-             insertion-group (mem/get-insertions memory rule-node token)
-             fact insertion-group
-             :when (fact-visible? fact)]
-         (platform/fact-id-wrap fact))
-       (into #{})))
+  [memory {:keys [production-nodes] :as _rulebase}]
+  (into #{} (mapcat #(->rule-insertion-record-facts memory %)) production-nodes))
 
 (defn- ->wrapped-facts-from-accum-memory
-  "Wrapped user-visible facts held in accumulate-node memory (the accumulator
-   `:from` inputs)."
-  [memory rulebase]
-  (into #{}
-        (for [node (vals (:id-to-node rulebase))
-              :when (accumulate-node? node)
-              fact-group (->accumulated-facts memory node)
-              fact fact-group
-              :when (fact-visible? fact)]
-          (platform/fact-id-wrap fact))))
+  "Wrapped user-visible facts held in accumulate-node memory (the accumulator `:from` inputs)."
+  [memory {:keys [id-to-node] :as _rulebase}]
+  (set (for [node (vals id-to-node)
+             :when (accumulate-node? node)
+             fact-group (->accumulated-facts memory node)
+             fact fact-group
+             :when (fact-visible? fact)]
+         (platform/fact-id-wrap fact))))
 
 (defn- ->beta-memory-facts
-  "Wrapped user-visible facts with definite presence in beta-node memory:
-   join/negation element memory plus accumulate-node memory."
+  "Wrapped user-visible facts with definite presence in beta-node memory: join/negation element
+  memory plus accumulate-node memory."
   [memory rulebase]
-  (set/union (->wrapped-facts-from-alpha-memory memory)
-             (->wrapped-facts-from-accum-memory memory rulebase)))
+  (-> memory
+      ->wrapped-facts-from-alpha-memory
+      (set/union (->wrapped-facts-from-accum-memory memory rulebase))))
+
+(defn- node-accepts-fact?
+  "True when any alpha node in `alpha-nodes` accepts `fact`."
+  [[alpha-nodes _token :as _alpha-group] fact]
+  (->> alpha-nodes
+       (some (fn [{:keys [activation env] :as _node}]
+               (activation fact env)))
+       boolean))
 
 (defn- alpha-accepts-fact?
   "True when at least one alpha node's activation accepts `fact`."
   [get-alphas-fn fact]
-  (boolean
-   (some (fn [[alpha-nodes _]]
-           (some (fn [node]
-                   (when-let [bindings ((:activation node) fact (:env node))]
-                     bindings))
-                 alpha-nodes))
-         (get-alphas-fn [fact]))))
+  (->> [fact]
+       get-alphas-fn
+       (some #(node-accepts-fact? % fact))
+       boolean))
 
 (defn- ->fact-retained-pred
   "Returns `(fn [fact] bool)` — whether `fact` is still in working memory.
@@ -280,12 +302,12 @@
   [memory rulebase get-alphas-fn]
   (let [insertion-facts (->insertion-record-facts memory rulebase)
         fact-retained? (->fact-retained-pred get-alphas-fn memory rulebase)
-        union (set/union (->beta-memory-facts memory rulebase)
-                         insertion-facts)]
-    (into #{}
-          (remove (fn [wrapped]
-                    (and (contains? insertion-facts wrapped)
-                         (not (fact-retained? (platform/fact-id-unwrap wrapped))))))
+        union (-> memory
+                  (->beta-memory-facts rulebase)
+                  (set/union insertion-facts))]
+    (into #{} (remove (fn [wrapped]
+                        (and (contains? insertion-facts wrapped)
+                             (not (fact-retained? (platform/fact-id-unwrap wrapped))))))
           union)))
 
 (s/defn get-all-facts :- [s/Any]
@@ -304,42 +326,70 @@
 
 ;; --- Production-level views ------------------------------------------------
 
+(defn- ->rule-insertion-entries
+  "Insertion entries for `rule-node`: one per user-visible logically inserted fact."
+  [session memory rule-node]
+  (into [] (mapcat (fn [token]
+                     (let [explanation (first (tokens->explanations session [token]))]
+                       (into [] (comp (mapcat identity)
+                                      (filter fact-visible?)
+                                      (map (fn [insertion]
+                                             {:explanation explanation
+                                              :fact insertion})))
+                             (mem/get-insertions memory rule-node token)))))
+        (keys (mem/get-insertions-all memory rule-node))))
+
 (s/defn get-insertions :- {s/Any [InsertionEntry]}
   "Per-rule logical insertions, one `InsertionEntry` per inserted fact
    (user-visible facts only)."
   [session]
-  (let [{:keys [memory rulebase]} (eng/components session)]
-    (into {}
-          (for [rule-node (:production-nodes rulebase)
-                :let [rule (:production rule-node)]]
-            [rule
-             (vec
-              (for [token (keys (mem/get-insertions-all memory rule-node))
-                    :let [explanation (first (tokens->explanations session [token]))]
-                    insertion-group (mem/get-insertions memory rule-node token)
-                    insertion insertion-group
-                    :when (fact-visible? insertion)]
-                {:explanation explanation
-                 :fact insertion}))]))))
+  (let [{:keys [memory rulebase]} (eng/components session)
+        {:keys [production-nodes]} rulebase]
+    (into {} (map (fn [{:keys [production] :as rule-node}]
+                    [production (->rule-insertion-entries session memory rule-node)]))
+          production-nodes)))
 
 (s/defn get-rule-matches :- {s/Any [Explanation]}
   "Per-rule activation `Explanation`s — one per token with a recorded logical
    insertion."
   [session]
-  (let [{:keys [memory rulebase]} (eng/components session)]
-    (into {}
-          (for [rule-node (:production-nodes rulebase)]
-            [(:production rule-node)
-             (tokens->explanations session (keys (mem/get-insertions-all memory rule-node)))]))))
+  (let [{:keys [memory rulebase]} (eng/components session)
+        {:keys [production-nodes]} rulebase]
+    (into {} (map (fn [{:keys [production] :as rule-node}]
+                    [production
+                     (tokens->explanations session
+                                           (keys (mem/get-insertions-all memory rule-node)))]))
+          production-nodes)))
 
 (s/defn get-query-matches :- {s/Any [Explanation]}
   "Per-query result `Explanation`s — one per current result token."
   [session]
-  (let [{:keys [memory rulebase]} (eng/components session)]
-    (into {}
-          (for [[_query-name query-node] (:query-nodes rulebase)]
-            [(:query query-node)
-             (tokens->explanations session (mem/get-tokens-all memory query-node))]))))
+  (let [{:keys [memory rulebase]} (eng/components session)
+        {:keys [query-nodes]} rulebase]
+    (into {} (map (fn [[_query-name {:keys [query] :as query-node}]]
+                    [query (tokens->explanations session
+                                                 (mem/get-tokens-all memory query-node))]))
+          query-nodes)))
+
+(defn- insertions-retained?
+  "True when `rule-node`'s recorded insertions for `token` still hold a retained fact."
+  [memory rule-node fact-retained? token]
+  (->> (mem/get-insertions memory rule-node token)
+       (into [] cat)
+       (some fact-retained?)
+       boolean))
+
+(defn- ->rule-support-pairs
+  "Support pairs for one production node."
+  [memory id-to-node fact-retained? {:keys [production] :as rule-node}]
+  (into [] (comp (filter #(insertions-retained? memory rule-node fact-retained? %))
+                 (mapcat #(token->match-facts memory id-to-node %))
+                 (filter fact-visible?)
+                 (map (fn [fact]
+                        {:fact (platform/fact-id-wrap fact)
+                         :production production
+                         :type "rule"})))
+        (keys (mem/get-insertions-all memory rule-node))))
 
 (s/defn ->insertion-support-pairs :- [FactProduction]
   "`FactProduction` entries for facts in a rule activation whose recorded
@@ -348,86 +398,81 @@
   [session]
   (let [{:keys [get-alphas-fn memory rulebase]} (eng/components session)
         fact-retained? (->fact-retained-pred get-alphas-fn memory rulebase)
-        id-to-node (:id-to-node rulebase)]
-    (vec
-     (for [rule-node (:production-nodes rulebase)
-           :let [rule (:production rule-node)]
-           token (keys (mem/get-insertions-all memory rule-node))
-           :let [insertions (mapcat identity (mem/get-insertions memory rule-node token))]
-           :when (some fact-retained? insertions)
-           fact (token->match-facts memory id-to-node token)
-           :when (fact-visible? fact)]
-       {:fact (platform/fact-id-wrap fact)
-        :production rule
-        :type "rule"}))))
+        {:keys [id-to-node production-nodes]} rulebase]
+    (into [] (mapcat #(->rule-support-pairs memory id-to-node fact-retained? %)) production-nodes)))
+
+(defn- ->query-support-pairs
+  "Support pairs for one `[query explanations]` entry."
+  [[query explanations]]
+  (into [] (comp (mapcat (fn [{:keys [matches] :as _explanation}] matches))
+                 (mapcat match->facts)
+                 (filter fact-visible?)
+                 (map (fn [fact]
+                        {:fact (platform/fact-id-wrap fact)
+                         :production query
+                         :type "query"})))
+        explanations))
 
 (s/defn ->result-support-pairs :- [FactProduction]
   "`FactProduction` entries for facts that support a current query result — the
    facts in each result token's matches (accumulator inputs included)."
   [query-matches]
-  (vec
-   (for [[query explanations] query-matches
-         explanation explanations
-         match (:matches explanation)
-         fact (match->facts match)
-         :when (fact-visible? fact)]
-     {:fact (platform/fact-id-wrap fact)
-      :production query
-      :type "query"})))
+  (into [] (mapcat ->query-support-pairs) query-matches))
 
 ;; --- Beta-node relation classification -------------------------------------
+
+(defn- ->fact-productions
+  "`FactProduction` entries pairing `fact` with each terminal `production`."
+  [productions fact]
+  (mapv (fn [{:keys [production type]}]
+          {:fact (platform/fact-id-wrap fact)
+           :production production
+           :type type})
+        productions))
 
 (s/defn ->node-relation-pairs :- NodeRelations
   "Classifies each fact in a beta node's memory by how it participates
    (see `NodeRelations`)."
   [session]
   (let [{:keys [memory rulebase]} (eng/components session)]
-    (reduce
-     (fn [acc [_id node]]
-       (cond
-         (join-node? node)
-         (let [productions (->descendant-terminal-productions node)]
-           (reduce (fn [acc element]
-                     (update acc :matches-condition-of
-                             into (for [{:keys [production type]} productions]
-                                    {:fact (platform/fact-id-wrap (:fact element))
-                                     :production production
-                                     :type type})))
-                   acc
-                   (get-node-elements memory node)))
-
-         (negation-node? node)
-         (let [productions (->descendant-terminal-productions node)
-               binding-keys (:binding-keys node)
-               token-groups (group-by #(select-keys (:bindings %) binding-keys)
-                                      (get-node-tokens memory node))]
-           (reduce (fn [acc element]
-                     (let [relation (if (negation-element-blocks? node element token-groups)
-                                      :blocks-condition-of
-                                      :blocking-candidate-of)]
-                       (update acc relation
-                               into (for [{:keys [production type]} productions]
-                                      {:fact (platform/fact-id-wrap (:fact element))
-                                       :production production
-                                       :type type}))))
-                   acc
-                   (get-node-elements memory node)))
-
-         (accumulate-node? node)
-         (let [productions (->descendant-terminal-productions node)]
-           (reduce (fn [acc fact]
-                     (update acc :matches-condition-of
-                             into (for [{:keys [production type]} productions]
-                                    {:fact (platform/fact-id-wrap fact)
-                                     :production production
-                                     :type type})))
-                   acc
-                   (for [fact-group (->accumulated-facts memory node)
-                         fact fact-group]
-                     fact)))
-
-         :else acc))
-     {:matches-condition-of []
-      :blocks-condition-of []
-      :blocking-candidate-of []}
-     (:id-to-node rulebase))))
+    (letfn [(handle-join-node [acc node]
+              (let [productions (->descendant-terminal-productions node)]
+                (->> node
+                     (get-node-elements memory)
+                     (reduce (fn [acc {:keys [fact] :as _element}]
+                               (update acc :matches-condition-of into (->fact-productions productions fact)))
+                             acc))))
+            (handle-negation-node [acc {:keys [binding-keys] :as node}]
+              (let [productions (->descendant-terminal-productions node)
+                    token-groups (->> node
+                                      (get-node-tokens memory)
+                                      (group-by (fn [{:keys [bindings] :as _token}]
+                                                  (select-keys bindings binding-keys))))]
+                (->> node
+                     (get-node-elements memory)
+                     (reduce (fn [acc {:keys [fact] :as element}]
+                               (let [relation (if (negation-element-blocks? node element token-groups)
+                                                :blocks-condition-of
+                                                :blocking-candidate-of)]
+                                 (update acc relation into (->fact-productions productions fact))))
+                             acc))))
+            (handle-accum-node [acc node]
+              (let [productions (->descendant-terminal-productions node)]
+                (transduce cat
+                           (completing (fn [acc fact]
+                                         (update acc :matches-condition-of
+                                                 into (->fact-productions productions fact))))
+                           acc
+                           (->accumulated-facts memory node))))]
+      (->> rulebase
+           :id-to-node
+           (reduce
+            (fn [acc [_id node]]
+              (cond
+                (join-node? node) (handle-join-node acc node)
+                (negation-node? node) (handle-negation-node acc node)
+                (accumulate-node? node) (handle-accum-node acc node)
+                :else acc))
+            {:matches-condition-of []
+             :blocks-condition-of []
+             :blocking-candidate-of []})))))
