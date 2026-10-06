@@ -65,7 +65,7 @@
   (last (str/split (str (:name p)) #"/")))
 
 (defn- entry->fact
-  "Unwraps the `:fact` of a `FactProduction` entry."
+  "Unwraps the `:fact` of a support/relation entry."
   [entry]
   (platform/fact-id-unwrap (:fact entry)))
 
@@ -77,15 +77,15 @@
        (map (comp short-name :production))
        set))
 
-;; --- match->facts ----------------------------------------------------------
+;; --- condition-match->facts ----------------------------------------------------------
 
-(deftest test-match->facts
+(deftest test-condition-match->facts
   (testing "a non-accumulator condition contributes its own fact"
-    (is (= [:f] (inspect/match->facts {:fact :f :condition {:type :T}}))))
+    (is (= [:f] (inspect/condition-match->facts {:fact :f :condition {:type :T}}))))
   (testing "an accumulator condition contributes the inputs, not the result"
-    (is (= [:a :b] (inspect/match->facts {:fact :result
-                                          :condition {:accumulator :all}
-                                          :facts-accumulated [:a :b]})))))
+    (is (= [:a :b] (inspect/condition-match->facts {:fact :result
+                                                    :condition {:accumulator :all}
+                                                    :facts-accumulated [:a :b]})))))
 
 ;; --- get-all-facts / get-root-facts ----------------------------------------
 
@@ -149,10 +149,10 @@
     (is (= 2 (count (get query-matches query)))
         "both applications pass the negation when no hold is present")))
 
-;; --- support pairs ---------------------------------------------------------
+;; --- supports ---------------------------------------------------------
 
-(deftest test-insertion-support-pairs
-  (let [entries (inspect/->insertion-support-pairs (->relations-session))
+(deftest test-rule-insertion-supports
+  (let [entries (inspect/->rule-insertion-supports (->relations-session))
         supports-open-review? (fn [entry]
                                 (and (instance? Application (entry->fact entry))
                                      (= "open-review-task" (short-name (:production entry)))))]
@@ -167,8 +167,8 @@
     (testing "every entry is a rule"
       (is (every? #(= "rule" (:type %)) entries)))))
 
-(deftest test-result-support-pairs
-  (let [entries (inspect/->result-support-pairs (inspect/get-query-matches (->clean-session)))]
+(deftest test-query-result-supports
+  (let [entries (inspect/->query-result-supports (inspect/get-query-matches (->clean-session)))]
     (testing "each application supports the query result"
       (is (= #{"app-1" "app-2"}
              (->> entries
@@ -182,7 +182,7 @@
 (deftest test-accumulator-relations
   (let [session (->accumulator-session)
         facts (inspect/get-all-facts session)
-        relations (inspect/->node-relation-pairs session)
+        relations (inspect/->beta-node-relations session)
         accum-source? #(instance? AccumSource %)
         start? #(instance? Start %)]
     (testing "an inserted accumulator-input fact is retained in working memory"
@@ -194,8 +194,8 @@
       (is (= #{"insert-accum-source" "accumulate-sources" "accumulate-over-threshold"}
              (fact-entry-names relations :matches-condition-of start?))))))
 
-(deftest test-insertion-support-pairs-include-accumulator-inputs
-  (let [entries (inspect/->insertion-support-pairs (->accumulator-session))]
+(deftest test-rule-insertion-supports-include-accumulator-inputs
+  (let [entries (inspect/->rule-insertion-supports (->accumulator-session))]
     (testing "accumulator :from inputs support the rules that accumulated them"
       (is (= #{"accumulate-sources" "accumulate-over-threshold"}
              (->> entries
@@ -203,10 +203,10 @@
                   (map (comp short-name :production))
                   set))))))
 
-;; --- node relations --------------------------------------------------------
+;; --- beta-node relations --------------------------------------------------------
 
-(deftest test-node-relation-pairs
-  (let [relations (inspect/->node-relation-pairs (->relations-session))
+(deftest test-beta-node-relations
+  (let [relations (inspect/->beta-node-relations (->relations-session))
         manual-hold? #(instance? ManualHold %)
         loan-9? #(and (instance? LoanOffer %) (= 9 (:apr %)))
         loan-5? #(and (instance? LoanOffer %) (= 5 (:apr %)))

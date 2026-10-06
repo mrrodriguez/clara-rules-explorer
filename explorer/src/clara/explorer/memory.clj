@@ -103,7 +103,7 @@
    results the fact supports."
   [query-matches get-fact-id production-order-key-fn]
   (->fact-id-dep-pairs->index
-   (for [{:keys [fact production type]} (mem-inspect/->result-support-pairs query-matches)
+   (for [{:keys [fact production type]} (mem-inspect/->query-result-supports query-matches)
          :let [fact-id (get-fact-id (platform/fact-id-unwrap fact))]
          :when fact-id]
      [fact-id (->production-dep production type)])
@@ -115,7 +115,7 @@
    least one retained fact."
   [session get-fact-id production-order-key-fn]
   (->fact-id-dep-pairs->index
-   (for [{:keys [fact production type]} (mem-inspect/->insertion-support-pairs session)
+   (for [{:keys [fact production type]} (mem-inspect/->rule-insertion-supports session)
          :let [fact-id (get-fact-id (platform/fact-id-unwrap fact))]
          :when fact-id]
      [fact-id (->production-dep production type)])
@@ -267,21 +267,21 @@
          (group-by (comp :name :type))
          (reduce-kv add-fact-type-instance-data {}))))
 
-(defn- ->node-relation-maps
+(defn- ->beta-node-relation-maps
   "`{:matches-condition-of {fact-id [dep]} :blocks-condition-of …
    :blocking-candidate-of …}` — deps distinct and production-order sorted."
   [session get-fact-id production-order-key-fn]
-  (let [pairs (mem-inspect/->node-relation-pairs session)
-        ->index (fn [pairs]
+  (let [relations (mem-inspect/->beta-node-relations session)
+        ->index (fn [entries]
                   (->fact-id-dep-pairs->index
-                   (for [{:keys [fact production type]} pairs
+                   (for [{:keys [fact production type]} entries
                          :let [fact-id (get-fact-id (platform/fact-id-unwrap fact))]
                          :when fact-id]
                      [fact-id (->production-dep production type)])
                    production-order-key-fn))]
-    {:matches-condition-of (->index (:matches-condition-of pairs))
-     :blocks-condition-of (->index (:blocks-condition-of pairs))
-     :blocking-candidate-of (->index (:blocking-candidate-of pairs))}))
+    {:matches-condition-of (->index (:matches-condition-of relations))
+     :blocks-condition-of (->index (:blocks-condition-of relations))
+     :blocking-candidate-of (->index (:blocking-candidate-of relations))}))
 
 (defn- ->id-name-index
   "Reverse index {route-id(name) → name} for a collection of serialized
@@ -321,7 +321,7 @@
     (doseq [{:keys [bindings matches]} explanations
             :let [pruned-bindings (prune-fn bindings)
                   ids (into #{}
-                            (comp (mapcat mem-inspect/match->facts)
+                            (comp (mapcat mem-inspect/condition-match->facts)
                                   (keep get-fact-id))
                             matches)]]
       (doseq [id ids]
@@ -423,9 +423,9 @@
          supports-results-of-index (->supports-results-of-index query-matches
                                                                 get-fact-id
                                                                 production-order-key-fn)
-         node-relations (->node-relation-maps session
-                                              get-fact-id
-                                              production-order-key-fn)
+         node-relations (->beta-node-relation-maps session
+                                                   get-fact-id
+                                                   production-order-key-fn)
          origin-map (->origin-map insertions
                                   get-fact-id
                                   production-order-key-fn)
