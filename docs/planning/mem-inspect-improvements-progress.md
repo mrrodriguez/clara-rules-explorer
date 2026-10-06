@@ -77,12 +77,12 @@ included) except demo regen (on hold by request).
   insertion-record facts that fail the predicate.  The same predicate drives
   the `:supports-insertions-of` token filter, so a logical insertion of a type
   no condition reads (e.g. the fixture `Marker`) counts as retained.
-- Accumulators are first-class inspection inputs now.  `->node-relation-pairs`
+- Accumulators are first-class inspection inputs now.  `->beta-node-relations`
   folds accumulate-node facts into `:matches-condition-of` for both
   `AccumulateNode` and `AccumulateWithJoinFilterNode` (candidate facts,
-  condition-local).  `->insertion-support-pairs` expands accumulator conditions
-  to their `:from` inputs via `token->match-facts`, matching the
-  `match->facts` expansion `->result-support-pairs` already did.  A new
+  condition-local).  `->rule-insertion-supports` expands accumulator conditions
+  to their `:from` inputs via `token->facts`, matching the
+  `condition-match->facts` expansion `->query-result-supports` already did.  A new
   `accumulator-relations-test-rules` fixture covers an inserted fact read only
   by an accumulator `:from` condition.
 - Node relations skip facts the fact table cannot describe (nil / ISystemFact):
@@ -95,8 +95,8 @@ included) except demo regen (on hold by request).
   could move upstream.  Its public surface is the nine functions
   `clara.explorer.memory` actually consumes — `get-all-facts`,
   `get-root-facts`, `get-insertions`, `get-rule-matches`, `get-query-matches`,
-  `->insertion-support-pairs`, `->result-support-pairs`, `->node-relation-pairs`,
-  and `match->facts` — plus the `Explanation` schema.  Node taxonomy, node
+  `->rule-insertion-supports`, `->query-result-supports`, `->beta-node-relations`,
+  and `condition-match->facts` — plus the `Explanation` schema.  Node taxonomy, node
   memory readers (including accumulate-node reads), retention, and
   token→`Explanation` conversion are private helpers to be promoted if a future
   caller needs them.  `clara.explorer.memory` now only maps that raw view to the
