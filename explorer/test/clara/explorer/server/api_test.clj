@@ -193,9 +193,9 @@
         (let [body (parse-json (:body response))]
           (is (contains? body :fact-types))
           (is (contains? body :facts))
-          (is (contains? body :used-by))
           (is (contains? body :origin))
-          (is (seq (:facts body))))))))
+          (is (seq (:facts body)))
+          (is (every? #(contains? % :supports-insertions-of) (vals (:facts body)))))))))
 
 (deftest test-memory-analysis-known-tracks-session-swap
   (testing "After the host swaps the session atom, the memory-analysis known-set is recomputed against the new session's analysis — never served stale"

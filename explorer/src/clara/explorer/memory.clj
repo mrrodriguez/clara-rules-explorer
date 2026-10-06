@@ -1,8 +1,7 @@
 (ns clara.explorer.memory
   "Helpers for analyzing Clara Rules working memory."
-  (:require [clara.explorer.vendor.tools.inspect :as inspect]
+  (:require [clara.explorer.memory.inspect :as mem-inspect]
             [clara.rules.engine :as eng]
-            [clara.rules.memory :as mem]
             [clara.rules.platform :as platform]
             [clara.explorer.conditions :as conditions]
             [clara.explorer.fact-types :as ft]
@@ -28,24 +27,16 @@
               :else x))]
     (pr-str (canonicalize (prune-fn fact)))))
 
-(defn- extract-match-facts
-  "Returns a sequence of actual facts involved in a match, skipping accumulator
-   results which are not themselves facts in working memory."
-  [{:keys [fact condition facts-accumulated] :as _match}]
-  (cond
-    (:accumulator condition) facts-accumulated
-    (some? fact) [fact]))
-
 (defn- get-production-order [rulebase]
   (->> (:productions rulebase)
        (map-indexed (fn [i p] [(:name p) i]))
        (into {})))
 
-(defn- get-all-facts-wrapped
-  [{:keys [all-facts] :as _inspection}]
+(defn- ->wrapped-fact-set
+  [facts]
   (into #{}
         (map platform/fact-id-wrap)
-        all-facts))
+        facts))
 
 (defn- get-fact-type-order
   [{:keys [productions] :as _rulebase}]
@@ -78,69 +69,79 @@
   (fn [{p-name :name :as _production-meta}]
     (get production-order p-name Integer/MAX_VALUE)))
 
-(defn- ->used-by-index
-  [inspection get-id production-order-key-fn]
-  (let [{:keys [rule-matches query-matches]} inspection
-        rule-match-facts
-        (for [[rule explanations] rule-matches
-              explanation explanations
-              match (:matches explanation)
-              fact (extract-match-facts match)
-              :when fact]
-          [(get-id fact) {:name (:name rule)
-                          :id (serialize/route-id (str (:name rule)))
-                          :ns (str (:ns-name rule))
-                          :type "rule"}])
+(defn- ->production-dep
+  "ProductionDep for a rule or query map (see
+   `clara.explorer.server.api/ProductionDep`).  `:ns` is derived via
+   `serialize/production-ns-name-sym`, which falls back to the production's
+   fully-qualified `:name` when `:ns-name` is absent (queries)."
+  [production p-type]
+  {:name (:name production)
+   :id   (-> production :name str serialize/route-id)
+   :ns   (-> production serialize/production-ns-name-sym str)
+   :type p-type})
 
-        query-match-facts
-        (for [[query explanations] query-matches
-              explanation explanations
-              match (:matches explanation)
-              fact (extract-match-facts match)
-              :when fact]
-          [(get-id fact) {:name (:name query)
-                          :id (serialize/route-id (str (:name query)))
-                          :ns (str (:ns-name query))
-                          :type "query"}])
+(defn- ->fact-id-dep-pairs->index
+  "Folds `[fact-id dep]` pairs into `{fact-id [dep …]}` with deps distinct and
+   sorted by production order (then name, so equal-load-order query deps are
+   deterministic).  nil fact-ids (facts the fact table cannot describe) are
+   dropped."
+  [pairs production-order-key-fn]
+  (->> pairs
+       (reduce (fn [acc [fact-id dep]]
+                 (if (nil? fact-id)
+                   acc
+                   (update acc fact-id (fnil conj #{}) dep)))
+               {})
+       (reduce-kv (fn [acc fact-id deps]
+                    (assoc acc fact-id (->> deps
+                                            (sort-by (juxt production-order-key-fn :name))
+                                            vec)))
+                  {})))
 
-        add-fact-id-matches
-        (fn add-fact-id-matches [used-by-index fact-id id-match-pairs]
-          (assoc used-by-index
-                 fact-id
-                 (->> (map second id-match-pairs)
-                      distinct
-                      (sort-by production-order-key-fn)
-                      vec)))]
+(defn- ->supports-results-of-index
+  "`{fact-id [clara.explorer.server.api/ProductionDep]}` — queries whose current
+   results the fact supports."
+  [query-matches get-fact-id production-order-key-fn]
+  (->fact-id-dep-pairs->index
+   (for [{:keys [fact production type]} (mem-inspect/->query-result-supports query-matches)
+         :let [fact-id (get-fact-id (platform/fact-id-unwrap fact))]
+         :when fact-id]
+     [fact-id (->production-dep production type)])
+   production-order-key-fn))
 
-    (->> rule-match-facts
-         (concat query-match-facts)
-         (group-by first)
-         (reduce-kv add-fact-id-matches {}))))
+(defn- ->supports-insertions-of-index
+  "`{fact-id [clara.explorer.server.api/ProductionDep]}` — rules whose activation
+   includes the fact and whose recorded logical insertions still contain at
+   least one retained fact."
+  [session get-fact-id production-order-key-fn]
+  (->fact-id-dep-pairs->index
+   (for [{:keys [fact production type]} (mem-inspect/->rule-insertion-supports session)
+         :let [fact-id (get-fact-id (platform/fact-id-unwrap fact))]
+         :when fact-id]
+     [fact-id (->production-dep production type)])
+   production-order-key-fn))
 
 (defn- insertion-id+rule-pairs
   "`([fact-id rule] …)`, one pair per insertion in `inspect`'s `:insertions`.
 
   Reads the per-rule insertion view so each pair is attached to the instance
-  actually inserted. Facts with no id are dropped — `get-id` only knows facts
-  that reached the fact table."
-  [insertions get-id]
+  actually inserted. Facts with no id are dropped — `get-fact-id` only knows
+  facts that reached the fact table."
+  [insertions get-fact-id]
   (for [[rule rule-insertions] insertions
         {:keys [fact]} rule-insertions
-        :let [id (get-id fact)]
+        :let [id (get-fact-id fact)]
         :when id]
     [id rule]))
 
 (defn- ->origin
-  [{p-name :name p-ns-name :ns-name}]
-  {:name p-name
-   :id (serialize/route-id (str p-name))
-   :ns (str p-ns-name)
-   :type "rule"})
+  [p]
+  (->production-dep p "rule"))
 
 (defn- ->origin-map
   "`{fact-id [origin …]}` — the rules that inserted each fact."
-  [insertions get-id production-order-key-fn]
-  (->> (insertion-id+rule-pairs insertions get-id)
+  [insertions get-fact-id production-order-key-fn]
+  (->> (insertion-id+rule-pairs insertions get-fact-id)
        (reduce (fn [acc [id rule]]
                  (update acc id (fnil conj []) rule))
                {})
@@ -158,7 +159,11 @@
            root-facts
            get-fact-id
            origin-map
-           used-by-index
+           supports-insertions-of-index
+           supports-results-of-index
+           matches-condition-of-index
+           blocks-condition-of-index
+           blocking-candidate-of-index
            known-set
            prune-fn]}]
   (let [raw-types (reduce (fn [acc wrapped]
@@ -197,21 +202,27 @@
                                   :data (prune-fn fact)
                                   :is-root (boolean (some #(identical? fact %) root-facts))
                                   :inserted-from (get origin-map id [])
-                                  :used-by (get used-by-index id [])}])))
+                                  :supports-insertions-of (get supports-insertions-of-index id [])
+                                  :supports-results-of (get supports-results-of-index id [])
+                                  :matches-condition-of (get matches-condition-of-index id [])
+                                  :blocks-condition-of (get blocks-condition-of-index id [])
+                                  :blocking-candidate-of (get blocking-candidate-of-index id [])}])))
                     sorted-facts)]
     {:facts facts
      :raw-types raw-types}))
 
 (defn- group-instances-by-role
-  "Groups instances of a fact type by their origin (inserted-from) or usage (used-by)."
+  "Groups instances of a fact type by a production relation (`role-key`).
+   `:inserted-from` substitutes a root group when a fact has no origin; every
+   other role reads the fact's `role-key` vector directly (empty → no group)."
   [instances role-key production-order-key-fn]
   (->> (for [inst instances
-             role (case role-key
-                    :inserted-from (let [origins (:inserted-from inst)]
-                                     (if (empty? origins)
-                                       [{:name "Root Facts (External)" :type "root"}]
-                                       origins))
-                    :used-by (:used-by inst))]
+             role (if (= role-key :inserted-from)
+                    (let [origins (:inserted-from inst)]
+                      (if (empty? origins)
+                        [{:name "Root Facts (External)" :type "root"}]
+                        origins))
+                    (get inst role-key))]
          (assoc role :fact inst))
        (group-by (juxt :name :type))
        (map (fn [[[name type] items]]
@@ -227,24 +238,50 @@
                     (production-order-key-fn entry))))
        vec))
 
+(def ^:private session-relation-role-keys
+  "Production-relation role keys on a SessionFact, in fact-type-grouping order.
+   `:inserted-from` is special-cased for root groups; every other key groups by
+   the fact's own `role-key` vector."
+  [:inserted-from
+   :supports-insertions-of
+   :supports-results-of
+   :matches-condition-of
+   :blocks-condition-of
+   :blocking-candidate-of])
+
 (defn- ->fact-type-index
   [fact-table production-order-key-fn]
-  (letfn [(add-fact-type-instance-data [m fact-type-name instances]
+  (letfn [(role-groups [instances role-key]
+            (group-instances-by-role instances role-key production-order-key-fn))
+          (add-fact-type-instance-data [m fact-type-name instances]
             (assoc m fact-type-name
-                   {:name fact-type-name
-                    :id (serialize/route-id fact-type-name)
-                    :ns (:ns (first instances))
-                    :count (count instances)
-                    :inserted-from (group-instances-by-role instances
-                                                            :inserted-from
-                                                            production-order-key-fn)
-                    :used-by (group-instances-by-role instances
-                                                      :used-by
-                                                      production-order-key-fn)
-                    :ids (mapv :id instances)}))]
+                   (into {:name fact-type-name
+                          :id (serialize/route-id fact-type-name)
+                          :ns (:ns (first instances))
+                          :count (count instances)
+                          :ids (mapv :id instances)}
+                         (map (fn [role-key]
+                                [role-key (role-groups instances role-key)]))
+                         session-relation-role-keys)))]
     (->> (vals fact-table)
          (group-by (comp :name :type))
          (reduce-kv add-fact-type-instance-data {}))))
+
+(defn- ->beta-node-relation-maps
+  "`{:matches-condition-of {fact-id [dep]} :blocks-condition-of …
+   :blocking-candidate-of …}` — deps distinct and production-order sorted."
+  [session get-fact-id production-order-key-fn]
+  (let [relations (mem-inspect/->beta-node-relations session)
+        ->index (fn [entries]
+                  (->fact-id-dep-pairs->index
+                   (for [{:keys [fact production type]} entries
+                         :let [fact-id (get-fact-id (platform/fact-id-unwrap fact))]
+                         :when fact-id]
+                     [fact-id (->production-dep production type)])
+                   production-order-key-fn))]
+    {:matches-condition-of (->index (:matches-condition-of relations))
+     :blocks-condition-of (->index (:blocks-condition-of relations))
+     :blocking-candidate-of (->index (:blocking-candidate-of relations))}))
 
 (defn- ->id-name-index
   "Reverse index {route-id(name) → name} for a collection of serialized
@@ -284,7 +321,7 @@
     (doseq [{:keys [bindings matches]} explanations
             :let [pruned-bindings (prune-fn bindings)
                   ids (into #{}
-                            (comp (mapcat extract-match-facts)
+                            (comp (mapcat mem-inspect/condition-match->facts)
                                   (keep get-fact-id))
                             matches)]]
       (doseq [id ids]
@@ -361,26 +398,34 @@
   ([session]
    (->memory-analysis session #{}))
   ([session known-set]
-   (let [{:keys [root-facts insertions query-matches rule-matches] :as inspection}
-         (inspect/inspect session)
+   (let [all-facts (mem-inspect/get-all-facts session)
+         root-facts (mem-inspect/get-root-facts session)
+         insertions (mem-inspect/get-insertions session)
+         rule-matches (mem-inspect/get-rule-matches session)
+         query-matches (mem-inspect/get-query-matches session)
 
          {:keys [get-alphas-fn rulebase]} (eng/components session)
          {:keys [fact-type-fn]} (meta get-alphas-fn)
 
          production-order (get-production-order rulebase)
          fact-type-order (get-fact-type-order rulebase)
+         production-order-key-fn (->production-order-key-fn production-order)
 
-         all-facts-wrapped (get-all-facts-wrapped inspection)
+         all-facts-wrapped (->wrapped-fact-set all-facts)
          prune-fn (serialize/memoizing-prune-fns)
          sorted-facts (sort-facts all-facts-wrapped fact-type-fn fact-type-order prune-fn)
          id-map (->id-map sorted-facts)
          get-fact-id (fn get-fact-id [fact] (.get ^java.util.IdentityHashMap id-map fact))
 
-         production-order-key-fn (->production-order-key-fn production-order)
-
-         used-by-index (->used-by-index inspection
-                                        get-fact-id
-                                        production-order-key-fn)
+         supports-insertions-of-index (->supports-insertions-of-index session
+                                                                      get-fact-id
+                                                                      production-order-key-fn)
+         supports-results-of-index (->supports-results-of-index query-matches
+                                                                get-fact-id
+                                                                production-order-key-fn)
+         node-relations (->beta-node-relation-maps session
+                                                   get-fact-id
+                                                   production-order-key-fn)
          origin-map (->origin-map insertions
                                   get-fact-id
                                   production-order-key-fn)
@@ -390,7 +435,11 @@
                                    :root-facts root-facts
                                    :get-fact-id get-fact-id
                                    :origin-map origin-map
-                                   :used-by-index used-by-index
+                                   :supports-insertions-of-index supports-insertions-of-index
+                                   :supports-results-of-index supports-results-of-index
+                                   :matches-condition-of-index (:matches-condition-of node-relations)
+                                   :blocks-condition-of-index (:blocks-condition-of node-relations)
+                                   :blocking-candidate-of-index (:blocking-candidate-of node-relations)
                                    :known-set known-set
                                    :prune-fn prune-fn})
          fact-type-index (->fact-type-index (:facts fact-table)
@@ -414,7 +463,6 @@
       ;; which would double-serialize (phantom string-kinded fact types).
       ;; Stripped from the served memory-analysis in api.clj.
       :fact-raw-types    (:raw-types fact-table)
-      :used-by           used-by-index
       :origin            origin-map
       :rule-matches      rule-match-index
       :query-matches     query-match-index
@@ -429,7 +477,7 @@
   "Re-derives the per-fact :type :known flag of an existing memory-analysis from
    `known-set` (serialized fact-type names), without re-inspecting the session.
    Re-stamps every fact entry wherever it appears — :facts, the rule/query match
-   indices, and the :fact-types inserted-from/used-by role grouping — still
+   indices, and the :fact-types production-relation role groupings — still
    O(total fact entries), far cheaper than a fresh memory-analysis.  Used by the
    cache build to reuse a memory-analysis produced during memory enrichment
    (which is built with an empty known-set)."
@@ -454,9 +502,10 @@
                   (update qm :matches stamp-matches)))
         (update :fact-types update-vals
                 (fn [entry]
-                  (-> entry
-                      (update :inserted-from stamp-roles)
-                      (update :used-by stamp-roles)))))))
+                  (reduce (fn [e role-key]
+                            (update e role-key stamp-roles))
+                          entry
+                          session-relation-role-keys))))))
 
 (defn get-rule-activity
   "Returns a unified activity map for a rule: {:matches [...] :inserted-facts [...]}"
@@ -467,18 +516,3 @@
   "Returns a unified activity map for a query: {:matches [...]}"
   [memory-analysis p-name]
   (get-in memory-analysis [:query-matches p-name]))
-
-(defn get-node-elements
-  "Returns all elements (facts) currently in the memory for the given node ID."
-  [session node-id]
-  (let [memory (-> session eng/components :memory)]
-    (mem/get-elements-all memory {:id node-id})))
-
-(defn get-node-tokens
-  "Returns all tokens currently in the memory for the given node ID."
-  [session node-id]
-  (let [memory (-> session eng/components :memory)
-        id-to-node (get-in (eng/components session) [:rulebase :id-to-node])
-        node (get id-to-node node-id)]
-    (mem/get-tokens-all memory node)))
-

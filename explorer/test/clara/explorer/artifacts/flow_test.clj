@@ -460,8 +460,9 @@
                     :manifest-fn (fn [m context]
                                    (reset! seen {:history (count (:history m)) :context context})
                                    (assoc m :host {:note "added by the hook"}))}
-              _ (manifest/write-manifest! (dissoc opts :manifest-fn))
-              m (edn-io/read-edn-file (io/file (manifest/write-manifest! opts)))]
+              _ (manifest/write-manifest! (assoc (dissoc opts :manifest-fn) :change "first run"))
+              m (edn-io/read-edn-file (io/file (manifest/write-manifest!
+                                                (assoc opts :change "second run"))))]
           (testing "the hook runs on the finished manifest, history already appended"
             (is (= 2 (:history @seen)))
             (is (= {:dir (str root "/x")} (:context @seen))))

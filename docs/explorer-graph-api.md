@@ -649,7 +649,6 @@ Full memory-analysis. Internal indices included for completeness; the UI should 
 {
   "fact-types": { "typeName": { ... }, ... },
   "facts": { factId: { ... }, ... },
-  "used-by": { factId: [ ... ], ... },
   "origin": { factId: [ ... ], ... },
   "rule-matches": { "ruleFqName": { "matches": [...], "inserted-facts": [...] }, ... },
   "query-matches": { "queryFqName": { "matches": [...] }, ... },
@@ -721,21 +720,9 @@ All instances of a specific fact type, grouped by origin and usage.
           "ns": "my.ns",
           "data": { "app-id": "app-1" },
           "is-root": true,
-          "inserted-from": [],
-          "used-by": [
-            { "name": "my.ns/check-app", "id": "my.ns.check-app-h8i9j1k2", "ns": "my.ns", "type": "rule" }
-          ]
+          "inserted-from": []
         }
       ]
-    }
-  ],
-  "used-by": [
-    {
-      "name": "my.ns/check-app",
-      "id": "my.ns.check-app-h8i9j1k2",
-      "ns": "my.ns",
-      "type": "rule",
-      "facts": [ ... ]
     }
   ]
 }
@@ -749,7 +736,11 @@ All instances of a specific fact type, grouped by origin and usage.
 | `count` | int | Number of instances in memory |
 | `ids` | int[] | All fact IDs of this type |
 | `inserted-from` | object[] | Facts grouped by their origin rule (or `"Root Facts (External)"`); each group carries `name`/`id`/`type` |
-| `used-by` | object[] | Facts grouped by which rule/query reads them; each group carries `name`/`id`/`type`/`ns` |
+| `supports-insertions-of` | object[] | Facts grouped by the rule whose activation includes them and still has a retained logical insertion; each group carries `name`/`id`/`type`/`ns` |
+| `supports-results-of` | object[] | Facts grouped by the query whose current results the fact supports; each group carries `name`/`id`/`type`/`ns` |
+| `matches-condition-of` | object[] | Facts grouped by the production whose positive condition they pass; each group carries `name`/`id`/`type`/`ns` |
+| `blocks-condition-of` | object[] | Facts grouped by the production whose negated condition they satisfy and block; each group carries `name`/`id`/`type`/`ns` |
+| `blocking-candidate-of` | object[] | Facts grouped by the production whose negated condition they satisfy without currently blocking; each group carries `name`/`id`/`type`/`ns` |
 
 **Response** `404`: `{ "error": "Fact type not found in session" }`
 
@@ -770,9 +761,15 @@ A single fact instance with its lineage and usage.
   "data": { "app-id": "app-1" },
   "is-root": true,
   "inserted-from": [],
-  "used-by": [
+  "supports-insertions-of": [
     { "name": "my.ns/check-app", "id": "my.ns.check-app-h8i9j1k2", "ns": "my.ns", "type": "rule" }
-  ]
+  ],
+  "supports-results-of": [],
+  "matches-condition-of": [
+    { "name": "my.ns/check-app", "id": "my.ns.check-app-h8i9j1k2", "ns": "my.ns", "type": "rule" }
+  ],
+  "blocks-condition-of": [],
+  "blocking-candidate-of": []
 }
 ```
 
@@ -784,11 +781,68 @@ A single fact instance with its lineage and usage.
 | `data` | object | Fact data (arbitrary Clojure structure, fns redacted) |
 | `is-root` | boolean | True if inserted externally (not by a rule) |
 | `inserted-from` | ProductionDep[] | Rules that inserted this fact |
-| `used-by` | ProductionDep[] | Rules/queries currently matching this fact |
+| `supports-insertions-of` | ProductionDep[] | Rules whose activation includes this fact and still has a retained logical insertion (see [Working-memory relations](#working-memory-relations)) |
+| `supports-results-of` | ProductionDep[] | Queries whose current results this fact supports |
+| `matches-condition-of` | ProductionDep[] | Rules/queries whose positive condition this fact passes (condition-local, see limits) |
+| `blocks-condition-of` | ProductionDep[] | Rules/queries whose negated condition this fact satisfies and whose partial match it blocks |
+| `blocking-candidate-of` | ProductionDep[] | Rules/queries whose negated condition this fact satisfies but whose partial match it does not currently block |
 
 **Response** `404`: `{ "error": "Fact not found in session" }`
 
 **Response** `409`: See [Working-Memory Availability (409)](#working-memory-availability-409).
+
+---
+
+### Working-memory relations
+
+Every production relation on a session fact runs **from a fact to productions**
+(the same direction as `inserted-from`), read as "this fact *relation* these
+productions".  The fact-type detail groups instances by the same relations.
+`inserted-from` is the origin; the other five keys are:
+
+| Key | A fact is in it when | Productions |
+|---|---|---|
+| `supports-insertions-of` | it is in an activation whose recorded logical insertions include one still in working memory | rules |
+| `supports-results-of` | it supports a current result (accumulator `:from` inputs included) | queries |
+| `matches-condition-of` | it passes a positive condition's own constraints, the ones that need no other condition's bindings (accumulator `:from` inputs included) | rules, queries |
+| `blocks-condition-of` | it matches a negated condition **and** blocks a partial match waiting at that node | rules, queries |
+| `blocking-candidate-of` | it matches a negated condition, but blocks no partial match there now | rules, queries |
+
+**Why two keys.**  For a rule the relation is "supports its insertions"; for a
+query, which has no RHS, it is "supports its results".  Those are different
+claims, so they have different names.
+
+**How `retract!` fits in.**  An RHS `retract!` is not truth-maintained and Clara
+records no insertion for it, so an activation that only retracts leaves nothing
+behind and its facts get no `supports-insertions-of` entry.  Retracting a fact
+another activation inserted leaves that activation's insertion record pointing
+at a gone fact; such a record is dropped from `supports-insertions-of` and the
+retracted fact is dropped from the fact list.
+
+**`:blocks-condition-of` versus `:blocking-candidate-of`.**  Both are computed from memory a
+restored session already has — Clara keeps a negation node's waiting tokens
+even while blocked, keyed by the same join bindings as its elements.  A fact
+blocks a token when it shares the node's join bindings (and, for a join-filter
+negation, the node's join filter accepts the pair); a fact that matches the
+negated condition but blocks no waiting token is a candidate.
+
+### Working-memory relation limits
+
+These are documented rather than fixed:
+
+- **An activation that recorded no logical insertion leaves no trace.**  That
+  covers `insert-unconditional!`, `retract!`-only RHSs, side effects, and an
+  `insert!` on a branch not taken.  Only `:unfiltered-rule-matches`, from a
+  session fired under `with-full-logging`, has these.
+- **An unconditional insertion of a type no condition reads is invisible.**  No
+  alpha node holds it and no insertion record names it.
+- **`:test` conditions hold no facts.**  `matches-condition-of` shows a fact
+  reached the rule, not that the test was what stopped it.
+- **`:matches-condition-of` is condition-local.**  It says the fact passes that
+  condition's own constraints, not that it joined the facts before it.  For an
+  accumulator `:from`, a fact is condition-local by passing the `:from` type and
+  alpha constraints; a join-filter accumulator still lists candidate facts that
+  the token filter would reject.
 
 ---
 
@@ -810,7 +864,7 @@ Unified activity view for a rule: what it matched + what it inserted.
         "data": { "app-id": "app-1" },
         "is-root": true,
         "inserted-from": [],
-        "used-by": [ ... ]
+        "supports-insertions-of": [ ... ]
       },
       "bindings": [
         { "?app-id": "app-1", "?outcome": { ... } }
@@ -825,7 +879,7 @@ Unified activity view for a rule: what it matched + what it inserted.
       "data": { "app-id": "app-1", "status": "approved" },
       "is-root": false,
       "inserted-from": [ { "name": "my.ns/app-outcome-approved", "id": "...", "ns": "my.ns", "type": "rule" } ],
-      "used-by": [ ... ]
+      "supports-insertions-of": [ ... ]
     }
   ]
 }
@@ -862,7 +916,7 @@ Activity view for a query.
         "data": { "app-id": "app-1", "status": "approved" },
         "is-root": false,
         "inserted-from": [],
-        "used-by": [ { "name": "my.ns/find-app-outcome", "id": "...", "ns": "my.ns", "type": "query" } ]
+        "supports-results-of": [ { "name": "my.ns/find-app-outcome", "id": "...", "ns": "my.ns", "type": "query" } ]
       },
       "bindings": [
         { "?outcome": { ... }, "?app-id": "app-1" }

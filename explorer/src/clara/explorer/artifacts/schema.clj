@@ -621,6 +621,21 @@
   it, a run with no explicit `:namespaces` and no `:session` records none."
   (s/=> [(s/cond-pre s/Str s/Symbol)] {s/Any s/Any}))
 
+(s/defschema ManifestHistoryEntry
+  "One `:history` entry of a `Manifest`: `{:date :change}`. Open, because a
+  host's `:manifest-fn` may enrich the entries it writes."
+  {:date s/Str
+   :change s/Str
+   s/Keyword s/Any})
+
+(s/defschema Manifest
+  "The provenance manifest `clara.explorer.artifacts.manifest` writes: git +
+  runtime state-of-the-world plus an append-only `:history` without exact
+  duplicates. Open, because callers merge their own `:blocks` in and
+  `:manifest-fn` may add anything."
+  {(s/optional-key :history) [ManifestHistoryEntry]
+   s/Keyword s/Any})
+
 (s/defschema ManifestContext
   "What a `:manifest-fn` is called with beside the manifest: the `:dir` it is
   written to and, for a composition, `:sources`: each source unit's `UnitRef`
@@ -632,7 +647,8 @@
 
 (s/defschema ManifestFn
   "The `:manifest-fn` hook: `(fn [manifest ManifestContext] -> manifest)`, called
-  on the finished manifest (`:created` preserved, `:history` appended) just
+  on the finished manifest (`:created` preserved, `:history` appended without
+  exact duplicates) just
   before it is written. What it returns is what is written, so it may add or
   change anything; keeping the keys readers rely on intact (`:source`,
   `:analysis-run`, `:staleness`) is the caller's to get right."

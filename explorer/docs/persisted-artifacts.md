@@ -376,7 +376,7 @@ what they return.
 
 State-of-the-world only — git shas, branch and working-tree state of the inputs
 that drift, the analyzed namespace list, the Clojure version, the layer ids, and
-an append-only `:history`. No derived analysis: what resolved and how is recorded
+an append-only `:history` without exact duplicates. No derived analysis: what resolved and how is recorded
 per callsite in the layers, not counted here.
 
 `artifacts/manifest.clj` knows the artifact set, the run's own checkout and the

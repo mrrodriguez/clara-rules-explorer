@@ -3,7 +3,7 @@
 
   Records **state-of-the-world only**: git shas / branch / working-tree of every
   input that can drift over time, plus the analysis method + Clojure version +
-  analyzed namespaces and an append-only `:history`. It deliberately records **no
+  analyzed namespaces and an append-only `:history`, without exact duplicates. It deliberately records **no
   derived analysis** (no counts, no per-rule resolution detail) — the annotation
   layers' per-callsite `:status` / per-dimension `:resolution` is the source of
   truth for what resolved.
@@ -28,6 +28,7 @@
    [clara.explorer.artifacts.layout :as layout]
    [clara.explorer.artifacts.schema :as schema]
    [clara.explorer.artifacts.git :as git]
+   [clara.explorer.artifacts.shared.manifest :as shared-manifest]
    [clara.explorer.artifacts.store :as store]
    [clara.explorer.edn-io :as edn-io]
    [clojure.edn :as edn]
@@ -158,6 +159,17 @@
 ;; write (preserve :created, append :history on re-runs)
 ;; ===========================================================================
 
+(s/defn ^:private append-history :- [schema/ManifestHistoryEntry]
+  "`existing` followed by the entries of `fresh` it does not already hold.
+  Expressed through `shared-manifest/dedupe-history`, so there is one definition
+  of duplicate: whole-entry value equality, earliest occurrence kept."
+  [existing :- [schema/ManifestHistoryEntry]
+   fresh :- [schema/ManifestHistoryEntry]]
+  (let [new-history (into [] cat [existing fresh])]
+    (-> {:history new-history}
+        shared-manifest/dedupe-history
+        :history)))
+
 (s/defn ^:private read-existing :- (s/maybe {s/Keyword s/Any})
   [file :- File]
   (when (.exists file)
@@ -165,7 +177,8 @@
 
 (s/defn write-manifest! :- s/Str
   "Build and write the provenance manifest into the artifact dir. Preserves an
-  existing manifest's `:created` and appends this run's entry to `:history`.
+  existing manifest's `:created` and appends this run's entry to `:history`,
+  without adding an entry identical to one already present.
   Returns the written file path.
 
   `opts` is a `schema/ManifestOptions`; its `:root`/`:dir`/`:repo`/`:variant`/
@@ -185,7 +198,8 @@
         manifest (cond-> fresh
                    existing
                    (assoc :created (get existing :created (:created fresh))
-                          :history (vec (concat (get existing :history []) (:history fresh))))
+                          :history (append-history (get existing :history [])
+                                                   (:history fresh)))
 
                    manifest-fn
                    (manifest-fn {:dir dir}))]

@@ -26,10 +26,34 @@
 						emptyMessage: undefined
 					},
 					{
-						icon: 'bi-lightning',
-						label: 'Impact (Used By)',
-						groups: detail['used-by'] || [],
-						emptyMessage: 'No active usage detected for these instances.'
+						icon: 'bi-send',
+						label: 'Supports Insertions Of',
+						groups: detail['supports-insertions-of'] || [],
+						emptyMessage: 'No rule insertion is supported by these instances.'
+					},
+					{
+						icon: 'bi-list-check',
+						label: 'Supports Results Of',
+						groups: detail['supports-results-of'] || [],
+						emptyMessage: 'These instances support no query results.'
+					},
+					{
+						icon: 'bi-filter-circle',
+						label: 'Matches Condition Of',
+						groups: detail['matches-condition-of'] || [],
+						emptyMessage: 'These instances pass no positive condition.'
+					},
+					{
+						icon: 'bi-x-octagon',
+						label: 'Blocks Condition Of',
+						groups: detail['blocks-condition-of'] || [],
+						emptyMessage: 'These instances block the condition of nothing.'
+					},
+					{
+						icon: 'bi-dash-circle',
+						label: 'Blocking Candidate Of',
+						groups: detail['blocking-candidate-of'] || [],
+						emptyMessage: 'These instances are a blocking candidate of nothing.'
 					}
 				]
 			: []

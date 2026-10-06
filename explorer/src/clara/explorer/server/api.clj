@@ -224,13 +224,17 @@
 
 (s/defschema SessionFact
   "A single fact instance in working memory."
-  {:id            s/Int
-   :type          TypeReference
-   :ns            (s/maybe s/Str)
-   :data          s/Any
-   :is-root       s/Bool
-   :inserted-from [ProductionDep]
-   :used-by       [ProductionDep]})
+  {:id                      s/Int
+   :type                    TypeReference
+   :ns                      (s/maybe s/Str)
+   :data                    s/Any
+   :is-root                 s/Bool
+   :inserted-from           [ProductionDep]
+   :supports-insertions-of  [ProductionDep]
+   :supports-results-of     [ProductionDep]
+   :matches-condition-of    [ProductionDep]
+   :blocks-condition-of     [ProductionDep]
+   :blocking-candidate-of   [ProductionDep]})
 
 (s/defschema FactMatch
   "A working-memory fact matched by a production, with every distinct set of
@@ -256,13 +260,17 @@
 
 (s/defschema SessionFactTypeDetail
   "Full detail for a single fact type in the session, including role groupings."
-  {:name          s/Str
-   :id            s/Str
-   :ns            (s/maybe s/Str)
-   :count         s/Int
-   :inserted-from [FactTypeRoleGroup]
-   :used-by       [FactTypeRoleGroup]
-   :ids           [s/Int]})
+  {:name                    s/Str
+   :id                      s/Str
+   :ns                      (s/maybe s/Str)
+   :count                   s/Int
+   :inserted-from           [FactTypeRoleGroup]
+   :supports-insertions-of  [FactTypeRoleGroup]
+   :supports-results-of     [FactTypeRoleGroup]
+   :matches-condition-of    [FactTypeRoleGroup]
+   :blocks-condition-of     [FactTypeRoleGroup]
+   :blocking-candidate-of   [FactTypeRoleGroup]
+   :ids                     [s/Int]})
 
 ;; Internal atom shape
 (s/defschema AnnotationsMap
