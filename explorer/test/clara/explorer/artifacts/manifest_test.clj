@@ -1,13 +1,14 @@
 (ns clara.explorer.artifacts.manifest-test
   "The manifest's `:history` never holds an exact duplicate: `write-manifest!`
-  appends without duplicating, and `dedupe-history` cleans manifests that
-  already hold duplicates.
+  appends without duplicating, and `shared-manifest/dedupe-history` cleans
+  manifests that already hold duplicates.
 
   What these pin: regenerating a unit repeatedly on one day writes the same
   `{:date :change}` entry every time, so without dedupe the history fills with
   identical entries that bury the ones marking a real change in date."
   (:require
    [clara.explorer.artifacts.manifest :as manifest]
+   [clara.explorer.artifacts.shared.manifest :as shared-manifest]
    [clara.explorer.edn-io :as edn-io]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing use-fixtures]]
@@ -91,17 +92,17 @@
   (let [a {:date "2026-01-01" :change "one"}
         b {:date "2026-01-02" :change "two"}]
     (testing "removes exact duplicates, keeping the first occurrence"
-      (is (= [a b] (:history (manifest/dedupe-history {:history [a b a]})))))
+      (is (= [a b] (:history (shared-manifest/dedupe-history {:history [a b a]})))))
     (testing "is idempotent"
       (let [m {:history [a b a]}]
-        (is (= (manifest/dedupe-history m)
-               (manifest/dedupe-history (manifest/dedupe-history m))))))
+        (is (= (shared-manifest/dedupe-history m)
+               (shared-manifest/dedupe-history (shared-manifest/dedupe-history m))))))
     (testing "a manifest without :history is returned unchanged"
       (let [m {:repo "x"}]
-        (is (= m (manifest/dedupe-history m)))
-        (is (not (contains? (manifest/dedupe-history m) :history)))))
+        (is (= m (shared-manifest/dedupe-history m)))
+        (is (not (contains? (shared-manifest/dedupe-history m) :history)))))
     (testing "leaves every other key untouched"
       (is (= {:repo "x" :source {:sha "abc"} :history [a]}
-             (manifest/dedupe-history {:repo "x"
-                                       :source {:sha "abc"}
-                                       :history [a a]}))))))
+             (shared-manifest/dedupe-history {:repo "x"
+                                              :source {:sha "abc"}
+                                              :history [a a]}))))))

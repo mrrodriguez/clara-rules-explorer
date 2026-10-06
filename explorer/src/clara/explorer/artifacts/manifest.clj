@@ -28,6 +28,7 @@
    [clara.explorer.artifacts.layout :as layout]
    [clara.explorer.artifacts.schema :as schema]
    [clara.explorer.artifacts.git :as git]
+   [clara.explorer.artifacts.shared.manifest :as shared-manifest]
    [clara.explorer.artifacts.store :as store]
    [clara.explorer.edn-io :as edn-io]
    [clojure.edn :as edn]
@@ -158,26 +159,15 @@
 ;; write (preserve :created, append :history on re-runs)
 ;; ===========================================================================
 
-(s/defn dedupe-history :- schema/Manifest
-  "`manifest` with exact-duplicate `:history` entries removed, keeping the
-  first of each. A manifest with no `:history` is returned unchanged.
-
-  The rule `write-manifest!` appends by, so a registry owner can apply the
-  same cleanup to manifests it has read but is not about to regenerate."
-  [manifest :- schema/Manifest]
-  (cond-> manifest
-    (contains? manifest :history)
-    (update :history #(into [] (distinct) %))))
-
 (s/defn ^:private append-history :- [schema/ManifestHistoryEntry]
   "`existing` followed by the entries of `fresh` it does not already hold.
-  Expressed through `dedupe-history`, so there is one definition of
-  duplicate: whole-entry value equality, earliest occurrence kept."
+  Expressed through `shared-manifest/dedupe-history`, so there is one definition
+  of duplicate: whole-entry value equality, earliest occurrence kept."
   [existing :- [schema/ManifestHistoryEntry]
    fresh :- [schema/ManifestHistoryEntry]]
   (let [new-history (into [] cat [existing fresh])]
     (-> {:history new-history}
-        dedupe-history
+        shared-manifest/dedupe-history
         :history)))
 
 (s/defn ^:private read-existing :- (s/maybe {s/Keyword s/Any})
