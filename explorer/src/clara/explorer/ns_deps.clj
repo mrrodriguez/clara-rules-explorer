@@ -63,10 +63,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defn ->ns-required
-  "Returns a sorted vector of `[{:ns-name-sym … :refers […] } …]` — one entry
-   per namespace with at least one referred var (`clojure.core` excluded, as
-   with the `:require` clause projection). `:refers` is sorted; an entry
-   exists only when the ns is referred, so it is never empty."
+  "Returns a sorted vector of `[{:ns-name-sym … :refers […] } …]` — one entry per namespace with at
+  least one referred var (`clojure.core` excluded, as with the `:require` clause projection).
+  `:refers` is sorted; an entry exists only when the ns is referred, so it is never empty."
   [nsobj]
   (let [refers (into []
                      (comp (remove #(= 'clojure.core

@@ -15,6 +15,7 @@
             [clara.explorer.test.rules.loan-app-rules]
             [clara.explorer.test.rules.loan-app-facts :as laf]
             [clara.explorer.test.rules.analyze-test-rules :as atr]
+            [clara.explorer.test.rules.refer-all-rules :as rall]
             [clara.explorer.test-utils :as tu]
             [schema.test :as st])
   (:import [clara.explorer.test.rules.loan_app_facts
@@ -167,6 +168,29 @@
     :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
                          :type-resolver-fn ->fact-type-resolver}]
     :dynamic-type-fallback-resolution :none}))
+
+;; ---------------------------------------------------------------------------
+;; :refer :all callee-misattribution fixtures
+;; (docs/planning/defect-refer-all-misattributes-callee.md)
+;; ---------------------------------------------------------------------------
+
+(def ^:private refer-all-session
+  (r/mk-session 'clara.explorer.test.rules.refer-all-rules))
+
+(def ^:private refer-all-analysis
+  (analyze/->rule-source-analysis
+   {:session-or-rulebase refer-all-session
+    :include-ns-prefixes [rules-prefix]}))
+
+(def ^:private refer-all-ctor-annotations
+  "Annotations for the refer-all fixture with ->fact constructor-of-interest
+   resolution. Without callee re-attribution the ->fact usage is reported as
+   `clara.rules/->fact` (no such var) and the insert is unresolved."
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis refer-all-analysis
+    :session-or-rulebase refer-all-session
+    :fact-constructors [{:match-fn (->fact-sym-match-fn helpers->fact-sym)
+                         :type-resolver-fn ->fact-type-resolver}]}))
 
 ;; ---------------------------------------------------------------------------
 ;; Dynamic-detection expectation helpers (shared by insert/retract tests)
@@ -1534,6 +1558,23 @@
             (is (= [`atr/rule-fact-builder-call ->fact-sym]
                    (mapv :var-name-sym boundary-to-constructor-path))
                 "boundary-to-constructor-path: boundary-caller → ->fact (direct, no helper)")))))))
+
+(deftest test-refer-all-callee-reattribution
+  (testing "a name used from the second :refer :all namespace resolves to it, not the first"
+    (let [ann (ann/get-annotation refer-all-ctor-annotations `rall/refer-all-ctor-rule)
+          dyn (:clara-rules/dynamic-insert-types-detected ann)]
+      (is (= [:refer-all/out] (:clara-rules/insert-types ann))
+          "->fact type is promoted once the callee is corrected")
+      (is (= :full (:resolution dyn)))
+      (let [cs (first (:callsites dyn))]
+        (is (= helpers->fact-sym (:constructor-sym cs))
+            "constructor callee is helpers/->fact, never clara.rules/->fact")
+        (is (= [:refer-all/out] (:resolved-types cs)))
+        (is (= "(->fact :refer-all/out {:x ?x})" (:source-str cs)))
+        (let [{:keys [boundary-var-name-sym boundary-to-constructor-path]} (:via cs)]
+          (is (= 'clara.rules/insert! boundary-var-name-sym))
+          (is (= [`rall/refer-all-ctor-rule helpers->fact-sym]
+                 (mapv :var-name-sym boundary-to-constructor-path))))))))
 
 (deftest test-constructor-resolver-overrules-callsite-resolver
   (testing "constructor path owns its callsite; generic resolver handles the rest"

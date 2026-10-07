@@ -1,7 +1,8 @@
 # Defect: `:refer :all` attributes every referred name to the first refer-all namespace
 
-Status: **open**, not yet investigated upstream. Found while triaging unresolved insert callsites
-in a composed analysis.
+Status: **fixed** — see
+[`defect-refer-all-misattributes-callee-progress.md`](./defect-refer-all-misattributes-callee-progress.md).
+Found while triaging unresolved insert callsites in a composed analysis.
 
 ## 1. Symptom
 
