@@ -171,7 +171,6 @@
 
 ;; ---------------------------------------------------------------------------
 ;; :refer :all callee-misattribution fixtures
-;; (docs/planning/defect-refer-all-misattributes-callee.md)
 ;; ---------------------------------------------------------------------------
 
 (def ^:private refer-all-session
@@ -1873,7 +1872,6 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Callsite `:via` provenance — `:boundary-in-var` and `:rule-to-boundary-path`
-;; (see docs/planning/analyze-callsite-provenance-fixes-problem-statement.md)
 ;; ---------------------------------------------------------------------------
 
 (deftest test-via-boundary-in-var-direct-rhs

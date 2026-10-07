@@ -390,7 +390,6 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Callsite `:via` provenance fixtures
-;; (gap A / gap B — see docs/planning/analyze-callsite-provenance-fixes-*)
 
 (defn insert-summary! [id]
   (r/insert! (->fact :demo/summary {:id id})))
@@ -457,7 +456,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Heuristic record-ctor scan fallback fixtures
 ;; (defect: spurious record-ctor scan types outranking constructor-of-interest
-;; resolution — see server/docs/defect-spurious-defrecord-ctor-types-resolved.md)
+;; resolution)
 
 (defrecord UnrelatedScanRecord [x])
 
@@ -574,8 +573,7 @@
   [QueryOnlyRecord (= ?id id)])
 
 ;; ---------------------------------------------------------------------------
-;; Locals-expand fixtures (span-set expansion — see
-;; docs/planning/locals-expand-ana-plan.md)
+;; Locals-expand fixtures (span-set expansion)
 
 (defn look-up-facts-1
   "Helper returning facts built by the ->fact constructor."
@@ -667,7 +665,7 @@
   (r/insert! (->fact ::local-doc {:app-id ?app-id})))
 
 ;; ---------------------------------------------------------------------------
-;; Non-call boundary usages (see docs/planning/fix-boundary-args-parsing-problem.md)
+;; Non-call boundary usages
 ;;
 ;; kondo reports a `:var-usage` for every reference to a boundary fn, not just
 ;; calls. A value use (`(run! insert! xs)`) or a bare threaded step

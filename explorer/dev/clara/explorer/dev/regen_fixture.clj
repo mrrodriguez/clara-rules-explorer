@@ -1,5 +1,5 @@
 ;; Regenerates test-resources/clara/explorer/annotations/loan-doc-rules-annotations.edn
-;; as a Layer (docs/anno-merging-update-plan.md phase 6.6).
+;; as a Layer.
 ;;
 ;; Run from explorer/:
 ;;   make regen-fixture

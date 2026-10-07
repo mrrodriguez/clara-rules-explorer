@@ -7,7 +7,7 @@
    composes it into the top-level `:ns-deps` entry via `->ns-deps`.
    The leaf requires only `clojure.java.io`, `clojure.string` and
    `schema.core` — never `analyze` or `core` — so both can depend on it
-   without a cycle (see rb-ana-ns-deps-plan.md §7)."
+   without a cycle."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [schema.core :as s]))

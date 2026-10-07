@@ -545,7 +545,7 @@
 (defn- arg-span-set
   "The ephemeral span set for one boundary-call argument: the boundary usage
    span plus the init spans of every local transitively reachable from usages
-   inside it (see docs/planning/locals-expand-ana-plan.md).
+   inside it.
 
    Returns `{:spans […] :var-syms #{…}}`: spans are
    `{:filename … :start [row col] :end [row col]}` (`:end` exclusive);

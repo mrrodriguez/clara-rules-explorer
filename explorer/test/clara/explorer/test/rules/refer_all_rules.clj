@@ -1,6 +1,5 @@
 (ns clara.explorer.test.rules.refer-all-rules
-  "Fixture for the `:refer :all` callee-misattribution defect (see
-   docs/planning/defect-refer-all-misattributes-callee.md).
+  "Fixture for the `:refer :all` callee-misattribution defect.
 
    Two namespaces are referred wholesale: `clara.rules` (provides `defrule`,
    `insert!`) and `clara.explorer.test.rules.helpers` (provides `->fact`).
