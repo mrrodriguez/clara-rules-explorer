@@ -15,6 +15,8 @@
             [clara.explorer.test.rules.loan-app-rules]
             [clara.explorer.test.rules.loan-app-facts :as laf]
             [clara.explorer.test.rules.analyze-test-rules :as atr]
+            [clara.explorer.test.rules.cross-ns-boundary-helpers :as cnbh]
+            [clara.explorer.test.rules.cross-ns-boundary-rules :as cnbr]
             [clara.explorer.test.rules.refer-all-rules :as rall]
             [clara.explorer.test-utils :as tu]
             [schema.test :as st])
@@ -1574,6 +1576,34 @@
           (is (= 'clara.rules/insert! boundary-var-name-sym))
           (is (= [`rall/refer-all-ctor-rule helpers->fact-sym]
                  (mapv :var-name-sym boundary-to-constructor-path))))))))
+
+(deftest test-cross-ns-boundary-traversal
+  (testing "a boundary call inside a dependency namespace is traversed from the rule"
+    (let [session (r/mk-session 'clara.explorer.test.rules.cross-ns-boundary-rules)
+          analysis (analyze/->rule-source-analysis
+                    {:session-or-rulebase session
+                     :include-ns-prefixes [rules-prefix]})
+          ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis analysis
+                :session-or-rulebase session
+                :fact-constructors [{:match-fn (->fact-sym-match-fn helpers->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})
+          rule-ann (ann/get-annotation ann `cnbr/cross-ns-boundary-rule)
+          dyn (:clara-rules/dynamic-insert-types-detected rule-ann)]
+      (is (= [:cross-ns-boundary/out] (:clara-rules/insert-types rule-ann))
+          "insert type resolves through the dependency-namespace helper")
+      (is (= :full (:resolution dyn)))
+      (let [cs (first (:callsites dyn))]
+        (is (= helpers->fact-sym (:constructor-sym cs)))
+        (is (= [:cross-ns-boundary/out] (:resolved-types cs)))
+        (is (= 'clara.rules/insert! (-> cs :via :boundary-var-name-sym)))
+        (is (= `cnbh/insert-cross-ns-fact! (-> cs :via :boundary-in-var))
+            "the boundary call lives in the dependency namespace, not the rule")
+        (is (= [`cnbr/cross-ns-boundary-rule `cnbh/insert-cross-ns-fact!]
+               (mapv :var-name-sym (-> cs :via :rule-to-boundary-path)))
+            "rule -> dependency-namespace helper -> boundary")
+        (is (= [`cnbh/insert-cross-ns-fact! helpers->fact-sym]
+               (mapv :var-name-sym (-> cs :via :boundary-to-constructor-path))))))))
 
 (deftest test-constructor-resolver-overrules-callsite-resolver
   (testing "constructor path owns its callsite; generic resolver handles the rest"
