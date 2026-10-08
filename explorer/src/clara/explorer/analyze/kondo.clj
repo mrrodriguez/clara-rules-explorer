@@ -53,6 +53,16 @@
       (binding [*ns* (or the-ns *ns*)]
         (try (read-string s) (catch Exception _ nil))))))
 
+(defn source-text-for-span
+  "The source text for a kondo usage/binding span
+   (`{:row … :col … :end-row … :end-col … :filename …}`), or nil when the
+   span or its source cannot be resolved.  `get-lines` is
+   `(fn [ns-sym filename] -> lines-vec)`; the ns-sym may be nil, in which case
+   the source is looked up by filename."
+  [get-lines ns-sym {:keys [row col end-row end-col filename]}]
+  (when-let [lines (get-lines ns-sym filename)]
+    (source-text-at lines row col end-row end-col)))
+
 (defn read-boundary-args
   "Reads the argument forms of the boundary call (`insert!`/`retract!`/…) described
    by a kondo `:var-usage`.  Returns a (possibly empty) sequence of forms.
@@ -209,3 +219,145 @@
                                         (:row ctor-usage) (:col ctor-usage)
                                         (:end-row ctor-usage) (:end-col ctor-usage))]
       (read-string-in-ns (:from ctor-usage) call-str))))
+
+;; ---------------------------------------------------------------------------
+;; Bracket-depth scanning (for binding classification)
+;;
+;; Classifying a kondo `:locals` binding (see
+;; `clara.explorer.analyze.callsite`) needs to know how deeply the binding
+;; symbol nests inside its enclosing binding form, without interpreting
+;; destructuring semantics — kondo already reports which source positions are
+;; bindings.  These helpers scan source text char-by-char, tracking `()` / `[]`
+;; / `{}` depth while skipping the regions whose brackets must not count:
+;; strings, character literals, `;` line comments, and `#_`-discarded forms.
+;; ---------------------------------------------------------------------------
+
+(defn- skip-string
+  "Index after the string literal whose opening `\"` sits at index `i`."
+  [^String s i]
+  (let [n (.length s)]
+    (loop [j (inc i)]
+      (cond
+        (>= j n) n
+        (= \\ (.charAt s j)) (recur (+ j 2))
+        (= \" (.charAt s j)) (inc j)
+        :else (recur (inc j))))))
+
+(defn- skip-char-literal
+  "Index after the character literal whose leading `\\` sits at index `i`.
+   Handles both single-char literals (`\\(`) and named/hex literals
+   (`\\newline`, `\\u0041`)."
+  [^String s i]
+  (let [n (.length s)
+        j (inc i)]
+    (if (>= j n)
+      n
+      (let [ch (.charAt s j)]
+        (if (Character/isLetter ^char ch)
+          (loop [k j]
+            (if (and (< k n) (Character/isLetter ^char (.charAt s k)))
+              (recur (inc k))
+              k))
+          (inc j))))))
+
+(defn- skip-line-comment
+  "Index just past the `;` comment starting at index `i` (the newline, when
+   present, is left for the caller to consume)."
+  [^String s i]
+  (let [n (.length s)]
+    (loop [j i]
+      (cond
+        (>= j n) n
+        (= \newline (.charAt s j)) j
+        :else (recur (inc j))))))
+
+;; `skip-delimited`, `skip-discard`, and `skip-form` are mutually recursive
+;; (`#_` inside a collection skips a form, which may itself contain a
+;; collection).
+(declare skip-delimited skip-discard skip-form)
+
+(defn- skip-delimited
+  "Index after the `open`-delimited form starting at index `i`.  Only the
+   given `open`/`close` delimiter pair is balanced; other delimiters are
+   skipped as ordinary characters, which is correct for well-formed source."
+  [^String s i open close]
+  (let [n (.length s)]
+    (loop [j (inc i) depth 1]
+      (if (>= j n)
+        n
+        (let [ch (.charAt s j)
+              nch (when (< (inc j) n) (.charAt s (inc j)))]
+          (cond
+            (= ch \") (recur (skip-string s j) depth)
+            (= ch \\) (recur (skip-char-literal s j) depth)
+            (= ch \;) (recur (skip-line-comment s j) depth)
+            (and (= ch \#) (= nch \_)) (recur (skip-discard s j) depth)
+            (= ch open) (recur (inc j) (inc depth))
+            (= ch close) (if (= depth 1)
+                           (inc j)
+                           (recur (inc j) (dec depth)))
+            :else (recur (inc j) depth)))))))
+
+(defn- skip-discard
+  "Index after a `#_` discarded form whose `#` sits at index `i`."
+  [^String s i]
+  (skip-form s (+ i 2)))
+
+(defn- skip-form
+  "Index after the form starting at index `i`.  Skips whitespace, strings,
+   character literals, line comments, `#_` discards, and balanced
+   `()`/`[]`/`{}` collections."
+  [^String s i]
+  (let [n (.length s)]
+    (loop [j i]
+      (if (>= j n)
+        n
+        (let [ch (.charAt s j)
+              nch (when (< (inc j) n) (.charAt s (inc j)))]
+          (cond
+            (Character/isWhitespace ^char ch) (recur (inc j))
+            (= ch \") (recur (skip-string s j))
+            (= ch \\) (recur (skip-char-literal s j))
+            (= ch \;) (recur (skip-line-comment s j))
+            (and (= ch \#) (= nch \_)) (recur (skip-discard s j))
+            (= ch \() (recur (skip-delimited s j \( \)))
+            (= ch \[) (recur (skip-delimited s j \[ \]))
+            (= ch \{) (recur (skip-delimited s j \{ \}))
+            :else (recur (inc j))))))))
+
+(defn- pos->offset
+  "0-indexed char offset of the 1-indexed `[row col]` position within `s`.
+   Positions past the end resolve to the length of `s`."
+  [^String s row col]
+  (let [n (.length s)]
+    (loop [i 0 r 1 c 1]
+      (cond
+        (>= i n) n
+        (and (= r row) (= c col)) i
+        :else
+        (let [ch (.charAt s i)]
+          (if (= ch \newline)
+            (recur (inc i) (inc r) 1)
+            (recur (inc i) r (inc c))))))))
+
+(defn bracket-depth-at
+  "Bracket nesting depth at the 1-indexed `[row col]` position within source
+   string `s`, measured just before the char at that position.  Every open
+   `(`/`[`/`{` counts one level; strings, character literals, line comments,
+   and `#_`-discarded forms are skipped so their brackets do not count."
+  [^String s row col]
+  (let [target (pos->offset s row col)]
+    (loop [i 0 depth 0]
+      (if (>= i target)
+        depth
+        (let [ch (.charAt s i)
+              n (.length s)
+              nch (when (< (inc i) n) (.charAt s (inc i)))]
+          (cond
+            (= ch \") (recur (skip-string s i) depth)
+            (= ch \\) (recur (skip-char-literal s i) depth)
+            (= ch \;) (recur (skip-line-comment s i) depth)
+            (and (= ch \#) (= nch \_)) (recur (skip-discard s i) depth)
+            (or (= ch \() (= ch \[) (= ch \{)) (recur (inc i) (inc depth))
+            (or (= ch \)) (= ch \]) (= ch \})) (recur (inc i) (dec depth))
+            :else (recur (inc i) depth)))))))

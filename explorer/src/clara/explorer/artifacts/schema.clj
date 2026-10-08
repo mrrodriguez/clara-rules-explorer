@@ -423,6 +423,7 @@
    (s/optional-key :filename) s/Str
    (s/optional-key :direction) DetectionDimension
    (s/optional-key :rule) s/Any
+   (s/optional-key :resolve-local) (s/=> (s/maybe analyze.callsite/LocalBinding) s/Symbol)
    (s/optional-key :via) s/Any})
 
 (s/defschema FactTypeResolverFn
