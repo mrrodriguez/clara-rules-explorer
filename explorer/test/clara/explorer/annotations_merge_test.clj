@@ -1,6 +1,6 @@
 (ns clara.explorer.annotations-merge-test
-  "Tests for the layered-annotation format and merge semantics
-   (docs/anno-merging-update-plan.md §4–§5, phase 1).  Pure-data tests over
+  "Tests for the layered-annotation format and merge semantics.
+   Pure-data tests over
    fixture layers — no session, no rulebase, no classpath."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]

@@ -1,7 +1,7 @@
 (ns clara.explorer.annotation-fixtures
   "Shared access to the loan-doc annotation layer fixture
    (test-resources/.../loan-doc-rules-annotations.edn), regenerated as a
-   Layer per docs/anno-merging-update-plan.md phase 6.6."
+   Layer."
   (:require [clara.explorer.annotations.merge :as ann.merge]
             [clojure.java.io :as io]))
 

@@ -453,6 +453,17 @@ boundary chain already resolves them precisely at the callsite.
 | `:arg-form` | the argument form, with locals already traced to their init forms |
 | `:source-str` | `pr-str` of `:arg-form` |
 | `:filename` | file containing the callsite |
+| `:resolve-local` | `(fn [sym] -> nil \| LocalBinding)` — resolves a local symbol in the callsite's lexical scope to its classified binding (see below) |
+
+`LocalBinding` is `{:kind #{:let-init :param :destructured :loop :seq-binding
+:unknown} :init-form …}`. Only `:let-init` carries `:init-form` — the read init
+form of a direct `let` / `let*` / `if-let` / `when-let` / `if-some` /
+`when-some` binding. Every other kind carries no init form: a parameter's value
+comes from its callers, a destructured symbol's from the destructured
+collection, and `loop`/`for`/`doseq` bindings from their iterations. A resolver
+recurses by calling `:resolve-local` again on symbols in a returned
+`:init-form`; the explorer caps the total depth. `nil` means the name is
+shadowed inside the callsite span, or not resolvable there.
 
 Return `nil` (still unresolved) or `{:resolved-types [tokens…]}`. Tokens may be Classes, symbols, keywords, or any fact-type shape your session uses; they pass through to the annotation. Exceptions are contained — logged and treated as unresolved.
 
@@ -554,6 +565,7 @@ fails fast.
 | `:filename` | Source file |
 | `:direction` | `:insert` or `:retract` |
 | `:rule` | Full rule production map |
+| `:resolve-local` | `(fn [sym] -> nil \| LocalBinding)` — the same local resolver, scoped to the constructor call's span (see the `:callsite-resolver-fn` section for the `LocalBinding` shape) |
 | `:via` | Optional `ViaChain` — provenance from the boundary fn to this constructor callsite |
 
 #### `ViaChain`

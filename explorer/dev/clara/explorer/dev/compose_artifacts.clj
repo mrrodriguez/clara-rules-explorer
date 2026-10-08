@@ -1,6 +1,6 @@
 ;; Compose a registry selection into one unit-shaped artifact directory the
 ;; caller names, so `explorer/bin/annotations_report.bb` can read it as a normal
-;; single unit (see docs/planning/composed-artifact-persist-plan.md).
+;; single unit.
 ;;
 ;; Run from explorer/. The :dev alias puts this file's dir on the classpath, so
 ;; `-m` finds the namespace; :test supplies the `test-resources` registry the

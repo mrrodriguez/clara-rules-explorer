@@ -35,6 +35,7 @@
             [clara.explorer.analyze.utils :as u]
             [clara.explorer.analyze.kondo :as kondo]
             [clara.explorer.analyze.index :as index]
+            [clara.explorer.analyze.refer :as refer]
             [clara.explorer.analyze.synth :as synth]
             [clara.explorer.serialize :as serialize]
             [clara.explorer.conditions :as conditions]
@@ -793,8 +794,15 @@
                                                (group-by u/var-usage-caller (:var-usages rule-source-analysis))
                                                fact-type-spec-fn))
         rule-source-analysis (cond-> rule-source-analysis
-                               (seq alias-by-rule)
-                               (update :var-usages into (mapcat :usages) (vals alias-by-rule)))
+                               (seq alias-by-rule) (update :var-usages into
+                                                           (mapcat :usages)
+                                                           (vals alias-by-rule))
+                               ;; kondo misattributes usages from `:refer :all` namespaces to the
+                               ;; first refer-all'd namespace; correct `:to` against the live refer
+                               ;; tables before the index keys boundary detection and constructor
+                               ;; matching on the resolved callee (see
+                               ;; clara.explorer.analyze.refer).
+                               true (update :var-usages refer/re-attribute-refer-all-usages))
         index (index/->analysis-index
                {:analysis rule-source-analysis
                 :get-source get-source
