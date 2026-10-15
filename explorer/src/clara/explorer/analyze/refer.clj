@@ -2,16 +2,16 @@
   "Correction of clj-kondo `:var-usages` misattributed under `:refer :all`.
 
    When a namespace refers two or more namespaces wholesale (`:refer :all`), clj-kondo attributes
-  every name used from any of them to the *first* one listed in the `:require` clause. This includes
-  names that namespace does not export. The analyzer keys boundary detection and
-  constructor-of-interest matching on the resolved callee, so a usage reported erroneously as, eg.
-  `clara.rules/->fact` (no such var) is never matched and its insert goes unresolved.
+   every name used from any of them to the *first* one listed in the `:require` clause. This includes
+   names that namespace does not export. The analyzer keys boundary detection and
+   constructor-of-interest matching on the resolved callee, so a usage reported erroneously as, eg.
+   `clara.rules/->fact` (no such var) is never matched and its insert goes unresolved.
 
    This namespace re-attributes such usages from the live namespace's refer table (`ns-refers`),
-  which reflects runtime resolution exactly: a local symbol referred from several namespaces
-  resolves to one winning var, and a refer-all spec is already expanded to concrete vars. A usage
-  whose `:to` namespace is referred but does not provide `:name` is rewritten to the single other
-  referred namespace that does; when none qualify the usage is left untouched."
+   which reflects runtime resolution exactly: a local symbol referred from several namespaces
+   resolves to one winning var, and a refer-all spec is already expanded to concrete vars. A usage
+   whose `:to` namespace is referred but does not provide `:name` is rewritten to the single other
+   referred namespace that does; when none qualify the usage is left untouched."
   (:require [clara.explorer.ns-deps :as ns-deps]))
 
 (defn- refer-sets

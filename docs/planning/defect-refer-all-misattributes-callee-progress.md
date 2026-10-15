@@ -64,11 +64,19 @@ Defect §5 suggested using the `ns-deps` refer-all expansion. The live
   namespaces (`fake.refer.a` = `insert!`, `fake.refer.b` = `->fact`) and
   consumer namespaces referring both wholesale in each order. Covers both
   defect table rows, the already-correct case, unknown-namespace keyword
-  `:to`, unresolvable names, and unloaded `:from`.
+  `:to`, unresolvable names, unloaded `:from`, the refer-collision case (two
+  refer-all'd namespaces exporting the same name — rewritten to the runtime
+  winner), and its residual corner (a loser ns exporting only the colliding
+  name — passed through uncorrected).
 - Integration fixture: `explorer/test/clara/explorer/test/rules/refer_all_rules.clj`
-  — a real rule ns with `[clara.rules :refer :all]`
-  `[clara.explorer.test.rules.helpers :refer :all]` and
-  `(insert! (->fact :refer-all/out …))`.
+  — a real rule ns with `[clara.rules :as r]`,
+  `[clara.explorer.test.rules.refer-all-decoy :refer :all]` (listed first, so
+  clj-kondo attributes bare names from either refer-all'd ns to it) and
+  `[clara.explorer.test.rules.helpers :refer :all]`, with
+  `(r/insert! (->fact :refer-all/out {:x ?x}))`.  `clara.rules` is aliased
+  rather than refer-all'd so the fixture also lints cleanly in a cold-cache run
+  (third-party `:refer :all` is unresolvable without a cache); the rationale
+  lives in the fixture's ns docstring.
 - Integration test: `test-refer-all-callee-reattribution` in
   `explorer/test/clara/explorer/analyze_test.clj` — asserts the `->fact`
   callsite resolves with `:constructor-sym
@@ -78,7 +86,7 @@ Defect §5 suggested using the `ns-deps` refer-all expansion. The live
 
 ## Verification
 
-- `make test` — 491 tests / 3240 assertions, 0 failures, 0 errors.
+- `make test` — 498 tests / 3281 assertions, 0 failures, 0 errors.
 - `make lint` — 0 errors, 0 warnings.
 - `make format-check` — clean.
 - `make reflection-check` — no warnings.
@@ -98,5 +106,12 @@ Defect §5 suggested using the `ns-deps` refer-all expansion. The live
   scope for this defect.
 - Boundary-side impact (defect §4 second row, `insert!` misattributed when the
   facts ns is listed first) is covered by the unit test at the re-attribution
-  layer; an end-to-end fixture for that order was not added since the
-  first-listed-ns-is-`clara.rules` case is the realistic one.
+  layer; the integration fixture's first-listed refer-all'd ns is the decoy
+  rather than `clara.rules` (which is aliased), so the second table row's
+  end-to-end shape is exercised at the unit layer only.
+- Refer collision (two refer-all'd namespaces exporting the *same* name): the
+  live `ns-refers` table records only the runtime winner, so re-attribution
+  keys on the winner and the candidate set is provably 0-or-1.  A residual
+  pathological corner — the loser namespace exports *only* the colliding name,
+  so it is absent from `refer-sets` and the usage passes through uncorrected —
+  is documented but out of scope.

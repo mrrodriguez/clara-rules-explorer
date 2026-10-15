@@ -85,10 +85,18 @@ Complete — all rollout steps implemented and verified.
   brackets are net-zero; strings/chars/comments inside it are already skipped.
   Verified against `[x 1 #_ #_ z 3 y 2]` → `[x 1 y 2]` (both `z` and `3`
   discarded).
+- **Review 1 feedback**
+  ([`provide-local-scope-for-callsite-resolver-review-1.md`](./provide-local-scope-for-callsite-resolver-review-1.md)):
+  hardened `binding-macro-usage-enclosing` to match on `:name` *and*
+  `clojure.core` `:to`; corrected the `binding-macro-syms` / `classify-binding`
+  docstrings; pinned the previously-unexercised classification paths with new
+  fixtures (`dotimes`, `if-let`/`when-let`/`if-some`/`when-some`, `for`/`doseq`
+  `:let` modifiers, multi-arity `defn` params) and a `->resolve-local` budget
+  test (`test-resolve-local-budget`).
 
 ## Verification (all green)
 
 - `make format-check` → all files formatted correctly.
 - `make lint` → errors 0, warnings 0.
-- `make test` → 495 tests, 3267 assertions, 0 failures / 0 errors.
+- `make test` → 498 tests, 3281 assertions, 0 failures / 0 errors.
 - `make reflection-check` → no warnings in project code.

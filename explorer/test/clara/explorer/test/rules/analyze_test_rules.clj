@@ -804,6 +804,77 @@
   (let [ctor-type :t/ctor]
     (r/insert! (->fact ctor-type {:app-id ?app-id}))))
 
+(r/defrule rule-resolve-local-if-let
+  "Nested local is an `if-let` binding — expects :let-init with init form."
+  [Application (= ?app-id app-id)]
+  =>
+  #_{:clj-kondo/ignore [:condition-always-true]}
+  (if-let [if-let-type :t/if-let]
+    (r/insert! (make-local-fact if-let-type {:app-id ?app-id}))
+    nil))
+
+(r/defrule rule-resolve-local-when-let
+  "Nested local is a `when-let` binding — expects :let-init with init form."
+  [Application (= ?app-id app-id)]
+  =>
+  #_{:clj-kondo/ignore [:condition-always-true]}
+  (when-let [when-let-type :t/when-let]
+    (r/insert! (make-local-fact when-let-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-if-some
+  "Nested local is an `if-some` binding — expects :let-init with init form."
+  [Application (= ?app-id app-id)]
+  =>
+  #_{:clj-kondo/ignore [:condition-always-true]}
+  (if-some [if-some-type :t/if-some]
+    (r/insert! (make-local-fact if-some-type {:app-id ?app-id}))
+    nil))
+
+(r/defrule rule-resolve-local-when-some
+  "Nested local is a `when-some` binding — expects :let-init with init form."
+  [Application (= ?app-id app-id)]
+  =>
+  #_{:clj-kondo/ignore [:condition-always-true]}
+  (when-some [when-some-type :t/when-some]
+    (r/insert! (make-local-fact when-some-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-dotimes
+  "Nested local is a `dotimes` binding — expects :seq-binding, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (dotimes [dotimes-type 1]
+    (r/insert! (make-local-fact dotimes-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-for-let-modifier
+  "Nested local is a `for` `:let` modifier — expects :destructured, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert-all! (for [_ [:t/for-let]
+                       :let [for-let-type :t/for-let]]
+                   (make-local-fact for-let-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-doseq-let-modifier
+  "Nested local is a `doseq` `:let` modifier — expects :destructured, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (doseq [_ [:t/doseq-let]
+          :let [doseq-let-type :t/doseq-let]]
+    (r/insert! (make-local-fact doseq-let-type {:app-id ?app-id}))))
+
+(defn insert-multi-arity!
+  "Helper whose boundary arg is a multi-arity defn parameter. The arity list
+   adds a nesting level, so the param classifies :destructured (not :param)."
+  ([p-multi-type]
+   p-multi-type)
+  ([p-multi-type m]
+   (r/insert! (make-local-fact p-multi-type m))))
+
+(r/defrule rule-resolve-local-multi-arity-param
+  "Nested local is a multi-arity defn parameter — expects :destructured, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (insert-multi-arity! :t/multi {:app-id ?app-id}))
+
 ;; ---------------------------------------------------------------------------
 ;; §2.4 fixtures: the automatic locals-tracing chain
 

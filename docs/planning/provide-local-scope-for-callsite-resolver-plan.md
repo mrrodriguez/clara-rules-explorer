@@ -1,6 +1,8 @@
 # Give callsite and constructor resolvers a sound view of local scope
 
-Status: **proposal**. Scope: `explorer/src/clara/explorer/analyze/callsite.clj`,
+Status: **fixed** — see
+[`provide-local-scope-for-callsite-resolver-progress.md`](./provide-local-scope-for-callsite-resolver-progress.md).
+Scope: `explorer/src/clara/explorer/analyze/callsite.clj`,
 `clara.explorer.analyze.kondo`, `clara.explorer.artifacts.schema` (the resolver context schemas),
 and the analyzer test fixtures.
 

@@ -119,9 +119,11 @@
 
 (def ^:private binding-macro-syms
   "Every binding form classification recognizes.  Other let-like macros
-   (`binding`, `with-open`, `with-redefs`, …) are deliberately absent: they
-   bind, but their direct binding symbols are not `:let-init` here and classify
-   as `:unknown` (no init form)."
+   (`binding`, `with-open`, `with-redefs`, …) are deliberately absent: their
+   direct binding symbols never classify `:let-init` (no init form is ever
+   handed out).  Outside any recognized binding macro they classify
+   `:unknown`; nested inside one (e.g. a `let`) they classify `:destructured`
+   (depth > 2)."
   (into let-init-macro-syms
         (concat fn-param-macro-syms seq-binding-macro-syms '#{loop})))
 
@@ -129,11 +131,17 @@
   "The innermost binding-macro `:var-usage` whose span contains the source
    position `[row col]`, or nil.  Candidate usages come from the per-file
    `:var-usages-by-filename` index; the innermost is the one with the latest
-   start position among those that still contain the point."
+   start position among those that still contain the point.
+
+   Matches on `:name` *and* a `clojure.core` `:to` — every name in
+   `binding-macro-syms` is a core var, so a user- or library-defined var
+   named `let`/`loop`/`for`/… whose span happens to enclose the point is
+   never mistaken for the special form."
   [{:keys [var-usages-by-filename]} filename row col]
   (->> (get var-usages-by-filename filename)
        (filter (fn [u]
                  (and (contains? binding-macro-syms (:name u))
+                      (= 'clojure.core (:to u))
                       (span-contains-pos? (usage->span u) filename row col))))
        (sort-by (juxt #(or (:row %) 0) #(or (:col %) 0)))
        last))
@@ -153,7 +161,7 @@
 
    Classification reads the innermost enclosing binding-macro form and measures
    the binding symbol's bracket depth within it (see
-   `analyze.kondo/bracket-depth-at`).  Direct bindings sit at depth 2 (the
+   `kondo/bracket-depth-at`).  Direct bindings sit at depth 2 (the
    macro form's own `(` counts one level); nested destructuring sits deeper.
    kondo has already decided which source positions are bindings, so no
    destructuring semantics are reimplemented here."

@@ -450,7 +450,7 @@ boundary chain already resolves them precisely at the callsite.
 | `:ns-name-sym` | namespace where the callsite was found (may be a helper ns) |
 | `:direction` | `:insert` or `:retract` |
 | `:boundary-fn` | e.g. `clara.rules/insert!` |
-| `:arg-form` | the argument form, with locals already traced to their init forms |
+| `:arg-form` | the argument form, with `:let-init` (let-family) locals traced to their init forms (params / loop / destructured are not chased) |
 | `:source-str` | `pr-str` of `:arg-form` |
 | `:filename` | file containing the callsite |
 | `:resolve-local` | `(fn [sym] -> nil \| LocalBinding)` — resolves a local symbol in the callsite's lexical scope to its classified binding (see below) |

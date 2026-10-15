@@ -711,16 +711,24 @@
 
 (deftest test-resolve-local-boundary-context
   (let [results (resolve-local-boundary-results
-                 {`atr/rule-resolve-local-let-literal  ['lt-fact-type]
-                  `atr/rule-resolve-local-let-chain    ['lt-outer 'lt-inner]
-                  `atr/rule-resolve-local-literal-map  ['map-type]
-                  `atr/rule-resolve-local-shadowed     ['shadowed-type]
-                  `atr/rule-resolve-local-fn-param     ['p-fact-type]
-                  `atr/rule-resolve-local-destructured ['d-type]
-                  `atr/rule-resolve-local-loop         ['loop-type]
-                  `atr/rule-resolve-local-for          ['for-type]
-                  `atr/rule-resolve-local-doseq        ['doseq-type]
-                  `atr/rule-resolve-local-called       ['local-fn]})]
+                 {`atr/rule-resolve-local-let-literal       ['lt-fact-type]
+                  `atr/rule-resolve-local-let-chain         ['lt-outer 'lt-inner]
+                  `atr/rule-resolve-local-literal-map       ['map-type]
+                  `atr/rule-resolve-local-shadowed          ['shadowed-type]
+                  `atr/rule-resolve-local-fn-param          ['p-fact-type]
+                  `atr/rule-resolve-local-destructured      ['d-type]
+                  `atr/rule-resolve-local-loop              ['loop-type]
+                  `atr/rule-resolve-local-for               ['for-type]
+                  `atr/rule-resolve-local-doseq             ['doseq-type]
+                  `atr/rule-resolve-local-if-let            ['if-let-type]
+                  `atr/rule-resolve-local-when-let          ['when-let-type]
+                  `atr/rule-resolve-local-if-some           ['if-some-type]
+                  `atr/rule-resolve-local-when-some         ['when-some-type]
+                  `atr/rule-resolve-local-dotimes           ['dotimes-type]
+                  `atr/rule-resolve-local-for-let-modifier  ['for-let-type]
+                  `atr/rule-resolve-local-doseq-let-modifier ['doseq-let-type]
+                  `atr/rule-resolve-local-multi-arity-param ['p-multi-type]
+                  `atr/rule-resolve-local-called            ['local-fn]})]
     (testing "let local holding a literal"
       (is (= [{:kind :let-init :init-form :t/a}]
              (get results [`atr/rule-resolve-local-let-literal 'lt-fact-type]))))
@@ -757,10 +765,52 @@
       (is (= [{:kind :seq-binding}]
              (get results [`atr/rule-resolve-local-doseq 'doseq-type]))))
 
+    (testing "if-let / when-let / if-some / when-some bindings are :let-init with init form"
+      (is (= [{:kind :let-init :init-form :t/if-let}]
+             (get results [`atr/rule-resolve-local-if-let 'if-let-type])))
+      (is (= [{:kind :let-init :init-form :t/when-let}]
+             (get results [`atr/rule-resolve-local-when-let 'when-let-type])))
+      (is (= [{:kind :let-init :init-form :t/if-some}]
+             (get results [`atr/rule-resolve-local-if-some 'if-some-type])))
+      (is (= [{:kind :let-init :init-form :t/when-some}]
+             (get results [`atr/rule-resolve-local-when-some 'when-some-type]))))
+
+    (testing "dotimes binding reports :seq-binding with no init form"
+      (is (= [{:kind :seq-binding}]
+             (get results [`atr/rule-resolve-local-dotimes 'dotimes-type]))))
+
+    (testing "for / doseq :let modifiers report :destructured with no init form"
+      (is (= [{:kind :destructured}]
+             (get results [`atr/rule-resolve-local-for-let-modifier 'for-let-type])))
+      (is (= [{:kind :destructured}]
+             (get results [`atr/rule-resolve-local-doseq-let-modifier 'doseq-let-type]))))
+
+    (testing "multi-arity defn parameter reports :destructured with no init form"
+      (is (= [{:kind :destructured}]
+             (get results [`atr/rule-resolve-local-multi-arity-param 'p-multi-type]))))
+
     (testing "a local called as a function resolves the head symbol"
       (is (= [{:kind :let-init
                :init-form '(fn [t] (make-local-fact t {:app-id ?app-id}))}]
              (get results [`atr/rule-resolve-local-called 'local-fn]))))))
+
+(deftest test-resolve-local-budget
+  (testing "the 9th resolution from one context returns nil (recursion guard)"
+    (let [results (atom [])
+          resolver (fn [{:keys [rule resolve-local]}]
+                     (when (= (str `atr/rule-resolve-local-let-literal)
+                              (str (:name rule)))
+                       (dotimes [_ 9]
+                         (swap! results conj (resolve-local 'lt-fact-type))))
+                     nil)]
+      (analyze/->annotations-from-rule-source-analysis
+       {:rule-source-analysis edge-case-analysis
+        :session-or-rulebase edge-case-session
+        :callsite-resolver-fn resolver})
+      (is (= 9 (count @results)))
+      (is (= 8 (count (remove nil? @results))))
+      (is (nil? (last @results))
+          "the budget caps at max-resolution-depth (8) successes per context"))))
 
 (defn- ->fact-local-type-resolver
   "Resolves a `->fact` callsite whose type argument is a nested local, via
