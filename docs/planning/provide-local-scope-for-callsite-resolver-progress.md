@@ -79,6 +79,12 @@ Complete — all rollout steps implemented and verified.
   `test-trace-local-form-classified` to `analyze-test`.
 - Fixed clj-kondo lint warnings in the new fixtures (loop without `recur`,
   misplaced docstring, unused binding).
+- **Correction (post-review):** the bracket-depth scanner's `#_` handling was
+  removed. Its `skip-form` skipped to end-of-string (a bug), and `#_` needs no
+  special case at all for depth: a discarded form is one balanced form, so its
+  brackets are net-zero; strings/chars/comments inside it are already skipped.
+  Verified against `[x 1 #_ #_ z 3 y 2]` → `[x 1 y 2]` (both `z` and `3`
+  discarded).
 
 ## Verification (all green)
 
