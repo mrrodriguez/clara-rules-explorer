@@ -390,7 +390,6 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Callsite `:via` provenance fixtures
-;; (gap A / gap B — see docs/planning/analyze-callsite-provenance-fixes-*)
 
 (defn insert-summary! [id]
   (r/insert! (->fact :demo/summary {:id id})))
@@ -457,7 +456,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Heuristic record-ctor scan fallback fixtures
 ;; (defect: spurious record-ctor scan types outranking constructor-of-interest
-;; resolution — see server/docs/defect-spurious-defrecord-ctor-types-resolved.md)
+;; resolution)
 
 (defrecord UnrelatedScanRecord [x])
 
@@ -574,8 +573,7 @@
   [QueryOnlyRecord (= ?id id)])
 
 ;; ---------------------------------------------------------------------------
-;; Locals-expand fixtures (span-set expansion — see
-;; docs/planning/locals-expand-ana-plan.md)
+;; Locals-expand fixtures (span-set expansion)
 
 (defn look-up-facts-1
   "Helper returning facts built by the ->fact constructor."
@@ -634,6 +632,34 @@
     (let [f (->fact :demo/shadowed {:id ?app-id})]
       (count f))))
 
+(r/defrule rule-ctor-doseq-source
+  "Rule L13: the ->fact constructor is reached only through the `doseq`
+   binding's *source* — `(look-up-facts-2 …)` — not its body. Ownership
+   expansion must follow the seq binding's source span to attribute it."
+  [Application (= ?app-id app-id)]
+  =>
+  (doseq [f (look-up-facts-2 ?app-id)]
+    (r/insert! f)))
+
+(r/defrule rule-ctor-for-source
+  "Rule L14: the ->fact constructor is reached only through the `for` binding's
+   *source*, with the bound local inserted via `insert-all!` over the whole
+   `for` form."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert-all! (for [f (look-up-facts-1 ?app-id)] f)))
+
+(r/defrule rule-ctor-loop-source
+  "Rule L15: the ->fact constructor is reached only through the `loop` binding's
+   *initial value* — `(look-up-facts-1 …)` — not its body."
+  [Application (= ?app-id app-id)]
+  =>
+  (loop [facts (look-up-facts-1 ?app-id)
+         remaining 1]
+    (when (pos? remaining)
+      (r/insert-all! facts)
+      (recur facts (dec remaining)))))
+
 ;; ---------------------------------------------------------------------------
 ;; ::auto-resolved keyword fixtures
 
@@ -667,7 +693,7 @@
   (r/insert! (->fact ::local-doc {:app-id ?app-id})))
 
 ;; ---------------------------------------------------------------------------
-;; Non-call boundary usages (see docs/planning/fix-boundary-args-parsing-problem.md)
+;; Non-call boundary usages
 ;;
 ;; kondo reports a `:var-usage` for every reference to a boundary fn, not just
 ;; calls. A value use (`(run! insert! xs)`) or a bare threaded step
@@ -696,3 +722,285 @@
   [Application (= ?app-id app-id)]
   =>
   (thread-insert! {:value ?app-id}))
+
+;; ---------------------------------------------------------------------------
+;; :resolve-local fixtures (local scope for resolvers)
+;;
+;; Each rule nests a local inside a boundary argument so the automatic
+;; locals-tracing chain (`trace-local-form`) leaves it alone — the local is
+;; *not* the whole argument — and a resolver has to reach for `:resolve-local`
+;; to read it.
+
+(defn make-local-fact
+  "Plain fact builder (with-meta) — not a record ctor, so it never
+   auto-resolves; only a `:callsite-resolver-fn` / `:type-resolver-fn` can
+   read it."
+  [fact-type data]
+  (with-meta data {:type fact-type}))
+
+(r/defrule rule-resolve-local-let-literal
+  "The nested local is a direct let LHS holding a literal."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [lt-fact-type :t/a]
+    (r/insert! (make-local-fact lt-fact-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-let-chain
+  "A chain of two let locals: the resolver must hop twice through
+   `:resolve-local`."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [lt-inner :t/b
+        lt-outer lt-inner]
+    (r/insert! (make-local-fact lt-outer {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-literal-map
+  "A direct let LHS holding a literal map — the resolver receives the map as
+   `:init-form` and does the runtime-key lookup itself."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [map-type {"a" :t/a, "b" :t/b}]
+    (r/insert! (make-local-fact map-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-shadowed
+  "The same name refers to two different bindings inside the boundary span —
+   `:resolve-local` must refuse (nil) rather than pick one."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [shadowed-type :t/outer]
+    (r/insert! (make-local-fact shadowed-type
+                                (let [shadowed-type :t/inner]
+                                  shadowed-type)))))
+
+(defn insert-local-param-fact!
+  "The callsite lives in a helper; the nested local is a fn parameter. The
+   second parameter pins the old `read-init-form` misread (which would read it
+   as the parameter's init form)."
+  [p-fact-type m]
+  (r/insert! (make-local-fact p-fact-type m)))
+
+(r/defrule rule-resolve-local-fn-param
+  "Nested local is a fn parameter — expects :param, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (insert-local-param-fact! :t/param {:app-id ?app-id}))
+
+(r/defrule rule-resolve-local-destructured
+  "Nested local is destructured — expects :destructured, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [[d-type] [:t/d]]
+    (r/insert! (make-local-fact d-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-loop
+  "Nested local is a loop binding — expects :loop, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (loop [loop-type :t/loop
+         remaining 1]
+    (when (pos? remaining)
+      (r/insert! (make-local-fact loop-type {:app-id ?app-id}))
+      (recur loop-type (dec remaining)))))
+
+(r/defrule rule-resolve-local-for
+  "Nested local is a `for` binding — expects :seq-binding, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert-all! (for [for-type [:t/for]]
+                   (make-local-fact for-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-doseq
+  "Nested local is a `doseq` binding — expects :seq-binding, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (doseq [doseq-type [:t/doseq]]
+    (r/insert! (make-local-fact doseq-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-called
+  "The nested local is called as a function — the lookup must resolve the head
+   symbol of the call form."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [local-fn (fn [t] (make-local-fact t {:app-id ?app-id}))]
+    (r/insert! (local-fn :t/called))))
+
+(r/defrule rule-resolve-local-ctor-context
+  "The `:type-resolver-fn` context also carries `:resolve-local`; the ctor's
+   type argument is a nested local."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [ctor-type :t/ctor]
+    (r/insert! (->fact ctor-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-if-let
+  "Nested local is an `if-let` binding — expects :let-init with init form."
+  [Application (= ?app-id app-id)]
+  =>
+  #_{:clj-kondo/ignore [:condition-always-true]}
+  (if-let [if-let-type :t/if-let]
+    (r/insert! (make-local-fact if-let-type {:app-id ?app-id}))
+    nil))
+
+(r/defrule rule-resolve-local-when-let
+  "Nested local is a `when-let` binding — expects :let-init with init form."
+  [Application (= ?app-id app-id)]
+  =>
+  #_{:clj-kondo/ignore [:condition-always-true]}
+  (when-let [when-let-type :t/when-let]
+    (r/insert! (make-local-fact when-let-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-if-some
+  "Nested local is an `if-some` binding — expects :let-init with init form."
+  [Application (= ?app-id app-id)]
+  =>
+  #_{:clj-kondo/ignore [:condition-always-true]}
+  (if-some [if-some-type :t/if-some]
+    (r/insert! (make-local-fact if-some-type {:app-id ?app-id}))
+    nil))
+
+(r/defrule rule-resolve-local-when-some
+  "Nested local is a `when-some` binding — expects :let-init with init form."
+  [Application (= ?app-id app-id)]
+  =>
+  #_{:clj-kondo/ignore [:condition-always-true]}
+  (when-some [when-some-type :t/when-some]
+    (r/insert! (make-local-fact when-some-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-dotimes
+  "Nested local is a `dotimes` binding — expects :seq-binding, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (dotimes [dotimes-type 1]
+    (r/insert! (make-local-fact dotimes-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-for-let-modifier
+  "Nested local is a `for` `:let` modifier — expects :destructured, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert-all! (for [_ [:t/for-let]
+                       :let [for-let-type :t/for-let]]
+                   (make-local-fact for-let-type {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-doseq-let-modifier
+  "Nested local is a `doseq` `:let` modifier — expects :destructured, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (doseq [_ [:t/doseq-let]
+          :let [doseq-let-type :t/doseq-let]]
+    (r/insert! (make-local-fact doseq-let-type {:app-id ?app-id}))))
+
+(defn insert-multi-arity!
+  "Helper whose boundary arg is a multi-arity defn parameter. The arity list
+   adds a nesting level, but the param still classifies :param."
+  ([p-multi-type]
+   p-multi-type)
+  ([p-multi-type m]
+   (r/insert! (make-local-fact p-multi-type m))))
+
+(r/defrule rule-resolve-local-multi-arity-param
+  "Nested local is a multi-arity defn parameter — expects :param, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (insert-multi-arity! :t/multi {:app-id ?app-id}))
+
+(defn insert-multi-arity-destructured!
+  "Helper whose boundary arg is a *destructured* multi-arity defn parameter —
+   a destructured param classifies :destructured, same as single-arity."
+  ([{:keys [p-multi-destructured]}]
+   p-multi-destructured)
+  ([{:keys [p-multi-destructured]} m]
+   (r/insert! (make-local-fact p-multi-destructured m))))
+
+(r/defrule rule-resolve-local-multi-arity-destructured
+  "Nested local is a destructured multi-arity defn parameter — expects
+   :destructured, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (insert-multi-arity-destructured! {:p-multi-destructured :t/multi-destructured}
+                                    {:app-id ?app-id}))
+
+;; ---------------------------------------------------------------------------
+;; Fixtures: the automatic locals-tracing chain
+
+(defn insert-first-param!
+  "The boundary arg is the helper's first parameter. The second parameter pins
+   the old `read-init-form` misread — reading the next form after the binding
+   symbol would read `_m`, not a value."
+  [trace-p-type _m]
+  (r/insert! trace-p-type))
+
+(r/defrule rule-trace-local-param-not-followed
+  "A fn parameter as the whole boundary arg must stay untraced (:param has no
+   init form)."
+  [Application (= ?app-id app-id)]
+  =>
+  (insert-first-param! :t/trace {:app-id ?app-id}))
+
+(r/defrule rule-trace-local-let-chain
+  "A chain of two let locals as the whole boundary arg — the automatic chain
+   follows both hops to the constructor."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [trace-inner (DocumentCheck. ?app-id :pass "two-let-chain" nil nil)
+        trace-outer trace-inner]
+    (r/insert! trace-outer)))
+
+;; ---------------------------------------------------------------------------
+;; :resolve-local scope + classification of unrecognized binding forms
+;; ---------------------------------------------------------------------------
+
+(r/defrule rule-resolve-local-traced-arg
+  "The boundary arg is a let-local whose init references a *sibling* local —
+   `:resolve-local` must scope to the traced form's span, not the
+   boundary call's span, to resolve `traced-type`."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [traced-type :t/traced
+        f (make-local-fact traced-type {:app-id ?app-id})]
+    (r/insert! f)))
+
+(r/defrule rule-resolve-local-catch
+  "Nested local is a `catch` binding — classifies :unknown, never
+   :destructured."
+  [Application (= ?app-id app-id)]
+  =>
+  (try
+    (throw (Exception. "boom"))
+    (catch Exception caught-e
+      (r/insert! (make-local-fact caught-e {:app-id ?app-id})))))
+
+(r/defrule rule-resolve-local-with-open
+  "Nested local is a `with-open` binding — classifies :unknown."
+  [Application (= ?app-id app-id)]
+  =>
+  (with-open [r (java.io.StringReader. "")]
+    (r/insert! (make-local-fact r {:app-id ?app-id}))))
+
+(defn insert-with-open!
+  "Helper whose boundary arg is a `with-open` binding at the top of a
+   single-arity defn body — classifies :unknown, never :destructured."
+  [m]
+  (with-open [r (java.io.StringReader. "")]
+    (r/insert! (make-local-fact r m))))
+
+(r/defrule rule-resolve-local-with-open-helper
+  "Nested local is a `with-open` binding in a defn helper body — classifies
+   :unknown, never :destructured."
+  [Application (= ?app-id app-id)]
+  =>
+  (insert-with-open! {:app-id ?app-id}))
+
+(r/defrule rule-resolve-local-letfn
+  "Nested local is a `letfn` binding — classifies :unknown."
+  [Application (= ?app-id app-id)]
+  =>
+  (letfn [(local-fn-letfn [t] (make-local-fact t {:app-id ?app-id}))]
+    (r/insert! (local-fn-letfn :t/letfn))))
+
+(r/defrule rule-resolve-local-named-fn
+  "Nested local is a named-`fn` self binding (depth 1) — classifies :unknown."
+  [Application (= ?app-id app-id)]
+  =>
+  ((fn self [_t]
+     (r/insert! (make-local-fact self {:app-id ?app-id})))
+   :t/named-fn))

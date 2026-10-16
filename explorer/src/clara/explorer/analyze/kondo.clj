@@ -77,13 +77,16 @@
 (defn read-init-form
   "Reads the init form following a `:locals` binding symbol in the source —
    the text from just after the binding symbol's end position onward, parsed
-   as a single form.  Returns nil on any error."
-  [get-lines ns-sym {:keys [row end-col]}]
+   as a single form.  When `:end-row` is present the read is bounded by that
+   row (the enclosing binding macro's end) instead of running to end-of-file.
+   Returns nil on any error."
+  [get-lines ns-sym {:keys [row end-col end-row filename]}]
   (try
-    (when-let [lines (get-lines ns-sym nil)]
+    (when-let [lines (get-lines ns-sym filename)]
       (when (and row end-col)
-        (let [line (nth lines (dec row))
-              tail (str/join "\n" (cons (subs line (dec end-col)) (drop row lines)))]
+        (let [bounded-lines (if end-row (subvec lines 0 (min (count lines) end-row)) lines)
+              line (nth bounded-lines (dec row))
+              tail (str/join "\n" (cons (subs line (dec end-col)) (drop row bounded-lines)))]
           (read-string-in-ns ns-sym tail))))
     (catch Throwable _
       nil)))
@@ -92,27 +95,29 @@
   "The `[row col]` (1-indexed) where the init form of a `:locals` binding
    starts: the first readable character at/after the binding symbol's end
    position, skipping whitespace, commas, and `;` comments — mirroring how
-   `read-init-form` finds the form.  Returns nil on any error."
-  [get-lines ns-sym {:keys [row end-col]}]
+   `read-init-form` finds the form.  When `:end-row` is present the scan is
+   bounded by that row.  Returns nil on any error."
+  [get-lines ns-sym {:keys [row end-col end-row filename]}]
   (try
-    (when-let [lines (get-lines ns-sym nil)]
+    (when-let [lines (get-lines ns-sym filename)]
       (when (and row end-col)
-        (loop [r row
-               off (dec end-col)]
-          (when (<= r (count lines))
-            (let [line (nth lines (dec r))]
-              (cond
-                (>= off (count line))
-                (recur (inc r) 0)
+        (let [bounded-lines (if end-row (subvec lines 0 (min (count lines) end-row)) lines)]
+          (loop [r row
+                 off (dec end-col)]
+            (when (<= r (count bounded-lines))
+              (let [line (nth bounded-lines (dec r))]
+                (cond
+                  (>= off (count line))
+                  (recur (inc r) 0)
 
-                (or (Character/isWhitespace ^char (nth line off))
-                    (= \, (nth line off)))
-                (recur r (inc off))
+                  (or (Character/isWhitespace ^char (nth line off))
+                      (= \, (nth line off)))
+                  (recur r (inc off))
 
-                (= \; (nth line off))
-                (recur (inc r) 0)
+                  (= \; (nth line off))
+                  (recur (inc r) 0)
 
-                :else [r (inc off)]))))))
+                  :else [r (inc off)])))))))
     (catch Throwable _
       nil)))
 
@@ -184,15 +189,20 @@
 (defn init-form-span
   "The `{:filename … :start [row col] :end [row col]}` span (1-indexed,
    `:end` exclusive) of the init form following a `:locals` binding symbol.
-   Nil when the span cannot be determined."
-  [get-lines ns-sym {:keys [row end-col filename] :as _binding}]
-  (when-let [start (init-form-start get-lines ns-sym {:row row :end-col end-col})]
+   When `:end-row` is present the read is bounded by that row (the enclosing
+   binding macro's end) instead of running to end-of-file.  Nil when the span
+   cannot be determined."
+  [get-lines ns-sym {:keys [row end-col end-row filename] :as _binding}]
+  (when-let [start (init-form-start get-lines ns-sym
+                                    {:row row :end-col end-col
+                                     :end-row end-row :filename filename})]
     (try
-      (when-let [lines (get-lines ns-sym nil)]
-        (let [[sr sc] start
-              line (nth lines (dec sr) nil)
+      (when-let [lines (get-lines ns-sym filename)]
+        (let [bounded-lines (if end-row (subvec lines 0 (min (count lines) end-row)) lines)
+              [sr sc] start
+              line (nth bounded-lines (dec sr) nil)
               tail (when line
-                     (str/join "\n" (cons (subs line (dec sc)) (drop sr lines))))]
+                     (str/join "\n" (cons (subs line (dec sc)) (drop sr bounded-lines))))]
           (when-let [n (and tail (read-one-form-char-count ns-sym tail))]
             {:filename filename
              :start start
@@ -209,3 +219,86 @@
                                         (:row ctor-usage) (:col ctor-usage)
                                         (:end-row ctor-usage) (:end-col ctor-usage))]
       (read-string-in-ns (:from ctor-usage) call-str))))
+
+(defn- skip-string
+  "Index after the string literal whose opening `\"` sits at index `i`."
+  [^String s i]
+  (let [n (.length s)]
+    (loop [j (inc i)]
+      (cond
+        (>= j n) n
+        (= \\ (.charAt s j)) (recur (+ j 2))
+        (= \" (.charAt s j)) (inc j)
+        :else (recur (inc j))))))
+
+(defn- skip-char-literal
+  "Index after the character literal whose leading `\\` sits at index `i`.
+   Handles both single-char literals (`\\(`) and named/hex literals
+   (`\\newline`, `\\u0041`)."
+  [^String s i]
+  (let [n (.length s)
+        j (inc i)]
+    (if (>= j n)
+      n
+      (let [ch (.charAt s j)]
+        (if (Character/isLetter ch)
+          (loop [k j]
+            (if (and (< k n) (Character/isLetter (.charAt s k)))
+              (recur (inc k))
+              k))
+          (inc j))))))
+
+(defn- skip-line-comment
+  "Index just past the `;` comment starting at index `i` (the newline, when
+   present, is left for the caller to consume)."
+  [^String s i]
+  (let [n (.length s)]
+    (loop [j i]
+      (cond
+        (>= j n) n
+        (= \newline (.charAt s j)) j
+        :else (recur (inc j))))))
+
+(defn- scan-brackets
+  "Scans `^String s`, returning `{:stack […] :past-depth2-close? bool}`. `:stack` is the
+  open-bracket stack (outermost first) at the end of the scan; `:past-depth2-close?` is true when a
+  `[` at depth 2 closed during the scan — for a single-arity fn-family macro that is the params
+  vector closing, which marks the header/body boundary. A multi-arity arity list is a `(` at depth 2
+  and does not set it. Strings, character literals, regex literals, and line comments are skipped so
+  their brackets do not count. `#_`-discarded forms need no special case: a discarded form is one
+  balanced form, so its brackets contribute net-zero."
+  [^String s]
+  (let [n (.length s)]
+    (loop [i 0 stack [] past-depth2-close? false]
+      (if (>= i n)
+        {:stack stack :past-depth2-close? past-depth2-close?}
+        (let [ch (.charAt s i)]
+          (cond
+            (= ch \") (recur (skip-string s i) stack past-depth2-close?)
+            (= ch \\) (recur (skip-char-literal s i) stack past-depth2-close?)
+            (= ch \;) (recur (skip-line-comment s i) stack past-depth2-close?)
+            (and (= ch \#)
+                 (< (inc i) n)
+                 (= \" (.charAt s (inc i))))
+            (recur (skip-string s (inc i)) stack past-depth2-close?)
+            (or (= ch \() (= ch \[) (= ch \{))
+            (recur (inc i) (conj stack ch) past-depth2-close?)
+            (or (= ch \)) (= ch \]) (= ch \}))
+            (recur (inc i)
+                   (if (seq stack) (pop stack) stack)
+                   (or past-depth2-close?
+                       (and (= ch \]) (= 2 (count stack)))))
+            :else (recur (inc i) stack past-depth2-close?)))))))
+
+(defn ->bracket-scan
+  "The `scan-brackets` result for the source prefix between a macro usage's start and a binding
+  position within it, measured just before the binding position. Nil when the source cannot be read.
+
+   `usage` and `binding` are kondo position maps (`:row`/`:col` 1-indexed, `:filename`)."
+  [get-lines
+   ns-sym
+   {:keys [row col filename] :as _usage}
+   {brow :row bcol :col :as _binding}]
+  (when-let [lines (get-lines ns-sym filename)]
+    (when-let [prefix (source-text-at lines row col brow bcol)]
+      (scan-brackets prefix))))

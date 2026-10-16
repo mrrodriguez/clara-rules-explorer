@@ -9,8 +9,7 @@
 ;;            `parseedn "1.2"`, `clojure-mode "5.18"` from `Eldev`. This file's
 ;;            `unless (featurep ...)` guards become no-ops so real impls win,
 ;;            and the new `*-real-*` tests exercise them.
-;;   Tier 3 — live server + nREPL integration: deferred (see
-;;            `docs/planning/explorer-server-emacs-testing.md`). Requires a
+;;   Tier 3 — live server + nREPL integration: deferred. Requires a
 ;;            running `clara.explorer.server` JVM + `cider-connect-clj`.
 ;;
 ;; Real deps are preferred when present; stubs exist only for the

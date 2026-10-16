@@ -1,21 +1,72 @@
-# clj-kondo interaction notes for `analyze.clj`
+# clj-kondo interaction notes for `clara.explorer.analyze`
 
-This document captures the mechanics of how `clara.explorer.analyze`
-interacts with clj-kondo, why it uses `with-in-str` + `:lint ["-"]` +
-`:filename`, and how the session-based analysis pipeline
-(`->rule-source-analysis`) synthesizes sources and prunes hook output.
+This document captures the mechanics of how `clara.explorer.analyze` feeds
+source text to clj-kondo and maps kondo's position-based output back onto that
+text. For the pass-level concepts that consume the analysis, see
+[`analyze-pipeline-concepts.md`](analyze-pipeline-concepts.md); for the
+annotation output, see [`rule-annotations.md`](rule-annotations.md).
+
+## The high-level concept
+
+clj-kondo is a file/linter-oriented tool: its public API has no "analyze this
+string" option. The analyzer works around that by binding source text to stdin
+and handing kondo a *pretend* `:filename`, then uses that same filename plus
+kondo's row/col spans to read argument forms back out of the source. One
+minimal rule shows the whole loop:
+
+```clojure
+;; Synthesized source handed to clj-kondo (namespace `my.rules`, not on disk):
+(defn __clara_explorer_rule_0__ []
+  (let [fact (->LoanDecision :approved 5000)]
+    (clara.rules/insert! fact)))
+```
+
+```text
+        SOURCE STRING (synthesized — no file on disk)
+ ┌──────────────────────────────────────────────────────┐
+ │ (ns my.rules …)                                      │
+ │ (defn __clara_explorer_rule_0__ []                   │
+ │   (let [fact (->LoanDecision :approved 5000)]        │
+ │     (clara.rules/insert! fact)))   ← the callsite    │
+ └──────────────────────┬───────────────────────────────┘
+                        │  with-in-str  (binds *in*)
+                        ▼
+              clj-kondo (clj-kondo.core/run!)
+              :lint ["-"]  :lang :clj  :filename "my/rules.clj"
+                        │  analysis map
+                        ▼
+ ┌──────────────────────────────────────────────────────┐
+ │ {:var-usages [{:from      my.rules                    │
+ │                :to        clara.rules                 │
+ │                :name      insert!                     │
+ │                :filename  "my/rules.clj"              │
+ │                :row 4 :col 7 :end-row 4 :end-col 14}]}│
+ └──────────────────────┬───────────────────────────────┘
+                        │  :filename + :row/:col → join key
+                        ▼
+ ┌──────────────────────────────────────────────────────┐
+ │ clara.explorer.analyze.kondo/read-boundary-args       │
+ │   reads the usage span → args [fact]                  │
+ │ clara.explorer.analyze.callsite/trace-local-form      │
+ │   traces fact → (->LoanDecision :approved 5000)       │
+ └──────────────────────────────────────────────────────┘
+```
+
+Positions above are illustrative; the real values come from kondo's spans.
 
 ## The core pattern
+
+`clara.explorer.analyze/analyze-source-code` is the single funnel every source
+string passes through:
 
 ```clojure
 (defn- analyze-source-code [source-code resource-path config-dir]
   (with-in-str source-code
-    (kondo/run!
+    (kondo-core/run!
      (cond-> {:lint ["-"]
               :lang :clj
               :filename resource-path
-              :config {:analysis {:namespace-definitions true
-                                  :var-definitions true
+              :config {:analysis {:var-definitions true
                                   :var-usages true
                                   :java-class-usages true
                                   :locals true
@@ -25,163 +76,97 @@ interacts with clj-kondo, why it uses `with-in-str` + `:lint ["-"]` +
 
 ## Why `with-in-str`?
 
-This is the **public API** path for feeding arbitrary source text to clj-kondo.
-
-`kondo/run!` accepts `:lint` — a seqable of files, directories, classpaths, or the
-string `"-"` (stdin). There is no `:source` key on the public `run!` options map.
-
-Internally, when clj-kondo processes a `:lint` entry:
+`clj-kondo.core/run!` accepts `:lint` — a seqable of files, directories,
+classpaths, or the string `"-"` (stdin). There is no `:source` option on the
+public `run!` map. Internally, when kondo processes a `"-"` lint entry it
+schedules the file with `:source` read from stdin:
 
 ```clojure
-;; clj_kondo/impl/core.clj — process-file
-(= "-" path)
+;; clj_kondo.impl.core, when a :lint entry is "-":
 (schedule ctx {:filename (or filename-fallback "<stdin>")
-               :source (slurp *in*)    ;; reads source from stdin
-               :lang ...})
+               :source   (slurp *in*)})
 ```
 
-So `with-in-str` binds `*in*` → clj-kondo calls `(slurp *in*)` → gets the source
-string. The `schedule` function (also internal) does accept `:source` in its map,
-and `analyze-input` (in `clj_kondo.impl.analyzer`) takes an `input` string
-parameter directly — but neither is part of the public API surface. The
-`with-in-str` dance is the supported route to reach those internals through
-`run!`.
+So `with-in-str` binding `*in*` is the supported route to reach that path
+through the public API. (Internal `schedule` accepts `:source`, and the
+analyzer's `analyze-input` takes a string directly, but neither is public.)
 
-## Why `:filename` set to a resource path?
+## Why `:filename` is a resource path
 
-Two purposes:
+### Language detection
 
-### 1. Language detection
+clj-kondo derives the parse language from `:filename`. The extension matters:
 
-clj-kondo calls `lang-from-file` on `:filename` to determine the parse language.
-The extension matters:
-
-| Extension | Lang |
-|-----------|------|
-| `.clj`    | `:clj` |
+| Extension | Lang   |
+|-----------|--------|
+| `.clj`    | `:clj`  |
 | `.cljc`   | `:cljc` |
 
-The resource path (e.g. `clara/explorer/test/rules/loan_doc_rules.clj`)
-carries the correct extension even when the source string was synthesized by
-`->rule-source-analysis` rather than slurped from a classpath resource.
+The resource path (via `clara.explorer.analyze/ns->resource-base`) carries the
+right extension even when the source was synthesized rather than slurped from
+the classpath.
 
-### 2. Source attribution in analysis output
+### Source attribution
 
-Every var-usage, namespace-definition, and finding in clj-kondo's output
-carries `:filename`. Downstream code in `analyze.clj` / `analyze.callsite` uses
-this to map back from analysis results to the original source:
+Every `:var-usage`, `:locals` entry, and finding in kondo's output carries
+`:filename`. That key — plus `:row`/`:col` — is how the analyzer maps a result
+back to the text it analyzed: `clara.explorer.analyze/->source-loader` resolves
+a namespace to its synthesized or classpath source, and
+`clara.explorer.analyze.kondo/read-boundary-args` slices a usage's span out of
+it. Local bindings are joined to their usages by `:id` *and* `:filename`
+(`clara.explorer.analyze.callsite/find-unique-local-binding`), because kondo's
+local `:id` counters restart per analyzed namespace.
 
-- Callsite extraction uses `(:filename usage)` (plus `:row`/`:end-row`) as a
-  key into the source loader to read the text of dynamic constructor
-  callsites.
-- `->source-loader` checks the synthesized `::combined-sources` by
-  namespace symbol first, then falls back to the classpath resource.
-- **Locals tracing** (`analyze.callsite/find-local-binding`) joins
-  `:local-usages` to `:locals` bindings by `:id` *and* `:filename` — kondo's
-  local `:id` counters restart per analyzed namespace, so the id alone is not
-  unique in a merged analysis.
+## What the public API does — and doesn't — require
 
-The filename is the join key between the analysis output and the source text.
+- **No backing file needed.** When `:lint` is `"-"`, `:filename` is just an
+  identifier; clj-kondo never checks that it exists.
+- **Any origin works.** Classpath resources, synthesized strings, dynamically
+  generated forms, REPL evaluations all flow through the same pattern.
+- **Only constraint:** `:filename` should end in `.clj`/`.cljc` for correct
+  language detection and be unique enough to attribute results downstream.
 
-## How flexible is the public API?
+## Where the pipeline pieces live
 
-**Fully flexible for ad-hoc source analysis.** The `with-in-str` + `:lint ["-"]`
-+ `:filename` pattern works with:
+The mechanics above are the only parts not already described by the impl's own
+docstrings. The rest of the pipeline is documented at the symbols themselves:
 
-- **Source code from any origin** — classpath resources, synthesized strings,
-  dynamically generated forms, REPL evaluations.
-- **No backing file on disk required** — the `:filename` string does not need
-  to correspond to an existing file. clj-kondo never checks whether the file
-  exists when the lint path is `"-"`.
-- **Arbitrary `:filename` values** — the only constraint is that it should end
-  in `.clj` or `.cljc` for correct language detection, and be unique/meaningful
-  enough for downstream attribution.
+| Concern | See |
+|---|---|
+| Synthesized source + `:offset`/`:tag->production` | `clara.explorer.analyze.synth/synthesize-ns-source` |
+| Reconstructed `ns` form (no classpath source) | `clara.explorer.analyze.synth/reconstruct-ns-source` |
+| Prune-and-replace of hook output vs snippets | `clara.explorer.analyze/prune-and-rename-analysis` |
+| Session pipeline (4 steps, options) | `clara.explorer.analyze/->rule-source-analysis` |
+| `:ns-source-map`/`:config-dir`/`:cache-atom` options | `clara.explorer.analyze/->rule-source-analysis-from-namespaces` |
+| Source lookup for callsite text | `clara.explorer.analyze/->source-loader` |
+| Read args at a kondo usage span | `clara.explorer.analyze.kondo/read-boundary-args` |
+| Bracket scan (binding classification) | `clara.explorer.analyze.kondo/->bracket-scan` |
+| Resolution chain overview | `clara.explorer.analyze.callsite` (ns docstring) |
+| Local binding classification | `clara.explorer.analyze.callsite/classify-binding` |
+| Local → init-form tracing | `clara.explorer.analyze.callsite/trace-local-form` |
+| Span-set expansion (ctor ownership) | `clara.explorer.analyze.callsite/arg-span-set` |
+| `:refer :all` callee misattribution fix | `clara.explorer.analyze.refer/re-attribute-refer-all-usages` |
 
-## The session-based pipeline
+Two kondo behaviours are worth keeping in mind because they are not visible at
+any single symbol:
 
-`->rule-source-analysis` builds the analysis for a Clara session's rules. The
-session rulebase is the source of truth for which rules exist (so macro-emitted
-rules are included); clj-kondo does all Clojure syntax analysis.
-
-### Synthesized sources (`:ns-source-map`, `::combined-sources`)
-
-For each rule-owning namespace, `synthesize-ns-source` produces a *combined
-source*: the real classpath source (or a reconstructed `ns` form when the
-namespace only exists via `eval`, with any `:refer-clojure :exclude`/`:rename`,
-imports, etc. reflected) followed by one synthetic snippet per production:
-
-```clojure
-(defn __clara_explorer_rule_0__ [] <the production's :rhs form>)
-```
-
-`->rule-source-analysis-from-namespaces` accepts `:ns-source-map` — a
-`{ns-symbol source-string}` map — and analyzes those strings via the same
-stdin pattern (`ns->resource-base` + `.clj` as filename). The synthesized
-sources ride along on the merged analysis under `::combined-sources` so that
-`->annotations-from-rule-source-analysis`'s source loader reads them (not the raw
-classpath source) when extracting callsite text.
-
-### Prune-and-replace
-
-The bundled clj-kondo config contains the *verbatim* clara-rules hook imports
-(`config.edn` from clara-rules' `.clj-kondo` directory), which rewrite
-`defrule`/`defquery` into hook output we do not want to consume for rule
-structure (the rulebase already tells us the rules). Since the combined source
-puts the real source *before* the snippets, `prune-and-rename-analysis`:
-
-1. Drops var-definitions/usages attributed to known session production vars
-   (`:prune-vars`) in the *source region* (rows at or before the snippet
-   offset).
-2. Renames the snippet defs (`__clara_explorer_rule_N__`) to their production
-   names, making the snippet region the authoritative source of RHS usages.
-
-The snippet tags carry no semantic content — they are ordinal placeholders
-that never leak into output.
-
-### Locals for callsite resolution
-
-`:locals true :local-usages true` are enabled so that `analyze.callsite` can
-trace a local symbol argument at an `insert!`/`retract!` callsite (e.g. a
-macro gensym) to its binding's init form: the `:local-usages` entry at the
-arg's position shares an `:id` with the `:locals` binding in the same file,
-and the init form is read from the source text immediately after the binding
-symbol.  Tracing is multi-hop — each further hop resolves the next local
-within the previous binding's init span (`analyze.callsite/trace-local-form`
-threads the current span), and the chain restarts on the deepest traced form
-(constructor checks, then the caller's `:callsite-resolver-fn`).
-
-The constructor-of-interest pass goes further with an ephemeral *span-set
-expansion* (`analyze.callsite/arg-span-set`): from a boundary argument it
-follows the same `:id` linkage transitively, collecting the source spans of
-every reached binding init, so a constructor reached through a helper in a
-`let` init or a `concat`/`for` closure is still attributed to that argument.
-All linkage stays position-identity based.
-
-Kondo's local `:id` values are **not deterministic across runs** — they are
-per-run counters. They are only ever used for linkage *within* a single
-analysis map, never persisted or compared across runs.
-
-## Source lookup for dynamic callsite extraction
-
-`->source-loader` creates a `(fn [ns-sym filename] -> source-str)` that:
-
-1. Checks the analysis map's `::combined-sources` by namespace symbol
-   (synthesized sources from `->rule-source-analysis`).
-2. Falls back to `find-ns-resource` (classpath) by namespace symbol.
-
-This layered lookup is why `:filename` is set to the resource path: it gives
-the downstream source extraction code the best chance of finding the original
-text.
+- **Local `:id` values are per-run counters** — never persisted or compared
+  across runs; linkage is always within one analysis map.
+- **`:refer :all` cold-cache misattribution** — with no warm
+  `.clj-kondo/.cache` for the referred libraries, kondo attributes every bare
+  name used from several refer-all'd namespaces to the *first* one in the
+  `:require` clause; see `clara.explorer.analyze.refer/re-attribute-refer-all-usages`
+  for the correction.
 
 ## Summary
 
 | Concern | Solution |
-|---------|----------|
-| Feed arbitrary source to clj-kondo | `with-in-str` + `:lint ["-"]` |
-| Report correct language | `:filename` ending in `.clj` or `.cljc` |
-| Attribute results to origin | `:filename` as join key into source loader |
-| No backing file needed | `:filename` is just an identifier string |
-| Session rules as source of truth | `synthesize-ns-source` + `:ns-source-map` |
-| Hook output vs rule structure | prune-and-replace (source region vs snippet region) |
-| Macro gensym / local args at callsites | `:locals` + `:local-usages` tracing (`analyze.callsite`) |
-| Source-less (eval'd) namespaces | reconstructed `ns` form + synthesized snippets |
+|---|---|
+| Feed arbitrary source to clj-kondo | `with-in-str` + `:lint ["-"]` (`clara.explorer.analyze/analyze-source-code`) |
+| Correct parse language | `:filename` ending in `.clj`/`.cljc` |
+| Map results back to source | `:filename` + `:row`/`:col` via `clara.explorer.analyze/->source-loader` |
+| No backing file needed | `:filename` is just an identifier when `:lint` is `"-"` |
+| Session rules as source of truth | `clara.explorer.analyze.synth/synthesize-ns-source` + `clara.explorer.analyze/->rule-source-analysis` |
+| Hook output vs rule structure | `clara.explorer.analyze/prune-and-rename-analysis` |
+| Macro gensym / local args at callsites | `clara.explorer.analyze.callsite` tracing |
+| Source-less (eval'd) namespaces | `clara.explorer.analyze.synth/reconstruct-ns-source` + snippets |

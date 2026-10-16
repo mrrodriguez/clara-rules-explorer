@@ -352,7 +352,7 @@ For each callsite argument form (see `clara.explorer.analyze.callsite`):
 
 1. **Record constructors** — `->MyRecord` / `map->MyRecord` heads are resolved in the live namespace of the consuming rule.
 2. **Java constructors** — `(MyFact. …)`, `(new MyFact …)`, and `(MyFact/new …)` resolve to the class.
-3. **Locals tracing** — a local symbol argument (e.g. a macro gensym) is traced through clj-kondo's `:locals` analysis to its binding's init form, and the chain restarts there.
+3. **Locals tracing** — a local symbol argument (e.g. a macro gensym) is traced through clj-kondo's `:locals` analysis to its binding's init form when the binding is `:let-init` (a direct `let`-family left-hand side); parameters, destructured symbols, and loop/seq bindings are not traced, and the chain restarts on the traced form.
 4. **Everything else defers** — helper calls, `with-meta`, literals/templates, and the var-as-fact pattern are *deliberately not* resolved automatically; they go to the caller-supplied `:callsite-resolver-fn`, then fall back to unresolved capture.
 
 Resolved types are **promoted**: a fully-resolved dynamic insert also appears in `:clara-rules/insert-types` (likewise retracts), so downstream graph linking uses it directly.
@@ -450,9 +450,34 @@ boundary chain already resolves them precisely at the callsite.
 | `:ns-name-sym` | namespace where the callsite was found (may be a helper ns) |
 | `:direction` | `:insert` or `:retract` |
 | `:boundary-fn` | e.g. `clara.rules/insert!` |
-| `:arg-form` | the argument form, with locals already traced to their init forms |
+| `:arg-form` | the argument form, with `:let-init` (let-family) locals traced to their init forms (params / loop / destructured are not chased) |
 | `:source-str` | `pr-str` of `:arg-form` |
 | `:filename` | file containing the callsite |
+| `:resolve-local` | `(fn [sym] -> nil \| LocalBinding)` — resolves a local symbol in the *traced argument form's* span to its classified binding (see below) |
+
+`LocalBinding` is `{:kind #{:let-init :param :destructured :loop :seq-binding
+:unknown} :init-form … :init-form-span … :resolve-local …}`. Only `:let-init`
+carries `:init-form` — the read init form of a direct `let` / `let*` /
+`if-let` / `when-let` / `if-some` / `when-some` binding — plus
+`:init-form-span` (a `{:filename … :start [row col] :end [row col]}` span,
+the `callsite/SourceSpan` shape; only meaningful for comparing positions or
+for the nested `:resolve-local` below). Every other kind carries no init form:
+a parameter's value comes from its callers, a destructured symbol's from the
+destructured collection, and `loop`/`for`/`doseq` bindings from their
+iterations. A `:let-init` binding whose init span is known also carries its own
+`:resolve-local`, scoped to that span, so a resolver recurses by calling it on
+symbols in the returned `:init-form` rather than reusing the callsite-scoped
+resolver (which cannot see them). The whole chain shares one depth budget —
+once exhausted, further lookups return nil. `nil` means the name is shadowed
+inside the span, not resolvable there, or the resolution budget is spent.
+
+**Exact-vs-possible types.** A lookup in a literal map, a `case`, or an `if`
+gives the *set* of values a type could be, not the one it is. A resolver that
+enumerates values must follow the completeness rule: report every possible
+value, and leave the callsite unresolved if any branch or default is not
+literal. Over-reporting a member the flow can never produce is acceptable;
+omitting one a resolved callsite could produce is not, since that reports
+`:full` for an incomplete set.
 
 Return `nil` (still unresolved) or `{:resolved-types [tokens…]}`. Tokens may be Classes, symbols, keywords, or any fact-type shape your session uses; they pass through to the annotation. Exceptions are contained — logged and treated as unresolved.
 
@@ -554,6 +579,7 @@ fails fast.
 | `:filename` | Source file |
 | `:direction` | `:insert` or `:retract` |
 | `:rule` | Full rule production map |
+| `:resolve-local` | `(fn [sym] -> nil \| LocalBinding)` — the same local resolver, scoped to the constructor call's span (see the `:callsite-resolver-fn` section for the `LocalBinding` shape) |
 | `:via` | Optional `ViaChain` — provenance from the boundary fn to this constructor callsite |
 
 #### `ViaChain`

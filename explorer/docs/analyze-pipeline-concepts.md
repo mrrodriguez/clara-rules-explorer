@@ -230,9 +230,12 @@ Before any resolution pass, boundary-call argument forms are **traced**:
 1. **Read** the argument form from source at kondo's position span
    (`analyze.kondo/read-boundary-args`).
 2. If the argument is a **local symbol**, follow kondo's `:local-usages` →
-   `:locals` linkage to its binding's init form; each further hop resolves the
-   next local within the previous binding's init span (multi-hop,
-   depth-capped at 8).  The deepest form is what the chain restarts on.
+   `:locals` linkage to its binding, and — only when the binding classifies
+   `:let-init` (a direct `let`-family left-hand side) — to that binding's init
+   form; each further hop resolves the next local within the previous binding's
+   init span (multi-hop, depth-capped at 8).  Parameters, destructured symbols,
+   and loop/seq bindings are not traced.  The deepest form is what the chain
+   restarts on.
 
 ```clojure
 ;; Example: local tracing
@@ -256,7 +259,7 @@ The chain that converts a trace-resolved argument form into fact-type tokens:
 Argument form
   ├─ Record ctor?  (->X …) or (map->X …)   → resolve in live ns → fq class name
   ├─ Java ctor?    (X. …) (new X …) (X/new) → resolve class → fq class name
-  ├─ Local symbol?                          → trace to init form → restart chain
+  ├─ Local symbol? (a :let-init binding)    → trace to init form → restart chain
   └─ Otherwise                              → caller's :callsite-resolver-fn → :none
 ```
 
