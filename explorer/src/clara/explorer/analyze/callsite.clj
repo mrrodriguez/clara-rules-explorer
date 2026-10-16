@@ -32,7 +32,7 @@
    runs first and *owns* the arguments it accounts for, so no insert is
    reported twice.
 
-   Var-alias chains (`:fact-type-spec-fn`, see `analyze.alias`): callsites
+   Var-alias chains (`:fact-type-spec-fn`, see `clara.explorer.analyze.alias`): callsites
    discovered through an alias chain bypass the ctor chain and are recorded
    :none (unresolved) with `:fact-type`/`:fact-type-spec` context attached (then
    handed to the resolver).
@@ -44,8 +44,8 @@
    aggregation.
 
    All Clojure syntax understanding comes from clj-kondo; reading forms at
-   kondo positions lives in `analyze.kondo`, constructor recognition in
-   `analyze.ctor`."
+   kondo positions lives in `clara.explorer.analyze.kondo`, constructor
+   recognition in `clara.explorer.analyze.ctor`."
   (:require [schema.core :as s]
             [clojure.tools.logging :as log]
             [clara.explorer.analyze.utils :as u]
@@ -208,13 +208,20 @@
   "True when the containers from the binding/params vector down to the binding
    are all `[`/`{` — destructuring never goes through a list form.  The
    fn-family arity list `(` (when present at depth 2) is structural and
-   skipped."
-  [macro-name {:keys [stack]}]
-  (let [inner (if (and (contains? fn-param-macro-syms macro-name)
-                       (= \( (second stack)))
-                (subvec stack 2)
-                (subvec stack 1))]
-    (and (seq inner) (every? #{\[ \{} inner))))
+   skipped.  The binding must still be in the macro header (no depth-2 `]`
+   closed yet) and inside the binding/params vector itself: `(first inner)`
+   is that vector's `[`, so a depth-2 `(` that is not a fn-family arity list
+   (an unrecognized binding macro in a single-arity body) never classifies
+   as destructuring."
+  [macro-name {:keys [stack past-depth2-close?]}]
+  (when-not past-depth2-close?
+    (let [inner (if (and (contains? fn-param-macro-syms macro-name)
+                         (= \( (second stack)))
+                  (subvec stack 2)
+                  (subvec stack 1))]
+      (and (> (count inner) 1)
+           (= \[ (first inner))
+           (every? #{\[ \{} inner)))))
 
 (defn- classify-binding
   "Classifies a kondo `:locals` binding into a `LocalBinding`: `:kind`, plus
@@ -253,15 +260,16 @@
           stack (:stack scan)
           past-depth2-close? (:past-depth2-close? scan)
           macro-name (:name usage)
-          n (count stack)]
+          n (count stack)
+          bounded-binding (assoc binding :end-row (:end-row usage))]
       (cond
         (and stack
              (contains? let-init-macro-syms macro-name)
              (= n 2)
              (not past-depth2-close?))
-        (let [init-form (some-> (kondo/read-init-form get-lines ns-sym binding)
+        (let [init-form (some-> (kondo/read-init-form get-lines ns-sym bounded-binding)
                                 utils/canonicalize-minted-names)
-              init-form-span (kondo/init-form-span get-lines ns-sym binding)]
+              init-form-span (kondo/init-form-span get-lines ns-sym bounded-binding)]
           (cond-> {:kind :let-init}
             (some? init-form) (assoc :init-form init-form)
             (some? init-form-span) (assoc :init-form-span init-form-span)))
@@ -273,16 +281,17 @@
              (contains? seq-binding-macro-syms macro-name)
              (= n 2)
              (not past-depth2-close?))
-        (let [source-span (kondo/init-form-span get-lines ns-sym binding)]
+        (let [source-span (kondo/init-form-span get-lines ns-sym bounded-binding)]
           (cond-> {:kind :seq-binding}
             (some? source-span) (assoc :source-span source-span)))
 
         (and stack (= 'loop macro-name) (= n 2) (not past-depth2-close?))
-        (let [source-span (kondo/init-form-span get-lines ns-sym binding)]
+        (let [source-span (kondo/init-form-span get-lines ns-sym bounded-binding)]
           (cond-> {:kind :loop}
             (some? source-span) (assoc :source-span source-span)))
 
-        (and stack (> n 2) (destructured-stack? macro-name scan))
+        (and stack (> n 2) (not past-depth2-close?)
+             (destructured-stack? macro-name scan))
         {:kind :destructured}
 
         :else
@@ -366,7 +375,8 @@
             :else
             ;; The form and its span must always pair.  When the init form read
             ;; but its span did not, stop tracing rather than pairing the init
-            ;; form with the boundary span (which would silently restore A2).
+            ;; form with the boundary span (which would scope `:resolve-local`
+            ;; to the boundary call instead of the init form).
             (if init-span
               {:form init-form :span init-span}
               {:form arg-form :span span})))
@@ -484,7 +494,7 @@
   "Aggregates a callsite vector into a dimension-level resolution: nil (no
    callsites — the dimension is absent), :full (all :full), :none (all
    :none), :partial (otherwise).  Shared by the analyzer and by
-   `annotations.callsite/aggregate-resolution`, which additionally excludes
+   `clara.explorer.annotations.callsite/aggregate-resolution`, which additionally excludes
    quarantined (`:dangling?`) callsites first."
   [callsites]
   (cond
@@ -608,6 +618,12 @@
    (s/optional-key :init-form-span) SourceSpan
    (s/optional-key :resolve-local) (s/=> (s/maybe (s/recursive #'LocalBinding)) s/Symbol)})
 
+(s/defschema ClassifiedBinding
+  "Internal return shape of `classify-binding` / `->local-binding-classifier`:
+   a `LocalBinding` (before `:resolve-local` is attached) plus the internal
+   `:source-span` used by `arg-span-set` for `:seq-binding`/`:loop` ownership."
+  (assoc LocalBinding (s/optional-key :source-span) SourceSpan))
+
 (s/defschema CallsiteResolverContext
   "Context map passed to `:callsite-resolver-fn` by
    `clara.explorer.analyze/->annotations-from-rule-source-analysis`.
@@ -703,7 +719,7 @@
           :rule-var s/Symbol
           :rule-to-boundary-path-for (s/=> (s/maybe [ViaEntry]) s/Symbol)
           :callsite-resolver-fn (s/maybe (s/=> s/Any s/Any))
-          :classify-local-binding (s/=> LocalBinding s/Symbol s/Any)
+          :classify-local-binding (s/=> ClassifiedBinding s/Symbol s/Any)
           :dropped-ctor-provenance (s/maybe
                                     {s/Int {(s/optional-key :constructor-sym) s/Symbol
                                             (s/optional-key :boundary-to-constructor-path) [ViaEntry]}})
@@ -726,7 +742,7 @@
           :rule-to-boundary-path-for (s/=> (s/maybe [ViaEntry]) s/Symbol)
           :get-lines (s/=> s/Any s/Any)
           :read-ctor-form (s/=> s/Any s/Any)
-          :classify-local-binding (s/=> LocalBinding s/Symbol s/Any)
+          :classify-local-binding (s/=> ClassifiedBinding s/Symbol s/Any)
           s/Any s/Any}))
 
 (s/defn resolve-boundary-callsites
@@ -748,7 +764,7 @@
 
    Returns a `CallsiteResolution` including `:resolved-arg-idxs` — the `:idx`
    of every traced argument that resolved to at least one type (used by
-   `analyze/extract-insert-types` for per-inserter-var heuristic fallback
+   `clara.explorer.analyze/extract-insert-types` for per-inserter-var heuristic fallback
    attribution)."
   [traced-args :- [TracedArg]
    {:keys [dropped-ctor-provenance] :as ctx} :- BoundaryCallsiteCtx]
@@ -1094,7 +1110,7 @@
    Returns a `CallsiteResolution` including `:owned-arg-idxs` — the `:idx` of
    every boundary argument a constructor accounted for.  Those must not also go
    through `resolve-boundary-callsites`, or the same insert would be reported
-   twice (see `analyze/extract-insert-types`)."
+   twice (see `clara.explorer.analyze/extract-insert-types`)."
   [traced-args :- [TracedArg]
    constructor-ctr-map :- index/CtorCallsiteMap
    {:keys [get-lines read-ctor-form graph direction rule

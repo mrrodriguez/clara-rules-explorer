@@ -920,7 +920,7 @@
                                     {:app-id ?app-id}))
 
 ;; ---------------------------------------------------------------------------
-;; §2.4 fixtures: the automatic locals-tracing chain
+;; Fixtures: the automatic locals-tracing chain
 
 (defn insert-first-param!
   "The boundary arg is the helper's first parameter. The second parameter pins
@@ -946,13 +946,12 @@
     (r/insert! trace-outer)))
 
 ;; ---------------------------------------------------------------------------
-;; Review-2 fixtures: :resolve-local scope + classification of unrecognized
-;; binding forms
+;; :resolve-local scope + classification of unrecognized binding forms
 ;; ---------------------------------------------------------------------------
 
 (r/defrule rule-resolve-local-traced-arg
   "The boundary arg is a let-local whose init references a *sibling* local —
-   `:resolve-local` must scope to the traced form's span (A2), not the
+   `:resolve-local` must scope to the traced form's span, not the
    boundary call's span, to resolve `traced-type`."
   [Application (= ?app-id app-id)]
   =>
@@ -976,6 +975,20 @@
   =>
   (with-open [r (java.io.StringReader. "")]
     (r/insert! (make-local-fact r {:app-id ?app-id}))))
+
+(defn insert-with-open!
+  "Helper whose boundary arg is a `with-open` binding at the top of a
+   single-arity defn body — classifies :unknown, never :destructured."
+  [m]
+  (with-open [r (java.io.StringReader. "")]
+    (r/insert! (make-local-fact r m))))
+
+(r/defrule rule-resolve-local-with-open-helper
+  "Nested local is a `with-open` binding in a defn helper body — classifies
+   :unknown, never :destructured."
+  [Application (= ?app-id app-id)]
+  =>
+  (insert-with-open! {:app-id ?app-id}))
 
 (r/defrule rule-resolve-local-letfn
   "Nested local is a `letfn` binding — classifies :unknown."

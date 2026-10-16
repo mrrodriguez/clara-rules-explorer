@@ -49,20 +49,20 @@
 ;; local symbol while `:name` is the resolved original.
 ;; ---------------------------------------------------------------------------
 
-(defn- bare-usage
+(defn- ->bare-usage
   "A bare `:var-usage` for `sym`: no alias, name span = symbol length."
   [from to sym]
   {:from from :to to :name sym
    :name-col 1 :name-end-col (inc (count (name sym)))})
 
-(defn- aliased-usage
+(defn- ->aliased-usage
   "An aliased `:var-usage` (`alias/sym`): `:alias` present, name span =
    `alias/sym` length."
   [from to sym alias]
   {:from from :to to :name sym :alias alias
    :name-col 1 :name-end-col (inc (count (str (name alias) "/" (name sym))))})
 
-(defn- qualified-usage
+(defn- ->qualified-usage
   "A fully-qualified `:var-usage` (`ns-sym/sym`): no alias, name span =
    `ns-sym/sym` length."
   [from to sym ns-sym]
@@ -70,7 +70,7 @@
    :name-col 1 :name-end-col (inc (count (str (name ns-sym) "/" (name sym))))})
 
 ;; ---------------------------------------------------------------------------
-;; A1 regression fixture: an aliased ns that refers only `defrule`, alongside
+;; Aliased-usage fixture: an aliased ns that refers only `defrule`, alongside
 ;; a refer-all'd facts ns that exports `insert!`. `(r/insert! …)` must keep
 ;; its `:to` (the aliased ns) even though the facts ns also exports `insert!`.
 ;; ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@
      (:require [fake.refer.collision-a :refer :all]
                [fake.refer.collision-b :refer :all])))
 
-(defn- collision-winner-sym
+(defn- get-collision-winner-sym
   "The namespace the live consumer's `ns-refers` maps `shared` to (the runtime
    winner among the two refer-all'd namespaces exporting it)."
   []
@@ -139,70 +139,70 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest test-reattributes-bare-to-second-refer-all-ns
-  (testing "a bare name only in the second :refer :all ns is rewritten (defect table row 1)"
+  (testing "a bare name only in the second :refer :all ns is rewritten"
     (is (= [{:from from-ab :to b-sym :name '->fact
              :name-col 1 :name-end-col 7}]
            (refer/re-attribute-refer-all-usages
-            [(bare-usage from-ab a-sym '->fact)])))))
+            [(->bare-usage from-ab a-sym '->fact)])))))
 
 (deftest test-reattributes-bare-reversed
-  (testing "reversed require order: the bare name only in the second ns is rewritten (row 2)"
+  (testing "reversed require order: the bare name only in the second ns is rewritten"
     (is (= [{:from from-ba :to a-sym :name 'insert!
              :name-col 1 :name-end-col 8}]
            (refer/re-attribute-refer-all-usages
-            [(bare-usage from-ba b-sym 'insert!)])))))
+            [(->bare-usage from-ba b-sym 'insert!)])))))
 
 (deftest test-leaves-correct-bare-attribution-alone
   (testing "a bare name the reported :to namespace actually provides stays put"
-    (is (= [(bare-usage from-ab a-sym 'insert!)]
+    (is (= [(->bare-usage from-ab a-sym 'insert!)]
            (refer/re-attribute-refer-all-usages
-            [(bare-usage from-ab a-sym 'insert!)])))))
+            [(->bare-usage from-ab a-sym 'insert!)])))))
 
 (deftest test-leaves-aliased-usage-alone
-  (testing "an aliased usage is never rewritten, even when a refer-all'd ns exports the name (A1)"
-    (let [usage (aliased-usage from-alias rules-sym 'insert! 'r)]
+  (testing "an aliased usage is never rewritten, even when a refer-all'd ns exports the name"
+    (let [usage (->aliased-usage from-alias rules-sym 'insert! 'r)]
       (is (= [usage]
              (refer/re-attribute-refer-all-usages [usage]))
           "`r/insert!` resolves to the aliased ns, not the refer-all'd facts ns"))))
 
 (deftest test-leaves-fully-qualified-usage-alone
   (testing "a fully-qualified usage is never rewritten, even when the reported :to ns does not refer the name"
-    (let [usage (qualified-usage from-ab b-sym 'insert! 'fake.refer.a)]
+    (let [usage (->qualified-usage from-ab b-sym 'insert! 'fake.refer.a)]
       (is (= [usage]
              (refer/re-attribute-refer-all-usages [usage]))
           "`fake.refer.a/insert!` is a qualified token — its span is longer than `insert!`"))))
 
 (deftest test-rewrites-collision-to-runtime-winner
-  (let [winner (collision-winner-sym)
+  (let [winner (get-collision-winner-sym)
         loser (if (= winner collision-a-sym) collision-b-sym collision-a-sym)]
     (testing "a bare name exported by two refer-all'd namespaces is rewritten to the runtime winner"
       (is (= [{:from from-collision :to winner :name 'shared
                :name-col 1 :name-end-col 7}]
              (refer/re-attribute-refer-all-usages
-              [(bare-usage from-collision loser 'shared)]))))
+              [(->bare-usage from-collision loser 'shared)]))))
     (testing "the already-correct (winner) attribution is left alone"
-      (is (= [(bare-usage from-collision winner 'shared)]
+      (is (= [(->bare-usage from-collision winner 'shared)]
              (refer/re-attribute-refer-all-usages
-              [(bare-usage from-collision winner 'shared)]))))))
+              [(->bare-usage from-collision winner 'shared)]))))))
 
 (deftest test-resolves-bare-unknown-namespace
   (testing "a bare usage kondo could not resolve is rewritten to the live refer winner"
     (is (= [{:from from-ab :to b-sym :name '->fact
              :name-col 1 :name-end-col 7}]
            (refer/re-attribute-refer-all-usages
-            [(bare-usage from-ab :clj-kondo/unknown-namespace '->fact)])))))
+            [(->bare-usage from-ab :clj-kondo/unknown-namespace '->fact)])))))
 
 (deftest test-leaves-unresolvable-alone
   (testing "a bare name no referred namespace provides is untouched"
-    (is (= [(bare-usage from-ab a-sym 'no-such-name)]
+    (is (= [(->bare-usage from-ab a-sym 'no-such-name)]
            (refer/re-attribute-refer-all-usages
-            [(bare-usage from-ab a-sym 'no-such-name)])))))
+            [(->bare-usage from-ab a-sym 'no-such-name)])))))
 
 (deftest test-leaves-unloaded-from-ns-alone
   (testing "a :from namespace with no live ns passes through untouched"
-    (is (= [(bare-usage 'fake.refer.not-loaded a-sym '->fact)]
+    (is (= [(->bare-usage 'fake.refer.not-loaded a-sym '->fact)]
            (refer/re-attribute-refer-all-usages
-            [(bare-usage 'fake.refer.not-loaded a-sym '->fact)])))))
+            [(->bare-usage 'fake.refer.not-loaded a-sym '->fact)])))))
 
 (deftest test-leaves-renamed-refer-all-alone
   (testing "a :rename'd usage is not bare: the source span is the local symbol, `:name` the resolved original"

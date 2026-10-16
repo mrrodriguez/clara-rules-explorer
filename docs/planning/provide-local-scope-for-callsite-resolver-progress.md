@@ -168,9 +168,50 @@ P3 (`bare-usage?` runs once per usage in `->refers-by-from` and again in
 `->annotations-from-rule-source-analysis` on a real rulebase, `main` vs
 branch).
 
+## Review 4
+
+Fourth pass ([`…-review-4.md`](./provide-local-scope-for-callsite-resolver-review-4.md))
+found one classification regression (R1) and schema/source-read hygiene items,
+all now addressed:
+
+- **R1 — unrecognized binding macros in a single-arity `defn`/`fn` body.**
+  `destructured-stack?` now requires the binding to still be in the macro
+  header (`(not past-depth2-close?)`) and to sit inside the binding/params
+  vector (whose `[` is `(first inner)`), and the `:destructured` branch also
+  checks `(not past-depth2-close?)`.  A depth-2 `(` that is not a fn-family
+  arity list (e.g. `with-open` in a helper body) no longer classifies
+  `:destructured`.  Pinned by the new `insert-with-open!` `defn` helper and
+  `rule-resolve-local-with-open-helper` (a rule RHS is wrapped in `(do …)`,
+  which hides the shape, so the fixture uses a plain `defn` helper).
+- **S1** — `ClassifiedBinding` schema captures the internal classifier return
+  shape (`LocalBinding` plus the internal `:source-span`), used in
+  `BoundaryCallsiteCtx` / `ConstructorCallsiteCtx`.
+- **S2** — `read-init-form`, `init-form-start`, and `init-form-span` now take
+  and forward `:filename`, so `get-lines` falls back to the file path when
+  `ns-sym` has no classpath resource.
+- **P1** — `read-init-form`, `init-form-start`, and `init-form-span` accept an
+  optional `:end-row` and bound their slice to the enclosing binding macro's
+  end instead of end-of-file; `classify-binding` passes the macro usage's
+  `:end-row`.  (The optional single-`LispReader/read`-pass combination from the
+  plan was not applied.)
+- **D1** — docstring/comment code references now use in-scope aliases or full
+  namespaces (`callsite.clj`, `analyze.clj`).
+- **D2** — cross-file review/plan section labels (`A1`, `A2`, `R1`, `§1`,
+  `§2.4`, `Review-2`, `defect table row 1`, `row 2`) removed from source and
+  test comments and `testing` strings.
+- **D3** — bare-noun helpers in `refer_test.clj` renamed (`->bare-usage`,
+  `->aliased-usage`, `->qualified-usage`, `get-collision-winner-sym`).  The
+  `cond->` `true` clause in `analyze.clj` was **kept**: it is idiomatic, and
+  `/clojure-engineering` now documents `cond->` with a `true` clause as the
+  natural way to interleave an unconditional step with conditional ones.
+
+Remaining (non-blocking perf): P3 (`bare-usage?` runs once per usage in
+`->refers-by-from` and again in `re-attribute-usage`) and P4 (time
+`->annotations-from-rule-source-analysis` on a real rulebase).
+
 ## Verification (all green)
 
 - `make format-check` → all files formatted correctly.
 - `make lint` → errors 0, warnings 0.
-- `make test` → 511 tests, 3308 assertions, 0 failures / 0 errors.
+- `make test` → 511 tests, 3309 assertions, 0 failures / 0 errors.
 - `make reflection-check` → no warnings in project code.

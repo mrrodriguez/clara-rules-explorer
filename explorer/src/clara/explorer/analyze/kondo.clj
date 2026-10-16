@@ -77,13 +77,16 @@
 (defn read-init-form
   "Reads the init form following a `:locals` binding symbol in the source —
    the text from just after the binding symbol's end position onward, parsed
-   as a single form.  Returns nil on any error."
-  [get-lines ns-sym {:keys [row end-col]}]
+   as a single form.  When `:end-row` is present the read is bounded by that
+   row (the enclosing binding macro's end) instead of running to end-of-file.
+   Returns nil on any error."
+  [get-lines ns-sym {:keys [row end-col end-row filename]}]
   (try
-    (when-let [lines (get-lines ns-sym nil)]
+    (when-let [lines (get-lines ns-sym filename)]
       (when (and row end-col)
-        (let [line (nth lines (dec row))
-              tail (str/join "\n" (cons (subs line (dec end-col)) (drop row lines)))]
+        (let [bounded-lines (if end-row (subvec lines 0 (min (count lines) end-row)) lines)
+              line (nth bounded-lines (dec row))
+              tail (str/join "\n" (cons (subs line (dec end-col)) (drop row bounded-lines)))]
           (read-string-in-ns ns-sym tail))))
     (catch Throwable _
       nil)))
@@ -92,27 +95,29 @@
   "The `[row col]` (1-indexed) where the init form of a `:locals` binding
    starts: the first readable character at/after the binding symbol's end
    position, skipping whitespace, commas, and `;` comments — mirroring how
-   `read-init-form` finds the form.  Returns nil on any error."
-  [get-lines ns-sym {:keys [row end-col]}]
+   `read-init-form` finds the form.  When `:end-row` is present the scan is
+   bounded by that row.  Returns nil on any error."
+  [get-lines ns-sym {:keys [row end-col end-row filename]}]
   (try
-    (when-let [lines (get-lines ns-sym nil)]
+    (when-let [lines (get-lines ns-sym filename)]
       (when (and row end-col)
-        (loop [r row
-               off (dec end-col)]
-          (when (<= r (count lines))
-            (let [line (nth lines (dec r))]
-              (cond
-                (>= off (count line))
-                (recur (inc r) 0)
+        (let [bounded-lines (if end-row (subvec lines 0 (min (count lines) end-row)) lines)]
+          (loop [r row
+                 off (dec end-col)]
+            (when (<= r (count bounded-lines))
+              (let [line (nth bounded-lines (dec r))]
+                (cond
+                  (>= off (count line))
+                  (recur (inc r) 0)
 
-                (or (Character/isWhitespace ^char (nth line off))
-                    (= \, (nth line off)))
-                (recur r (inc off))
+                  (or (Character/isWhitespace ^char (nth line off))
+                      (= \, (nth line off)))
+                  (recur r (inc off))
 
-                (= \; (nth line off))
-                (recur (inc r) 0)
+                  (= \; (nth line off))
+                  (recur (inc r) 0)
 
-                :else [r (inc off)]))))))
+                  :else [r (inc off)])))))))
     (catch Throwable _
       nil)))
 
@@ -184,15 +189,20 @@
 (defn init-form-span
   "The `{:filename … :start [row col] :end [row col]}` span (1-indexed,
    `:end` exclusive) of the init form following a `:locals` binding symbol.
-   Nil when the span cannot be determined."
-  [get-lines ns-sym {:keys [row end-col filename] :as _binding}]
-  (when-let [start (init-form-start get-lines ns-sym {:row row :end-col end-col})]
+   When `:end-row` is present the read is bounded by that row (the enclosing
+   binding macro's end) instead of running to end-of-file.  Nil when the span
+   cannot be determined."
+  [get-lines ns-sym {:keys [row end-col end-row filename] :as _binding}]
+  (when-let [start (init-form-start get-lines ns-sym
+                                    {:row row :end-col end-col
+                                     :end-row end-row :filename filename})]
     (try
-      (when-let [lines (get-lines ns-sym nil)]
-        (let [[sr sc] start
-              line (nth lines (dec sr) nil)
+      (when-let [lines (get-lines ns-sym filename)]
+        (let [bounded-lines (if end-row (subvec lines 0 (min (count lines) end-row)) lines)
+              [sr sc] start
+              line (nth bounded-lines (dec sr) nil)
               tail (when line
-                     (str/join "\n" (cons (subs line (dec sc)) (drop sr lines))))]
+                     (str/join "\n" (cons (subs line (dec sc)) (drop sr bounded-lines))))]
           (when-let [n (and tail (read-one-form-char-count ns-sym tail))]
             {:filename filename
              :start start

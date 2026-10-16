@@ -835,10 +835,10 @@
         :session-or-rulebase edge-case-session
         :callsite-resolver-fn resolver})
       (is (= [:let-init :let-init :t/b] @results)
-          "the §1 two-hop shape: outer hop yields the inner symbol, whose own resolver hops again"))))
+          "two-hop let chain: outer hop yields the inner symbol, whose own resolver hops again"))))
 
 (deftest test-resolve-local-traced-arg-scope
-  (testing ":resolve-local is scoped to the traced arg form's span, not the boundary call's (A2)"
+  (testing ":resolve-local is scoped to the traced arg form's span, not the boundary call's"
     (let [results (atom [])
           resolver (fn [{:keys [rule arg-form resolve-local]}]
                      (when (and (= (str `atr/rule-resolve-local-traced-arg)
@@ -856,15 +856,18 @@
 
 (deftest test-resolve-local-unrecognized-bindings
   (let [results (resolve-local-boundary-results
-                 {`atr/rule-resolve-local-catch     ['caught-e]
-                  `atr/rule-resolve-local-with-open ['r]
-                  `atr/rule-resolve-local-letfn     ['local-fn-letfn]
-                  `atr/rule-resolve-local-named-fn  ['self]})]
+                 {`atr/rule-resolve-local-catch             ['caught-e]
+                  `atr/rule-resolve-local-with-open         ['r]
+                  `atr/rule-resolve-local-with-open-helper  ['r]
+                  `atr/rule-resolve-local-letfn             ['local-fn-letfn]
+                  `atr/rule-resolve-local-named-fn          ['self]})]
     (testing "unrecognized binding forms classify :unknown, never :destructured"
       (is (= [{:kind :unknown}]
              (get results [`atr/rule-resolve-local-catch 'caught-e])))
       (is (= [{:kind :unknown}]
              (get results [`atr/rule-resolve-local-with-open 'r])))
+      (is (= [{:kind :unknown}]
+             (get results [`atr/rule-resolve-local-with-open-helper 'r])))
       (is (= [{:kind :unknown}]
              (get results [`atr/rule-resolve-local-letfn 'local-fn-letfn]))))
     (testing "a named-fn self name is unresolvable (kondo emits no :locals binding for it)"
@@ -2067,7 +2070,7 @@
           ":callsite-resolver-fn sees nothing — every arg is constructor-owned"))))
 
 (deftest test-constructor-seq-loop-source-expansion
-  (testing "ctors reached only through doseq/for/loop binding *sources* are owned (R1)"
+  (testing "ctors reached only through doseq/for/loop binding *sources* are owned"
     (let [ann (analyze/->annotations-from-rule-source-analysis
                {:rule-source-analysis edge-case-analysis
                 :session-or-rulebase edge-case-session
