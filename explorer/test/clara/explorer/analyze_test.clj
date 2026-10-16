@@ -728,6 +728,7 @@
                   `atr/rule-resolve-local-for-let-modifier  ['for-let-type]
                   `atr/rule-resolve-local-doseq-let-modifier ['doseq-let-type]
                   `atr/rule-resolve-local-multi-arity-param ['p-multi-type]
+                  `atr/rule-resolve-local-multi-arity-destructured ['p-multi-destructured]
                   `atr/rule-resolve-local-called            ['local-fn]})]
     (testing "let local holding a literal"
       (is (match? [{:kind :let-init :init-form :t/a}]
@@ -788,6 +789,10 @@
     (testing "multi-arity defn parameter reports :param with no init form"
       (is (= [{:kind :param}]
              (get results [`atr/rule-resolve-local-multi-arity-param 'p-multi-type]))))
+
+    (testing "destructured multi-arity defn parameter reports :destructured, matching single-arity"
+      (is (= [{:kind :destructured}]
+             (get results [`atr/rule-resolve-local-multi-arity-destructured 'p-multi-destructured]))))
 
     (testing "a local called as a function resolves the head symbol"
       (is (match? [{:kind :let-init
@@ -2060,6 +2065,38 @@
               ":demo/shadowed is bound to a shadowed local but never inserted")))
       (is (empty? @seen)
           ":callsite-resolver-fn sees nothing — every arg is constructor-owned"))))
+
+(deftest test-constructor-seq-loop-source-expansion
+  (testing "ctors reached only through doseq/for/loop binding *sources* are owned (R1)"
+    (let [ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis edge-case-analysis
+                :session-or-rulebase edge-case-session
+                :rules-filter [`atr/rule-ctor-doseq-source
+                               `atr/rule-ctor-for-source
+                               `atr/rule-ctor-loop-source]
+                :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})]
+      (testing "doseq binding source"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-doseq-source)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              cs (first (:callsites dyn))]
+          (is (= [:demo/looked-up-2] (:clara-rules/insert-types a)))
+          (is (= :full (:resolution dyn)))
+          (is (= ->fact-sym (:constructor-sym cs)))))
+      (testing "for binding source inserted via insert-all! over the for form"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-for-source)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              cs (first (:callsites dyn))]
+          (is (= [:demo/looked-up-1] (:clara-rules/insert-types a)))
+          (is (= :full (:resolution dyn)))
+          (is (= ->fact-sym (:constructor-sym cs)))))
+      (testing "loop initial value"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-loop-source)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              cs (first (:callsites dyn))]
+          (is (= [:demo/looked-up-1] (:clara-rules/insert-types a)))
+          (is (= :full (:resolution dyn)))
+          (is (= ->fact-sym (:constructor-sym cs))))))))
 
 (deftest test-constructor-options-validation
   (testing "a :fact-constructors spec missing :type-resolver-fn fails schema validation"

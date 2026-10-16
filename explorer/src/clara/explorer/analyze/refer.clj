@@ -19,7 +19,14 @@
    aliased or fully-qualified one. A bare usage has no `:alias`, and its
    `:name-col`/`:name-end-col` span is exactly the symbol name. Qualified
    tokens are longer (they include `ns/`); a `:rename`d usage spans the local
-   symbol while `:name` is the resolved original, so neither is bare."
+   symbol while `:name` is the resolved original, so neither is bare.
+
+   A hook-derived usage (one emitted from a macro call rather than a written
+   symbol) can look bare when its `:name` happens to have the same length as
+   the macro token. That is benign: the rewrite is still the runtime truth for
+   that bare name, and the pathological case (a qualified hook-emitted symbol
+   whose bare name is referred from elsewhere) does not arise in the bundled
+   clara-rules config."
   [{:keys [alias name-col name-end-col] name-sym :name}]
   (and (nil? alias)
        (symbol? name-sym)

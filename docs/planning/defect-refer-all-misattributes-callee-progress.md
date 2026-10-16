@@ -43,8 +43,9 @@ Namespace `clara.explorer.analyze.refer`
   untouched — kondo attributes them correctly, and only they could carry the
   false-positive a candidate scan would introduce.
 - Wired into `clara.explorer.analyze/->annotations-from-rule-source-analysis`
-  **before** the alias-usage pass and the index, so every consumer keys on the
-  corrected callee.
+  as the final `cond->` step over `:var-usages`, after alias-usage injection.
+  Synthetic alias usages carry no `:name-col`/`:name-end-col`, so `bare-usage?`
+  never matches them and re-attribution is unaffected by ordering.
 
 ## Why live `ns-refers` (not parsed headers)
 
@@ -107,9 +108,9 @@ is the runtime winner by construction, so there is no corner to document.
   because it intentionally exercises `:refer :all`.
 - Defect §5 open question 3 (how common ≥2 refer-alls are in a real rulebase)
   was not measured against a production rulebase. The answer no longer affects
-  the approach: re-attribution is O(usages) with one `ns-refers` lookup per
-  bare usage and no per-namespace candidate scan, so prevalence is irrelevant
-  to cost.
+  the approach: re-attribution is O(usages) with one `ns-refers` *map* per
+  distinct `:from` namespace and one `get` per bare usage (no per-namespace
+  candidate scan), so prevalence is irrelevant to cost.
 - Boundary-side impact (defect §4 second row, `insert!` misattributed when the
   facts ns is listed first) is covered at the re-attribution layer; the
   integration fixture's first-listed refer-all'd ns is the decoy rather than

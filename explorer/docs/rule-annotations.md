@@ -453,22 +453,23 @@ boundary chain already resolves them precisely at the callsite.
 | `:arg-form` | the argument form, with `:let-init` (let-family) locals traced to their init forms (params / loop / destructured are not chased) |
 | `:source-str` | `pr-str` of `:arg-form` |
 | `:filename` | file containing the callsite |
-| `:resolve-local` | `(fn [sym] -> nil \| LocalBinding)` — resolves a local symbol in the callsite's lexical scope to its classified binding (see below) |
+| `:resolve-local` | `(fn [sym] -> nil \| LocalBinding)` — resolves a local symbol in the *traced argument form's* span to its classified binding (see below) |
 
 `LocalBinding` is `{:kind #{:let-init :param :destructured :loop :seq-binding
 :unknown} :init-form … :init-form-span … :resolve-local …}`. Only `:let-init`
 carries `:init-form` — the read init form of a direct `let` / `let*` /
 `if-let` / `when-let` / `if-some` / `when-some` binding — plus
-`:init-form-span` (the span that form was read from). Every other kind carries
-no init form: a parameter's value comes from its callers, a destructured
-symbol's from the destructured collection, and `loop`/`for`/`doseq` bindings
-from their iterations. A `:let-init` binding whose init span is known also
-carries its own `:resolve-local`, scoped to that span, so a resolver recurses
-by calling it on symbols in the returned `:init-form` rather than reusing the
-callsite-scoped resolver (which cannot see them). The whole chain shares one
-depth budget — once exhausted, further lookups return nil. `nil` means the
-name is shadowed inside the span, not resolvable there, or the resolution
-budget is spent.
+`:init-form-span` (a `{:filename … :start [row col] :end [row col]}` span,
+the `callsite/SourceSpan` shape; only meaningful for comparing positions or
+for the nested `:resolve-local` below). Every other kind carries no init form:
+a parameter's value comes from its callers, a destructured symbol's from the
+destructured collection, and `loop`/`for`/`doseq` bindings from their
+iterations. A `:let-init` binding whose init span is known also carries its own
+`:resolve-local`, scoped to that span, so a resolver recurses by calling it on
+symbols in the returned `:init-form` rather than reusing the callsite-scoped
+resolver (which cannot see them). The whole chain shares one depth budget —
+once exhausted, further lookups return nil. `nil` means the name is shadowed
+inside the span, not resolvable there, or the resolution budget is spent.
 
 **Exact-vs-possible types.** A lookup in a literal map, a `case`, or an `if`
 gives the *set* of values a type could be, not the one it is. A resolver that

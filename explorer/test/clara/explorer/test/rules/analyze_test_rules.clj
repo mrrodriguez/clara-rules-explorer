@@ -632,6 +632,34 @@
     (let [f (->fact :demo/shadowed {:id ?app-id})]
       (count f))))
 
+(r/defrule rule-ctor-doseq-source
+  "Rule L13: the ->fact constructor is reached only through the `doseq`
+   binding's *source* — `(look-up-facts-2 …)` — not its body. Ownership
+   expansion must follow the seq binding's source span to attribute it."
+  [Application (= ?app-id app-id)]
+  =>
+  (doseq [f (look-up-facts-2 ?app-id)]
+    (r/insert! f)))
+
+(r/defrule rule-ctor-for-source
+  "Rule L14: the ->fact constructor is reached only through the `for` binding's
+   *source*, with the bound local inserted via `insert-all!` over the whole
+   `for` form."
+  [Application (= ?app-id app-id)]
+  =>
+  (r/insert-all! (for [f (look-up-facts-1 ?app-id)] f)))
+
+(r/defrule rule-ctor-loop-source
+  "Rule L15: the ->fact constructor is reached only through the `loop` binding's
+   *initial value* — `(look-up-facts-1 …)` — not its body."
+  [Application (= ?app-id app-id)]
+  =>
+  (loop [facts (look-up-facts-1 ?app-id)
+         remaining 1]
+    (when (pos? remaining)
+      (r/insert-all! facts)
+      (recur facts (dec remaining)))))
+
 ;; ---------------------------------------------------------------------------
 ;; ::auto-resolved keyword fixtures
 
@@ -863,17 +891,33 @@
 
 (defn insert-multi-arity!
   "Helper whose boundary arg is a multi-arity defn parameter. The arity list
-   adds a nesting level, so the param classifies :destructured (not :param)."
+   adds a nesting level, but the param still classifies :param."
   ([p-multi-type]
    p-multi-type)
   ([p-multi-type m]
    (r/insert! (make-local-fact p-multi-type m))))
 
 (r/defrule rule-resolve-local-multi-arity-param
-  "Nested local is a multi-arity defn parameter — expects :destructured, no init."
+  "Nested local is a multi-arity defn parameter — expects :param, no init."
   [Application (= ?app-id app-id)]
   =>
   (insert-multi-arity! :t/multi {:app-id ?app-id}))
+
+(defn insert-multi-arity-destructured!
+  "Helper whose boundary arg is a *destructured* multi-arity defn parameter —
+   a destructured param classifies :destructured, same as single-arity."
+  ([{:keys [p-multi-destructured]}]
+   p-multi-destructured)
+  ([{:keys [p-multi-destructured]} m]
+   (r/insert! (make-local-fact p-multi-destructured m))))
+
+(r/defrule rule-resolve-local-multi-arity-destructured
+  "Nested local is a destructured multi-arity defn parameter — expects
+   :destructured, no init."
+  [Application (= ?app-id app-id)]
+  =>
+  (insert-multi-arity-destructured! {:p-multi-destructured :t/multi-destructured}
+                                    {:app-id ?app-id}))
 
 ;; ---------------------------------------------------------------------------
 ;; §2.4 fixtures: the automatic locals-tracing chain

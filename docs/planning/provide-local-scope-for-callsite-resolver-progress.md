@@ -118,10 +118,11 @@ found three correctness gaps, all fixed:
 
 Decisions recorded:
 
-- **§5.2(b) (`arg-span-set`):** `arg-span-set` now classifies each reached
-  binding and expands only `:let-init` spans — the old unconditional
-  `init-form-span` walk carried the §1.1 parameter misread into the constructor
-  pass's ownership spans.
+- **§5.2(b) (`arg-span-set`):** `arg-span-set` classifies each reached binding
+  and expands `:let-init` → `:init-form-span`, plus `:seq-binding`/`:loop` →
+  `:source-span` (the collection/initial value).  For *ownership* the
+  seq/loop source span is a sound over-approximation; the §1.1 misread only
+  applies to fn params and nested destructuring, which stay unexpanded.
 - **§5.1 (exact-vs-possible types)** stays undecided for the *explorer* (no
   "one of" marker is added); the completeness rule is now documented in
   `rule-annotations.md` for caller resolvers.
@@ -132,9 +133,44 @@ Decisions recorded:
   expected to classify `:unknown` (no enclosing bracket to measure), but no test
   pins that yet.
 
+## Review 3
+
+Third pass ([`…-review-3.md`](./provide-local-scope-for-callsite-resolver-review-3.md))
+found one verified recall regression (R1) and several nits, now addressed:
+
+- **R1 — seq/loop ownership.** `arg-span-set` expanding only `:let-init` threw
+  away direct `doseq`/`for`/`loop` sources. `classify-binding` now attaches an
+  internal `:source-span` (the next-form span) to direct `:seq-binding`/`:loop`
+  bindings, and `arg-span-set` expands it — for *ownership* that span is a sound
+  over-approximation (the §1.1 misread applies only to fn params and nested
+  destructuring). Pinned by `rule-ctor-doseq-source`, `rule-ctor-for-source`,
+  `rule-ctor-loop-source`.
+- **C1** — `fn-param-binding?` checks `= 3` (not `>= 3`) and `destructured-stack?`
+  skips the fn-family arity `(`, so a destructured multi-arity param classifies
+  `:destructured`, matching single-arity. Pinned by
+  `rule-resolve-local-multi-arity-destructured`.
+- **C2** — the `:let-init`/`:seq-binding`/`:loop` depth-2 branches also require
+  `(not past-depth2-close?)`, so the never-over-report invariant holds for
+  hook/`:lint-as`-derived bindings too.
+- **C3** — `trace-local-form` stops tracing when an init form reads but its span
+  does not, instead of pairing the init form with the boundary span.
+- **C4** — `bare-usage?` docstring notes the benign hook-derived case.
+- **C5** — `classify-local-binding` no longer has a fallback path;
+  `:classify-local-binding` is a required key of both per-run ctx schemas.
+- **R2** — re-attribution stays a final `cond->` `true` step (after alias-usage
+  injection, which is unaffected: synthetic usages carry no `:name-col`); the
+  defect progress doc now says so.
+
+Remaining (non-blocking perf recommendations): P1 (bound `read-init-form` /
+`init-form-span` reads by the enclosing macro's end rather than end-of-file),
+P3 (`bare-usage?` runs once per usage in `->refers-by-from` and again in
+`re-attribute-usage`), and P4 (time
+`->annotations-from-rule-source-analysis` on a real rulebase, `main` vs
+branch).
+
 ## Verification (all green)
 
 - `make format-check` → all files formatted correctly.
 - `make lint` → errors 0, warnings 0.
-- `make test` → 510 tests, 3298 assertions, 0 failures / 0 errors.
+- `make test` → 511 tests, 3308 assertions, 0 failures / 0 errors.
 - `make reflection-check` → no warnings in project code.

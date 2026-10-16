@@ -190,7 +190,7 @@
   "True when `scan` describes a fn-family parameter: the binding is still in
    the fn header (no depth-2 container — the params vector — has closed) and
    sits directly in the params vector (single arity, depth 2) or in the params
-   vector of an arity list (multi-arity, depth 3+).
+   vector of an arity list (multi-arity, depth 3).
 
    `macro-name` is the bare `:name` symbol of a usage
    `find-enclosing-binding-macro-usage` already matched — it carries no
@@ -200,15 +200,20 @@
   (and (contains? fn-param-macro-syms macro-name)
        (not past-depth2-close?)
        (or (= 2 (count stack))
-           (and (>= (count stack) 3)
+           (and (= 3 (count stack))
                 (= \( (nth stack 1))
                 (= \[ (nth stack 2))))))
 
 (defn- destructured-stack?
   "True when the containers from the binding/params vector down to the binding
-   are all `[`/`{` — destructuring never goes through a list form."
-  [{:keys [stack]}]
-  (let [inner (subvec stack 1)]
+   are all `[`/`{` — destructuring never goes through a list form.  The
+   fn-family arity list `(` (when present at depth 2) is structural and
+   skipped."
+  [macro-name {:keys [stack]}]
+  (let [inner (if (and (contains? fn-param-macro-syms macro-name)
+                       (= \( (second stack)))
+                (subvec stack 2)
+                (subvec stack 1))]
     (and (seq inner) (every? #{\[ \{} inner))))
 
 (defn- classify-binding
@@ -223,13 +228,19 @@
    `kondo/->bracket-scan`).  Direct bindings sit at stack depth 2 (the macro
    form's own `(` plus the binding vector); nested destructuring sits deeper
    and never goes through a list form, so `:destructured` requires every
-   container below the macro form to be `[`/`{`.
+   container below the macro form to be `[`/`{` (after skipping a fn-family
+   arity list).
 
    Invariants:
    - Only `:let-init` carries an `:init-form`/`:init-form-span`, and it requires
-     a `clojure.core` let-family macro at exactly stack depth 2.  Every other
-     kind is label-only, so misclassification under-reports (drops a resolvable
-     local) rather than over-reports (fabricates a value).
+     a `clojure.core` let-family macro at exactly stack depth 2, still in the
+     header (`past-depth2-close?` false).  Every other kind is label-only, so
+     misclassification under-reports (drops a resolvable local) rather than
+     over-reports (fabricates a value).
+   - `:seq-binding`/`:loop` also attach a `:source-span` — the next-form span
+     after the binding symbol, which is the collection/initial value.  It is
+     internal to `arg-span-set` ownership expansion, not a resolver contract;
+     a seq binding's *value* is still not its source.
    - The enclosing macro is the innermost recognized one (see
      `find-enclosing-binding-macro-usage`): a caller-supplied macro named
      `let`/`defn`/…, or any unrecognized form, is never treated as one — its
@@ -240,12 +251,14 @@
   (if-let [usage (find-enclosing-binding-macro-usage ctx binding)]
     (let [scan (kondo/->bracket-scan get-lines ns-sym usage binding)
           stack (:stack scan)
+          past-depth2-close? (:past-depth2-close? scan)
           macro-name (:name usage)
           n (count stack)]
       (cond
         (and stack
              (contains? let-init-macro-syms macro-name)
-             (= n 2))
+             (= n 2)
+             (not past-depth2-close?))
         (let [init-form (some-> (kondo/read-init-form get-lines ns-sym binding)
                                 utils/canonicalize-minted-names)
               init-form-span (kondo/init-form-span get-lines ns-sym binding)]
@@ -258,13 +271,18 @@
 
         (and stack
              (contains? seq-binding-macro-syms macro-name)
-             (= n 2))
-        {:kind :seq-binding}
+             (= n 2)
+             (not past-depth2-close?))
+        (let [source-span (kondo/init-form-span get-lines ns-sym binding)]
+          (cond-> {:kind :seq-binding}
+            (some? source-span) (assoc :source-span source-span)))
 
-        (and stack (= 'loop macro-name) (= n 2))
-        {:kind :loop}
+        (and stack (= 'loop macro-name) (= n 2) (not past-depth2-close?))
+        (let [source-span (kondo/init-form-span get-lines ns-sym binding)]
+          (cond-> {:kind :loop}
+            (some? source-span) (assoc :source-span source-span)))
 
-        (and stack (> n 2) (destructured-stack? scan))
+        (and stack (> n 2) (destructured-stack? macro-name scan))
         {:kind :destructured}
 
         :else
@@ -272,11 +290,16 @@
     {:kind :unknown}))
 
 (defn ->local-binding-classifier
-  "Returns a `(fn [ns-sym binding] -> LocalBinding)` memoized by
+  "Returns a `(fn [ns-sym binding] -> classification-map)` memoized by
    `[filename local-id]` for the lifetime of one analysis index.  kondo local
    ids are stable within a run, and classification is source-reading work
    shared across every `trace-local-form` hop, `:resolve-local` lookup, and
-   `arg-span-set` expansion."
+   `arg-span-set` expansion.
+
+   The map is a `LocalBinding` plus an internal `:source-span` on
+   `:seq-binding`/`:loop` — stripped by `->scoped-resolver` before a
+   `:resolve-local` result reaches a resolver.  `classify-binding` always
+   returns a map (never nil), so a nil-valued cache entry cannot occur."
   [ctx]
   (let [cache (atom {})]
     (fn [ns-sym binding]
@@ -288,12 +311,9 @@
 
 (defn- classify-local-binding
   "Classifies `binding` via the memoized classifier carried in `ctx` (see
-   `->local-binding-classifier`), falling back to a fresh classification when
-   absent."
+   `->local-binding-classifier`), which every analysis context carries."
   [ctx ns-sym binding]
-  (if-let [classifier (:classify-local-binding ctx)]
-    (classifier ns-sym binding)
-    (classify-binding ctx ns-sym binding)))
+  ((:classify-local-binding ctx) ns-sym binding))
 
 (defn- ->scoped-resolver
   "Returns a `(fn [sym] -> nil | LocalBinding)` scoped to `span`, sharing
@@ -306,9 +326,10 @@
         (let [{:keys [kind init-form-span] :as lb}
               (classify-local-binding ctx ns-sym binding)]
           (swap! budget dec)
-          (if (and (= :let-init kind) init-form-span)
-            (assoc lb :resolve-local (->scoped-resolver ctx ns-sym init-form-span budget))
-            lb))))))
+          (let [lb (dissoc lb :source-span)] ; internal to arg-span-set, not a resolver contract
+            (if (and (= :let-init kind) init-form-span)
+              (assoc lb :resolve-local (->scoped-resolver ctx ns-sym init-form-span budget))
+              lb)))))))
 
 (defn- ->resolve-local
   "Builds the `(fn [sym] -> nil | LocalBinding)` handed to resolver hooks as
@@ -343,7 +364,12 @@
             (recur init-form ctx ns-sym init-span (inc depth))
 
             :else
-            {:form init-form :span (or init-span span)}))
+            ;; The form and its span must always pair.  When the init form read
+            ;; but its span did not, stop tracing rather than pairing the init
+            ;; form with the boundary span (which would silently restore A2).
+            (if init-span
+              {:form init-form :span init-span}
+              {:form arg-form :span span})))
         {:form arg-form :span span}))
     {:form arg-form :span span}))
 
@@ -664,9 +690,10 @@
    a boundary argument's `:idx` to the `:constructor-sym` /
    `:boundary-to-constructor-path` of the constructor the ctor pass owned but
    could not type, so the argument's entry still carries that provenance; nil
-   when no ctor pass ran.  `:rule-to-boundary-path-for` and
-   `:callsite-resolver-fn` are fns, so the `s/=>` fn schemas are
-   documentation (prismatic FnSchema does not validate fn-ness).
+   when no ctor pass ran.  `:rule-to-boundary-path-for`,
+   `:callsite-resolver-fn`, and `:classify-local-binding` are fns, so the
+   `s/=>` fn schemas are documentation (prismatic FnSchema does not validate
+   fn-ness).
 
    Open map — the caller's ctx carries more than the declared keys
    (`:get-lines`, `:read-ctor-form`, `:alias-context-for`, …)."
@@ -676,6 +703,7 @@
           :rule-var s/Symbol
           :rule-to-boundary-path-for (s/=> (s/maybe [ViaEntry]) s/Symbol)
           :callsite-resolver-fn (s/maybe (s/=> s/Any s/Any))
+          :classify-local-binding (s/=> LocalBinding s/Symbol s/Any)
           :dropped-ctor-provenance (s/maybe
                                     {s/Int {(s/optional-key :constructor-sym) s/Symbol
                                             (s/optional-key :boundary-to-constructor-path) [ViaEntry]}})
@@ -687,8 +715,9 @@
    `:rule-to-boundary-path-for`, and the source-reading closures
    `:get-lines` / `:read-ctor-form`.  `:rule` may be nil when the consuming
    var is not a rulebase production.  `:rule-to-boundary-path-for`,
-   `:get-lines` and `:read-ctor-form` are fns, so the `s/=>` fn schemas are
-   documentation (prismatic FnSchema does not validate fn-ness).
+   `:get-lines`, `:read-ctor-form`, and `:classify-local-binding` are fns, so
+   the `s/=>` fn schemas are documentation (prismatic FnSchema does not
+   validate fn-ness).
 
    Open map — the caller's ctx carries more than the declared keys."
   (merge index/AnalysisIndex
@@ -697,6 +726,7 @@
           :rule-to-boundary-path-for (s/=> (s/maybe [ViaEntry]) s/Symbol)
           :get-lines (s/=> s/Any s/Any)
           :read-ctor-form (s/=> s/Any s/Any)
+          :classify-local-binding (s/=> LocalBinding s/Symbol s/Any)
           s/Any s/Any}))
 
 (s/defn resolve-boundary-callsites
@@ -764,10 +794,12 @@
 
 (defn- arg-span-set
   "The ephemeral span set for one boundary-call argument: the boundary usage
-   span plus the init spans of every `:let-init` local transitively reachable
-   from usages inside it.  Only `:let-init` bindings are followed — a
-   parameter, destructured symbol, or loop/seq binding has no statically-known
-   init form to expand.
+   span plus the source spans of every local transitively reachable from usages
+   inside it.  For *ownership* (does this constructor's value reach this
+   argument?) the expansion is a sound over-approximation: `:let-init` expands
+   to its `:init-form-span`, and a direct `:seq-binding`/`:loop` expands to its
+   `:source-span` (the collection/initial value the bound symbol flows out of).
+   `:param`, `:destructured`, and `:unknown` are never expanded.
 
    Returns `{:spans […] :var-syms #{…}}`: spans are
    `{:filename … :start [row col] :end [row col]}` (`:end` exclusive);
@@ -802,10 +834,12 @@
                                       (comp (map (fn [[f id]] (get locals-by-id [f id])))
                                             (remove nil?)
                                             (keep (fn [binding]
-                                                    (let [lb (classify-local-binding ctx ns-sym binding)]
-                                                      (when (= :let-init (:kind lb))
-                                                        (:init-form-span lb)))))
-                                            (remove nil?))
+                                                    (let [{:keys [kind init-form-span source-span]}
+                                                          (classify-local-binding ctx ns-sym binding)]
+                                                      (case kind
+                                                        :let-init init-form-span
+                                                        (:seq-binding :loop) source-span
+                                                        nil)))))
                                       fresh-keys)]
                   (recur (into spans new-spans)
                          (count spans)

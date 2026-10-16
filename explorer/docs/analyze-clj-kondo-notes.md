@@ -162,9 +162,11 @@ restarts on the deepest traced form (constructor checks, then the caller's
 The constructor-of-interest pass goes further with an ephemeral *span-set
 expansion* (`analyze.callsite/arg-span-set`): from a boundary argument it
 follows the same `:id` linkage transitively, collecting the source spans of
-every reached `:let-init` binding, so a constructor reached through a helper in
-a `let` init or a `concat`/`for` closure is still attributed to that argument.
-All linkage stays position-identity based.
+every reached `:let-init` binding (its init-form span) and every direct
+`:seq-binding`/`:loop` binding (its source span — the collection/initial
+value), so a constructor reached through a helper in a `let` init or a
+`doseq`/`for`/`loop` binding source is still attributed to that argument.  All
+linkage stays position-identity based.
 
 Kondo's local `:id` values are **not deterministic across runs** — they are
 per-run counters. They are only ever used for linkage *within* a single
