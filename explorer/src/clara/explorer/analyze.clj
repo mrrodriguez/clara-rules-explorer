@@ -588,16 +588,19 @@
 
    `->lines-loader` creates a memoized `get-lines` from `get-source`;
    `read-ctor-form` is a closure over `get-lines` for reading constructor
-   forms by kondo usage position."
+   forms by kondo usage position; `->local-binding-classifier` memoizes local
+   binding classification by `[filename local-id]` for the run."
   [{:keys [index callsite-resolver-fn alias-by-rule fallback-mode get-source]}]
   (let [get-lines (->lines-loader get-source)
+        index' (assoc index :get-lines get-lines)
         read-ctor-form (fn [ctor-usage] (kondo/read-ctor-form ctor-usage get-lines))]
-    (assoc index
+    (assoc index'
            :get-lines get-lines
            :read-ctor-form read-ctor-form
            :callsite-resolver-fn callsite-resolver-fn
            :alias-by-rule alias-by-rule
-           :dynamic-type-fallback-resolution fallback-mode)))
+           :dynamic-type-fallback-resolution fallback-mode
+           :classify-local-binding (callsite/->local-binding-classifier index'))))
 
 (s/defschema ConstructorMatchFn
   "A spec's `:match-fn`: decides whether a fully-qualified var symbol is a
@@ -797,11 +800,9 @@
                                (seq alias-by-rule) (update :var-usages into
                                                            (mapcat :usages)
                                                            (vals alias-by-rule))
-                               ;; kondo misattributes usages from `:refer :all` namespaces to the
+                               ;; kondo misattributes bare usages from `:refer :all` namespaces to the
                                ;; first refer-all'd namespace; correct `:to` against the live refer
-                               ;; tables before the index keys boundary detection and constructor
-                               ;; matching on the resolved callee (see
-                               ;; clara.explorer.analyze.refer).
+                               ;; table (see `refer/re-attribute-refer-all-usages`).
                                true (update :var-usages refer/re-attribute-refer-all-usages))
         index (index/->analysis-index
                {:analysis rule-source-analysis

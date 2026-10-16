@@ -53,16 +53,6 @@
       (binding [*ns* (or the-ns *ns*)]
         (try (read-string s) (catch Exception _ nil))))))
 
-(defn source-text-for-span
-  "The source text for a kondo usage/binding span
-   (`{:row … :col … :end-row … :end-col … :filename …}`), or nil when the
-   span or its source cannot be resolved.  `get-lines` is
-   `(fn [ns-sym filename] -> lines-vec)`; the ns-sym may be nil, in which case
-   the source is looked up by filename."
-  [get-lines ns-sym {:keys [row col end-row end-col filename]}]
-  (when-let [lines (get-lines ns-sym filename)]
-    (source-text-at lines row col end-row end-col)))
-
 (defn read-boundary-args
   "Reads the argument forms of the boundary call (`insert!`/`retract!`/…) described
    by a kondo `:var-usage`.  Returns a (possibly empty) sequence of forms.
@@ -241,9 +231,9 @@
     (if (>= j n)
       n
       (let [ch (.charAt s j)]
-        (if (Character/isLetter ^char ch)
+        (if (Character/isLetter ch)
           (loop [k j]
-            (if (and (< k n) (Character/isLetter ^char (.charAt s k)))
+            (if (and (< k n) (Character/isLetter (.charAt s k)))
               (recur (inc k))
               k))
           (inc j))))))
@@ -259,38 +249,46 @@
         (= \newline (.charAt s j)) j
         :else (recur (inc j))))))
 
-(defn- pos->offset
-  "0-indexed char offset of the 1-indexed `[row col]` position within `s`.
-   Positions past the end resolve to the length of `s`."
-  [^String s row col]
+(defn- scan-brackets
+  "Scans `^String s`, returning `{:stack […] :past-depth2-close? bool}`. `:stack` is the
+  open-bracket stack (outermost first) at the end of the scan; `:past-depth2-close?` is true when a
+  `[` at depth 2 closed during the scan — for a single-arity fn-family macro that is the params
+  vector closing, which marks the header/body boundary. A multi-arity arity list is a `(` at depth 2
+  and does not set it. Strings, character literals, regex literals, and line comments are skipped so
+  their brackets do not count. `#_`-discarded forms need no special case: a discarded form is one
+  balanced form, so its brackets contribute net-zero."
+  [^String s]
   (let [n (.length s)]
-    (loop [i 0 r 1 c 1]
-      (cond
-        (>= i n) n
-        (and (= r row) (= c col)) i
-        :else
-        (let [ch (.charAt s i)]
-          (if (= ch \newline)
-            (recur (inc i) (inc r) 1)
-            (recur (inc i) r (inc c))))))))
-
-(defn bracket-depth-at
-  "Bracket nesting depth at the 1-indexed `[row col]` position within source
-   string `s`, measured just before the char at that position.  Every open
-   `(`/`[`/`{` counts one level; strings, character literals, and line comments
-   are skipped so their brackets do not count.  `#_`-discarded forms need no
-   special case: a discarded form is one balanced form, so its brackets
-   contribute net-zero."
-  [^String s row col]
-  (let [target (pos->offset s row col)]
-    (loop [i 0 depth 0]
-      (if (>= i target)
-        depth
+    (loop [i 0 stack [] past-depth2-close? false]
+      (if (>= i n)
+        {:stack stack :past-depth2-close? past-depth2-close?}
         (let [ch (.charAt s i)]
           (cond
-            (= ch \") (recur (skip-string s i) depth)
-            (= ch \\) (recur (skip-char-literal s i) depth)
-            (= ch \;) (recur (skip-line-comment s i) depth)
-            (or (= ch \() (= ch \[) (= ch \{)) (recur (inc i) (inc depth))
-            (or (= ch \)) (= ch \]) (= ch \})) (recur (inc i) (dec depth))
-            :else (recur (inc i) depth)))))))
+            (= ch \") (recur (skip-string s i) stack past-depth2-close?)
+            (= ch \\) (recur (skip-char-literal s i) stack past-depth2-close?)
+            (= ch \;) (recur (skip-line-comment s i) stack past-depth2-close?)
+            (and (= ch \#)
+                 (< (inc i) n)
+                 (= \" (.charAt s (inc i))))
+            (recur (skip-string s (inc i)) stack past-depth2-close?)
+            (or (= ch \() (= ch \[) (= ch \{))
+            (recur (inc i) (conj stack ch) past-depth2-close?)
+            (or (= ch \)) (= ch \]) (= ch \}))
+            (recur (inc i)
+                   (if (seq stack) (pop stack) stack)
+                   (or past-depth2-close?
+                       (and (= ch \]) (= 2 (count stack)))))
+            :else (recur (inc i) stack past-depth2-close?)))))))
+
+(defn ->bracket-scan
+  "The `scan-brackets` result for the source prefix between a macro usage's start and a binding
+  position within it, measured just before the binding position. Nil when the source cannot be read.
+
+   `usage` and `binding` are kondo position maps (`:row`/`:col` 1-indexed, `:filename`)."
+  [get-lines
+   ns-sym
+   {:keys [row col filename] :as _usage}
+   {brow :row bcol :col :as _binding}]
+  (when-let [lines (get-lines ns-sym filename)]
+    (when-let [prefix (source-text-at lines row col brow bcol)]
+      (scan-brackets prefix))))

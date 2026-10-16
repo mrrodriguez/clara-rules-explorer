@@ -83,10 +83,13 @@ Add one key to `CallsiteResolverContext` and `ConstructorTypeResolverContext`:
 
 - `:resolve-local` — `(fn [sym] -> nil | LocalBinding)`.
 
-It is a function, not data, because only the resolver knows which symbols it needs. Resolvers
-recurse by calling it again on symbols in the returned `:init-form`. The explorer caps the
-total depth, as `max-resolution-depth` does today. For the constructor pass the scope is the
-constructor call's span; for the boundary pass it is the boundary usage's span.
+It is a function, not data, because only the resolver knows which symbols it needs. A
+`:let-init` `LocalBinding` carries its own `:resolve-local`, scoped to the binding's
+`:init-form-span`; resolvers recurse by calling *that* on symbols in the returned
+`:init-form` (the callsite-scoped resolver cannot see them, since an init form sits outside the
+callsite span). The explorer caps the total depth — the whole chain shares one budget, so it
+really caps chain depth. For the constructor pass the scope is the constructor call's span; for
+the boundary pass it is the traced argument form's span.
 
 The key is optional in `FactTypeResolverContext`, the same as every other key there: a resolver
 runs in code this library does not own and must stay total.

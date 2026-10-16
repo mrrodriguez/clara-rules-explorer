@@ -900,3 +900,50 @@
   (let [trace-inner (DocumentCheck. ?app-id :pass "two-let-chain" nil nil)
         trace-outer trace-inner]
     (r/insert! trace-outer)))
+
+;; ---------------------------------------------------------------------------
+;; Review-2 fixtures: :resolve-local scope + classification of unrecognized
+;; binding forms
+;; ---------------------------------------------------------------------------
+
+(r/defrule rule-resolve-local-traced-arg
+  "The boundary arg is a let-local whose init references a *sibling* local —
+   `:resolve-local` must scope to the traced form's span (A2), not the
+   boundary call's span, to resolve `traced-type`."
+  [Application (= ?app-id app-id)]
+  =>
+  (let [traced-type :t/traced
+        f (make-local-fact traced-type {:app-id ?app-id})]
+    (r/insert! f)))
+
+(r/defrule rule-resolve-local-catch
+  "Nested local is a `catch` binding — classifies :unknown, never
+   :destructured."
+  [Application (= ?app-id app-id)]
+  =>
+  (try
+    (throw (Exception. "boom"))
+    (catch Exception caught-e
+      (r/insert! (make-local-fact caught-e {:app-id ?app-id})))))
+
+(r/defrule rule-resolve-local-with-open
+  "Nested local is a `with-open` binding — classifies :unknown."
+  [Application (= ?app-id app-id)]
+  =>
+  (with-open [r (java.io.StringReader. "")]
+    (r/insert! (make-local-fact r {:app-id ?app-id}))))
+
+(r/defrule rule-resolve-local-letfn
+  "Nested local is a `letfn` binding — classifies :unknown."
+  [Application (= ?app-id app-id)]
+  =>
+  (letfn [(local-fn-letfn [t] (make-local-fact t {:app-id ?app-id}))]
+    (r/insert! (local-fn-letfn :t/letfn))))
+
+(r/defrule rule-resolve-local-named-fn
+  "Nested local is a named-`fn` self binding (depth 1) — classifies :unknown."
+  [Application (= ?app-id app-id)]
+  =>
+  ((fn self [_t]
+     (r/insert! (make-local-fact self {:app-id ?app-id})))
+   :t/named-fn))

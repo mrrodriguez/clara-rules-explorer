@@ -730,20 +730,20 @@
                   `atr/rule-resolve-local-multi-arity-param ['p-multi-type]
                   `atr/rule-resolve-local-called            ['local-fn]})]
     (testing "let local holding a literal"
-      (is (= [{:kind :let-init :init-form :t/a}]
-             (get results [`atr/rule-resolve-local-let-literal 'lt-fact-type]))))
+      (is (match? [{:kind :let-init :init-form :t/a}]
+                  (get results [`atr/rule-resolve-local-let-literal 'lt-fact-type]))))
 
     (testing "chain of two let locals: the first hop returns the inner symbol; the second hop is out of the callsite's lexical scope"
-      (is (= [{:kind :let-init :init-form 'lt-inner}]
-             (get results [`atr/rule-resolve-local-let-chain 'lt-outer]))
+      (is (match? [{:kind :let-init :init-form 'lt-inner}]
+                  (get results [`atr/rule-resolve-local-let-chain 'lt-outer]))
           "the outer hop returns the inner symbol, not its value")
       (is (= [nil]
              (get results [`atr/rule-resolve-local-let-chain 'lt-inner]))
           "`lt-inner` is only referenced in the binding vector, not the callsite span"))
 
     (testing "literal map init form is handed to the resolver verbatim"
-      (is (= [{:kind :let-init :init-form {"a" :t/a, "b" :t/b}}]
-             (get results [`atr/rule-resolve-local-literal-map 'map-type]))))
+      (is (match? [{:kind :let-init :init-form {"a" :t/a, "b" :t/b}}]
+                  (get results [`atr/rule-resolve-local-literal-map 'map-type]))))
 
     (testing "shadowed name inside the span resolves to nil"
       (is (= [nil]
@@ -766,14 +766,14 @@
              (get results [`atr/rule-resolve-local-doseq 'doseq-type]))))
 
     (testing "if-let / when-let / if-some / when-some bindings are :let-init with init form"
-      (is (= [{:kind :let-init :init-form :t/if-let}]
-             (get results [`atr/rule-resolve-local-if-let 'if-let-type])))
-      (is (= [{:kind :let-init :init-form :t/when-let}]
-             (get results [`atr/rule-resolve-local-when-let 'when-let-type])))
-      (is (= [{:kind :let-init :init-form :t/if-some}]
-             (get results [`atr/rule-resolve-local-if-some 'if-some-type])))
-      (is (= [{:kind :let-init :init-form :t/when-some}]
-             (get results [`atr/rule-resolve-local-when-some 'when-some-type]))))
+      (is (match? [{:kind :let-init :init-form :t/if-let}]
+                  (get results [`atr/rule-resolve-local-if-let 'if-let-type])))
+      (is (match? [{:kind :let-init :init-form :t/when-let}]
+                  (get results [`atr/rule-resolve-local-when-let 'when-let-type])))
+      (is (match? [{:kind :let-init :init-form :t/if-some}]
+                  (get results [`atr/rule-resolve-local-if-some 'if-some-type])))
+      (is (match? [{:kind :let-init :init-form :t/when-some}]
+                  (get results [`atr/rule-resolve-local-when-some 'when-some-type]))))
 
     (testing "dotimes binding reports :seq-binding with no init form"
       (is (= [{:kind :seq-binding}]
@@ -785,14 +785,14 @@
       (is (= [{:kind :destructured}]
              (get results [`atr/rule-resolve-local-doseq-let-modifier 'doseq-let-type]))))
 
-    (testing "multi-arity defn parameter reports :destructured with no init form"
-      (is (= [{:kind :destructured}]
+    (testing "multi-arity defn parameter reports :param with no init form"
+      (is (= [{:kind :param}]
              (get results [`atr/rule-resolve-local-multi-arity-param 'p-multi-type]))))
 
     (testing "a local called as a function resolves the head symbol"
-      (is (= [{:kind :let-init
-               :init-form '(fn [t] (make-local-fact t {:app-id ?app-id}))}]
-             (get results [`atr/rule-resolve-local-called 'local-fn]))))))
+      (is (match? [{:kind :let-init
+                    :init-form '(fn [t] (make-local-fact t {:app-id ?app-id}))}]
+                  (get results [`atr/rule-resolve-local-called 'local-fn]))))))
 
 (deftest test-resolve-local-budget
   (testing "the 9th resolution from one context returns nil (recursion guard)"
@@ -811,6 +811,61 @@
       (is (= 8 (count (remove nil? @results))))
       (is (nil? (last @results))
           "the budget caps at max-resolution-depth (8) successes per context"))))
+
+(deftest test-resolve-local-recursion
+  (testing "a resolver recurses through the returned binding's own :resolve-local"
+    (let [results (atom [])
+          resolver (fn [{:keys [rule resolve-local]}]
+                     (when (= (str `atr/rule-resolve-local-let-chain)
+                              (str (:name rule)))
+                       (when-let [outer (resolve-local 'lt-outer)]
+                         (let [inner ((:resolve-local outer) 'lt-inner)]
+                           (swap! results conj
+                                  (:kind outer)
+                                  (:kind inner)
+                                  (:init-form inner)))))
+                     nil)]
+      (analyze/->annotations-from-rule-source-analysis
+       {:rule-source-analysis edge-case-analysis
+        :session-or-rulebase edge-case-session
+        :callsite-resolver-fn resolver})
+      (is (= [:let-init :let-init :t/b] @results)
+          "the §1 two-hop shape: outer hop yields the inner symbol, whose own resolver hops again"))))
+
+(deftest test-resolve-local-traced-arg-scope
+  (testing ":resolve-local is scoped to the traced arg form's span, not the boundary call's (A2)"
+    (let [results (atom [])
+          resolver (fn [{:keys [rule arg-form resolve-local]}]
+                     (when (and (= (str `atr/rule-resolve-local-traced-arg)
+                                   (str (:name rule)))
+                                (seq? arg-form)
+                                (= 'make-local-fact (first arg-form)))
+                       (swap! results conj (resolve-local (second arg-form))))
+                     nil)]
+      (analyze/->annotations-from-rule-source-analysis
+       {:rule-source-analysis edge-case-analysis
+        :session-or-rulebase edge-case-session
+        :callsite-resolver-fn resolver})
+      (is (match? [{:kind :let-init :init-form :t/traced}] @results)
+          "the traced arg is (make-local-fact traced-type …); its sibling local resolves"))))
+
+(deftest test-resolve-local-unrecognized-bindings
+  (let [results (resolve-local-boundary-results
+                 {`atr/rule-resolve-local-catch     ['caught-e]
+                  `atr/rule-resolve-local-with-open ['r]
+                  `atr/rule-resolve-local-letfn     ['local-fn-letfn]
+                  `atr/rule-resolve-local-named-fn  ['self]})]
+    (testing "unrecognized binding forms classify :unknown, never :destructured"
+      (is (= [{:kind :unknown}]
+             (get results [`atr/rule-resolve-local-catch 'caught-e])))
+      (is (= [{:kind :unknown}]
+             (get results [`atr/rule-resolve-local-with-open 'r])))
+      (is (= [{:kind :unknown}]
+             (get results [`atr/rule-resolve-local-letfn 'local-fn-letfn]))))
+    (testing "a named-fn self name is unresolvable (kondo emits no :locals binding for it)"
+      (is (= [nil]
+             (get results [`atr/rule-resolve-local-named-fn 'self]))
+          "its :local-usages entry carries no :id, so the lookup returns nil"))))
 
 (defn- ->fact-local-type-resolver
   "Resolves a `->fact` callsite whose type argument is a nested local, via

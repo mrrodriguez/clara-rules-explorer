@@ -143,23 +143,44 @@ that never leak into output.
 `:locals true :local-usages true` are enabled so that `analyze.callsite` can
 trace a local symbol argument at an `insert!`/`retract!` callsite (e.g. a
 macro gensym) to its binding's init form: the `:local-usages` entry at the
-arg's position shares an `:id` with the `:locals` binding in the same file,
-and the init form is read from the source text immediately after the binding
-symbol.  Tracing is multi-hop — each further hop resolves the next local
-within the previous binding's init span (`analyze.callsite/trace-local-form`
-threads the current span), and the chain restarts on the deepest traced form
-(constructor checks, then the caller's `:callsite-resolver-fn`).
+arg's position shares an `:id` with the `:locals` binding in the same file.
+Kondo's `:locals` entry carries no kind discriminator — it gives the binding
+symbol's own position and its scope, but not whether it is a `let` LHS, a fn
+parameter, a destructured symbol, or a loop/seq binding.  The analyzer derives
+that by reading the innermost enclosing binding-macro form and scanning the
+source prefix up to the binding position with a bracket scanner
+(`analyze.kondo/scan-brackets` — strings, char literals, regex literals, and
+line comments skipped; `#_` forms contribute net-zero).  A direct binding sits
+at bracket depth 2; only `:let-init` bindings (direct `let`-family LHSes) are
+traced to their init form.  Parameters, destructured symbols, and loop/seq
+bindings are not traced.  Tracing is multi-hop — each further hop resolves the
+next local within the previous binding's init span
+(`analyze.callsite/trace-local-form` threads the current span), and the chain
+restarts on the deepest traced form (constructor checks, then the caller's
+`:callsite-resolver-fn`).
 
 The constructor-of-interest pass goes further with an ephemeral *span-set
 expansion* (`analyze.callsite/arg-span-set`): from a boundary argument it
 follows the same `:id` linkage transitively, collecting the source spans of
-every reached binding init, so a constructor reached through a helper in a
-`let` init or a `concat`/`for` closure is still attributed to that argument.
+every reached `:let-init` binding, so a constructor reached through a helper in
+a `let` init or a `concat`/`for` closure is still attributed to that argument.
 All linkage stays position-identity based.
 
 Kondo's local `:id` values are **not deterministic across runs** — they are
 per-run counters. They are only ever used for linkage *within* a single
 analysis map, never persisted or compared across runs.
+
+### Cold-cache `:refer :all` callee misattribution
+
+When a namespace refers two or more namespaces wholesale (`:refer :all`),
+clj-kondo attributes every bare name used from any of them to the *first* one
+listed in the `:require` clause — including names that namespace does not
+export. This is a kondo behaviour under the analyzer's stdin+`:config-dir`
+lint (no populated `.clj-kondo/.cache` for the referred libraries); the same
+lint from a directory with a warm cache attributes correctly. The analyzer
+compensates in `analyze.refer`, which rewrites *bare* usages (no `:alias`, a
+`:name-col`/`:name-end-col` span exactly the symbol name) to the namespace of
+the live `ns-refers` winner; qualified usages are left untouched.
 
 ## Source lookup for dynamic callsite extraction
 

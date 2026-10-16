@@ -7,61 +7,116 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Loaded target namespaces with distinct publics (mimics clara.rules vs a
-;; facts namespace), and consumer namespaces that refer both wholesale in
-;; each require order.
+;; facts namespace), and consumer namespaces that refer them wholesale /
+;; aliased in each require order.
 ;; ---------------------------------------------------------------------------
+
+(defn- define-fake-ns!
+  "Creates `ns-sym` and evals `body` inside it."
+  [ns-sym body]
+  (create-ns ns-sym)
+  (binding [*ns* (the-ns ns-sym)]
+    (eval body)))
 
 (def ^:private a-sym 'fake.refer.a)
 (def ^:private b-sym 'fake.refer.b)
 
-(create-ns a-sym)
-(binding [*ns* (the-ns a-sym)]
-  (eval '(do (clojure.core/ns fake.refer.a)
-             (defn insert! [x] x))))
+(define-fake-ns! a-sym
+  '(do (clojure.core/ns fake.refer.a)
+       (defn insert! [x] x)))
 
-(create-ns b-sym)
-(binding [*ns* (the-ns b-sym)]
-  (eval '(do (clojure.core/ns fake.refer.b)
-             (defn ->fact [t m] m))))
+(define-fake-ns! b-sym
+  '(do (clojure.core/ns fake.refer.b)
+       (defn ->fact [t m] m)))
 
 (def ^:private from-ab 'fake.refer.consumer-ab)
-(create-ns from-ab)
-(binding [*ns* (the-ns from-ab)]
-  (eval '(clojure.core/ns fake.refer.consumer-ab
-           (:require [fake.refer.a :refer :all]
-                     [fake.refer.b :refer :all]))))
+(define-fake-ns! from-ab
+  '(clojure.core/ns fake.refer.consumer-ab
+     (:require [fake.refer.a :refer :all]
+               [fake.refer.b :refer :all])))
 
 (def ^:private from-ba 'fake.refer.consumer-ba)
-(create-ns from-ba)
-(binding [*ns* (the-ns from-ba)]
-  (eval '(clojure.core/ns fake.refer.consumer-ba
-           (:require [fake.refer.b :refer :all]
-                     [fake.refer.a :refer :all]))))
+(define-fake-ns! from-ba
+  '(clojure.core/ns fake.refer.consumer-ba
+     (:require [fake.refer.b :refer :all]
+               [fake.refer.a :refer :all])))
 
-;; Two refer-all'd namespaces exporting the *same* name — the live `ns-refers`
-;; table records only the runtime winner, so re-attribution keys on the winner
-;; and the candidate set is provably 0-or-1.
+;; ---------------------------------------------------------------------------
+;; Usage-shape builders. kondo tells bare / aliased / fully-qualified /
+;; renamed usages apart by `:alias` and the `:name-col`/`:name-end-col` span:
+;; a bare usage has no `:alias` and a span exactly the symbol name; qualified
+;; tokens are longer (they include `ns/`), and a `:rename`d usage spans the
+;; local symbol while `:name` is the resolved original.
+;; ---------------------------------------------------------------------------
+
+(defn- bare-usage
+  "A bare `:var-usage` for `sym`: no alias, name span = symbol length."
+  [from to sym]
+  {:from from :to to :name sym
+   :name-col 1 :name-end-col (inc (count (name sym)))})
+
+(defn- aliased-usage
+  "An aliased `:var-usage` (`alias/sym`): `:alias` present, name span =
+   `alias/sym` length."
+  [from to sym alias]
+  {:from from :to to :name sym :alias alias
+   :name-col 1 :name-end-col (inc (count (str (name alias) "/" (name sym))))})
+
+(defn- qualified-usage
+  "A fully-qualified `:var-usage` (`ns-sym/sym`): no alias, name span =
+   `ns-sym/sym` length."
+  [from to sym ns-sym]
+  {:from from :to to :name sym
+   :name-col 1 :name-end-col (inc (count (str (name ns-sym) "/" (name sym))))})
+
+;; ---------------------------------------------------------------------------
+;; A1 regression fixture: an aliased ns that refers only `defrule`, alongside
+;; a refer-all'd facts ns that exports `insert!`. `(r/insert! …)` must keep
+;; its `:to` (the aliased ns) even though the facts ns also exports `insert!`.
+;; ---------------------------------------------------------------------------
+
+(def ^:private rules-sym 'fake.refer.rules)
+(def ^:private facts-sym 'fake.refer.facts)
+
+(define-fake-ns! rules-sym
+  '(do (clojure.core/ns fake.refer.rules)
+       (defn defrule [& _] nil)
+       (defn insert! [x] x)))
+
+(define-fake-ns! facts-sym
+  '(do (clojure.core/ns fake.refer.facts)
+       (defn insert! [x] x)))
+
+(def ^:private from-alias 'fake.refer.consumer-alias)
+(define-fake-ns! from-alias
+  '(clojure.core/ns fake.refer.consumer-alias
+     (:require [fake.refer.rules :as r :refer [defrule]]
+               [fake.refer.facts :refer :all])))
+
+;; ---------------------------------------------------------------------------
+;; Refer-all collision fixtures: two namespaces exporting the same name. The
+;; live `ns-refers` table records only the runtime winner, so re-attribution
+;; keys on the winner and the candidate set is provably 0-or-1.
+;; ---------------------------------------------------------------------------
+
 (def ^:private collision-a-sym 'fake.refer.collision-a)
 (def ^:private collision-b-sym 'fake.refer.collision-b)
 
-(create-ns collision-a-sym)
-(binding [*ns* (the-ns collision-a-sym)]
-  (eval '(do (clojure.core/ns fake.refer.collision-a)
-             (defn shared [x] x)
-             (defn a-only [x] x))))
+(define-fake-ns! collision-a-sym
+  '(do (clojure.core/ns fake.refer.collision-a)
+       (defn shared [x] x)
+       (defn a-only [x] x)))
 
-(create-ns collision-b-sym)
-(binding [*ns* (the-ns collision-b-sym)]
-  (eval '(do (clojure.core/ns fake.refer.collision-b)
-             (defn shared [x] x)
-             (defn b-only [x] x))))
+(define-fake-ns! collision-b-sym
+  '(do (clojure.core/ns fake.refer.collision-b)
+       (defn shared [x] x)
+       (defn b-only [x] x)))
 
 (def ^:private from-collision 'fake.refer.consumer-collision)
-(create-ns from-collision)
-(binding [*ns* (the-ns from-collision)]
-  (eval '(clojure.core/ns fake.refer.consumer-collision
-           (:require [fake.refer.collision-a :refer :all]
-                     [fake.refer.collision-b :refer :all]))))
+(define-fake-ns! from-collision
+  '(clojure.core/ns fake.refer.consumer-collision
+     (:require [fake.refer.collision-a :refer :all]
+               [fake.refer.collision-b :refer :all])))
 
 (defn- collision-winner-sym
   "The namespace the live consumer's `ns-refers` maps `shared` to (the runtime
@@ -69,81 +124,91 @@
   []
   (-> (ns-resolve from-collision 'shared) meta :ns ns-name))
 
+;; ---------------------------------------------------------------------------
+;; `:refer :all :rename` fixture: the local symbol differs from the resolved
+;; name, so the usage is never bare.
+;; ---------------------------------------------------------------------------
+
+(def ^:private from-rename 'fake.refer.consumer-rename)
+(define-fake-ns! from-rename
+  '(clojure.core/ns fake.refer.consumer-rename
+     (:require [fake.refer.b :refer :all :rename {->fact build}])))
+
+;; ---------------------------------------------------------------------------
+;; Tests
+;; ---------------------------------------------------------------------------
+
+(deftest test-reattributes-bare-to-second-refer-all-ns
+  (testing "a bare name only in the second :refer :all ns is rewritten (defect table row 1)"
+    (is (= [{:from from-ab :to b-sym :name '->fact
+             :name-col 1 :name-end-col 7}]
+           (refer/re-attribute-refer-all-usages
+            [(bare-usage from-ab a-sym '->fact)])))))
+
+(deftest test-reattributes-bare-reversed
+  (testing "reversed require order: the bare name only in the second ns is rewritten (row 2)"
+    (is (= [{:from from-ba :to a-sym :name 'insert!
+             :name-col 1 :name-end-col 8}]
+           (refer/re-attribute-refer-all-usages
+            [(bare-usage from-ba b-sym 'insert!)])))))
+
+(deftest test-leaves-correct-bare-attribution-alone
+  (testing "a bare name the reported :to namespace actually provides stays put"
+    (is (= [(bare-usage from-ab a-sym 'insert!)]
+           (refer/re-attribute-refer-all-usages
+            [(bare-usage from-ab a-sym 'insert!)])))))
+
+(deftest test-leaves-aliased-usage-alone
+  (testing "an aliased usage is never rewritten, even when a refer-all'd ns exports the name (A1)"
+    (let [usage (aliased-usage from-alias rules-sym 'insert! 'r)]
+      (is (= [usage]
+             (refer/re-attribute-refer-all-usages [usage]))
+          "`r/insert!` resolves to the aliased ns, not the refer-all'd facts ns"))))
+
+(deftest test-leaves-fully-qualified-usage-alone
+  (testing "a fully-qualified usage is never rewritten, even when the reported :to ns does not refer the name"
+    (let [usage (qualified-usage from-ab b-sym 'insert! 'fake.refer.a)]
+      (is (= [usage]
+             (refer/re-attribute-refer-all-usages [usage]))
+          "`fake.refer.a/insert!` is a qualified token — its span is longer than `insert!`"))))
+
 (deftest test-rewrites-collision-to-runtime-winner
   (let [winner (collision-winner-sym)
         loser (if (= winner collision-a-sym) collision-b-sym collision-a-sym)]
-    (testing "a name exported by two refer-all'd namespaces is rewritten to the runtime winner"
-      (is (= [{:from from-collision :to winner :name 'shared}]
+    (testing "a bare name exported by two refer-all'd namespaces is rewritten to the runtime winner"
+      (is (= [{:from from-collision :to winner :name 'shared
+               :name-col 1 :name-end-col 7}]
              (refer/re-attribute-refer-all-usages
-              [{:from from-collision :to loser :name 'shared}]))))
+              [(bare-usage from-collision loser 'shared)]))))
     (testing "the already-correct (winner) attribution is left alone"
-      (is (= [{:from from-collision :to winner :name 'shared}]
+      (is (= [(bare-usage from-collision winner 'shared)]
              (refer/re-attribute-refer-all-usages
-              [{:from from-collision :to winner :name 'shared}]))))))
+              [(bare-usage from-collision winner 'shared)]))))))
 
-;; Residual corner: the loser namespace exports *only* the colliding name, so
-;; it contributes no refers at all and is absent from `refer-sets`.  A usage
-;; kondo misattributes to it passes through uncorrected.
-(def ^:private corner-loser-sym 'fake.refer.corner-loser)
-(def ^:private corner-winner-sym 'fake.refer.corner-winner)
-
-(create-ns corner-loser-sym)
-(binding [*ns* (the-ns corner-loser-sym)]
-  (eval '(do (clojure.core/ns fake.refer.corner-loser)
-             (defn shared [x] x))))
-
-(create-ns corner-winner-sym)
-(binding [*ns* (the-ns corner-winner-sym)]
-  (eval '(do (clojure.core/ns fake.refer.corner-winner)
-             (defn shared [x] x)
-             (defn winner-only [x] x))))
-
-(def ^:private from-corner 'fake.refer.consumer-corner)
-(create-ns from-corner)
-(binding [*ns* (the-ns from-corner)]
-  (eval '(clojure.core/ns fake.refer.consumer-corner
-           (:require [fake.refer.corner-loser :refer :all]
-                     [fake.refer.corner-winner :refer :all]))))
-
-(deftest test-leaves-corner-loser-usage-alone
-  (testing "a usage misattributed to a refer-all'd ns exporting only the colliding name
-            passes through (documented residual corner)"
-    (is (= [{:from from-corner :to corner-loser-sym :name 'shared}]
+(deftest test-resolves-bare-unknown-namespace
+  (testing "a bare usage kondo could not resolve is rewritten to the live refer winner"
+    (is (= [{:from from-ab :to b-sym :name '->fact
+             :name-col 1 :name-end-col 7}]
            (refer/re-attribute-refer-all-usages
-            [{:from from-corner :to corner-loser-sym :name 'shared}])))))
-
-(deftest test-reattributes-to-second-refer-all-ns
-  (testing "a name only in the second :refer :all ns is rewritten (defect table row 1)"
-    (is (= [{:from from-ab :to b-sym :name '->fact}]
-           (refer/re-attribute-refer-all-usages
-            [{:from from-ab :to a-sym :name '->fact}])))))
-
-(deftest test-reattributes-to-second-refer-all-ns-reversed
-  (testing "reversed require order: the name only in the second ns is rewritten (row 2)"
-    (is (= [{:from from-ba :to a-sym :name 'insert!}]
-           (refer/re-attribute-refer-all-usages
-            [{:from from-ba :to b-sym :name 'insert!}])))))
-
-(deftest test-leaves-correct-attribution-alone
-  (testing "a name the reported :to namespace actually provides stays put"
-    (is (= [{:from from-ab :to a-sym :name 'insert!}]
-           (refer/re-attribute-refer-all-usages
-            [{:from from-ab :to a-sym :name 'insert!}])))))
-
-(deftest test-leaves-unknown-namespace-token-alone
-  (testing "keyword :to (unknown-namespace token) is untouched"
-    (is (= [{:from from-ab :to :clj-kondo/unknown-namespace :name '->fact}]
-           (refer/re-attribute-refer-all-usages
-            [{:from from-ab :to :clj-kondo/unknown-namespace :name '->fact}])))))
+            [(bare-usage from-ab :clj-kondo/unknown-namespace '->fact)])))))
 
 (deftest test-leaves-unresolvable-alone
-  (testing "a name no refer-all'd namespace provides is untouched"
-    (is (= [{:from from-ab :to a-sym :name 'no-such-name}]
+  (testing "a bare name no referred namespace provides is untouched"
+    (is (= [(bare-usage from-ab a-sym 'no-such-name)]
            (refer/re-attribute-refer-all-usages
-            [{:from from-ab :to a-sym :name 'no-such-name}])))))
+            [(bare-usage from-ab a-sym 'no-such-name)])))))
 
 (deftest test-leaves-unloaded-from-ns-alone
   (testing "a :from namespace with no live ns passes through untouched"
-    (is (= [{:from 'fake.refer.not-loaded :to a-sym :name '->fact}]
+    (is (= [(bare-usage 'fake.refer.not-loaded a-sym '->fact)]
            (refer/re-attribute-refer-all-usages
-            [{:from 'fake.refer.not-loaded :to a-sym :name '->fact}])))))
+            [(bare-usage 'fake.refer.not-loaded a-sym '->fact)])))))
+
+(deftest test-leaves-renamed-refer-all-alone
+  (testing "a :rename'd usage is not bare: the source span is the local symbol, `:name` the resolved original"
+    (is (= [{:from from-rename :to b-sym :name '->fact
+             :name-col 1 :name-end-col 6}]
+           (refer/re-attribute-refer-all-usages
+            [{:from from-rename :to b-sym :name '->fact
+              :name-col 1 :name-end-col 6}]))
+        "`build` (5 chars) ≠ `->fact` (6 chars), so the usage stays put")))

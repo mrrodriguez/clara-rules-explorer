@@ -5,7 +5,9 @@ Tracks the fix for
 Keep this file updated alongside code changes.
 
 Status: **done** — re-attribution implemented, tested, all explorer quality
-gates green.
+gates green. Review 2 (see
+[`provide-local-scope-for-callsite-resolver-review-2.md`](./provide-local-scope-for-callsite-resolver-review-2.md),
+§A1) simplified the fix to a bare-usage `ns-refers` lookup.
 
 ## Root cause (answering defect §5 open question 1)
 
@@ -25,55 +27,62 @@ only the refer-all path needed correction — no cache/source injection
 
 ## Fix
 
-New namespace `clara.explorer.analyze.refer`
+Namespace `clara.explorer.analyze.refer`
 (`explorer/src/clara/explorer/analyze/refer.clj`):
 
-- `re-attribute-refer-all-usages` — rewrites `:to` on kondo `:var-usages`
-  entries misattributed under `:refer :all`. For each usage it consults the
-  **live** `:from` namespace's refer table (`ns-refers` via
-  `ns-deps/->ns-required`, so `:refer :all` is already expanded to concrete
-  vars and each local symbol resolves to its winning var — runtime semantics,
-  not kondo's guess). A usage whose `:to` namespace is referred but does not
-  provide `:name` is rewritten to the single other referred namespace that
-  does; when none qualify it is left untouched.
+- `re-attribute-refer-all-usages` rewrites the `:to` namespace of kondo
+  `:var-usages` entries misattributed under `:refer :all`. **Only bare usages
+  can be misattributed**, and kondo shows which usages are bare without any
+  source read: a bare usage has no `:alias`, and
+  `(- :name-end-col :name-col)` equals `(count (name sym))` (qualified tokens
+  are longer, because they include `ns/`). For a bare usage the truth is
+  `(get (ns-refers from) name)` → that var's namespace, which is the runtime
+  winner by construction.
+- Qualified usages (aliased, fully-qualified) and `:rename`d usages (whose
+  `:name` is the resolved original but whose span is the local symbol) are left
+  untouched — kondo attributes them correctly, and only they could carry the
+  false-positive a candidate scan would introduce.
 - Wired into `clara.explorer.analyze/->annotations-from-rule-source-analysis`
-  right before `index/->analysis-index`, after the `require` loop that loads
-  the analyzed namespaces and after alias-usage injection. This is the single
-  point where boundary detection and constructor-of-interest matching key on
-  the resolved callee.
-
-The correction runs on the merged `:var-usages` only; `::combined-sources` and
-source-reading are untouched.
+  **before** the alias-usage pass and the index, so every consumer keys on the
+  corrected callee.
 
 ## Why live `ns-refers` (not parsed headers)
 
 Defect §5 suggested using the `ns-deps` refer-all expansion. The live
-`ns-refers` table is the better source here:
+`ns-refers` table is the better source:
 
 - It matches runtime resolution exactly — when the same name is exported by
-  two refer-all'd namespaces, Clojure resolves to one winner; the parsed
-  header would report "several qualify" and leave kondo's (wrong) first pick.
+  two refer-all'd namespaces, Clojure resolves to one winner; a parsed header
+  would report "several qualify". The candidate set is provably 0-or-1.
 - It needs no classpath source for the referred namespaces, only that the
   `:from` namespace is loaded — which `->annotations-from-rule-source-analysis`
   already guarantees for rule-owning namespaces (it `require`s every
   `:var-definitions` ns, and the session load has already loaded the rule ns).
 
+The earlier candidate-scan approach (review 1) keyed on kondo's resolved
+`:name`, which could in principle rewrite a *qualified* usage whose reported
+`:to` happened not to refer the name (a facts ns that wraps `insert!`). The
+bare-usage check removes that false positive entirely, and with it the
+"residual corner" (a loser ns exporting only the colliding name) — `ns-refers`
+is the runtime winner by construction, so there is no corner to document.
+
 ## Tests
 
 - Unit: `explorer/test/clara/explorer/analyze/refer_test.clj` — fake target
-  namespaces (`fake.refer.a` = `insert!`, `fake.refer.b` = `->fact`) and
-  consumer namespaces referring both wholesale in each order. Covers both
-  defect table rows, the already-correct case, unknown-namespace keyword
-  `:to`, unresolvable names, unloaded `:from`, the refer-collision case (two
-  refer-all'd namespaces exporting the same name — rewritten to the runtime
-  winner), and its residual corner (a loser ns exporting only the colliding
-  name — passed through uncorrected).
+  namespaces and consumer namespaces, built via a shared `define-fake-ns!`
+  helper. Covers: bare usage rewritten to the second refer-all'd ns (both
+  require orders), the already-correct case, an aliased `r/insert!` staying put
+  even when a refer-all'd ns exports the same name (A1), a fully-qualified
+  usage staying put, a bare unknown-namespace usage resolved to the live refer
+  winner, the refer collision (rewritten to the runtime winner), an
+  unresolvable name, an unloaded `:from`, and `:refer :all :rename` (a renamed
+  usage is not bare, so it stays put).
 - Integration fixture: `explorer/test/clara/explorer/test/rules/refer_all_rules.clj`
   — a real rule ns with `[clara.rules :as r]`,
   `[clara.explorer.test.rules.refer-all-decoy :refer :all]` (listed first, so
   clj-kondo attributes bare names from either refer-all'd ns to it) and
   `[clara.explorer.test.rules.helpers :refer :all]`, with
-  `(r/insert! (->fact :refer-all/out {:x ?x}))`.  `clara.rules` is aliased
+  `(r/insert! (->fact :refer-all/out {:x ?x}))`. `clara.rules` is aliased
   rather than refer-all'd so the fixture also lints cleanly in a cold-cache run
   (third-party `:refer :all` is unresolvable without a cache); the rationale
   lives in the fixture's ns docstring.
@@ -86,7 +95,7 @@ Defect §5 suggested using the `ns-deps` refer-all expansion. The live
 
 ## Verification
 
-- `make test` — 498 tests / 3281 assertions, 0 failures, 0 errors.
+- `make test` — 510 tests / 3298 assertions, 0 failures, 0 errors.
 - `make lint` — 0 errors, 0 warnings.
 - `make format-check` — clean.
 - `make reflection-check` — no warnings.
@@ -96,22 +105,13 @@ Defect §5 suggested using the `ns-deps` refer-all expansion. The live
 - The fixture namespace disables the project-wide `:refer-all` lint via its ns
   attr-map (`{:clj-kondo/config '{:linters {:refer-all {:level :off}}}}`)
   because it intentionally exercises `:refer :all`.
-- `:refer :all :rename` needs no correction: kondo records the rename pair in
-  `:referred-vars` independently of the cache (verified — a renamed usage
-  resolves to `{:to fx.b :name ->fact}` with no cache), so re-attribution is a
-  no-op there. The one residual corner case is a renamed local whose *resolved*
-  name collides with another refer-all'd namespace's public (pathological); the
-  candidate lookup keys on kondo's resolved `:name` while `ns-refers` keys on
-  the local symbol, so such a collision could in principle be rewritten. Out of
-  scope for this defect.
+- Defect §5 open question 3 (how common ≥2 refer-alls are in a real rulebase)
+  was not measured against a production rulebase. The answer no longer affects
+  the approach: re-attribution is O(usages) with one `ns-refers` lookup per
+  bare usage and no per-namespace candidate scan, so prevalence is irrelevant
+  to cost.
 - Boundary-side impact (defect §4 second row, `insert!` misattributed when the
-  facts ns is listed first) is covered by the unit test at the re-attribution
-  layer; the integration fixture's first-listed refer-all'd ns is the decoy
-  rather than `clara.rules` (which is aliased), so the second table row's
-  end-to-end shape is exercised at the unit layer only.
-- Refer collision (two refer-all'd namespaces exporting the *same* name): the
-  live `ns-refers` table records only the runtime winner, so re-attribution
-  keys on the winner and the candidate set is provably 0-or-1.  A residual
-  pathological corner — the loser namespace exports *only* the colliding name,
-  so it is absent from `refer-sets` and the usage passes through uncorrected —
-  is documented but out of scope.
+  facts ns is listed first) is covered at the re-attribution layer; the
+  integration fixture's first-listed refer-all'd ns is the decoy rather than
+  `clara.rules` (which is aliased), so the second table row's end-to-end shape
+  is exercised at the unit layer only.

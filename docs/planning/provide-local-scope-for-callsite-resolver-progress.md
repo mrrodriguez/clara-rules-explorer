@@ -41,11 +41,14 @@ Complete — all rollout steps implemented and verified.
   `clara.explorer.analyze.kondo`, not a new dependency and not kondo's internal
   parsed form. Position matching remains by source position (kondo `:locals`
   entries), never by name.
-- **`:resolve-local` depth cap (§2.3):** a per-resolver-context budget seeded
-  with `max-resolution-depth`; each successful resolution consumes one unit and
-  the fn returns nil once exhausted. This caps the *total* local-hop budget a
-  resolver can spend from one context, mirroring `trace-local-form`'s cap for
-  the automatic chain.
+- **`:resolve-local` depth cap (§2.3, revised by review 2 §A3):** a
+  per-context budget seeded with `max-resolution-depth`, shared by every nested
+  resolver in the chain. Each successful resolution consumes one unit and the
+  fn returns nil once exhausted. Recursion works because a `:let-init`
+  `LocalBinding` carries its own `:resolve-local`, scoped to the binding's
+  `:init-form-span` — lookups stay "scoped to the form you are looking at", so
+  the budget really caps chain depth rather than guarding a recursion that
+  could never happen.
 
 ## TODO / remaining
 
@@ -94,9 +97,44 @@ Complete — all rollout steps implemented and verified.
   `:let` modifiers, multi-arity `defn` params) and a `->resolve-local` budget
   test (`test-resolve-local-budget`).
 
+## Review 2
+
+Second pass ([`…-review-2.md`](./provide-local-scope-for-callsite-resolver-review-2.md))
+found three correctness gaps, all fixed:
+
+- **A2 — traced-arg scope.** `trace-local-form` now returns the span of the form
+  it stops on (`:traced-span` on `TracedArg`), and `:resolve-local` scopes to it,
+  so a resolver can see locals referenced in a traced init that sits outside the
+  boundary call's span.
+- **A3 — recursion contract.** A `:let-init` `LocalBinding` carries its own
+  `:resolve-local`, scoped to its `:init-form-span` and sharing the parent's
+  budget atom, so the documented two-hop recursion actually works; the budget
+  now caps chain depth.
+- **B1 — `:destructured` catch-all.** The scanner returns the open-bracket stack
+  plus a depth-2 `[`-closed flag; `:destructured` requires every container below
+  the macro form to be `[`/`{`, fn-family arity `(` is treated explicitly
+  (multi-arity params are `:param`), and `catch`/`with-open`/`letfn`/… are
+  `:unknown`.
+
+Decisions recorded:
+
+- **§5.2(b) (`arg-span-set`):** `arg-span-set` now classifies each reached
+  binding and expands only `:let-init` spans — the old unconditional
+  `init-form-span` walk carried the §1.1 parameter misread into the constructor
+  pass's ownership spans.
+- **§5.1 (exact-vs-possible types)** stays undecided for the *explorer* (no
+  "one of" marker is added); the completeness rule is now documented in
+  `rule-annotations.md` for caller resolvers.
+- **`:init-form` canonicalization:** `classify-binding` canonicalizes minted
+  names in `:init-form` the same way `:arg-form` is, so reader gensyms do not
+  reach resolvers nondeterministically.
+- **Hook-generated locals** (`:derived-location`) remain unprobed; they are
+  expected to classify `:unknown` (no enclosing bracket to measure), but no test
+  pins that yet.
+
 ## Verification (all green)
 
 - `make format-check` → all files formatted correctly.
 - `make lint` → errors 0, warnings 0.
-- `make test` → 498 tests, 3281 assertions, 0 failures / 0 errors.
+- `make test` → 510 tests, 3298 assertions, 0 failures / 0 errors.
 - `make reflection-check` → no warnings in project code.
