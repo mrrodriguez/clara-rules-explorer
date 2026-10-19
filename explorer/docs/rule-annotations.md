@@ -676,20 +676,27 @@ reported twice.
 A boundary argument is **owned** by the constructor path when it is shown to
 reach a constructor that resolved. Ownership is decided per boundary argument
 (not per rule), because one rule may mix a constructor insert with an
-unrelated one. Three ways an argument reaches a constructor — the logic is
+unrelated one. It is decided from the argument's **ephemeral span set**
+(`clara.explorer.analyze.callsite/arg-span-set`): the boundary usage's span
+plus the source spans of every local transitively reachable from usages inside
+it — a `:let-init` expands to its init-form span, and `:seq-binding`/`:loop`
+expands to the collection/initial-value span. Two ways an argument reaches a
+constructor, both span-containment checks — the logic is
 `clara.explorer.analyze.callsite/find-owning-boundary-arg`:
 
 | The argument is… | Example | How it is matched |
 |---|---|---|
-| the constructor call itself | `(insert! (->fact :t m))`, `(insert-all! (mapv #(->fact :t %) xs))` | the constructor's source span is inside the boundary call's |
-| a call that leads to it | `(insert! (my-middle-fn args))` where `my-middle-fn` calls `->fact` | a call written inside the boundary call names a link on the constructor's `:via` `:boundary-to-constructor-path` — at any depth |
-| a local bound to it | `(let [f (->fact :t m)] (insert! f))` | the locals-traced form equals the resolved constructor call form |
+| the constructor call itself, including through locals | `(insert! (->fact :t m))`, `(let [f (->fact :t m)] (insert! f))`, `(insert-all! (mapv #(->fact :t %) xs))` | the constructor usage's position falls inside the argument's span set (position identity — a local's init-form span is part of the set) |
+| a call that leads to it | `(insert! (my-middle-fn args))` where `my-middle-fn` calls `->fact` | a var-usage inside the span set names a link on `intermediates` — the call-graph path from the inserter to the constructor's containing var, at any depth |
 
-All three are needed, and none subsumes the others. The call graph is
-`{caller-var -> #{callee-vars}}`, so it cannot say which of a rule's several
-`insert!` calls reached a constructor — that needs the source spans clj-kondo
-puts on every var-usage. And a bare local names nothing at all, so only the
-traced form joins it back.
+Both are decided by source-span containment across the span set — never by the
+text or value of a form, so a same-named form at a different position never
+cross-attributes. The call graph is `{caller-var -> #{callee-vars}}`, so it
+cannot say which of a rule's several `insert!` calls reached a constructor;
+that needs the source spans clj-kondo puts on every var-usage, expanded by the
+span set to reach into locals' init forms. `intermediates` deliberately
+excludes the constructor symbol itself, so only the first route may match the
+constructor — and by *usage identity*, not by name.
 
 An owned argument is skipped: `:callsite-resolver-fn` is never invoked for it,
 and the constructor entry (with `:constructor-sym` and `:via`) is the only
@@ -718,7 +725,7 @@ constructor the resolver cannot type is likewise not emitted; the argument
 falls through to the boundary path instead of being reported twice.
 
 The trade-off is recall: if an insert reaches a constructor by indirection none
-of the three routes can see — say `(insert-all! (apply f args))` — the type is
+of the two routes can see — say `(insert-all! (apply f args))` — the type is
 dropped rather than guessed. The boundary callsite then remains `:none`, which
 is the honest signal, and the caller can annotate `:clara-rules/insert-types`
 explicitly.
