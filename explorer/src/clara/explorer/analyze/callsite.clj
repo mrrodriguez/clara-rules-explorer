@@ -232,7 +232,7 @@
 
    Classification reads the innermost enclosing binding-macro form and measures
    the open-bracket stack up to the binding position (see
-   `kondo/->bracket-scan`).  Direct bindings sit at stack depth 2 (the macro
+   `kondo/scan-brackets-between`).  Direct bindings sit at stack depth 2 (the macro
    form's own `(` plus the binding vector); nested destructuring sits deeper
    and never goes through a list form, so `:destructured` requires every
    container below the macro form to be `[`/`{` (after skipping a fn-family
@@ -256,7 +256,7 @@
      destructuring semantics are reimplemented here."
   [{:keys [get-lines] :as ctx} ns-sym binding]
   (if-let [usage (find-enclosing-binding-macro-usage ctx binding)]
-    (let [scan (kondo/->bracket-scan get-lines ns-sym usage binding)
+    (let [scan (kondo/scan-brackets-between get-lines ns-sym usage binding)
           stack (:stack scan)
           past-depth2-close? (:past-depth2-close? scan)
           macro-name (:name usage)

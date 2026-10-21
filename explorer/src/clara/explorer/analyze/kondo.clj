@@ -290,11 +290,14 @@
                        (and (= ch \]) (= 2 (count stack)))))
             :else (recur (inc i) stack past-depth2-close?)))))))
 
-(defn ->bracket-scan
-  "The `scan-brackets` result for the source prefix between a macro usage's start and a binding
-  position within it, measured just before the binding position. Nil when the source cannot be read.
+(defn scan-brackets-between
+  "The `scan-brackets` result for the source prefix between two kondo
+   positions — `usage`'s start and `binding`'s position — measured just
+   before the binding position.  Nil when the source cannot be read.
 
-   `usage` and `binding` are kondo position maps (`:row`/`:col` 1-indexed, `:filename`)."
+   `usage` and `binding` are kondo position maps (`:row`/`:col` 1-indexed,
+   `:filename`).  Nothing here is specific to macro forms: the two positions
+   may be any points in a file."
   [get-lines
    ns-sym
    {:keys [row col filename] :as _usage}

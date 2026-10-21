@@ -140,7 +140,7 @@ docstrings. The rest of the pipeline is documented at the symbols themselves:
 | `:ns-source-map`/`:config-dir`/`:cache-atom` options | `clara.explorer.analyze/->rule-source-analysis-from-namespaces` |
 | Source lookup for callsite text | `clara.explorer.analyze/->source-loader` |
 | Read args at a kondo usage span | `clara.explorer.analyze.kondo/read-boundary-args` |
-| Bracket scan (binding classification) | `clara.explorer.analyze.kondo/->bracket-scan` |
+| Bracket scan (binding classification) | `clara.explorer.analyze.kondo/scan-brackets-between` |
 | Resolution chain overview | `clara.explorer.analyze.callsite` (ns docstring) |
 | Local binding classification | `clara.explorer.analyze.callsite/classify-binding` |
 | Local → init-form tracing | `clara.explorer.analyze.callsite/trace-local-form` |
