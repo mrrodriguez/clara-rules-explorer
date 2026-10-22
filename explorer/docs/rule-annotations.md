@@ -482,8 +482,12 @@ miss and worth stating here:
 - **A `:let-init` binding's `:resolve-local` is scoped to that init span**, so
   a resolver recurses into a returned `:init-form` by calling *that*
   `:resolve-local` — not the callsite-scoped one (which cannot see those
-  locals). The whole chain shares one depth budget; once exhausted, lookups
-  return nil.
+  locals). The whole chain shares one depth budget.
+- **Nil means "not a local"; nothing else does.** A lookup returns nil only
+  when the symbol names no local in the form. A local it cannot classify comes
+  back `{:kind :unknown}`, with `:reason :shadowed` (the name refers to more
+  than one binding inside the form) or `:reason :depth-exhausted` (the budget
+  is spent). A resolver must not read an `:unknown` local as a var.
 - **Exact-vs-possible types.** A lookup in a literal map, a `case`, or an `if`
   gives the *set* of values a type could be, not the one it is. A resolver that
   enumerates values must report every possible value and leave the callsite

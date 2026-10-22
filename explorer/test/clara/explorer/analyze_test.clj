@@ -746,8 +746,8 @@
       (is (match? [{:kind :let-init :init-form {"a" :t/a, "b" :t/b}}]
                   (get results [`atr/rule-resolve-local-literal-map 'map-type]))))
 
-    (testing "shadowed name inside the span resolves to nil"
-      (is (= [nil]
+    (testing "a name shadowed inside the span is a local, but :unknown and says why"
+      (is (= [{:kind :unknown :reason :shadowed}]
              (get results [`atr/rule-resolve-local-shadowed 'shadowed-type]))))
 
     (testing "fn parameter is :param with no init form"
@@ -800,7 +800,7 @@
                   (get results [`atr/rule-resolve-local-called 'local-fn]))))))
 
 (deftest test-resolve-local-budget
-  (testing "the 9th resolution from one context returns nil (recursion guard)"
+  (testing "the 9th resolution from one context is :unknown, :depth-exhausted (recursion guard)"
     (let [results (atom [])
           resolver (fn [{:keys [rule resolve-local]}]
                      (when (= (str `atr/rule-resolve-local-let-literal)
@@ -813,9 +813,23 @@
         :session-or-rulebase edge-case-session
         :callsite-resolver-fn resolver})
       (is (= 9 (count @results)))
-      (is (= 8 (count (remove nil? @results))))
-      (is (nil? (last @results))
-          "the budget caps at max-resolution-depth (8) successes per context"))))
+      (is (= 8 (count (filter #(= :let-init (:kind %)) @results))))
+      (is (= {:kind :unknown :reason :depth-exhausted} (last @results))
+          "the budget caps at max-resolution-depth (8) classified resolutions per context")))
+  (testing "a spent budget still tells a local apart from a symbol that names none"
+    (let [results (atom [])
+          resolver (fn [{:keys [rule resolve-local]}]
+                     (when (= (str `atr/rule-resolve-local-let-literal)
+                              (str (:name rule)))
+                       (dotimes [_ 8]
+                         (resolve-local 'lt-fact-type))
+                       (swap! results conj (resolve-local 'not-a-local-here)))
+                     nil)]
+      (analyze/->annotations-from-rule-source-analysis
+       {:rule-source-analysis edge-case-analysis
+        :session-or-rulebase edge-case-session
+        :callsite-resolver-fn resolver})
+      (is (= [nil] @results)))))
 
 (deftest test-resolve-local-recursion
   (testing "a resolver recurses through the returned binding's own :resolve-local"

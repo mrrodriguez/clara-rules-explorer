@@ -411,20 +411,11 @@
   (s/=> ResolvedTypes analyze.callsite/CallsiteResolverContext))
 
 (s/defschema FactTypeResolverContext
-  "What a `:type-resolver-fn` is handed for one callsite.
-  `analyze.callsite/ConstructorTypeResolverContext` is the shape the explorer
-  actually builds; this is deliberately looser, with every key optional, because
-  a resolver runs inside code this library does not own and has to be total over
-  whatever it is given. The explorer treats a throw as unresolved, so a resolver
-  that insisted on a key would degrade to silence rather than to an error."
-  {(s/optional-key :constructor-sym) s/Symbol
-   (s/optional-key :arg-form) s/Any
-   (s/optional-key :ns-name-sym) s/Symbol
-   (s/optional-key :filename) s/Str
-   (s/optional-key :direction) DetectionDimension
-   (s/optional-key :rule) s/Any
-   (s/optional-key :resolve-local) (s/=> (s/maybe analyze.callsite/LocalBinding) s/Symbol)
-   (s/optional-key :via) s/Any})
+  "What a `:type-resolver-fn` is handed for one callsite: exactly the
+  `analyze.callsite/ConstructorTypeResolverContext` the explorer builds, so a
+  resolver may rely on every required key, and a hand-built context in a
+  resolver's own tests validates only when it matches what the explorer passes."
+  analyze.callsite/ConstructorTypeResolverContext)
 
 (s/defschema FactTypeResolverFn
   "A spec's `:type-resolver-fn`: `(fn [FactTypeResolverContext] ->

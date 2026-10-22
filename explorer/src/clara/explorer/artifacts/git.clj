@@ -60,35 +60,76 @@
         (when (and (seq stripped) (not= "HEAD" stripped))
           stripped)))))
 
+(defn- mirror-clone?
+  "Whether `dir`'s repo mirrors `remote` (`remote.<remote>.mirror`), as the
+  cache tools.deps checks git deps out of does."
+  [dir remote]
+  (= "true" (git dir "config" "--bool" "--get" (format "remote.%s.mirror" remote))))
+
+(defn- get-remote-branch-layout
+  "Where `dir`'s repo keeps `remote`'s branches. A clone tracks them under
+  `refs/remotes/<remote>/`, with the remote's default at
+  `refs/remotes/<remote>/HEAD`. A mirror holds them as its own `refs/heads/`,
+  with the remote's default as the repo's own `HEAD` — read from the common git
+  dir, since a worktree's `HEAD` is its own checkout.
+
+  `:remote` is the alias a short ref name carries and loses on the way to a
+  branch name, nil for a mirror, whose short ref names are branch names."
+  [dir remote]
+  (if (mirror-clone? dir remote)
+    {:refs-prefix "refs/heads/"
+     :head-dir (git dir "rev-parse" "--path-format=absolute" "--git-common-dir")
+     :head-ref "HEAD"
+     :remote nil}
+    {:refs-prefix (format "refs/remotes/%s/" remote)
+     :head-dir dir
+     :head-ref (format "refs/remotes/%s/HEAD" remote)
+     :remote remote}))
+
+(defn- ->branch-name
+  "A short ref name as a branch name per `layout`, or nil when it names no
+  branch (`HEAD`, or a ref outside the remote)."
+  ^String [ref-name {:keys [remote]}]
+  (if remote
+    (strip-remote ref-name remote)
+    (when (and (seq ref-name) (not= "HEAD" ref-name))
+      ref-name)))
+
+(defn- get-remote-default-ref
+  "The short name of the ref the remote's default points at, or nil when the
+  remote does not advertise one."
+  ^String [{:keys [head-dir head-ref]}]
+  (git head-dir "symbolic-ref" "--short" head-ref))
+
 (defn default-branch
   "The remote's default branch name (`origin/HEAD`'s target, with the remote
-  alias stripped), or nil when the remote does not advertise one."
+  alias stripped, or a mirror's own `HEAD`), or nil when the remote does not
+  advertise one."
   ^String [dir remote]
-  (some-> (git dir "symbolic-ref" "--short"
-               (format "refs/remotes/%s/HEAD" remote))
-          (strip-remote remote)))
+  (let [layout (get-remote-branch-layout dir remote)]
+    (some-> (get-remote-default-ref layout)
+            (->branch-name layout))))
 
 (defn- default-branch-at
-  "The remote's default branch name when it points at `sha`, else nil.
-  `git symbolic-ref --short refs/remotes/origin/HEAD` names e.g. `origin/main`,
-  which is kept only if it resolves to the checkout's own sha."
-  ^String [dir sha remote]
-  (when-let [ref-name (git dir "symbolic-ref" "--short"
-                           (format "refs/remotes/%s/HEAD" remote))]
+  "The remote's default branch name when it points at `sha`, else nil. The
+  default's ref is kept only if it resolves to the checkout's own sha."
+  ^String [dir sha layout]
+  (when-let [ref-name (get-remote-default-ref layout)]
     (when (= sha (git dir "rev-parse" ref-name))
-      (strip-remote ref-name remote))))
+      (->branch-name ref-name layout))))
 
 (defn- any-branch-at
-  "First sorted remote-tracking branch on `remote` pointing at the checkout's
-  commit, sans remote alias. Nil when none does — a local branch that happens
-  to point at a detached commit says nothing about what the commit was synced
-  against, so only `refs/remotes` refs are considered."
-  ^String [dir remote]
+  "First sorted branch of the remote pointing at the checkout's commit, sans
+  remote alias. Nil when none does — a local branch of a clone that happens to
+  point at a detached commit says nothing about what the commit was synced
+  against, so only the remote's branches (see `get-remote-branch-layout`) are
+  considered."
+  ^String [dir {:keys [refs-prefix] :as layout}]
   (->> (str/split-lines (or (git dir "for-each-ref" "--points-at" "HEAD"
                                  "--format=%(refname:short)"
-                                 (format "refs/remotes/%s/" remote))
+                                 refs-prefix)
                             ""))
-       (keep #(strip-remote (str/trim %) remote))
+       (keep #(->branch-name (str/trim %) layout))
        sort
        first))
 
@@ -97,13 +138,14 @@
   own branch, pushed or not. A detached checkout (`rev-parse --abbrev-ref HEAD`
   reporting the literal `HEAD`) resolves to the remote branch — on the checkout's
   `origin` — pointing at the commit: the remote default first, then the first
-  sorted remote-tracking ref. `HEAD` is not a branch, so an unresolvable commit
+  sorted remote branch. `HEAD` is not a branch, so an unresolvable commit
   records nil."
   ^String [dir sha remote branch]
   (if (and (seq branch) (not= "HEAD" branch))
     branch
-    (or (default-branch-at dir sha remote)
-        (any-branch-at dir remote))))
+    (let [layout (get-remote-branch-layout dir remote)]
+      (or (default-branch-at dir sha layout)
+          (any-branch-at dir layout)))))
 
 (defn get-git-info
   "State-of-the-world for a repo dir, or nil if `dir` is missing / not a git
@@ -118,7 +160,9 @@
   own branch when attached, the remote branch pointing at the commit when
   detached — and is nil when no remote branch points at it. `:default-branch`
   is the remote's advertised default (`origin/HEAD`'s target, remote alias
-  stripped), nil when it has none; a nil default makes no run mainline."
+  stripped), nil when it has none; a nil default makes no run mainline. A
+  checkout of a mirror clone, such as a tools.deps git dep, reads both off the
+  mirror's own branches."
   [dir]
   (when-let [sha (ref-sha dir "HEAD")]
     {:remote (remote-url dir)

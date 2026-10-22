@@ -146,21 +146,27 @@
   (into let-init-macro-syms
         (concat fn-param-macro-syms seq-binding-macro-syms '#{loop})))
 
+(defn- find-local-binding-ids
+  "The kondo `:locals` ids the `:local-usages` entries for `sym` inside `span`
+   resolve to: empty when `sym` names no local there, more than one when the
+   name is shadowed inside the span.
+
+   Uses the precomputed `:local-usages-by-name` index (see
+   `index/AnalysisIndex`) — never scans the full analysis vectors."
+  [{:keys [local-usages-by-name]} span sym]
+  (into #{}
+        (comp (filter #(span-contains-pos? span (:filename %) (:row %) (:col %)))
+              (keep :id))
+        (get local-usages-by-name [(:filename span) sym])))
+
 (defn- find-unique-local-binding
   "The single kondo `:locals` binding every `:local-usages` entry for `sym`
    inside `span` resolves to, or nil when none do or they resolve to more than
-   one binding (the name is shadowed inside the span).
-
-   Uses the precomputed `:local-usages-by-name` / `:locals-by-id` indexes (see
-   `index/AnalysisIndex`) — never scans the full analysis vectors."
-  [{:keys [local-usages-by-name locals-by-id]} span sym]
-  (let [filename (:filename span)
-        ids (into #{}
-                  (comp (filter #(span-contains-pos? span (:filename %) (:row %) (:col %)))
-                        (keep :id))
-                  (get local-usages-by-name [filename sym]))]
+   one binding (see `find-local-binding-ids`)."
+  [{:keys [locals-by-id] :as ctx} span sym]
+  (let [ids (find-local-binding-ids ctx span sym)]
     (when (= 1 (count ids))
-      (get locals-by-id [filename (first ids)]))))
+      (get locals-by-id [(:filename span) (first ids)]))))
 
 (defn- find-enclosing-binding-macro-usage
   "The innermost binding-macro `:var-usage` whose span contains `binding`'s
@@ -326,12 +332,24 @@
 
 (defn- ->scoped-resolver
   "Returns a `(fn [sym] -> nil | LocalBinding)` scoped to `span`, sharing
-   `budget` across the whole resolution chain.  Every successful resolution
-   consumes one unit of `budget`; once exhausted every lookup returns nil."
-  [ctx ns-sym span budget]
+   `budget` across the whole resolution chain.
+
+   Nil means `sym` names no local inside `span`.  A local that cannot be
+   classified is `{:kind :unknown}` with a `:reason`: `:shadowed` when its
+   usages inside `span` resolve to more than one binding, `:depth-exhausted`
+   once the budget is spent.  Every classified resolution consumes one unit of
+   `budget`."
+  [{:keys [locals-by-id] :as ctx} ns-sym span budget]
   (fn [sym]
-    (when (pos? @budget)
-      (when-let [binding (find-unique-local-binding ctx span sym)]
+    (let [ids (find-local-binding-ids ctx span sym)
+          binding (when (= 1 (count ids))
+                    (get locals-by-id [(:filename span) (first ids)]))]
+      (cond
+        (empty? ids) nil
+        (< 1 (count ids)) {:kind :unknown :reason :shadowed}
+        (not (pos? @budget)) {:kind :unknown :reason :depth-exhausted}
+        (nil? binding) {:kind :unknown}
+        :else
         (let [{:keys [kind init-form-span] :as lb}
               (classify-local-binding ctx ns-sym binding)]
           (swap! budget dec)
@@ -344,7 +362,7 @@
   "Builds the `(fn [sym] -> nil | LocalBinding)` handed to resolver hooks as
    `:resolve-local`.  Scoped to `span` (the callsite span) and `ns-sym` (the
    callsite namespace).  A per-context budget seeded with `max-resolution-depth`
-   caps the total successful resolutions across the chain, so a resolver cannot
+   caps the total classified resolutions across the chain, so a resolver cannot
    recurse unboundedly through local chains."
   [ctx ns-sym span]
   (->scoped-resolver ctx ns-sym span (atom max-resolution-depth)))
@@ -612,8 +630,15 @@
    source data of arbitrary shape) and `:init-form-span` (the span that form
    was read from).  A `:let-init` binding whose init span is known also carries
    its own `:resolve-local`, scoped to that span, so a resolver can recurse
-   into the init form's locals; the whole chain shares one depth budget."
+   into the init form's locals; the whole chain shares one depth budget.
+
+   `:reason` says why a local is `:unknown` when it was not classified at all:
+   `:shadowed` (its occurrences in the form refer to more than one binding) or
+   `:depth-exhausted` (the budget is spent).  Either way the symbol *is* a
+   local, so a resolver must not read it as a var; only a nil lookup means the
+   symbol names no local."
   {:kind (s/enum :let-init :param :destructured :loop :seq-binding :unknown)
+   (s/optional-key :reason) (s/enum :shadowed :depth-exhausted)
    (s/optional-key :init-form) s/Any
    (s/optional-key :init-form-span) SourceSpan
    (s/optional-key :resolve-local) (s/=> (s/maybe (s/recursive #'LocalBinding)) s/Symbol)})

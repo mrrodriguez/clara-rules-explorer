@@ -112,6 +112,27 @@
                             (sh! (:dir repo) "worktree" "remove" "--force" wt)
                             (delete-tree (.getParent (io/file wt)))))))))
 
+      (testing "a worktree of a mirror clone reads the mirror's branches, as a git dep's checkout does"
+        (with-repo* (fn [{:keys [dir sha]}]
+                      (sh! dir "checkout" "-q" "-b" "feature")
+                      (let [feature-sha (commit! dir "feature")
+                            root (make-temp-dir "clara-git-mirror")
+                            mirror (str (io/file root "mirror.git"))
+                            main-wt (str (io/file root "main-wt"))
+                            feature-wt (str (io/file root "feature-wt"))]
+                        (try
+                          ;; a mirror's HEAD is the source's current branch: make it the default
+                          (sh! dir "checkout" "-q" "main")
+                          (sh! root "clone" "-q" "--mirror" dir mirror)
+                          (sh! mirror "worktree" "add" "-q" "--detach" main-wt sha)
+                          (sh! mirror "worktree" "add" "-q" "--detach" feature-wt feature-sha)
+                          (is (= {:branch "main" :default-branch "main"}
+                                 (select-keys (git/get-git-info main-wt) [:branch :default-branch])))
+                          (is (= {:branch "feature" :default-branch "main"}
+                                 (select-keys (git/get-git-info feature-wt) [:branch :default-branch]))
+                              "a commit only a non-default branch holds names that branch")
+                          (finally (delete-tree root)))))))
+
       (testing "a detached and an attached checkout of one commit agree"
         (with-repo* (fn [repo]
                       (point-origin! (:dir repo) (:sha repo) "main" "main")
