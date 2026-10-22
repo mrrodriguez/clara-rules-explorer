@@ -15,6 +15,9 @@
             [clara.explorer.test.rules.loan-app-rules]
             [clara.explorer.test.rules.loan-app-facts :as laf]
             [clara.explorer.test.rules.analyze-test-rules :as atr]
+            [clara.explorer.test.rules.cross-ns-boundary-helpers :as cnbh]
+            [clara.explorer.test.rules.cross-ns-boundary-rules :as cnbr]
+            [clara.explorer.test.rules.refer-all-rules :as rall]
             [clara.explorer.test-utils :as tu]
             [schema.test :as st])
   (:import [clara.explorer.test.rules.loan_app_facts
@@ -167,6 +170,28 @@
     :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
                          :type-resolver-fn ->fact-type-resolver}]
     :dynamic-type-fallback-resolution :none}))
+
+;; ---------------------------------------------------------------------------
+;; :refer :all callee-misattribution fixtures
+;; ---------------------------------------------------------------------------
+
+(def ^:private refer-all-session
+  (r/mk-session 'clara.explorer.test.rules.refer-all-rules))
+
+(def ^:private refer-all-analysis
+  (analyze/->rule-source-analysis
+   {:session-or-rulebase refer-all-session
+    :include-ns-prefixes [rules-prefix]}))
+
+(def ^:private refer-all-ctor-annotations
+  "Annotations for the refer-all fixture with ->fact constructor-of-interest
+   resolution. Without callee re-attribution the ->fact usage is reported as
+   `clara.rules/->fact` (no such var) and the insert is unresolved."
+  (analyze/->annotations-from-rule-source-analysis
+   {:rule-source-analysis refer-all-analysis
+    :session-or-rulebase refer-all-session
+    :fact-constructors [{:match-fn (->fact-sym-match-fn helpers->fact-sym)
+                         :type-resolver-fn ->fact-type-resolver}]}))
 
 ;; ---------------------------------------------------------------------------
 ;; Dynamic-detection expectation helpers (shared by insert/retract tests)
@@ -658,6 +683,261 @@
                 :callsite-resolver-fn (fn [_] (throw (ex-info "boom" {})))})]
       (is (= loan-doc-annotations ann)
           "a resolver that always throws yields the same annotations as no resolver"))))
+
+;; ---------------------------------------------------------------------------
+;; :resolve-local — local scope for resolver hooks
+;; ---------------------------------------------------------------------------
+
+(defn- resolve-local-boundary-results
+  "Runs edge-case annotations once with a resolver that, for each
+   `rule-sym -> [sym …]` pair, calls `:resolve-local` on each sym and records
+   the result (nil included). Returns `{[rule-sym sym] [LocalBinding-or-nil …]}`."
+  [rule->syms]
+  (let [results (atom {})
+        resolver (fn [{:keys [rule resolve-local]}]
+                   (let [rule-name (str (:name rule))]
+                     (doseq [[rule-sym syms] rule->syms
+                             sym syms]
+                       (when (= (str rule-sym) rule-name)
+                         (swap! results update [rule-sym sym]
+                                (fnil conj [])
+                                (resolve-local sym)))))
+                   nil)]
+    (analyze/->annotations-from-rule-source-analysis
+     {:rule-source-analysis edge-case-analysis
+      :session-or-rulebase edge-case-session
+      :callsite-resolver-fn resolver})
+    @results))
+
+(deftest test-resolve-local-boundary-context
+  (let [results (resolve-local-boundary-results
+                 {`atr/rule-resolve-local-let-literal       ['lt-fact-type]
+                  `atr/rule-resolve-local-let-chain         ['lt-outer 'lt-inner]
+                  `atr/rule-resolve-local-literal-map       ['map-type]
+                  `atr/rule-resolve-local-shadowed          ['shadowed-type]
+                  `atr/rule-resolve-local-fn-param          ['p-fact-type]
+                  `atr/rule-resolve-local-destructured      ['d-type]
+                  `atr/rule-resolve-local-loop              ['loop-type]
+                  `atr/rule-resolve-local-for               ['for-type]
+                  `atr/rule-resolve-local-doseq             ['doseq-type]
+                  `atr/rule-resolve-local-if-let            ['if-let-type]
+                  `atr/rule-resolve-local-when-let          ['when-let-type]
+                  `atr/rule-resolve-local-if-some           ['if-some-type]
+                  `atr/rule-resolve-local-when-some         ['when-some-type]
+                  `atr/rule-resolve-local-dotimes           ['dotimes-type]
+                  `atr/rule-resolve-local-for-let-modifier  ['for-let-type]
+                  `atr/rule-resolve-local-doseq-let-modifier ['doseq-let-type]
+                  `atr/rule-resolve-local-multi-arity-param ['p-multi-type]
+                  `atr/rule-resolve-local-multi-arity-destructured ['p-multi-destructured]
+                  `atr/rule-resolve-local-called            ['local-fn]})]
+    (testing "let local holding a literal"
+      (is (match? [{:kind :let-init :init-form :t/a}]
+                  (get results [`atr/rule-resolve-local-let-literal 'lt-fact-type]))))
+
+    (testing "chain of two let locals: the first hop returns the inner symbol; the second hop is out of the callsite's lexical scope"
+      (is (match? [{:kind :let-init :init-form 'lt-inner}]
+                  (get results [`atr/rule-resolve-local-let-chain 'lt-outer]))
+          "the outer hop returns the inner symbol, not its value")
+      (is (= [nil]
+             (get results [`atr/rule-resolve-local-let-chain 'lt-inner]))
+          "`lt-inner` is only referenced in the binding vector, not the callsite span"))
+
+    (testing "literal map init form is handed to the resolver verbatim"
+      (is (match? [{:kind :let-init :init-form {"a" :t/a, "b" :t/b}}]
+                  (get results [`atr/rule-resolve-local-literal-map 'map-type]))))
+
+    (testing "a name shadowed inside the span is a local, but :unknown and says why"
+      (is (= [{:kind :unknown :reason :shadowed}]
+             (get results [`atr/rule-resolve-local-shadowed 'shadowed-type]))))
+
+    (testing "fn parameter is :param with no init form"
+      (is (= [{:kind :param}]
+             (get results [`atr/rule-resolve-local-fn-param 'p-fact-type]))))
+
+    (testing "destructured symbol is :destructured with no init form"
+      (is (= [{:kind :destructured}]
+             (get results [`atr/rule-resolve-local-destructured 'd-type]))))
+
+    (testing "loop / for / doseq bindings report their kinds with no init form"
+      (is (= [{:kind :loop}]
+             (get results [`atr/rule-resolve-local-loop 'loop-type])))
+      (is (= [{:kind :seq-binding}]
+             (get results [`atr/rule-resolve-local-for 'for-type])))
+      (is (= [{:kind :seq-binding}]
+             (get results [`atr/rule-resolve-local-doseq 'doseq-type]))))
+
+    (testing "if-let / when-let / if-some / when-some bindings are :let-init with init form"
+      (is (match? [{:kind :let-init :init-form :t/if-let}]
+                  (get results [`atr/rule-resolve-local-if-let 'if-let-type])))
+      (is (match? [{:kind :let-init :init-form :t/when-let}]
+                  (get results [`atr/rule-resolve-local-when-let 'when-let-type])))
+      (is (match? [{:kind :let-init :init-form :t/if-some}]
+                  (get results [`atr/rule-resolve-local-if-some 'if-some-type])))
+      (is (match? [{:kind :let-init :init-form :t/when-some}]
+                  (get results [`atr/rule-resolve-local-when-some 'when-some-type]))))
+
+    (testing "dotimes binding reports :seq-binding with no init form"
+      (is (= [{:kind :seq-binding}]
+             (get results [`atr/rule-resolve-local-dotimes 'dotimes-type]))))
+
+    (testing "for / doseq :let modifiers report :destructured with no init form"
+      (is (= [{:kind :destructured}]
+             (get results [`atr/rule-resolve-local-for-let-modifier 'for-let-type])))
+      (is (= [{:kind :destructured}]
+             (get results [`atr/rule-resolve-local-doseq-let-modifier 'doseq-let-type]))))
+
+    (testing "multi-arity defn parameter reports :param with no init form"
+      (is (= [{:kind :param}]
+             (get results [`atr/rule-resolve-local-multi-arity-param 'p-multi-type]))))
+
+    (testing "destructured multi-arity defn parameter reports :destructured, matching single-arity"
+      (is (= [{:kind :destructured}]
+             (get results [`atr/rule-resolve-local-multi-arity-destructured 'p-multi-destructured]))))
+
+    (testing "a local called as a function resolves the head symbol"
+      (is (match? [{:kind :let-init
+                    :init-form '(fn [t] (make-local-fact t {:app-id ?app-id}))}]
+                  (get results [`atr/rule-resolve-local-called 'local-fn]))))))
+
+(deftest test-resolve-local-budget
+  (testing "the 9th resolution from one context is :unknown, :depth-exhausted (recursion guard)"
+    (let [results (atom [])
+          resolver (fn [{:keys [rule resolve-local]}]
+                     (when (= (str `atr/rule-resolve-local-let-literal)
+                              (str (:name rule)))
+                       (dotimes [_ 9]
+                         (swap! results conj (resolve-local 'lt-fact-type))))
+                     nil)]
+      (analyze/->annotations-from-rule-source-analysis
+       {:rule-source-analysis edge-case-analysis
+        :session-or-rulebase edge-case-session
+        :callsite-resolver-fn resolver})
+      (is (= 9 (count @results)))
+      (is (= 8 (count (filter #(= :let-init (:kind %)) @results))))
+      (is (= {:kind :unknown :reason :depth-exhausted} (last @results))
+          "the budget caps at max-resolution-depth (8) classified resolutions per context")))
+  (testing "a spent budget still tells a local apart from a symbol that names none"
+    (let [results (atom [])
+          resolver (fn [{:keys [rule resolve-local]}]
+                     (when (= (str `atr/rule-resolve-local-let-literal)
+                              (str (:name rule)))
+                       (dotimes [_ 8]
+                         (resolve-local 'lt-fact-type))
+                       (swap! results conj (resolve-local 'not-a-local-here)))
+                     nil)]
+      (analyze/->annotations-from-rule-source-analysis
+       {:rule-source-analysis edge-case-analysis
+        :session-or-rulebase edge-case-session
+        :callsite-resolver-fn resolver})
+      (is (= [nil] @results)))))
+
+(deftest test-resolve-local-recursion
+  (testing "a resolver recurses through the returned binding's own :resolve-local"
+    (let [results (atom [])
+          resolver (fn [{:keys [rule resolve-local]}]
+                     (when (= (str `atr/rule-resolve-local-let-chain)
+                              (str (:name rule)))
+                       (when-let [outer (resolve-local 'lt-outer)]
+                         (let [inner ((:resolve-local outer) 'lt-inner)]
+                           (swap! results conj
+                                  (:kind outer)
+                                  (:kind inner)
+                                  (:init-form inner)))))
+                     nil)]
+      (analyze/->annotations-from-rule-source-analysis
+       {:rule-source-analysis edge-case-analysis
+        :session-or-rulebase edge-case-session
+        :callsite-resolver-fn resolver})
+      (is (= [:let-init :let-init :t/b] @results)
+          "two-hop let chain: outer hop yields the inner symbol, whose own resolver hops again"))))
+
+(deftest test-resolve-local-traced-arg-scope
+  (testing ":resolve-local is scoped to the traced arg form's span, not the boundary call's"
+    (let [results (atom [])
+          resolver (fn [{:keys [rule arg-form resolve-local]}]
+                     (when (and (= (str `atr/rule-resolve-local-traced-arg)
+                                   (str (:name rule)))
+                                (seq? arg-form)
+                                (= 'make-local-fact (first arg-form)))
+                       (swap! results conj (resolve-local (second arg-form))))
+                     nil)]
+      (analyze/->annotations-from-rule-source-analysis
+       {:rule-source-analysis edge-case-analysis
+        :session-or-rulebase edge-case-session
+        :callsite-resolver-fn resolver})
+      (is (match? [{:kind :let-init :init-form :t/traced}] @results)
+          "the traced arg is (make-local-fact traced-type …); its sibling local resolves"))))
+
+(deftest test-resolve-local-unrecognized-bindings
+  (let [results (resolve-local-boundary-results
+                 {`atr/rule-resolve-local-catch             ['caught-e]
+                  `atr/rule-resolve-local-with-open         ['r]
+                  `atr/rule-resolve-local-with-open-helper  ['r]
+                  `atr/rule-resolve-local-letfn             ['local-fn-letfn]
+                  `atr/rule-resolve-local-named-fn          ['self]})]
+    (testing "unrecognized binding forms classify :unknown, never :destructured"
+      (is (= [{:kind :unknown}]
+             (get results [`atr/rule-resolve-local-catch 'caught-e])))
+      (is (= [{:kind :unknown}]
+             (get results [`atr/rule-resolve-local-with-open 'r])))
+      (is (= [{:kind :unknown}]
+             (get results [`atr/rule-resolve-local-with-open-helper 'r])))
+      (is (= [{:kind :unknown}]
+             (get results [`atr/rule-resolve-local-letfn 'local-fn-letfn]))))
+    (testing "a named-fn self name is unresolvable (kondo emits no :locals binding for it)"
+      (is (= [nil]
+             (get results [`atr/rule-resolve-local-named-fn 'self]))
+          "its :local-usages entry carries no :id, so the lookup returns nil"))))
+
+(defn- ->fact-local-type-resolver
+  "Resolves a `->fact` callsite whose type argument is a nested local, via
+   `:resolve-local`."
+  [{:keys [arg-form resolve-local]}]
+  (when (and (seq? arg-form)
+             (= 3 (count arg-form)))
+    (let [t (second arg-form)]
+      (when-let [b (and (symbol? t) (resolve-local t))]
+        (when (= :let-init (:kind b))
+          {:resolved-types [(:init-form b)]})))))
+
+(deftest test-resolve-local-constructor-context
+  (let [ann (analyze/->annotations-from-rule-source-analysis
+             {:rule-source-analysis edge-case-analysis
+              :session-or-rulebase edge-case-session
+              :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                   :type-resolver-fn ->fact-local-type-resolver}]})]
+    (is (= [:t/ctor]
+           (:clara-rules/insert-types
+            (ann/get-annotation ann `atr/rule-resolve-local-ctor-context))))
+    (is (match? (resolved-detection 'clara.explorer.test.rules.analyze-test-rules
+                                    "clara/explorer/test/rules/analyze_test_rules.clj"
+                                    "(->fact ctor-type {:app-id ?app-id})"
+                                    :t/ctor)
+                (:clara-rules/dynamic-insert-types-detected
+                 (ann/get-annotation ann `atr/rule-resolve-local-ctor-context))))))
+
+(deftest test-trace-local-form-classified
+  (testing "a fn parameter is no longer traced — the old read-init-form misread"
+    (let [dyn (:clara-rules/dynamic-insert-types-detected
+               (ann/get-annotation edge-case-annotations
+                                   `atr/rule-trace-local-param-not-followed))]
+      (is (some? dyn))
+      (is (= 1 (count (:callsites dyn))))
+      (is (= "trace-p-type" (:source-str (first (:callsites dyn))))
+          "the :param arg stays the parameter symbol, not the next parameter")
+      (is (nil? (:clara-rules/insert-types
+                 (ann/get-annotation edge-case-annotations
+                                     `atr/rule-trace-local-param-not-followed))))))
+
+  (testing "a chain of two let locals still traces to the constructor"
+    (let [a (ann/get-annotation edge-case-annotations
+                                `atr/rule-trace-local-let-chain)]
+      (is (= [`DocumentCheck] (:clara-rules/insert-types a)))
+      (is (match? (resolved-detection edge-case-ns-sym
+                                      edge-case-filename
+                                      "trace-outer"
+                                      `DocumentCheck)
+                  (:clara-rules/dynamic-insert-types-detected a))))))
 
 ;; ---------------------------------------------------------------------------
 ;; :fact-type-spec-fn — var-alias chains (caller-guided var-as-fact discovery)
@@ -1535,6 +1815,51 @@
                    (mapv :var-name-sym boundary-to-constructor-path))
                 "boundary-to-constructor-path: boundary-caller → ->fact (direct, no helper)")))))))
 
+(deftest test-refer-all-callee-reattribution
+  (testing "a name used from the second :refer :all namespace resolves to it, not the first"
+    (let [ann (ann/get-annotation refer-all-ctor-annotations `rall/refer-all-ctor-rule)
+          dyn (:clara-rules/dynamic-insert-types-detected ann)]
+      (is (= [:refer-all/out] (:clara-rules/insert-types ann))
+          "->fact type is promoted once the callee is corrected")
+      (is (= :full (:resolution dyn)))
+      (let [cs (first (:callsites dyn))]
+        (is (= helpers->fact-sym (:constructor-sym cs))
+            "constructor callee is helpers/->fact, never clara.rules/->fact")
+        (is (= [:refer-all/out] (:resolved-types cs)))
+        (is (= "(->fact :refer-all/out {:x ?x})" (:source-str cs)))
+        (let [{:keys [boundary-var-name-sym boundary-to-constructor-path]} (:via cs)]
+          (is (= 'clara.rules/insert! boundary-var-name-sym))
+          (is (= [`rall/refer-all-ctor-rule helpers->fact-sym]
+                 (mapv :var-name-sym boundary-to-constructor-path))))))))
+
+(deftest test-cross-ns-boundary-traversal
+  (testing "a boundary call inside a dependency namespace is traversed from the rule"
+    (let [session (r/mk-session 'clara.explorer.test.rules.cross-ns-boundary-rules)
+          analysis (analyze/->rule-source-analysis
+                    {:session-or-rulebase session
+                     :include-ns-prefixes [rules-prefix]})
+          ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis analysis
+                :session-or-rulebase session
+                :fact-constructors [{:match-fn (->fact-sym-match-fn helpers->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})
+          rule-ann (ann/get-annotation ann `cnbr/cross-ns-boundary-rule)
+          dyn (:clara-rules/dynamic-insert-types-detected rule-ann)]
+      (is (= [:cross-ns-boundary/out] (:clara-rules/insert-types rule-ann))
+          "insert type resolves through the dependency-namespace helper")
+      (is (= :full (:resolution dyn)))
+      (let [cs (first (:callsites dyn))]
+        (is (= helpers->fact-sym (:constructor-sym cs)))
+        (is (= [:cross-ns-boundary/out] (:resolved-types cs)))
+        (is (= 'clara.rules/insert! (-> cs :via :boundary-var-name-sym)))
+        (is (= `cnbh/insert-cross-ns-fact! (-> cs :via :boundary-in-var))
+            "the boundary call lives in the dependency namespace, not the rule")
+        (is (= [`cnbr/cross-ns-boundary-rule `cnbh/insert-cross-ns-fact!]
+               (mapv :var-name-sym (-> cs :via :rule-to-boundary-path)))
+            "rule -> dependency-namespace helper -> boundary")
+        (is (= [`cnbh/insert-cross-ns-fact! helpers->fact-sym]
+               (mapv :var-name-sym (-> cs :via :boundary-to-constructor-path))))))))
+
 (deftest test-constructor-resolver-overrules-callsite-resolver
   (testing "constructor path owns its callsite; generic resolver handles the rest"
     (let [seen (atom [])
@@ -1758,6 +2083,38 @@
       (is (empty? @seen)
           ":callsite-resolver-fn sees nothing — every arg is constructor-owned"))))
 
+(deftest test-constructor-seq-loop-source-expansion
+  (testing "ctors reached only through doseq/for/loop binding *sources* are owned"
+    (let [ann (analyze/->annotations-from-rule-source-analysis
+               {:rule-source-analysis edge-case-analysis
+                :session-or-rulebase edge-case-session
+                :rules-filter [`atr/rule-ctor-doseq-source
+                               `atr/rule-ctor-for-source
+                               `atr/rule-ctor-loop-source]
+                :fact-constructors [{:match-fn (->fact-sym-match-fn ->fact-sym)
+                                     :type-resolver-fn ->fact-type-resolver}]})]
+      (testing "doseq binding source"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-doseq-source)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              cs (first (:callsites dyn))]
+          (is (= [:demo/looked-up-2] (:clara-rules/insert-types a)))
+          (is (= :full (:resolution dyn)))
+          (is (= ->fact-sym (:constructor-sym cs)))))
+      (testing "for binding source inserted via insert-all! over the for form"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-for-source)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              cs (first (:callsites dyn))]
+          (is (= [:demo/looked-up-1] (:clara-rules/insert-types a)))
+          (is (= :full (:resolution dyn)))
+          (is (= ->fact-sym (:constructor-sym cs)))))
+      (testing "loop initial value"
+        (let [a (ann/get-annotation ann `atr/rule-ctor-loop-source)
+              dyn (:clara-rules/dynamic-insert-types-detected a)
+              cs (first (:callsites dyn))]
+          (is (= [:demo/looked-up-1] (:clara-rules/insert-types a)))
+          (is (= :full (:resolution dyn)))
+          (is (= ->fact-sym (:constructor-sym cs))))))))
+
 (deftest test-constructor-options-validation
   (testing "a :fact-constructors spec missing :type-resolver-fn fails schema validation"
     (is (thrown? Exception
@@ -1832,7 +2189,6 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Callsite `:via` provenance — `:boundary-in-var` and `:rule-to-boundary-path`
-;; (see docs/planning/analyze-callsite-provenance-fixes-problem-statement.md)
 ;; ---------------------------------------------------------------------------
 
 (deftest test-via-boundary-in-var-direct-rhs

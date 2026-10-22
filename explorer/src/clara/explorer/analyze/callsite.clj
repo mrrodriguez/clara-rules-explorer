@@ -10,9 +10,9 @@
       ->X/map->X ctor var whose derived class loads ⇒ fq class-name token.
    2. Java ctor form — (X. …), (new X …), (X/new …): strip the ctor marker,
       resolve the class name in the live caller ns ⇒ fq class-name token.
-   3. Local symbol — kondo :local-usages :id → :locals binding → init form
-      (read from the source right after the binding symbol) → the chain
-      restarts on the traced form (depth-capped).
+   3. Local symbol — kondo :local-usages :id → :locals binding → its
+      `:let-init` form (params / destructured / loop / seq bindings are not
+      traced) → the chain restarts on the traced form (depth-capped).
    4. Otherwise → the caller's :callsite-resolver-fn, then :none (unresolved).
 
    The automatic chain resolves only what we know the instance type of —
@@ -32,7 +32,7 @@
    runs first and *owns* the arguments it accounts for, so no insert is
    reported twice.
 
-   Var-alias chains (`:fact-type-spec-fn`, see `analyze.alias`): callsites
+   Var-alias chains (`:fact-type-spec-fn`, see `clara.explorer.analyze.alias`): callsites
    discovered through an alias chain bypass the ctor chain and are recorded
    :none (unresolved) with `:fact-type`/`:fact-type-spec` context attached (then
    handed to the resolver).
@@ -44,8 +44,8 @@
    aggregation.
 
    All Clojure syntax understanding comes from clj-kondo; reading forms at
-   kondo positions lives in `analyze.kondo`, constructor recognition in
-   `analyze.ctor`."
+   kondo positions lives in `clara.explorer.analyze.kondo`, constructor
+   recognition in `clara.explorer.analyze.ctor`."
   (:require [schema.core :as s]
             [clojure.tools.logging :as log]
             [clara.explorer.analyze.utils :as u]
@@ -57,7 +57,8 @@
 (def ^:private max-resolution-depth 8)
 
 ;; ---------------------------------------------------------------------------
-;; Step 3: locals tracing
+;; Source-position span helpers (shared by locals tracing and the
+;; constructor-pass span set)
 ;; ---------------------------------------------------------------------------
 
 (defn- usage->span
@@ -68,48 +69,337 @@
    :start [row col]
    :end [end-row end-col]})
 
-(defn- find-local-binding
-  "Finds the kondo `:locals` binding for a local symbol used at a known source
-   span: the `:local-usages` entry matching the symbol within `span`, linked to
-   its binding via kondo's per-ns-run `:id`.  Lookups are constrained to the
-   span's `:filename` because ids restart per analyzed namespace and collide in
-   the merged analysis.
+(defn- position<=
+  "Source-position ordering: `[row col]` before-or-equal `[row col]`."
+  [r1 c1 r2 c2]
+  (or (< r1 r2) (and (= r1 r2) (<= c1 c2))))
 
-   Uses the precomputed `:local-usages-by-name` / `:locals-by-id` indexes (see
-   `index/AnalysisIndex`) — never scans the
-   full analysis vectors."
-  [{:keys [local-usages-by-name locals-by-id]} {:keys [filename start end]} arg-sym]
-  (let [[row col] start
-        [end-row end-col] end
-        within-span? (fn [u]
-                       (and (= filename (:filename u))
-                            (<= row (:row u) end-row)
-                            (or (not= row (:row u)) (<= col (:col u)))
-                            (or (not= end-row (:row u)) (< (:col u) end-col))))
-        local-usage (->> (get local-usages-by-name [filename arg-sym])
-                         (filter within-span?)
-                         first)]
-    (when-let [id (:id local-usage)]
-      (get locals-by-id [filename id]))))
+(defn- span-contains-pos?
+  "True when 1-indexed `[row col]` lies in `span` (`{:filename … :start
+   [row col] :end [row col]}`, `:end` exclusive)."
+  [{:keys [filename start end]} ufilename row col]
+  (boolean
+   (and (= filename ufilename)
+        start end row col
+        (position<= (first start) (second start) row col)
+        (let [[er ec] end]
+          (or (< row er) (and (= row er) (< col ec)))))))
+
+(defn- first-usage-index-at-or-after
+  "Binary search: first index in `[row col]`-sorted `sorted-usages` (a vector)
+   at or after `[srow scol]`.  Vectors make `count`/`nth` O(1) — on the seq
+   `sort-by` returns this becomes O(n) per probe, so the span-index map (see
+   `index/usages-by-filename`) materializes its groups as vectors."
+  [sorted-usages srow scol]
+  (loop [lo 0 hi (count sorted-usages)]
+    (if (>= lo hi)
+      lo
+      (let [mid (quot (+ lo hi) 2)
+            u (nth sorted-usages mid)
+            r (or (:row u) 0)
+            c (or (:col u) 0)]
+        (if (or (> r srow) (and (= r srow) (>= c scol)))
+          (recur lo mid)
+          (recur (inc mid) hi))))))
+
+(defn- usages-in-span
+  "Entries of `[row col]`-sorted `sorted-usages` (one file, a vector) whose
+   start position lies in `span` (`:end` exclusive).  Two binary searches
+   bound the slice, so the cost is O(log n + k) in the usages rather than an
+   O(n) `drop` after an O(n) search.  Nil-safe on malformed spans."
+  [sorted-usages {:keys [start end] :as _span}]
+  (if (or (nil? start) (nil? end))
+    []
+    (let [[sr sc] start
+          [er ec] end
+          from (first-usage-index-at-or-after sorted-usages sr sc)
+          to (first-usage-index-at-or-after sorted-usages er ec)]
+      (if (<= from to)
+        (subvec sorted-usages from to)
+        []))))
+
+;; ---------------------------------------------------------------------------
+;; Local binding classification
+;; ---------------------------------------------------------------------------
+
+(def ^:private let-init-macro-syms
+  "Binding forms whose direct left-hand sides are `:let-init` — the only kind
+   whose value is statically the init form for the whole scope."
+  '#{let let* if-let when-let if-some when-some})
+
+(def ^:private fn-param-macro-syms
+  "Binding forms whose direct binding symbols are function parameters."
+  '#{fn fn* defn defn-})
+
+(def ^:private seq-binding-macro-syms
+  "Binding forms whose direct binding symbols are sequence bindings."
+  '#{for doseq dotimes})
+
+(def ^:private binding-macro-syms
+  "Every binding form classification recognizes.  Other let-like macros
+   (`binding`, `with-open`, `with-redefs`, …) are deliberately absent: their
+   direct binding symbols never classify `:let-init` (no init form is ever
+   handed out).  Outside any recognized binding macro they classify
+   `:unknown`; nested inside one they classify `:destructured` only when every
+   container below the macro form is a `[`/`{` (destructuring never goes
+   through a list form)."
+  (into let-init-macro-syms
+        (concat fn-param-macro-syms seq-binding-macro-syms '#{loop})))
+
+(defn- find-local-binding-ids
+  "The kondo `:locals` ids the `:local-usages` entries for `sym` inside `span`
+   resolve to: empty when `sym` names no local there, more than one when the
+   name is shadowed inside the span.
+
+   Uses the precomputed `:local-usages-by-name` index (see
+   `index/AnalysisIndex`) — never scans the full analysis vectors."
+  [{:keys [local-usages-by-name]} span sym]
+  (into #{}
+        (comp (filter #(span-contains-pos? span (:filename %) (:row %) (:col %)))
+              (keep :id))
+        (get local-usages-by-name [(:filename span) sym])))
+
+(defn- find-unique-local-binding
+  "The single kondo `:locals` binding every `:local-usages` entry for `sym`
+   inside `span` resolves to, or nil when none do or they resolve to more than
+   one binding (see `find-local-binding-ids`)."
+  [{:keys [locals-by-id] :as ctx} span sym]
+  (let [ids (find-local-binding-ids ctx span sym)]
+    (when (= 1 (count ids))
+      (get locals-by-id [(:filename span) (first ids)]))))
+
+(defn- find-enclosing-binding-macro-usage
+  "The innermost binding-macro `:var-usage` whose span contains `binding`'s
+   position, or nil.  The per-file `:var-usages-by-filename` index is
+   `[row col]`-sorted, so a binary search bounds the candidate prefix and a
+   backwards walk finds the innermost containing macro in O(log n + k).
+
+   Matches on `:name` *and* a `clojure.core` `:to` — kondo attributes every
+   name in `binding-macro-syms` to `clojure.core` (both the macros and the
+   `let*`/`fn*` special forms), so a user- or library-defined var named
+   `let`/`loop`/`for`/… whose span happens to enclose the point is never
+   mistaken for the core form."
+  [{:keys [var-usages-by-filename]} {:keys [filename row col]}]
+  (when-let [usages (get var-usages-by-filename filename)]
+    (when (and row col)
+      (let [lo (first-usage-index-at-or-after usages row col)]
+        (loop [i (dec lo)]
+          (when (>= i 0)
+            (let [u (nth usages i)]
+              (if (and (contains? binding-macro-syms (:name u))
+                       (= 'clojure.core (:to u))
+                       (span-contains-pos? (usage->span u) filename row col))
+                u
+                (recur (dec i))))))))))
+
+(defn- fn-param-binding?
+  "True when `scan` describes a fn-family parameter: the binding is still in
+   the fn header (no depth-2 container — the params vector — has closed) and
+   sits directly in the params vector (single arity, depth 2) or in the params
+   vector of an arity list (multi-arity, depth 3).
+
+   `macro-name` is the bare `:name` symbol of a usage
+   `find-enclosing-binding-macro-usage` already matched — it carries no
+   namespace qualifier, and its `:to` has already been verified to be
+   `clojure.core`."
+  [macro-name {:keys [stack past-depth2-close?]}]
+  (and (contains? fn-param-macro-syms macro-name)
+       (not past-depth2-close?)
+       (or (= 2 (count stack))
+           (and (= 3 (count stack))
+                (= \( (nth stack 1))
+                (= \[ (nth stack 2))))))
+
+(defn- destructured-stack?
+  "True when the containers from the binding/params vector down to the binding
+   are all `[`/`{` — destructuring never goes through a list form.  The
+   fn-family arity list `(` (when present at depth 2) is structural and
+   skipped.  The binding must still be in the macro header (no depth-2 `]`
+   closed yet) and inside the binding/params vector itself: `(first inner)`
+   is that vector's `[`, so a depth-2 `(` that is not a fn-family arity list
+   (an unrecognized binding macro in a single-arity body) never classifies
+   as destructuring."
+  [macro-name {:keys [stack past-depth2-close?]}]
+  (when-not past-depth2-close?
+    (let [inner (if (and (contains? fn-param-macro-syms macro-name)
+                         (= \( (second stack)))
+                  (subvec stack 2)
+                  (subvec stack 1))]
+      (and (> (count inner) 1)
+           (= \[ (first inner))
+           (every? #{\[ \{} inner)))))
+
+(defn- classify-binding
+  "Classifies a kondo `:locals` binding into a `LocalBinding`: `:kind`, plus
+   `:init-form`/`:init-form-span` when — and only when — the binding is a
+   direct let-family left-hand side.  `ns-sym` names the namespace the
+   binding's source belongs to (for source lookup); `binding` is the kondo
+   `:locals` entry.
+
+   Classification reads the innermost enclosing binding-macro form and measures
+   the open-bracket stack up to the binding position (see
+   `kondo/scan-brackets-between`).  Direct bindings sit at stack depth 2 (the macro
+   form's own `(` plus the binding vector); nested destructuring sits deeper
+   and never goes through a list form, so `:destructured` requires every
+   container below the macro form to be `[`/`{` (after skipping a fn-family
+   arity list).
+
+   Invariants:
+   - Only `:let-init` carries an `:init-form`/`:init-form-span`, and it requires
+     a `clojure.core` let-family macro at exactly stack depth 2, still in the
+     header (`past-depth2-close?` false).  Every other kind is label-only, so
+     misclassification under-reports (drops a resolvable local) rather than
+     over-reports (fabricates a value).
+   - `:seq-binding`/`:loop` also attach a `:source-span` — the next-form span
+     after the binding symbol, which is the collection/initial value.  It is
+     internal to `arg-span-set` ownership expansion, not a resolver contract;
+     a seq binding's *value* is still not its source.
+   - The enclosing macro is the innermost recognized one (see
+     `find-enclosing-binding-macro-usage`): a caller-supplied macro named
+     `let`/`defn`/…, or any unrecognized form, is never treated as one — its
+     bindings classify `:unknown`.
+   - kondo has already decided which source positions are bindings, so no
+     destructuring semantics are reimplemented here."
+  [{:keys [get-lines] :as ctx} ns-sym binding]
+  (if-let [usage (find-enclosing-binding-macro-usage ctx binding)]
+    (let [scan (kondo/scan-brackets-between get-lines ns-sym usage binding)
+          stack (:stack scan)
+          past-depth2-close? (:past-depth2-close? scan)
+          macro-name (:name usage)
+          n (count stack)
+          bounded-binding (assoc binding :end-row (:end-row usage))]
+      (cond
+        (and stack
+             (contains? let-init-macro-syms macro-name)
+             (= n 2)
+             (not past-depth2-close?))
+        (let [init-form (some-> (kondo/read-init-form get-lines ns-sym bounded-binding)
+                                utils/canonicalize-minted-names)
+              init-form-span (kondo/init-form-span get-lines ns-sym bounded-binding)]
+          (cond-> {:kind :let-init}
+            (some? init-form) (assoc :init-form init-form)
+            (some? init-form-span) (assoc :init-form-span init-form-span)))
+
+        (and stack (fn-param-binding? macro-name scan))
+        {:kind :param}
+
+        (and stack
+             (contains? seq-binding-macro-syms macro-name)
+             (= n 2)
+             (not past-depth2-close?))
+        (let [source-span (kondo/init-form-span get-lines ns-sym bounded-binding)]
+          (cond-> {:kind :seq-binding}
+            (some? source-span) (assoc :source-span source-span)))
+
+        (and stack (= 'loop macro-name) (= n 2) (not past-depth2-close?))
+        (let [source-span (kondo/init-form-span get-lines ns-sym bounded-binding)]
+          (cond-> {:kind :loop}
+            (some? source-span) (assoc :source-span source-span)))
+
+        (and stack (> n 2) (not past-depth2-close?)
+             (destructured-stack? macro-name scan))
+        {:kind :destructured}
+
+        :else
+        {:kind :unknown}))
+    {:kind :unknown}))
+
+(defn ->local-binding-classifier
+  "Returns a `(fn [ns-sym binding] -> classification-map)` memoized by
+   `[filename local-id]` for the lifetime of one analysis index.  kondo local
+   ids are stable within a run, and classification is source-reading work
+   shared across every `trace-local-form` hop, `:resolve-local` lookup, and
+   `arg-span-set` expansion.
+
+   The map is a `LocalBinding` plus an internal `:source-span` on
+   `:seq-binding`/`:loop` — stripped by `->scoped-resolver` before a
+   `:resolve-local` result reaches a resolver.  `classify-binding` always
+   returns a map (never nil), so a nil-valued cache entry cannot occur."
+  [ctx]
+  (let [cache (atom {})]
+    (fn [ns-sym binding]
+      (let [k [(:filename binding) (:id binding)]]
+        (or (get @cache k)
+            (let [lb (classify-binding ctx ns-sym binding)]
+              (swap! cache assoc k lb)
+              lb))))))
+
+(defn- classify-local-binding
+  "Classifies `binding` via the memoized classifier carried in `ctx` (see
+   `->local-binding-classifier`), which every analysis context carries."
+  [ctx ns-sym binding]
+  ((:classify-local-binding ctx) ns-sym binding))
+
+(defn- ->scoped-resolver
+  "Returns a `(fn [sym] -> nil | LocalBinding)` scoped to `span`, sharing
+   `budget` across the whole resolution chain.
+
+   Nil means `sym` names no local inside `span`.  A local that cannot be
+   classified is `{:kind :unknown}` with a `:reason`: `:shadowed` when its
+   usages inside `span` resolve to more than one binding, `:depth-exhausted`
+   once the budget is spent.  Every classified resolution consumes one unit of
+   `budget`."
+  [{:keys [locals-by-id] :as ctx} ns-sym span budget]
+  (fn [sym]
+    (let [ids (find-local-binding-ids ctx span sym)
+          binding (when (= 1 (count ids))
+                    (get locals-by-id [(:filename span) (first ids)]))]
+      (cond
+        (empty? ids) nil
+        (< 1 (count ids)) {:kind :unknown :reason :shadowed}
+        (not (pos? @budget)) {:kind :unknown :reason :depth-exhausted}
+        (nil? binding) {:kind :unknown}
+        :else
+        (let [{:keys [kind init-form-span] :as lb}
+              (classify-local-binding ctx ns-sym binding)]
+          (swap! budget dec)
+          (let [lb (dissoc lb :source-span)] ; internal to arg-span-set, not a resolver contract
+            (if (and (= :let-init kind) init-form-span)
+              (assoc lb :resolve-local (->scoped-resolver ctx ns-sym init-form-span budget))
+              lb)))))))
+
+(defn- ->resolve-local
+  "Builds the `(fn [sym] -> nil | LocalBinding)` handed to resolver hooks as
+   `:resolve-local`.  Scoped to `span` (the callsite span) and `ns-sym` (the
+   callsite namespace).  A per-context budget seeded with `max-resolution-depth`
+   caps the total classified resolutions across the chain, so a resolver cannot
+   recurse unboundedly through local chains."
+  [ctx ns-sym span]
+  (->scoped-resolver ctx ns-sym span (atom max-resolution-depth)))
 
 (defn- trace-local-form
   "Follows local-symbol arguments to their binding init forms, depth-capped.
-   `span` is the source span to resolve the current local usage in — the
-   boundary-call span on the first hop, then each traced binding's init span.
-   Returns the deepest form reached: the init form of the innermost traced
-   local, or `arg-form` itself when it is not a traceable local."
-  [arg-form {:keys [get-lines] :as ctx}
-   ns-sym span depth]
+   Only `:let-init` bindings are traced (see `classify-binding`); parameters,
+   destructured symbols, loop/seq bindings, and unknown kinds are left as the
+   argument symbol — their value is not statically the init form.
+
+   Returns `{:form … :span …}`: the deepest form reached and the span it was
+   read from — the boundary-call span on the first hop, then each traced
+   binding's `:init-form-span`."
+  [arg-form ctx ns-sym span depth]
   (if (and (symbol? arg-form) (< depth max-resolution-depth))
-    (if-let [binding (find-local-binding ctx span arg-form)]
-      (if-let [init-form (kondo/read-init-form get-lines ns-sym binding)]
-        (if-let [init-span (and (symbol? init-form)
-                                (kondo/init-form-span get-lines ns-sym binding))]
-          (recur init-form ctx ns-sym init-span (inc depth))
-          init-form)
-        arg-form)
-      arg-form)
-    arg-form))
+    (let [binding (find-unique-local-binding ctx span arg-form)
+          local-binding (and binding (classify-local-binding ctx ns-sym binding))]
+      (if (= :let-init (:kind local-binding))
+        (let [init-form (:init-form local-binding)
+              init-span (:init-form-span local-binding)]
+          (cond
+            (nil? init-form)
+            {:form arg-form :span span}
+
+            (and (symbol? init-form) init-span)
+            (recur init-form ctx ns-sym init-span (inc depth))
+
+            :else
+            ;; The form and its span must always pair.  When the init form read
+            ;; but its span did not, stop tracing rather than pairing the init
+            ;; form with the boundary span (which would scope `:resolve-local`
+            ;; to the boundary call instead of the init form).
+            (if init-span
+              {:form init-form :span init-span}
+              {:form arg-form :span span})))
+        {:form arg-form :span span}))
+    {:form arg-form :span span}))
 
 ;; ---------------------------------------------------------------------------
 ;; Token normalization
@@ -133,15 +423,17 @@
   `clara.explorer.analyze/->annotations-from-rule-source-analysis`). Alias context keys
   (`:fact-type`/`:fact-type-spec`) are present only for callsites discovered through a var-alias
   chain (`:fact-type-spec-fn`)."
-  [{:keys [rule direction usage alias-context]} arg-form]
-  (let [arg-form (utils/canonicalize-minted-names arg-form)]
+  [{:keys [rule direction usage alias-context traced-span] :as ctx} arg-form]
+  (let [arg-form (utils/canonicalize-minted-names arg-form)
+        span (or traced-span (usage->span usage))]
     (cond-> {:rule rule
              :ns-name-sym (:from usage)
              :direction direction
              :boundary-fn (symbol (str (:to usage)) (str (:name usage)))
              :arg-form arg-form
              :source-str (pr-str arg-form)
-             :filename (:filename usage)}
+             :filename (:filename usage)
+             :resolve-local (->resolve-local ctx (:from usage) span)}
       alias-context (merge (select-keys alias-context [:fact-type :fact-type-spec])))))
 
 (defn- invoke-callsite-resolver
@@ -174,7 +466,8 @@
            (ctor/resolve-ctor-form (:resolve-record-type ctx) live-ns-sym traced))
          ;; everything else defers to the caller's escape hatch (receives the
          ;; traced form): helper calls, with-meta, var-as-fact, literals.
-         (invoke-callsite-resolver callsite-resolver-fn (->callsite-resolver-context ctx traced))
+         (when callsite-resolver-fn
+           (invoke-callsite-resolver callsite-resolver-fn (->callsite-resolver-context ctx traced)))
          '())]
     (into #{}
           (map normalize-token)
@@ -205,10 +498,12 @@
                               args (or (seq (kondo/read-boundary-args usage get-lines))
                                        [(:name usage)])]
                           (map (fn [arg]
-                                 {:usage usage
-                                  :arg arg
-                                  :alias-context alias-ctx
-                                  :traced (trace-local-form arg ctx (:from usage) (usage->span usage) 0)})
+                                 (let [traced (trace-local-form arg ctx (:from usage) (usage->span usage) 0)]
+                                   {:usage usage
+                                    :arg arg
+                                    :alias-context alias-ctx
+                                    :traced (:form traced)
+                                    :traced-span (:span traced)}))
                                args))))
               (map-indexed (fn [i ta] (assoc ta :idx i))))
         usages))
@@ -217,7 +512,7 @@
   "Aggregates a callsite vector into a dimension-level resolution: nil (no
    callsites — the dimension is absent), :full (all :full), :none (all
    :none), :partial (otherwise).  Shared by the analyzer and by
-   `annotations.callsite/aggregate-resolution`, which additionally excludes
+   `clara.explorer.annotations.callsite/aggregate-resolution`, which additionally excludes
    quarantined (`:dangling?`) callsites first."
   [callsites]
   (cond
@@ -279,15 +574,26 @@
 ;; Schemas
 ;; ---------------------------------------------------------------------------
 
+(s/defschema SourceSpan
+  "A 1-indexed source span (`:end` exclusive), as produced by
+   `usage->span` / `kondo/init-form-span`."
+  {:filename s/Str
+   :start [s/Int]
+   :end [s/Int]})
+
 (s/defschema TracedArg
   "One boundary-call argument after reading + locals tracing (the output of
    `trace-boundary-args`).  `:arg` and `:traced` are unevaluated source data —
-   rule bindings inside them are free symbols.  `:alias-context` is non-nil
-   only for callsites discovered through a var-alias chain."
+   rule bindings inside them are free symbols.  `:traced-span` is the span the
+   traced form was read from, which a `:resolve-local` hook must scope to (the
+   traced form may live outside the boundary usage's own span).
+   `:alias-context` is non-nil only for callsites discovered through a
+   var-alias chain."
   {:idx s/Int
    :usage u/KondoVarUsage
    :arg s/Any
    :traced s/Any
+   :traced-span SourceSpan
    ;; :fact-type is s/Any: keywords, fq class-name symbols, strings are all
    ;; legitimate fact types; :fact-type-spec is an open caller-defined map
    :alias-context (s/maybe {(s/optional-key :fact-type) s/Any
@@ -315,6 +621,34 @@
    (s/optional-key :rule-to-boundary-path) [ViaEntry]
    (s/optional-key :source) (s/enum :record-ctor-scan)})
 
+(declare LocalBinding)
+
+(s/defschema LocalBinding
+  "A classified kondo `:locals` binding, returned by a `:resolve-local` fn.
+   `:kind` tells a resolver whether the binding's value is statically knowable;
+   only `:let-init` carries `:init-form` (the read init form, itself unevaluated
+   source data of arbitrary shape) and `:init-form-span` (the span that form
+   was read from).  A `:let-init` binding whose init span is known also carries
+   its own `:resolve-local`, scoped to that span, so a resolver can recurse
+   into the init form's locals; the whole chain shares one depth budget.
+
+   `:reason` says why a local is `:unknown` when it was not classified at all:
+   `:shadowed` (its occurrences in the form refer to more than one binding) or
+   `:depth-exhausted` (the budget is spent).  Either way the symbol *is* a
+   local, so a resolver must not read it as a var; only a nil lookup means the
+   symbol names no local."
+  {:kind (s/enum :let-init :param :destructured :loop :seq-binding :unknown)
+   (s/optional-key :reason) (s/enum :shadowed :depth-exhausted)
+   (s/optional-key :init-form) s/Any
+   (s/optional-key :init-form-span) SourceSpan
+   (s/optional-key :resolve-local) (s/=> (s/maybe (s/recursive #'LocalBinding)) s/Symbol)})
+
+(s/defschema ClassifiedBinding
+  "Internal return shape of `classify-binding` / `->local-binding-classifier`:
+   a `LocalBinding` (before `:resolve-local` is attached) plus the internal
+   `:source-span` used by `arg-span-set` for `:seq-binding`/`:loop` ownership."
+  (assoc LocalBinding (s/optional-key :source-span) SourceSpan))
+
 (s/defschema CallsiteResolverContext
   "Context map passed to `:callsite-resolver-fn` by
    `clara.explorer.analyze/->annotations-from-rule-source-analysis`.
@@ -330,6 +664,7 @@
    :arg-form s/Any                           ; the unresolved argument form
    :source-str s/Str                         ; `pr-str` of `:arg-form`
    :filename s/Str
+   :resolve-local (s/=> (s/maybe LocalBinding) s/Symbol)
    (s/optional-key :fact-type) s/Any         ; present only for alias-discovered callsites;
                                              ;   s/Any: keywords, fq class-name symbols, strings
    (s/optional-key :fact-type-spec)          ; present only for alias-discovered callsites
@@ -348,6 +683,7 @@
    :filename s/Str
    :direction (s/enum :insert :retract)
    :rule s/Any
+   :resolve-local (s/=> (s/maybe LocalBinding) s/Symbol)
    (s/optional-key :via) ViaChain})
 
 (s/defschema CallsiteEntry
@@ -395,9 +731,10 @@
    a boundary argument's `:idx` to the `:constructor-sym` /
    `:boundary-to-constructor-path` of the constructor the ctor pass owned but
    could not type, so the argument's entry still carries that provenance; nil
-   when no ctor pass ran.  `:rule-to-boundary-path-for` and
-   `:callsite-resolver-fn` are fns, so the `s/=>` fn schemas are
-   documentation (prismatic FnSchema does not validate fn-ness).
+   when no ctor pass ran.  `:rule-to-boundary-path-for`,
+   `:callsite-resolver-fn`, and `:classify-local-binding` are fns, so the
+   `s/=>` fn schemas are documentation (prismatic FnSchema does not validate
+   fn-ness).
 
    Open map — the caller's ctx carries more than the declared keys
    (`:get-lines`, `:read-ctor-form`, `:alias-context-for`, …)."
@@ -407,6 +744,7 @@
           :rule-var s/Symbol
           :rule-to-boundary-path-for (s/=> (s/maybe [ViaEntry]) s/Symbol)
           :callsite-resolver-fn (s/maybe (s/=> s/Any s/Any))
+          :classify-local-binding (s/=> ClassifiedBinding s/Symbol s/Any)
           :dropped-ctor-provenance (s/maybe
                                     {s/Int {(s/optional-key :constructor-sym) s/Symbol
                                             (s/optional-key :boundary-to-constructor-path) [ViaEntry]}})
@@ -418,8 +756,9 @@
    `:rule-to-boundary-path-for`, and the source-reading closures
    `:get-lines` / `:read-ctor-form`.  `:rule` may be nil when the consuming
    var is not a rulebase production.  `:rule-to-boundary-path-for`,
-   `:get-lines` and `:read-ctor-form` are fns, so the `s/=>` fn schemas are
-   documentation (prismatic FnSchema does not validate fn-ness).
+   `:get-lines`, `:read-ctor-form`, and `:classify-local-binding` are fns, so
+   the `s/=>` fn schemas are documentation (prismatic FnSchema does not
+   validate fn-ness).
 
    Open map — the caller's ctx carries more than the declared keys."
   (merge index/AnalysisIndex
@@ -428,6 +767,7 @@
           :rule-to-boundary-path-for (s/=> (s/maybe [ViaEntry]) s/Symbol)
           :get-lines (s/=> s/Any s/Any)
           :read-ctor-form (s/=> s/Any s/Any)
+          :classify-local-binding (s/=> ClassifiedBinding s/Symbol s/Any)
           s/Any s/Any}))
 
 (s/defn resolve-boundary-callsites
@@ -449,13 +789,13 @@
 
    Returns a `CallsiteResolution` including `:resolved-arg-idxs` — the `:idx`
    of every traced argument that resolved to at least one type (used by
-   `analyze/extract-insert-types` for per-inserter-var heuristic fallback
+   `clara.explorer.analyze/extract-insert-types` for per-inserter-var heuristic fallback
    attribution)."
   [traced-args :- [TracedArg]
    {:keys [dropped-ctor-provenance] :as ctx} :- BoundaryCallsiteCtx]
   (let [pairs (into []
-                    (map (fn [{:keys [idx usage arg traced alias-context]}]
-                           (let [ctx' (assoc ctx :usage usage :alias-context alias-context)
+                    (map (fn [{:keys [idx usage arg traced alias-context traced-span]}]
+                           (let [ctx' (assoc ctx :usage usage :alias-context alias-context :traced-span traced-span)
                                  tokens (resolve-traced-arg traced ctx' (:from usage))
                                  dropped (get dropped-ctor-provenance idx)
                                  entry (cond-> {:source-str (-> arg utils/canonicalize-minted-names pr-str)
@@ -493,59 +833,14 @@
 ;; Fact-constructor callsite resolution
 ;; ---------------------------------------------------------------------------
 
-(defn- position<=
-  "Source-position ordering: `[row col]` before-or-equal `[row col]`."
-  [r1 c1 r2 c2]
-  (or (< r1 r2) (and (= r1 r2) (<= c1 c2))))
-
-(defn- span-contains-pos?
-  "True when 1-indexed `[row col]` lies in `span` (`{:filename … :start
-   [row col] :end [row col]}`, `:end` exclusive)."
-  [{:keys [filename start end]} ufilename row col]
-  (boolean
-   (and (= filename ufilename)
-        start end row col
-        (position<= (first start) (second start) row col)
-        (let [[er ec] end]
-          (or (< row er) (and (= row er) (< col ec)))))))
-
-(defn- first-usage-index-at-or-after
-  "Binary search: first index in `[row col]`-sorted `sorted-usages` (a vector)
-   at or after `[srow scol]`.  Vectors make `count`/`nth` O(1) — on the seq
-   `sort-by` returns this becomes O(n) per probe, so the span-index map (see
-   `index/usages-by-filename`) materializes its groups as vectors."
-  [sorted-usages srow scol]
-  (loop [lo 0 hi (count sorted-usages)]
-    (if (>= lo hi)
-      lo
-      (let [mid (quot (+ lo hi) 2)
-            u (nth sorted-usages mid)
-            r (or (:row u) 0)
-            c (or (:col u) 0)]
-        (if (or (> r srow) (and (= r srow) (>= c scol)))
-          (recur lo mid)
-          (recur (inc mid) hi))))))
-
-(defn- usages-in-span
-  "Entries of `[row col]`-sorted `sorted-usages` (one file, a vector) whose
-   start position lies in `span` (`:end` exclusive).  Two binary searches
-   bound the slice, so the cost is O(log n + k) in the usages rather than an
-   O(n) `drop` after an O(n) search.  Nil-safe on malformed spans."
-  [sorted-usages {:keys [start end] :as _span}]
-  (if (or (nil? start) (nil? end))
-    []
-    (let [[sr sc] start
-          [er ec] end
-          from (first-usage-index-at-or-after sorted-usages sr sc)
-          to (first-usage-index-at-or-after sorted-usages er ec)]
-      (if (<= from to)
-        (subvec sorted-usages from to)
-        []))))
-
 (defn- arg-span-set
   "The ephemeral span set for one boundary-call argument: the boundary usage
-   span plus the init spans of every local transitively reachable from usages
-   inside it (see docs/planning/locals-expand-ana-plan.md).
+   span plus the source spans of every local transitively reachable from usages
+   inside it.  For *ownership* (does this constructor's value reach this
+   argument?) the expansion is a sound over-approximation: `:let-init` expands
+   to its `:init-form-span`, and a direct `:seq-binding`/`:loop` expands to its
+   `:source-span` (the collection/initial value the bound symbol flows out of).
+   `:param`, `:destructured`, and `:unknown` are never expanded.
 
    Returns `{:spans […] :var-syms #{…}}`: spans are
    `{:filename … :start [row col] :end [row col]}` (`:end` exclusive);
@@ -555,7 +850,7 @@
    bounds cycles. Nothing here is persisted — `:source-str` keeps the
    original arg."
   [{:keys [usage] :as _traced-arg}
-   {:keys [var-usages-by-filename local-usages-by-filename locals-by-id get-lines] :as _ctx}]
+   {:keys [var-usages-by-filename local-usages-by-filename locals-by-id] :as ctx}]
   (let [filename (:filename usage)
         ns-sym (:from usage)
         seed (usage->span usage)]
@@ -579,9 +874,13 @@
                       new-spans (into []
                                       (comp (map (fn [[f id]] (get locals-by-id [f id])))
                                             (remove nil?)
-                                            (map (fn [binding]
-                                                   (kondo/init-form-span get-lines ns-sym binding)))
-                                            (remove nil?))
+                                            (keep (fn [binding]
+                                                    (let [{:keys [kind init-form-span source-span]}
+                                                          (classify-local-binding ctx ns-sym binding)]
+                                                      (case kind
+                                                        :let-init init-form-span
+                                                        (:seq-binding :loop) source-span
+                                                        nil)))))
                                       fresh-keys)]
                   (recur (into spans new-spans)
                          (count spans)
@@ -609,9 +908,10 @@
      :rule - the rule production
      :rule-to-boundary-path-for - memoized (fn [boundary-in-var] -> [ViaEntry …] | nil)
      :resolver-fn - the `:type-resolver-fn` of the `:fact-constructors` spec
-       that matched this callsite"
+       that matched this callsite
+     :resolve-local - the scoped local resolver for this constructor's span"
   [{:keys [ctor-usage ctor-form boundary-usage call-path direction rule
-           rule-to-boundary-path-for resolver-fn]}]
+           rule-to-boundary-path-for resolver-fn resolve-local]}]
   (let [boundary-fn-sym (u/fq-sym (:to boundary-usage) (:name boundary-usage))
         ctor-sym (u/fq-sym (:to ctor-usage) (:name ctor-usage))
         via (when (seq call-path)
@@ -624,7 +924,8 @@
                               :ns-name-sym (:from ctor-usage)
                               :filename (:filename ctor-usage)
                               :direction direction
-                              :rule rule}
+                              :rule rule
+                              :resolve-local resolve-local}
                        via (assoc :via via))
         resolved (try
                    (some-> (resolver-fn resolver-ctx)
@@ -734,7 +1035,7 @@
    constructor entry, so the boundary pass can emit the provenance it would
    otherwise throw away."
   [{:keys [ctor-match inserter-var graph read-ctor-form
-           cfg-base candidates span-set-by-idx]}]
+           cfg-base candidates span-set-by-idx] :as env}]
   (let [{:keys [usage type-resolver-fn]} ctor-match
         ctor-usage usage
         path (ctor-call-path graph inserter-var ctor-usage)
@@ -751,6 +1052,7 @@
                   :ctor-form ctor-form
                   :call-path path
                   :resolver-fn type-resolver-fn
+                  :resolve-local (->resolve-local env (:from ctor-usage) (usage->span ctor-usage))
                   :boundary-usage (:usage owner))))
         ctor-path (:boundary-to-constructor-path (:via entry))]
     (when owner
@@ -768,8 +1070,9 @@
 
    `env` — the shared resolution context (`:args-by-caller`, `:graph`,
    `:get-lines`, `:read-ctor-form`, `:cfg-base`, plus the
-   `:var-usages-by-filename`, `:local-usages-by-filename` and `:locals-by-id`
-   expansion indexes) plus `:inserter-var` and `:ctor-matches`."
+   `:var-usages-by-filename`, `:local-usages-by-filename`,
+   `:local-usages-by-name`, `:locals-by-id` expansion indexes and the memoized
+   `:classify-local-binding`) plus `:inserter-var` and `:ctor-matches`."
   [{:keys [inserter-var ctor-matches] :as env}]
   (let [candidates (->> (get (:args-by-caller env) inserter-var)
                         (sort-by (juxt #(:row (:usage %)) #(:col (:usage %)))))
@@ -832,13 +1135,14 @@
    Returns a `CallsiteResolution` including `:owned-arg-idxs` — the `:idx` of
    every boundary argument a constructor accounted for.  Those must not also go
    through `resolve-boundary-callsites`, or the same insert would be reported
-   twice (see `analyze/extract-insert-types`)."
+   twice (see `clara.explorer.analyze/extract-insert-types`)."
   [traced-args :- [TracedArg]
    constructor-ctr-map :- index/CtorCallsiteMap
    {:keys [get-lines read-ctor-form graph direction rule
            rule-to-boundary-path-for
            var-usages-by-filename local-usages-by-filename
-           locals-by-id]} :- ConstructorCallsiteCtx]
+           local-usages-by-name locals-by-id
+           classify-local-binding]} :- ConstructorCallsiteCtx]
   (let [args-by-caller (group-by #(u/var-usage-caller (:usage %)) traced-args)
         cfg-base {:direction direction
                   :rule rule
@@ -850,7 +1154,9 @@
                       :cfg-base cfg-base
                       :var-usages-by-filename var-usages-by-filename
                       :local-usages-by-filename local-usages-by-filename
-                      :locals-by-id locals-by-id}
+                      :local-usages-by-name local-usages-by-name
+                      :locals-by-id locals-by-id
+                      :classify-local-binding classify-local-binding}
         results (into []
                       (mapcat (fn [[inserter-var ctor-matches]]
                                 (resolve-ctor-matches-for-inserter

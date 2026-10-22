@@ -2,6 +2,10 @@
 
 Rule annotations provide metadata about Clara rules to statically construct the Rete dependency graph. They declare what fact types a rule's RHS (Right-Hand Side) inserts or retracts, enabling the Explorer to link rules to the LHS (Left-Hand Side) conditions of downstream rules.
 
+This document covers the annotation **contract** — the keys, the layer/merge model, and the dynamic callsite vocabulary — with pointers to the implementation for the specifics. The generation *passes* behind it live in
+[`analyze-pipeline-concepts.md`](analyze-pipeline-concepts.md); the clj-kondo interaction mechanics are in
+[`analyze-clj-kondo-notes.md`](analyze-clj-kondo-notes.md).
+
 ---
 
 ## Annotation Structure
@@ -21,7 +25,7 @@ Rule annotations support the following qualified keys:
 
 ## Type Representation
 
-Fact types in `*-types` annotation keys (`:clara-rules/insert-types`,
+Fact types in `*-types` keys (`:clara-rules/insert-types`,
 `:clara-rules/retract-types`, `:resolved-types` in callsites) are **raw
 fact-type-fn objects** end-to-end in memory: Classes, keywords, strings,
 vectors, symbols — whatever the session's pluggable `fact-type-fn` returns.
@@ -30,7 +34,7 @@ write).
 
 ### In EDN (sidecar files, persisted annotations)
 
-A fact type keeps its EDN literal form.  The one workaround is for Classes:
+A fact type keeps its EDN literal form. The one workaround is Classes:
 Classes have no EDN literal, so they are written as **Class-name symbols**
 (fully qualified or unqualified).
 
@@ -46,38 +50,38 @@ Rules:
 - If a type has no EDN literal form, it does not go in a sidecar.
 - String literals for class names are not a supported convention — use symbols.
 
-### In memory
+### Canonicalization
 
-Compared keys (`:insert-types`, `:retract-types`) carry **raw objects**
-end-to-end; display formatting at the serialization boundary only.
-`:fact-instance-derived-types` in dynamic detection maps also carries raw
-objects — `serialize-dynamic-detection` converts them to strings at the JSON
-boundary.
-
-### Comparison (delta, novelty detection, enrichment coverage)
-
-`serialize/resolve-type` with the rule's namespace:
-
-- **Kind-explicit:** Class → `.getName`; keyword → keeps colon; string →
-  `pr-str`-quoted; unresolved symbol → `symbol[...]` wrapper; vector →
-  `pr-str` (inner kinds preserved).  Distinct kinds never conflate.
-- **Class ↔ class-name-symbol convergence** via two paths: ns-aware import
-  resolution, or the fallback that prints a fully-qualified symbol as its
-  name (which equals `.getName`).
-
-### Merge dedupe
-
-Same canonicalizer as comparison: `serialize/resolve-type` with the rule's
-namespace, derived from the rule-name key at the merge site.  There is **one**
-canonicalization for comparison and dedupe alike.
+There is **one** canonicalizer for comparison, novelty detection, and merge
+dedupe alike: `clara.explorer.serialize/resolve-type`, applied with the rule's
+namespace (derived from the rule-name key at the merge site). Its docstring
+spells out the per-kind rules (Class → `.getName`, keyword keeps its colon,
+string → `pr-str`-quoted, unresolved symbol → `symbol[...]` wrapper, vector →
+`pr-str`), including the two Class ↔ class-name-symbol convergence paths.
+Refer there rather than re-deriving them here.
 
 ---
 
 ## Sources of Annotations
 
 Annotations come in **layers** — one per source — folded together by
-`clara.explorer.annotations.merge/merge-layers`, lowest precedence
-first.
+`clara.explorer.annotations.merge/merge-layers`, lowest precedence first.
+
+```text
+        lowest precedence ────────────────────────────► highest
+ ┌──────────────────┐   ┌───────────────────────────┐   ┌──────────────────┐
+ │ :props           │   │ generated                 │   │ curated          │
+ │ (rule source,    │──▶│ (:clara.explorer.analyze/ │──▶│ (sidecar layer   │
+ │  ->props-layer)  │   │  generated id)            │   │  files)          │
+ └──────────────────┘   └───────────────────────────┘   └──────────────────┘
+                                  │ merge-layers (fold, rightmost wins)
+                                  ▼
+                       merged annotations + :provenance
+                                  │ derive-conclusions
+                                  ▼
+                  resolved callsite types promoted into
+                  :clara-rules/insert-types / :retract-types
+```
 
 ### Rule `:props` — the base layer
 
@@ -93,10 +97,10 @@ Annotations can be declared directly in the Clojure source code within the rule'
   (insert! (->Cold)))
 ```
 
-`clara.explorer.annotations.merge/->props-layer` reads every production's whole `:props` map off the
-compiled rulebase — nothing is filtered.  Folded first (the convention), it
-is the base that generated and curated layers add to; a higher layer can
-still overrule a props value with `:replace` or a tombstone (below).
+`clara.explorer.annotations.merge/->props-layer` reads every production's whole
+`:props` map off the compiled rulebase and folds it as the base layer that
+generated and curated layers add to. A higher layer can overrule a props value
+with `:replace` or a tombstone (below).
 
 ### Layer EDN files
 
@@ -117,11 +121,11 @@ by the rule's fully qualified name:
 ```
 
 Layers are **sparse**: omitting a key means "no opinion" — the lower layer's
-value survives.  Layers are read via `->layer` and written
-with `write-layer!`; in-memory layers are first-class (`->layer`).
+value survives. Layers are read via `clara.explorer.annotations.merge/->layer`
+and written with `clara.explorer.annotations.merge/write-layer!`.
 
-A layer file is one input to a whole persisted artifact set — the fold beside it,
-the analysis over that fold, a provenance manifest. That side of things is
+A layer file is one input to a whole persisted artifact set — the fold beside
+it, the analysis over that fold, a provenance manifest. That side of things is
 [Persisted artifacts](persisted-artifacts.md); nothing below this line is about
 files.
 
@@ -129,27 +133,27 @@ files.
 
 ## Annotation Merging
 
-`(annotations/merge-layers layers)` folds an ordered sequence of layers —
-**lowest precedence first**, so the rightmost layer wins a conflict.  Layer
-`:id`s must be distinct.  The merged result carries per-rule, per-key
+`clara.explorer.annotations.merge/merge-layers` folds an ordered sequence of
+layers — **lowest precedence first**, so the rightmost layer wins a conflict.
+Layer `:id`s must be distinct. The merged result carries per-rule, per-key
 `:provenance` (which layer(s) claimed each value, or `:derived`), and each
 callsite entry records `:from-layer`.
 
 ### Default strategies
-* **`:clara-rules/insert-types` / `:retract-types`** — **union**, lower layer first, deduplicated.
-* **`:clara-rules/notes`** — last declared wins.
-* **`:clara-rules/no-output-types`** — **last declared wins**: a higher layer that
-  declares the key decides the value, so a curator can say "no, this rule
-  *does* produce facts" (`false` wins) as well as the reverse.
-* **`:clara-rules/dynamic-*-types-detected`** — **deep merge by `:callsite-id`**:
-  a sparse callsite conclusion (id, `:status`, `:resolved-types`, optional
-  `:resolution-evidence`) overlays the analyzer's discovery fields without
-  restating them.  `:resolution` is always recomputed from the merged
-  callsites, never taken from a layer.
-* **Unknown keys** — last declared wins, and they are *preserved* through
-  every merge.
+
+| Key | Strategy |
+|---|---|
+| `:clara-rules/insert-types` / `:retract-types` | **union**, lower layer first, deduplicated |
+| `:clara-rules/notes` | last declared wins |
+| `:clara-rules/no-output-types` | **last declared wins** (a curator can declare `false` to say "this rule *does* produce facts") |
+| `:clara-rules/dynamic-*-types-detected` | **deep merge by `:callsite-id`**; `:resolution` is always recomputed, never taken from a layer |
+| unknown keys | last declared wins, preserved through every merge |
+
+The exact mechanics of each fold live in `clara.explorer.annotations.merge/merge-layers`
+(and `clara.explorer.annotations.merge/fold-key`); the table above is the curator-facing contract.
 
 ### Deleting and overruling
+
 An explicit `nil` is a **tombstone** on any key — it erases the value where
 mere absence would not:
 
@@ -159,9 +163,10 @@ mere absence would not:
 ```
 
 ### Custom Merge Control (`:clara-rules/merge-props`)
+
 A layer can control the strategy per key, either at the layer level (a
 default for every rule it touches) or on an individual rule entry (which
-wins over the layer level).  Keys are the *unqualified* annotation names:
+wins over the layer level). Keys are the *unqualified* annotation names:
 
 ```edn
 {:id :curated
@@ -177,17 +182,20 @@ wins over the layer level).  Keys are the *unqualified* annotation names:
 
 Available strategies: `:union` / `:replace` for type vectors, `:replace` /
 `:append` (newline-joined) for notes, `:deep` / `:replace` for detection
-maps.  `merge-props` is a directive consumed by the merge — it is never
+maps. `merge-props` is a directive consumed by the merge — it is never
 emitted into the merged output.
 
 ### Derivation
+
 After merging, conclusions are derived from the merged evidence (never by
 re-consulting the layers): each dimension's `:resolution` is recomputed, and
 resolved callsite types are promoted into `:clara-rules/insert-types` /
 `:retract-types` — a curated callsite thereby produces a graph edge without
-anyone hand-writing a type.  `:type-derivation :additive` (default) unions
-authored and callsite-derived types; `:from-callsites` makes the callsite
-record authoritative for any dimension that has one.
+anyone hand-writing a type. See `clara.explorer.annotations.merge/derive-conclusions`.
+
+`:type-derivation :additive` (default) unions authored and callsite-derived
+types; `:from-callsites` makes the callsite record authoritative for any
+dimension that has one.
 
 ---
 
@@ -210,29 +218,34 @@ fixture generator, `make regen-fixture`) carry the distinguished id
 that id — it is a marker for humans and tooling.
 
 **Dangling references.** Only the analyzer *discovers* callsites; every other
-layer *annotates* ones that already exist.  A merged callsite entry with no
+layer *annotates* ones that already exist. A merged callsite entry with no
 discovered form (no `:source-str`) is dangling — by default it is
 quarantined (`:dangling? true`, excluded from type derivation and the
 resolution aggregate, and reported by `unresolved-report` /
 `validate-layers`); `:on-dangling :keep` treats it as ordinary and `:drop`
-removes it.  A curating layer should carry `:source-str` as a redundant
+removes it. A curating layer should carry `:source-str` as a redundant
 witness — one line, ignored by the merge whenever a discovered entry
 supplies one, and the only context left when the entry dangles.
 
 **Rebasing.** Renaming a namespace dangles every curated callsite in it.
-`rebase-layer` remaps rule names, discovery fields, and type tokens across a
-known old→new namespace mapping and recomputes callsite ids, so a curated
-layer survives the rename without re-confirmation.
+`clara.explorer.annotations.rebase/rebase-layer` remaps rule names, discovery
+fields, and type tokens across a known old→new namespace mapping and
+recomputes callsite ids, so a curated layer survives the rename without
+re-confirmation.
 
 ---
 
 ## Dynamic Call-Site Capture and Resolution
 
-When the rule base analyzer detects call sites to `insert!`, `retract!`, or their variants (like `insert-all!`) whose fact type cannot be determined by static constructor tracing, it captures each callsite and attempts **runtime-guided resolution**. The session rulebase is the source of truth: RHS forms come from the compiled productions, so macro-emitted rules are captured too.
+When the analyzer detects callsites to `insert!`, `retract!`, or their variants
+(like `insert-all!`) whose fact type cannot be determined by static constructor
+tracing, it captures each callsite and attempts **runtime-guided resolution**.
+The session rulebase is the source of truth: RHS forms come from the compiled
+productions, so macro-emitted rules are captured too.
 
-> **Internal architecture:** The full pipeline — entry points, index building,
+> **Internal architecture:** the full pipeline — entry points, index building,
 > resolution chains, heuristic fallbacks — is documented in
-> [`explorer/docs/analyze-pipeline-concepts.md`](analyze-pipeline-concepts.md).
+> [`analyze-pipeline-concepts.md`](analyze-pipeline-concepts.md).
 
 ### What "simple enough" looks like
 
@@ -343,21 +356,43 @@ variations above — a constructor bound to a local
 
 Anything more indirect — a constructor that is built but never inserted, or
 reached only through opaque indirection like `(apply f args)` — stays
-unresolved (or needs an explicit `:clara-rules/insert-types`). Details on
-how each shape is proven are below.
+unresolved (or needs an explicit `:clara-rules/insert-types`).
 
 ### The resolution chain
 
-For each callsite argument form (see `clara.explorer.analyze.callsite`):
+For each boundary argument form, the automatic chain runs top to bottom
+(full contract in the `clara.explorer.analyze.callsite` namespace docstring):
 
-1. **Record constructors** — `->MyRecord` / `map->MyRecord` heads are resolved in the live namespace of the consuming rule.
-2. **Java constructors** — `(MyFact. …)`, `(new MyFact …)`, and `(MyFact/new …)` resolve to the class.
-3. **Locals tracing** — a local symbol argument (e.g. a macro gensym) is traced through clj-kondo's `:locals` analysis to its binding's init form, and the chain restarts there.
-4. **Everything else defers** — helper calls, `with-meta`, literals/templates, and the var-as-fact pattern are *deliberately not* resolved automatically; they go to the caller-supplied `:callsite-resolver-fn`, then fall back to unresolved capture.
+```text
+        boundary argument form
+                 │
+                 ▼
+   ┌─ seq? ──────────────────────────────────────► record ctor (->X / map->X)
+   │  (head is a constructor)                        Java ctor (X. / new X / X/new)
+   │                                                     │ resolved → fq type token
+   │
+   ├─ symbol? ───────────────────────────────────► locals trace (:let-init only)
+   │  (kondo :local-usages :id → :locals binding)      │ params/destructured/loop/seq
+   │                                                   │ are NOT traced
+   │                                                   ▼
+   │                                         recurse on the init form (depth-capped)
+   │
+   └─ otherwise ───────────────────────────────► :callsite-resolver-fn
+         (helper call, with-meta, literal,           │
+          var-as-fact — deliberately NOT auto)       ▼
+                                          {:resolved-types …} → resolved
+                                          nil → :status :none (unresolved)
+```
 
-Resolved types are **promoted**: a fully-resolved dynamic insert also appears in `:clara-rules/insert-types` (likewise retracts), so downstream graph linking uses it directly.
+Resolved types are **promoted**: a fully-resolved dynamic insert also appears
+in `:clara-rules/insert-types` (likewise retracts), so downstream graph linking
+uses it directly.
 
 ### Detection map structure
+
+The internal shape is `clara.explorer.analyze.callsite/CallsiteEntry` (and the
+aggregate `clara.explorer.analyze.callsite/CallsiteResolution`); see those
+schemas for the authoritative field list. A fully-populated example:
 
 ```edn
 {:clara-rules/dynamic-insert-types-detected
@@ -377,55 +412,50 @@ Resolved types are **promoted**: a fully-resolved dynamic insert also appears in
   :resolution :full}}
 ```
 
-* **`:source-str`** — the exact source text of the argument form at the boundary callsite (locals are *not* inlined here; the resolver receives the traced form separately). **Note:** on constructor-path callsites (those carrying `:constructor-sym`), `:source-str`/`:ns-name-sym`/`:filename` instead describe the *constructor* call form — which may live in a helper namespace and reference helper-locals (e.g. `(->fact :demo/tagged {:id id})`).
-* **`:ns-name-sym`** / **`:filename`** — where the callsite was found (may be a helper namespace).
-* **`:callsite-id`** — stable identity within the rule+dimension:
-  `ns:ctor:hash:ordinal` over the namespace, constructor, and source text
-  (see `clara.explorer.annotations.callsite/callsite-id`).
-* **`:status`** — `:full` (every type this callsite can produce is known),
-  `:partial` (some known, possibly more), or `:none` (nothing known).  The
+Terminology worth having precise:
+
+- **`:source-str`** — exact source text of the argument form at the boundary
+  callsite (locals are *not* inlined here; the resolver receives the traced
+  form separately). On constructor-path callsites (those carrying
+  `:constructor-sym`), `:source-str`/`:ns-name-sym`/`:filename` instead
+  describe the *constructor* call form, which may live in a helper namespace.
+- **`:callsite-id`** — stable identity within the rule+dimension; format in
+  `clara.explorer.annotations.callsite/callsite-id`.
+- **`:status`** / **`:resolution`** — `:full` / `:partial` / `:none`. The
   analyzer emits only `:full` and `:none`; `:partial` is reachable through
-  curation.
-* **`:resolved-types`** — present when resolved; the fact-type tokens.
-* **`:constructor-sym`** — present when resolved via a `:fact-constructors` spec; the fully-qualified constructor symbol. Its presence also discriminates constructor-path callsites from boundary-path ones (see note on `:source-str` below).
-* **`:via`** — the `ViaChain` provenance (see below).  Constructor-path callsites carry the full chain (`:boundary-var-name-sym`, `:boundary-in-var`, `:boundary-to-constructor-path`, and `:rule-to-boundary-path` when the boundary call is not in the rule's own RHS).  Boundary-path callsites (no `:constructor-sym`) carry the boundary-side keys — `:boundary-var-name-sym`, `:boundary-in-var`, and `:rule-to-boundary-path` — plus a merged `:boundary-to-constructor-path` when an unresolvable constructor was dropped onto them.  On *heuristic* callsites (the record-ctor scan fallback, below), `:via` instead carries `{:source :record-ctor-scan}` with no `:boundary-to-constructor-path`.
-* **`:resolution`** (aggregate) — `:full` when every callsite is `:full`, `:none` when every callsite is `:none`, `:partial` otherwise. Heuristic scan callsites count as resolved; check `:via :source` to distinguish their confidence.
+  curation. `:resolution` aggregates per-callsite `:status`
+  (`clara.explorer.annotations.callsite/aggregate-resolution`).
+- **`:constructor-sym`** — present when resolved via a `:fact-constructors`
+  spec; its presence discriminates constructor-path callsites from
+  boundary-path ones.
+- **`:via`** — the `clara.explorer.analyze.callsite/ViaChain` provenance (see
+  below).
 
 ### Heuristic record-ctor scan fallback
 
-For boundary arguments the resolution chain above cannot explain (e.g. a
-record built inside a helper and returned through an opaque call), the
-analyzer runs a **fallback scan**: record constructors (`->X` / `map->X`)
-found anywhere in a direct inserter var's reachable subtree, resolved against
-the live runtime. This is weaker evidence than the chain — clj-kondo's flat
-`:var-usages` cannot tell an argument expression apart from an unrelated call
-in the same body — so it is deliberately subordinate:
+For boundary arguments the chain cannot explain (e.g. a record built inside a
+helper and returned through an opaque call), the analyzer runs a **fallback
+scan** over a direct inserter var's reachable subtree. This is weaker evidence
+than the chain — clj-kondo's flat `:var-usages` cannot tell an argument
+expression apart from an unrelated call in the same body — so it is
+deliberately subordinate. The mechanics are `clara.explorer.analyze.index/->inserter-type-map`
+(build) and `clara.explorer.analyze/extract-insert-types` (attribution); the
+contract:
 
-* **Caller-driven resolution always wins.** The scan never displaces the
-  constructor-of-interest or boundary-chain paths. It is applied per
-  direct-inserter var, and only for vars whose boundary arguments no
-  caller-driven path accounted for. (Note the granularity: multiple insert
-  sites in the *same* var share that var's verdict.)
-* **Labeled, never silent.** Fallback types are promoted to
-  `:clara-rules/insert-types`/`:retract-types` *and* emitted as callsites
-  carrying `:via {:source :record-ctor-scan}` (with the ctor name as
-  `:source-str` and the inserter's boundary fn as `:boundary-var-name-sym`
-  when known), so consumers can filter or down-weight them.
-* **Scoped by `:dynamic-type-fallback-resolution`** (option to
-  `->annotations-from-rule-source-analysis`):
-  * `:rulebase-fact-types-only` (**default**) — a scanned type is credited
+- **Caller-driven resolution always wins.** Applied per direct-inserter var,
+  and only for vars whose boundary arguments no caller-driven path accounted
+  for.
+- **Labeled, never silent.** Fallback types are promoted *and* emitted as
+  callsites carrying `:via {:source :record-ctor-scan}`.
+- **Scoped by `:dynamic-type-fallback-resolution`** (an option to
+  `clara.explorer.analyze/->annotations-from-rule-source-analysis`, schema
+  `clara.explorer.analyze/DynamicTypeFallbackResolution`):
+  - `:rulebase-fact-types-only` (**default**) — a scanned type is credited
     only when it, **or any of its ancestors via the session's
-    `:ancestors-fn`**, appears on the LHS of some rule/query production in
-    the session. LHS matching is hierarchical, so a subtype inserted behind a
-    helper still links to a supertype condition. Third-party records that
-    merely pass through the subtree (validation helpers, schema-library
-    internals) are dropped.
-  * `:none` — the scan never runs; annotations come only from caller-driven
-    resolution.
-  * `:all-resolvable-fact-types` — any resolvable record-ctor type is
-    credited (the pre-fix recall, minus the precedence bug).
-* **Traceable skips.** Types rejected by the default filter are reported via
-  `tap>` (inert until a consumer calls `add-tap`):
+    `:ancestors-fn`**, appears on the LHS of some rule/query production.
+  - `:none` — the scan never runs.
+  - `:all-resolvable-fact-types` — any resolvable record-ctor type is credited.
+- **Traceable skips.** Rejected types are reported via `tap>`:
 
   ```clojure
   {:event :clara-rules/type-fallback-skipped
@@ -442,19 +472,32 @@ boundary chain already resolves them precisely at the callsite.
 
 ### `:callsite-resolver-fn`
 
-`->annotations-from-rule-source-analysis` accepts `:callsite-resolver-fn` — an escape hatch invoked once per argument form the automatic chain cannot resolve. It receives:
+`clara.explorer.analyze/->annotations-from-rule-source-analysis` accepts
+`:callsite-resolver-fn` — an escape hatch invoked once per argument form the
+automatic chain cannot resolve. Its context is
+`clara.explorer.analyze.callsite/CallsiteResolverContext`; the local binding
+shape is `clara.explorer.analyze.callsite/LocalBinding`. Two things are easy to
+miss and worth stating here:
 
-| Key | Description |
-|-----|-------------|
-| `:rule` | the full production map of the consuming rule (`:name :ns-name :lhs :rhs :props` …) |
-| `:ns-name-sym` | namespace where the callsite was found (may be a helper ns) |
-| `:direction` | `:insert` or `:retract` |
-| `:boundary-fn` | e.g. `clara.rules/insert!` |
-| `:arg-form` | the argument form, with locals already traced to their init forms |
-| `:source-str` | `pr-str` of `:arg-form` |
-| `:filename` | file containing the callsite |
+- **A `:let-init` binding's `:resolve-local` is scoped to that init span**, so
+  a resolver recurses into a returned `:init-form` by calling *that*
+  `:resolve-local` — not the callsite-scoped one (which cannot see those
+  locals). The whole chain shares one depth budget.
+- **Nil means "not a local"; nothing else does.** A lookup returns nil only
+  when the symbol names no local in the form. A local it cannot classify comes
+  back `{:kind :unknown}`, with `:reason :shadowed` (the name refers to more
+  than one binding inside the form) or `:reason :depth-exhausted` (the budget
+  is spent). A resolver must not read an `:unknown` local as a var.
+- **Exact-vs-possible types.** A lookup in a literal map, a `case`, or an `if`
+  gives the *set* of values a type could be, not the one it is. A resolver that
+  enumerates values must report every possible value and leave the callsite
+  unresolved if any branch or default is not literal. Over-reporting a member
+  the flow can never produce is acceptable; omitting one a resolved callsite
+  could produce is not.
 
-Return `nil` (still unresolved) or `{:resolved-types [tokens…]}`. Tokens may be Classes, symbols, keywords, or any fact-type shape your session uses; they pass through to the annotation. Exceptions are contained — logged and treated as unresolved.
+Return `nil` (still unresolved) or `{:resolved-types [tokens…]}`. Tokens may
+be Classes, symbols, keywords, or any fact-type shape your session uses.
+Exceptions are contained — logged and treated as unresolved.
 
 Example — resolving the var-as-fact pattern (`(insert! (var my-fact-fn))`):
 
@@ -490,19 +533,17 @@ mapping via `:fact-type-spec-fn`:
   {:aliases-var fully.qualified/var-name})
 ```
 
-**Mechanism** (per rule, when a spec fn is supplied):
+The mechanism is `clara.explorer.analyze.alias/alias-usage-map`: it scans each
+rule's `:lhs` for bound fact variables, and when `(fact-type-spec-fn t)`
+returns `{:aliases-var v}` for a bound type *and* the binding is used in the
+RHS, it emits a synthetic `:var-usage` linking the rule to `v` — so the
+existing reachability explores `v`'s whole call chain for boundary fns.
 
-1. The rule's `:lhs` is scanned for bound fact variables — `:fact-binding` on fact conditions and
-   `:result-binding` on accumulator conditions.
-2. When `(fact-type-spec-fn t)` returns `{:aliases-var v}` for a bound type *and* the binding is
-   used in the RHS (detected via the rule's snippet var-usages), a synthetic var-usage links the
-   rule to `v`, so the existing reachability explores `v`'s whole call chain for boundary fns. (If
-   `v` is invisible to clj-kondo — macro-emitted, unhooked — its chain is empty; that is the caller
-   `:config-dir` situation.)
-3. Callsites discovered *through* an alias chain **bypass the constructor chain**: they are recorded
-   `:status :none` (unresolved) with the alias context attached — `:fact-type` (the LHS-bound type) and
-   `:fact-type-spec` (the spec map) on both the callsite entry and the `:callsite-resolver-fn`
-   context — and are never automatically resolved. The resolver decides.
+Callsites discovered *through* an alias chain **bypass the constructor
+chain**: they are recorded `:status :none` (unresolved) with the alias context
+attached — `:fact-type` and `:fact-type-spec` on both the callsite entry and
+the `:callsite-resolver-fn` context — and are never automatically resolved.
+The resolver decides.
 
 ```clojure
 (analyze/->annotations-from-rule-source-analysis
@@ -521,46 +562,31 @@ carries no alias context.
 ### `:fact-constructors` — extensible constructor tracing
 
 When a codebase builds facts through plain functions rather than record/Java
-constructors (e.g. `with-meta`-tagged maps via a shared `->fact` builder),
-those functions are invisible to the automatic constructor-resolution chain
-because the chain only recognizes `->X` / `map->X` / `Class.` patterns.
-`:fact-constructors` lets callers declare their own constructors of interest
-as a **vector of specs**:
+constructors, those functions are invisible to the automatic chain (which only
+recognizes `->X` / `map->X` / `Class.` patterns). `:fact-constructors` declares
+extra constructors as a **vector of specs** — schema
+`clara.explorer.analyze/FactConstructorSpec`, whose `:match-fn` is a
+`clara.explorer.analyze/ConstructorMatchFn` (usually a set of fully-qualified
+symbols) and whose `:type-resolver-fn` receives a
+`clara.explorer.analyze.callsite/ConstructorTypeResolverContext`:
 
 ```clojure
-:fact-constructors [{:match-fn         (fn [fq-var-sym] -> truthy/nil)
+:fact-constructors [{:match-fn         (fn [fq-var-sym] -> truthy/nil)   ; or #{'my.helpers/->fact}
                      :type-resolver-fn (fn [ctx] -> nil or {:resolved-types [token …]})}
                     …]
 ```
 
-- **`:match-fn`** — the predicate that identifies a constructor of interest
-  by its fully-qualified symbol (e.g. `my.helpers/->fact`). kondo already
-  resolves these to FQ symbols, so matching is unambiguous.
-- **`:type-resolver-fn`** — called once per discovered constructor callsite
-  in the reachable subtree. Receives a `ConstructorTypeResolverContext`
-  (table below).
-
 When several specs could match the same callee, the **first matching spec in
-vector order wins** — vector order is precedence. Each spec must have both
-keys; `->annotations-from-rule-source-analysis` validates its options map against
-`GenerateAnnotationsOptions` (`s/validate`) at entry, so a malformed spec
-fails fast.
-
-| Key | Description |
-|---|---|
-| `:constructor-sym` | FQ symbol of the matched constructor var |
-| `:arg-form` | The full constructor callsite form read from source (e.g. `(->fact :my-type data)`) |
-| `:ns-name-sym` | Namespace where the constructor callsite was found |
-| `:filename` | Source file |
-| `:direction` | `:insert` or `:retract` |
-| `:rule` | Full rule production map |
-| `:via` | Optional `ViaChain` — provenance from the boundary fn to this constructor callsite |
+vector order wins** — vector order is precedence. Options are validated against
+`clara.explorer.analyze/RuleSourceAnnotationsOptions` at entry, so a malformed
+spec fails fast.
 
 #### `ViaChain`
 
 The `:via` chain traces how a constructor was reached from the originating
 boundary call, and — when the boundary call is not in the rule's own RHS — how
-the rule reaches the var holding that boundary call:
+the rule reaches the var holding that boundary call. Schema:
+`clara.explorer.analyze.callsite/ViaChain`.
 
 ```clojure
 {:boundary-var-name-sym clara.rules/insert!
@@ -571,21 +597,30 @@ the rule reaches the var holding that boundary call:
   {:var-name-sym my.helpers/->fact}]}
 ```
 
+```text
+   rule (my.rules/…)
+      │  :rule-to-boundary-path  (omitted when boundary is in the rule's own RHS)
+      ▼
+ collect-app-doc-check-input          ← :boundary-in-var (direct caller of insert!)
+      │  :boundary-to-constructor-path
+      ▼
+ ->document-check-input
+      ▼
+ my.helpers/->fact                    ← :constructor-sym
+```
+
 - **`:boundary-var-name-sym`** — the `insert!`/`retract!` variant.
 - **`:boundary-in-var`** — the var the boundary call is written in (the
   boundary's direct caller). Always present when `:via` is.
-- **`:boundary-to-constructor-path`** — BFS shortest-path through the call graph from the boundary's
-  direct caller to the constructor's containing var, then the constructor itself.
-- **`:rule-to-boundary-path`** — BFS shortest-path from the rule var to `:boundary-in-var`
-  (both ends inclusive). Omitted when the two are the same var (a boundary call
-  in the rule's own RHS), so a direct-RHS call reads as it did before this key
-  existed.
+- **`:boundary-to-constructor-path`** — BFS shortest path through the call
+  graph from the boundary's direct caller to the constructor's containing var,
+  then the constructor itself.
+- **`:rule-to-boundary-path`** — BFS shortest path from the rule var to
+  `:boundary-in-var` (both ends inclusive); omitted when the two are the same.
 
-Entries are maps (`{:var-name-sym …}`) so future extensions (arity, filename,
-row/col) don't require a breaking change.  Both `:rule-to-boundary-path` and `:boundary-to-constructor-path`
-are **shortest paths through a var-level call graph**, not observed runtime
-call paths — clj-kondo reports var-level edges, so the chain is a shortest path
-rather than the path actually taken at runtime.
+Entries are maps (`{:var-name-sym …}`) so future extensions don't break the
+shape. Both paths are **shortest paths through a var-level call graph**, not
+observed runtime call paths — clj-kondo reports var-level edges.
 
 #### Example
 
@@ -624,12 +659,8 @@ The analyzer is told about `->fact`:
 
 The analyzer traces through `->document-check-input` to find the `(h/->fact …)`
 callsite, reads `:loan-doc-rules/document-check-input` as the type, and promotes
-it into `:clara-rules/insert-types`. The callsite entry carries `:constructor-sym`
-and a `:via` chain showing the full provenance.
-
-**Validation**: options are checked against `GenerateAnnotationsOptions`
-with `s/validate` at function entry — a spec missing `:match-fn` or
-`:type-resolver-fn` throws.
+it into `:clara-rules/insert-types`. The callsite entry carries
+`:constructor-sym` and a `:via` chain showing the full provenance.
 
 #### Nested constructors
 
@@ -646,76 +677,81 @@ Constructor resolution is the **more specific** mechanism, so it runs first and
 wins. Both hooks can safely be supplied together — a boundary call is never
 reported twice.
 
-A boundary argument is **owned** by the constructor path when it is shown to reach
-a constructor that resolved. Ownership is decided per boundary argument (not per
-rule), because one rule may mix a constructor insert with an unrelated one. Three
-ways an argument reaches a constructor, each matching how the argument is written:
+A boundary argument is **owned** by the constructor path when it is shown to
+reach a constructor that resolved. Ownership is decided per boundary argument
+(not per rule), because one rule may mix a constructor insert with an
+unrelated one. It is decided from the argument's **ephemeral span set**
+(`clara.explorer.analyze.callsite/arg-span-set`): the boundary usage's span
+plus the source spans of every local transitively reachable from usages inside
+it — a `:let-init` expands to its init-form span, and `:seq-binding`/`:loop`
+expands to the collection/initial-value span. Two ways an argument reaches a
+constructor, both span-containment checks — the logic is
+`clara.explorer.analyze.callsite/find-owning-boundary-arg`:
 
 | The argument is… | Example | How it is matched |
 |---|---|---|
-| the constructor call itself | `(insert! (->fact :t m))`, `(insert-all! (mapv #(->fact :t %) xs))` | the constructor's source span is inside the boundary call's |
-| a call that leads to it | `(insert! (my-middle-fn args))` where `my-middle-fn` calls `->fact` | a call written inside the boundary call names a link on the constructor's `:via` `:boundary-to-constructor-path` — at any depth |
-| a local bound to it | `(let [f (->fact :t m)] (insert! f))` | the locals-traced form equals the resolved constructor call form |
+| the constructor call itself, including through locals | `(insert! (->fact :t m))`, `(let [f (->fact :t m)] (insert! f))`, `(insert-all! (mapv #(->fact :t %) xs))` | the constructor usage's position falls inside the argument's span set (position identity — a local's init-form span is part of the set) |
+| a call that leads to it | `(insert! (my-middle-fn args))` where `my-middle-fn` calls `->fact` | a var-usage inside the span set names a link on `intermediates` — the call-graph path from the inserter to the constructor's containing var, at any depth |
 
-All three are needed, and none subsumes the others. The call graph is
-`{caller-var -> #{callee-vars}}`, so it cannot say which of a rule's several
-`insert!` calls reached a constructor — that needs the source spans clj-kondo puts
-on every var-usage (the same data `read-boundary-args` uses to read the arguments).
-And a bare local names nothing at all, so only the traced form joins it back.
+Both are decided by source-span containment across the span set — never by the
+text or value of a form, so a same-named form at a different position never
+cross-attributes. The call graph is `{caller-var -> #{callee-vars}}`, so it
+cannot say which of a rule's several `insert!` calls reached a constructor;
+that needs the source spans clj-kondo puts on every var-usage, expanded by the
+span set to reach into locals' init forms. `intermediates` deliberately
+excludes the constructor symbol itself, so only the first route may match the
+constructor — and by *usage identity*, not by name.
 
-Rule 1 matches the constructor by *usage identity*, never by name — so a rule
-containing two separate `->fact` calls does not attribute both to whichever insert
-happens to contain one of them.
-
-An owned argument is skipped: `:callsite-resolver-fn` is never invoked for it, and
-the constructor entry (with `:constructor-sym` and `:via`) is the only entry
-emitted for that insert. Every other boundary argument reaches
+An owned argument is skipped: `:callsite-resolver-fn` is never invoked for it,
+and the constructor entry (with `:constructor-sym` and `:via`) is the only
+entry emitted for that insert. Every other boundary argument reaches
 `:callsite-resolver-fn` normally — `with-meta` maps, literals, var-as-fact —
-*including in the same rule* as a constructor insert, and including when it stays
-unresolved. An insert nobody can explain is reported with `:status :none` rather than
-dropped, so `:resolution` stays honest.
+*including in the same rule* as a constructor insert, and including when it
+stays unresolved. An insert nobody can explain is reported with `:status :none`
+rather than dropped, so `:resolution` stays honest.
 
 ### A constructor is only an insert if an insert reaches it
 
 A constructor call that **no** boundary argument reaches is not emitted and its
-type is not promoted:
+type is not promoted (the contract is
+`clara.explorer.analyze.callsite/resolve-constructor-callsites`):
 
 ```clojure
 (let [f (->fact :x m)]          ; called, but never inserted
   (insert! (something-else)))
 ;; => insert-types nil, resolution :none
-;;    one :unresolved callsite for (something-else)
+;;    one :none callsite for (something-else)
 ```
 
 This is what keeps the reachable-subtree scan from claiming types a rule never
 emits — the scan finds *candidates*, and ownership decides which are real. A
-constructor the resolver cannot type is likewise not emitted; the argument falls
-through to the boundary path instead of being reported twice.
+constructor the resolver cannot type is likewise not emitted; the argument
+falls through to the boundary path instead of being reported twice.
 
-The trade-off is recall: if an insert reaches a constructor by indirection none of
-the three routes can see — say `(insert-all! (apply f args))`, where the
-constructor-reaching fn is never named in the argument — the type is dropped rather
-than guessed. The boundary callsite then remains `:unresolved`, which is the honest
-signal, and the caller can annotate `:clara-rules/insert-types` explicitly.
+The trade-off is recall: if an insert reaches a constructor by indirection none
+of the two routes can see — say `(insert-all! (apply f args))` — the type is
+dropped rather than guessed. The boundary callsite then remains `:none`, which
+is the honest signal, and the caller can annotate `:clara-rules/insert-types`
+explicitly.
 
-Record/Java constructors and the `:fact-type-spec-fn` var-alias flow are unaffected.
-Alias-discovered callsites are deliberately never auto-resolved, so ownership never
-claims them either.
+Record/Java constructors and the `:fact-type-spec-fn` var-alias flow are
+unaffected. Alias-discovered callsites are deliberately never auto-resolved, so
+ownership never claims them either.
 
 ### `:ns-var-defs-fn` — helper bodies for source-less rule namespaces
 
-When a rule-owning namespace has no classpath source, `->rule-source-analysis`
+When a rule-owning namespace has no classpath source, `clara.explorer.analyze/->rule-source-analysis`
 reconstructs an `(ns …)` form from the live namespace and emits a
 `(declare …)` for every non-production intern. A `declare` has no body, so the
 analysis sees a helper var the rules call but nothing it calls in turn — a rule
 whose RHS reaches `insert!`/`retract!` only through such a helper is
-indistinguishable from one with no output, and is annotated
-`:clara-rules/no-output-types`.
+annotated `:clara-rules/no-output-types`.
 
-The analyzer cannot reconstruct those bodies itself: `ns-interns` yields
-compiled `Var`s, with no source text to read. Only the host that interned the
-vars (a rulebase loader, an authoring system, a generated namespace) still holds
-their definition forms, so `->rule-source-analysis` takes them as an input:
+The analyzer cannot reconstruct those bodies itself (`ns-interns` yields
+compiled `Var`s, no source text), so `->rule-source-analysis` takes them as an
+input. The hook's contract is `clara.explorer.analyze.synth/VarDef`, and the
+emission/validation rules are `clara.explorer.analyze.synth/synthesize-ns-source`
+(plus `clara.explorer.analyze.synth/var-def-line`):
 
 ```clojure
 :ns-var-defs-fn
@@ -728,28 +764,20 @@ their definition forms, so `->rule-source-analysis` takes them as an input:
 ```
 
 - **Called once per source-less rule-owning namespace.** A return of `nil` or
-  `[]` reproduces the current behaviour exactly. Exceptions are contained —
-  logged and treated as no var defs for that namespace.
-- **`:form` is a whole top-level form** — `(def f (fn f [x] …))`, `(defn f [x]
-  …)`, or anything else that defines `:name`. The analyzer never evaluates it;
-  it prints the form as text for clj-kondo to read.
-- **The `declare` stays and covers everything**, so forward references between
-  helper bodies resolve regardless of order, and vars the hook does not supply
-  keep today's behaviour.
+  `[]` reproduces the current behaviour exactly; exceptions are logged and
+  treated as no var defs for that namespace.
+- **`:form` is a whole top-level form** defining `:name`; the analyzer prints
+  it as text for clj-kondo to read — never evaluates it.
 - **Forms are printed one per line and round-trip validated.** A form that
-  prints across lines, or whose printed text is unreadable (an object with no
-  reader representation), is skipped and reported via `tap>` with
-  `:event :clara-rules/var-def-skipped` (plus `:ns`, `:var`, and `:reason`).
-- **Production names are rejected.** A `VarDef` whose `:name` collides with a
-  production in the namespace is dropped, keeping the synthesized source and
-  its analysis consistent.
+  prints across lines, or whose printed text is unreadable, is skipped and
+  reported via `tap>` with `:event :clara-rules/var-def-skipped`.
+- **Production names are rejected** — a `clara.explorer.analyze.synth/VarDef`
+  whose `:name` collides with a production is dropped.
 
 Once the helper bodies are in the analyzed text, nothing else changes: the
-helper is recorded as a direct inserter, `var-reachability` reports
-`:is-inserter? true` for rules that call it, and `extract-insert-types` reads
-boundary argument forms out of the synthesized source. `:fact-constructors` and
-`:callsite-resolver-fn` are reached normally, and constructor callsites carry a
-`:via` `:boundary-to-constructor-path` through the helper chain.
+helper is recorded as a direct inserter, and `:fact-constructors` /
+`:callsite-resolver-fn` are reached normally, with constructor callsites
+carrying a `:via` `:boundary-to-constructor-path` through the helper chain.
 
 ```clojure
 (let [analysis (analyze/->rule-source-analysis
@@ -768,11 +796,18 @@ boundary argument forms out of the synthesized source. `:fact-constructors` and
 
 ## Usage Workflows
 
-There are two paths to generate annotations and analysis, depending on whether you already have a REPL running with a live Clara session. **A session (or rulebase) is always required** — it is the source of truth for which rules exist, including macro-emitted ones.
+There are two paths to generate annotations and analysis, depending on whether
+you already have a REPL running with a live Clara session. **A session (or
+rulebase) is always required** — it is the source of truth for which rules
+exist, including macro-emitted ones.
 
 ### Path A — REPL with a live session (preferred when a REPL is already up)
 
-If you're already in a JVM REPL with a live Clara session, inject the explorer library at runtime with `add-libs` (requires Clojure 1.12+). This avoids classpath issues — your REPL already has all rule constructs, custom fact types, and deserialization logic loaded that the standalone CLI would need you to manage separately.
+If you're already in a JVM REPL with a live Clara session, inject the explorer
+library at runtime with `add-libs` (requires Clojure 1.12+). This avoids
+classpath issues — your REPL already has all rule constructs, custom fact
+types, and deserialization logic loaded that the standalone CLI would need you
+to manage separately.
 
 #### 1. Inject the explorer library
 
@@ -806,11 +841,15 @@ Auto-discover namespaces from the session and generate annotations:
   (clojure.pprint/pprint annotations))
 ```
 
-Rules defined by `eval` in namespaces with no classpath source are handled automatically: `->rule-source-analysis` reconstructs an `ns` form from the live namespace and synthesizes source from the session's productions.
+Rules defined by `eval` in namespaces with no classpath source are handled
+automatically: `clara.explorer.analyze/->rule-source-analysis` reconstructs an
+`ns` form from the live namespace and synthesizes source from the session's
+productions.
 
 #### 3. Generate full static analysis from a live session
 
-To get the same output as `--generate-analysis` (annotations + full rulebase analysis), use `clara.explorer.core/->rulebase-analysis`:
+To get the same output as `--generate-analysis` (annotations + full rulebase
+analysis), use `clara.explorer.core/->rulebase-analysis`:
 
 ```clojure
 (require '[clara.explorer.analyze :as analyze]
@@ -833,7 +872,7 @@ To get the same output as `--generate-analysis` (annotations + full rulebase ana
 ```
 
 For large rulebases the LHS/RHS form pretty-printing inside
-`rulebase-analysis` can be slow.  Pass `:form-printer pr-str` to skip it:
+`->rulebase-analysis` can be slow. Pass `:form-printer pr-str` to skip it:
 
 ```clojure
 (core/->rulebase-analysis my-session annotations {:form-printer pr-str})
@@ -851,11 +890,19 @@ For large rulebases the LHS/RHS form pretty-printing inside
 
 ### Path B — CLI via `-main` (standalone, no REPL needed)
 
-When a REPL isn't available, use the `-main` entry point. **Note:** if your session uses custom rule constructs, custom fact types, or non-Fressian serialization, those dependencies must be on the classpath when invoking `clojure -M`. The REPL path (Path A) avoids this because everything is already loaded in your running process. For a full flags reference, see the [server README](../README.md#cli-entry-point).
+When a REPL isn't available, use the `-main` entry point. **Note:** if your
+session uses custom rule constructs, custom fact types, or non-Fressian
+serialization, those dependencies must be on the classpath when invoking
+`clojure -M`. The REPL path (Path A) avoids this because everything is already
+loaded in your running process. For a full flags reference, see the
+[server README](../README.md#cli-entry-point).
 
 #### Generate static analysis dump to disk
 
-Requires a serialized session. Produces `annotations.edn` + `analysis.edn` in the given output directory. Annotations are auto-discovered from the session's rule namespaces via clj-kondo, with the session rulebase as the source of truth for rules:
+Requires a serialized session. Produces `annotations.edn` + `analysis.edn` in
+the given output directory. Annotations are auto-discovered from the session's
+rule namespaces via clj-kondo, with the session rulebase as the source of truth
+for rules:
 
 ```bash
 # Auto-discover from session (sources must be on classpath)

@@ -35,6 +35,7 @@
             [clara.explorer.analyze.utils :as u]
             [clara.explorer.analyze.kondo :as kondo]
             [clara.explorer.analyze.index :as index]
+            [clara.explorer.analyze.refer :as refer]
             [clara.explorer.analyze.synth :as synth]
             [clara.explorer.serialize :as serialize]
             [clara.explorer.conditions :as conditions]
@@ -197,7 +198,7 @@
    Caller-driven resolution always runs first and is never displaced: constructor-of-interest
   callsites (when :fact-constructors is supplied) are resolved via their matched
   `:type-resolver-fn`, then every remaining boundary-call argument form goes through the runtime
-  resolution chain (`analyze.callsite`) and the optional `:callsite-resolver-fn`.
+  resolution chain (`clara.explorer.analyze.callsite`) and the optional `:callsite-resolver-fn`.
 
    The record-ctor scan (`inserter-type-map`) is a *heuristic fallback*, applied per direct-inserter
   var: a var's scan types are credited only when no caller-driven path accounted for any of that
@@ -279,7 +280,7 @@
             all-callsites (into all-callsites fallback-callsites)
             all-types (into all-types (mapcat :resolved-types) fallback-callsites)
             ;; callsite identity: the discovering layer derives ids — it has
-            ;; the full entries (see annotations.callsite/assign-callsite-ids).
+            ;; the full entries (see ann.callsite/assign-callsite-ids).
             all-callsites (ann.callsite/assign-callsite-ids all-callsites)
             all-resolution (callsite/resolution-status all-callsites)]
         {:resolved-types all-types
@@ -333,7 +334,7 @@
   retracts fact types. Returns nil when the var has no output side-effects.
 
   Statically-traceable constructor types and types resolved by the dynamic
-  callsite chain (analyze.callsite) are promoted into :clara-rules/insert-types
+  callsite chain (`clara.explorer.analyze.callsite`) are promoted into :clara-rules/insert-types
   and :clara-rules/retract-types; unresolved or partially-resolved callsites
   remain visible under the dynamic-detection keys.
 
@@ -587,16 +588,19 @@
 
    `->lines-loader` creates a memoized `get-lines` from `get-source`;
    `read-ctor-form` is a closure over `get-lines` for reading constructor
-   forms by kondo usage position."
+   forms by kondo usage position; `->local-binding-classifier` memoizes local
+   binding classification by `[filename local-id]` for the run."
   [{:keys [index callsite-resolver-fn alias-by-rule fallback-mode get-source]}]
   (let [get-lines (->lines-loader get-source)
+        index' (assoc index :get-lines get-lines)
         read-ctor-form (fn [ctor-usage] (kondo/read-ctor-form ctor-usage get-lines))]
-    (assoc index
+    (assoc index'
            :get-lines get-lines
            :read-ctor-form read-ctor-form
            :callsite-resolver-fn callsite-resolver-fn
            :alias-by-rule alias-by-rule
-           :dynamic-type-fallback-resolution fallback-mode)))
+           :dynamic-type-fallback-resolution fallback-mode
+           :classify-local-binding (callsite/->local-binding-classifier index'))))
 
 (s/defschema ConstructorMatchFn
   "A spec's `:match-fn`: decides whether a fully-qualified var symbol is a
@@ -631,8 +635,8 @@
 
    Sets are already `IFn`, so a set works today by accident.  Normalizing means
    the invariant is stated once: everything downstream of
-   `->annotations-from-rule-source-analysis` — `analyze.index`, `analyze.callsite` —
-   holds a fn, and is entitled to."
+   `->annotations-from-rule-source-analysis` — `clara.explorer.analyze.index`,
+   `clara.explorer.analyze.callsite` — holds a fn, and is entitled to."
   [specs]
   (mapv (fn [{:keys [match-fn] :as spec}]
           (cond-> spec
@@ -724,7 +728,7 @@
    * `:rules-filter` — optional coll of rule symbols to filter by.
 
    * `:callsite-resolver-fn` — optional fn invoked once per callsite argument form the automatic
-  constructor-resolution chain cannot resolve (see `analyze.callsite`). Receives a
+  constructor-resolution chain cannot resolve (see `clara.explorer.analyze.callsite`). Receives a
   `callsite/CallsiteResolverContext`. Returns nil (still unresolved) or `{:resolved-types [tokens …]}`.
   Exceptions are contained: logged and treated as unresolved.
 
@@ -793,8 +797,13 @@
                                                (group-by u/var-usage-caller (:var-usages rule-source-analysis))
                                                fact-type-spec-fn))
         rule-source-analysis (cond-> rule-source-analysis
-                               (seq alias-by-rule)
-                               (update :var-usages into (mapcat :usages) (vals alias-by-rule)))
+                               (seq alias-by-rule) (update :var-usages into
+                                                           (mapcat :usages)
+                                                           (vals alias-by-rule))
+                               ;; kondo misattributes bare usages from `:refer :all` namespaces to the
+                               ;; first refer-all'd namespace; correct `:to` against the live refer
+                               ;; table (see `refer/re-attribute-refer-all-usages`).
+                               true (update :var-usages refer/re-attribute-refer-all-usages))
         index (index/->analysis-index
                {:analysis rule-source-analysis
                 :get-source get-source
