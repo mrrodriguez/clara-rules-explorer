@@ -56,7 +56,7 @@
   the checkouts only it knows about.
 
   Delegates to `clara.explorer.artifacts.git/get-git-info` — the same
-  implementation the offline bb `status` report reads through — including its
+  implementation the offline bb `status` subcommand reads through — including its
   detached-checkout resolution of `:branch` to the remote branch."
   [dir :- (s/maybe (s/cond-pre s/Str File))]
   (when (and dir (.exists (io/file (str dir))))

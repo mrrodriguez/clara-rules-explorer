@@ -19,8 +19,8 @@
   ## `:lhs` is scanned, not detail
 
   The one field whose access pattern is not obvious from its shape. It is the
-  biggest per-production value and no offline report subcommand touches it,
-  which reads as detail — but a condition-level analysis classifies every
+  biggest per-production value and no `inspect-artifacts.bb` subcommand touches
+  it, which reads as detail — but a condition-level analysis classifies every
   condition of every rule, which is a full-corpus scan. Filed with `:rhs-form`
   it would cost that reader 3.0MB it never looks at, so it gets
   `production-conditions.edn` to itself.
@@ -51,7 +51,7 @@
 (def part-files
   "`schema/AnalysisPartKey` → its filename under the analysis directory;
   `clara.explorer.artifacts.store` reads them from here. Defined in
-  `layout/part-files`, which the babashka report script also loads, so the two
+  `layout/part-files`, which `inspect-artifacts.bb` also loads, so the two
   cannot disagree on a filename."
   layout/part-files)
 

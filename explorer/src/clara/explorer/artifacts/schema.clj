@@ -160,8 +160,8 @@
 
 (def detection-keys-by-dimension
   "`DetectionDimension` → the annotation key holding its detection map. Exposed here because that
-  is where the dimension itself is defined; the value lives in `layout`, which the babashka report
-  script also loads."
+  is where the dimension itself is defined; the value lives in `layout`, which
+  `inspect-artifacts.bb` also loads."
   layout/detection-keys-by-dimension)
 
 (s/defschema Annotations

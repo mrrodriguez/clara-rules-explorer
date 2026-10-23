@@ -7,7 +7,7 @@ test:
 
 # Verify every :clara-rules-explorer/bb-loaded namespace requires under bb.
 bb-smoke-test:
-	bb bin/bb_shared_smoke_test.bb
+	bb bin/bb-shared-smoke-test.bb
 
 # Start a headless nREPL server with dev and test dependencies loaded (for Conjure, CIDER, etc.)
 repl:

@@ -1,6 +1,6 @@
 (ns clara.explorer.artifacts.layout-test
   "The unit → directory mapping (and its inverse) that the JVM store and the
-  babashka `status` report share, plus the variant segment encoding both read."
+  babashka `status` subcommand share, plus the variant segment encoding both read."
   (:require
    [clara.explorer.artifacts.layout :as layout]
    [clojure.java.io :as io]

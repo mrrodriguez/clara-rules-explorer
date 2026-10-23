@@ -1,7 +1,8 @@
 (ns ^{:clara-rules-explorer/bb-loaded true} clara.explorer.artifacts.cross-unit
   "Cross-unit readings over one (composed) analysis: entry points and unit
-  edges. Pure — every fn takes the already-read parts, so the bb report and
-  `clara.explorer.artifacts.diff` share one definition rather than restating it.
+  edges. Pure — every fn takes the already-read parts, so `inspect-artifacts.bb`
+  and `clara.explorer.artifacts.diff` share one definition rather than
+  restating it.
 
   Entry points are types a production matches that no rule produces (a rule
   produces what it inserts, and each of those types' ancestors; retraction does

@@ -1,0 +1,1 @@
+../../../../explorer/bin/editor-client.bb

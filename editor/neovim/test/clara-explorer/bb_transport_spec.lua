@@ -1,4 +1,4 @@
---- Tier 2: babashka transport — the `bb editor_client.bb` shell-out executor,
+--- Tier 2: babashka transport — the `bb editor-client.bb` shell-out executor,
 -- registry-selection prompt/cache, and the bb-mode dispatch in `init.lua`
 -- (navigate / refresh / swap-session / toggle / select-unit). Mirrors
 -- `editor/emacs/test/clara-explorer-test.el`'s babashka-transport tests.
@@ -192,7 +192,7 @@ describe("conjure.bb_script", function()
       vim.g,
       "clara_explorer_bb_script",
       nil,
-      function() assert.truthy(conjure.bb_script():match("editor_client%.bb$")) end
+      function() assert.truthy(conjure.bb_script():match("editor%-client%.bb$")) end
     )
   end)
 
@@ -200,8 +200,8 @@ describe("conjure.bb_script", function()
     with_restore(
       vim.g,
       "clara_explorer_bb_script",
-      "/elsewhere/editor_client.bb",
-      function() assert.are.same("/elsewhere/editor_client.bb", conjure.bb_script()) end
+      "/elsewhere/editor-client.bb",
+      function() assert.are.same("/elsewhere/editor-client.bb", conjure.bb_script()) end
     )
   end)
 end)
@@ -209,7 +209,7 @@ end)
 describe("conjure.bb_list_unit_repos", function()
   it("shells out to --list-units and decodes the sorted EDN vector", function()
     local captured
-    with_restore(conjure, "bb_script", function() return "/p/editor_client.bb" end, function()
+    with_restore(conjure, "bb_script", function() return "/p/editor-client.bb" end, function()
       with_restore(vim.fn, "filereadable", function() return 1 end, function()
         with_restore(vim, "system", function(cmd, opts)
           captured = { cmd = cmd, opts = opts }
@@ -230,7 +230,7 @@ describe("conjure.bb_list_unit_repos", function()
               entry = '{:repo "loan-disposition-ruleset", :variant [[:ref "feature/new-tax"]]}',
             },
           }, conjure.bb_list_unit_repos("/root"))
-          assert.are.same({ "bb", "/p/editor_client.bb", "--list-units", "/root" }, captured.cmd)
+          assert.are.same({ "bb", "/p/editor-client.bb", "--list-units", "/root" }, captured.cmd)
           assert.are.same(true, captured.opts.text)
         end)
       end)
@@ -238,7 +238,7 @@ describe("conjure.bb_list_unit_repos", function()
   end)
 
   it("notifies and returns empty when the script fails", function()
-    with_restore(conjure, "bb_script", function() return "/p/editor_client.bb" end, function()
+    with_restore(conjure, "bb_script", function() return "/p/editor-client.bb" end, function()
       with_restore(vim.fn, "filereadable", function() return 1 end, function()
         with_restore(vim, "system", function()
           return { wait = function() return { code = 3, stdout = "", stderr = "oops" } end }
@@ -257,7 +257,7 @@ describe("conjure.bb_list_unit_repos", function()
   end)
 
   it("notifies and returns empty when bb reports an :error", function()
-    with_restore(conjure, "bb_script", function() return "/p/editor_client.bb" end, function()
+    with_restore(conjure, "bb_script", function() return "/p/editor-client.bb" end, function()
       with_restore(vim.fn, "filereadable", function() return 1 end, function()
         with_restore(vim, "system", function()
           return { wait = function() return { code = 0, stdout = '{:error "not a directory"}', stderr = "" } end }
@@ -398,7 +398,7 @@ end)
 describe("conjure.bb_eval", function()
   it("runs bb and parses the EDN result", function()
     local captured
-    with_restore(conjure, "bb_script", function() return "/p/editor_client.bb" end, function()
+    with_restore(conjure, "bb_script", function() return "/p/editor-client.bb" end, function()
       with_restore(vim.fn, "filereadable", function() return 1 end, function()
         with_restore(vim, "system", function(cmd, opts, on_exit)
           captured = { cmd = cmd, opts = opts }
@@ -412,7 +412,7 @@ describe("conjure.bb_eval", function()
             done = true
           end)
           vim.wait(1000, function() return done end, 10)
-          assert.are.same({ "bb", "/p/editor_client.bb", "{sel}", "{input}" }, captured.cmd)
+          assert.are.same({ "bb", "/p/editor-client.bb", "{sel}", "{input}" }, captured.cmd)
           assert.are.same(true, captured.opts.text)
           assert.are.same({ direction = "consumer" }, result)
           assert.is_nil(err)
@@ -422,7 +422,7 @@ describe("conjure.bb_eval", function()
   end)
 
   it("surfaces a non-zero exit", function()
-    with_restore(conjure, "bb_script", function() return "/p/editor_client.bb" end, function()
+    with_restore(conjure, "bb_script", function() return "/p/editor-client.bb" end, function()
       with_restore(vim.fn, "filereadable", function() return 1 end, function()
         with_restore(vim, "system", function(_cmd, _opts, on_exit)
           on_exit({ code = 3, stdout = "", stderr = "oops" })
@@ -444,7 +444,7 @@ describe("conjure.bb_eval", function()
   end)
 
   it("surfaces invalid EDN", function()
-    with_restore(conjure, "bb_script", function() return "/p/editor_client.bb" end, function()
+    with_restore(conjure, "bb_script", function() return "/p/editor-client.bb" end, function()
       with_restore(vim.fn, "filereadable", function() return 1 end, function()
         with_restore(vim, "system", function(_cmd, _opts, on_exit)
           on_exit({ code = 0, stdout = "not edn {", stderr = "" })
@@ -465,7 +465,7 @@ describe("conjure.bb_eval", function()
   end)
 
   it("surfaces a spawn failure (bb missing)", function()
-    with_restore(conjure, "bb_script", function() return "/p/editor_client.bb" end, function()
+    with_restore(conjure, "bb_script", function() return "/p/editor-client.bb" end, function()
       with_restore(vim.fn, "filereadable", function() return 1 end, function()
         with_restore(vim, "system", function() error("ENOENT") end, function()
           local result, err
@@ -480,14 +480,14 @@ describe("conjure.bb_eval", function()
   end)
 
   it("surfaces a missing script", function()
-    with_restore(conjure, "bb_script", function() return "/p/editor_client.bb" end, function()
+    with_restore(conjure, "bb_script", function() return "/p/editor-client.bb" end, function()
       with_restore(vim.fn, "filereadable", function() return 0 end, function()
         local result, err
         conjure.bb_eval("{sel}", "{input}", function(r, e)
           result, err = r, e
         end)
         assert.is_nil(result)
-        assert.truthy(err:find("editor_client.bb not found", 1, true))
+        assert.truthy(err:find("editor-client.bb not found", 1, true))
       end)
     end)
   end)

@@ -198,7 +198,7 @@ file once, or not at all.**
 
 The consequence: **the merge is not readable without the layer files beside it.**
 Both readers resolve the references for you — `store/read-merged-annotations` on
-the JVM, and `annotations_report.bb` offline — so you never handle the stored
+the JVM, and `inspect-artifacts.bb` offline — so you never handle the stored
 shape unless you go looking. `store/read-compact-merged-annotations` is the way
 to look.
 
@@ -207,10 +207,10 @@ directly, so anything taken out of one would vanish from the API; the merge is
 the one annotation artifact the server never reads, which is what lets it point
 at them.
 
-## Querying it offline: `annotations_report.bb`
+## Querying it offline: `inspect-artifacts.bb`
 
 ```bash
-S="$CLARA_RULES_EXPLORER_HOME/explorer/bin/annotations_report.bb"
+S="$CLARA_RULES_EXPLORER_HOME/explorer/bin/inspect-artifacts.bb"
 D="/path/to/artifacts/<repo>"       # a variant unit is $ROOT/_variants/<repo>/<variant path>
 
 bb "$S" "$D"                              # summary + resolution tallies
@@ -306,14 +306,14 @@ and the `merged-annotations.edn` decode — lives in namespaces marked
 them safe for bb to `require`. Run the script from a checkout, not from a
 detached copy of the file alone.
 
-## Navigating offline: `editor_client.bb`
+## Navigating offline: `editor-client.bb`
 
-`bin/editor_client.bb` is the babashka twin of the editor navigation query
+`bin/editor-client.bb` is the babashka twin of the editor navigation query
 (`clara.explorer.server.client/navigate`): EDN-in, EDN-out over a registry
 selection, no JVM, no session, no Jetty.
 
 ```bash
-S="$CLARA_RULES_EXPLORER_HOME/explorer/bin/editor_client.bb"
+S="$CLARA_RULES_EXPLORER_HOME/explorer/bin/editor-client.bb"
 bb "$S" '{:root "…" :units [{:repo "…"} {:repo "…"}]}' \
         '{:production nil :side :lhs :token ":loan/applicant"}'
 ```
@@ -415,7 +415,7 @@ present, is the unit's variant — not git's branch, which stays under
 
 ### Checking a unit: `status`
 
-`bb annotations_report.bb <dir> status` answers "is this unit current?" from
+`bb inspect-artifacts.bb <dir> status` answers "is this unit current?" from
 the manifest (and, for a composed unit, its sources' manifests) — no JVM, no
 analysis parts. A source unit compares against `--checkout PATH` (`--ref`,
 default `HEAD`): a remote mismatch, a sha drift, a dirty generation tree, or an
@@ -524,7 +524,7 @@ it is a composition:
 
 It writes the three standard layers, compact `merged-annotations.edn`,
 `merged-rulebase-analysis/`, `rulebase-analysis-digest.edn`, and a manifest —
-the same shape `bin/annotations_report.bb` already reads. Per-unit provenance
+the same shape `bin/inspect-artifacts.bb` already reads. Per-unit provenance
 lives in the manifest's `:analysis-run` block rather than in the flattened
 layer files; the manifest's `:analysis-run :mode :compose` and `:units` are
 exactly the aggregate marker `registry/unit-info` reads back, so a composed

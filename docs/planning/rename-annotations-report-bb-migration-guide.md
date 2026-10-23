@@ -36,7 +36,9 @@ Unchanged: `explorer/bin/bootstrap.bb`, `explorer/bin/clj-local`,
    READMEs, wiki pages).
 
 Subcommands, flags, arguments, `--edn` shapes, and exit codes are unchanged —
-only the script filenames move. For example:
+only the script filenames move. Strings that embed the filename move with it:
+the `help` usage line and the scripts' usage/`die` hints name the new file.
+For example:
 
 ```bash
 # before
@@ -51,7 +53,9 @@ bb explorer/bin/inspect-artifacts.bb "$D" status
 ## 3. Verify you are clean
 
 ```bash
-# from the repo root — must print nothing (apart from this guide and the plan):
+# from the repo root — must print nothing apart from the docs under
+# `docs/planning/` that describe this rename (the plan, this guide, and the
+# progress log):
 grep -rn "annotations_report\|editor_client\|bb_shared_smoke" \
   --include='*.md' --include='*.clj' --include='*.bb' --include='*.lua' \
   --include='*.el' --include='Makefile' --include='*.sh' --include='*.yml' .
