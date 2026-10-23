@@ -231,8 +231,8 @@
           (let [fq-sym (-> fq-dep-name symbol)
                 ns-part (namespace fq-sym)]
             {:ns ns-part
-             :name (str fq-dep-name)
-             :id (route-id (str fq-dep-name))})
+             :name fq-dep-name
+             :id (route-id fq-dep-name)})
           {:ns (str p-ns-name)
            :name fq-dep-name
            :id (route-id (str fq-dep-name))})]

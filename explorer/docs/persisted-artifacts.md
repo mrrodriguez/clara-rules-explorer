@@ -248,7 +248,13 @@ resolution and the index fields, `production-conditions.edn` for `:lhs`, and
 annotations only for the full record's `:resolution`; `--part lhs` never opens
 `production-details.edn` or the annotations. With `--annotations` it prints the
 merged annotation for that production instead — a production with no annotation
-says so — and `--file` picks which annotation file that read uses.
+says so — and `--file` picks which annotation file that read uses. The text
+view renders `:lhs` as Clojure data (`clara.explorer.artifacts.render/->display-lhs`
+reads each persisted `:type`, `:constraints`, `:args`, and `:accumulator` `:form`
+string back into the value it names); `--edn` prints the persisted value
+unchanged. `--part` and `--edn` combine — `--part` picks the field, `--edn` the
+format — so `--part lhs` renders and `--part lhs --edn` prints the persisted
+`:lhs` verbatim.
 `units` reads the composed manifest plus `production-index.edn`; `unit-edges`
 reads `production-index.edn`, `dep-graph.edn`, and `fact-types.edn`;
 `entry-points` reads `production-index.edn` and `fact-types.edn`.
@@ -282,8 +288,9 @@ parts plus their merged annotations, and refuses units with differing
 present on only one side are reported under `scope`, never as added or
 removed; `scope` also lists the fact types only scope-only namespaces touch,
 through the `:ancestors` hierarchy. `--production NAME` (substring matching, as
-`production` does) prints one production's before and after per changed field;
-`--edn` prints the diff value. `--production` reads only the production files
+`production` does) prints one production's before and after per changed field —
+`:lhs` rendered as Clojure data and `:rhs-form` as its raw text, the same
+display form `production` uses — while `--edn` prints the diff value unchanged. `--production` reads only the production files
 and skips the full diff, so it answers even when the dep-graph, fact-types, or
 shape are absent. Three things it does not answer: a renamed production shows
 as one removed and one added; an `:rhs` tag says the text changed, not what it

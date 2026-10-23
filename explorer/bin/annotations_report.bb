@@ -30,6 +30,7 @@
          '[clara.explorer.artifacts.hierarchy :as hierarchy]
          '[clara.explorer.artifacts.cross-unit :as cross-unit]
          '[clara.explorer.artifacts.diff :as diff]
+         '[clara.explorer.artifacts.render :as render]
          '[clara.explorer.artifacts.status :as status])
 
 (def ^:private dims
@@ -578,7 +579,7 @@
    ["producers" "<type>" "rules inserting <type> or a descendant"]
    ["consumers" "<type>" "rules with <type> or an ancestor on LHS"]
    ["hierarchy" "<type>" "that type's ancestors and descendants"]
-   ["production" "<fq-name>" "one production's record; --part lhs|rhs|props, --annotations"]
+   ["production" "<fq-name>" "one production's record; --part lhs|rhs|props and --edn combine, --annotations"]
    ["edges" "<fq-name>" "dep-graph upstream/downstream"]
    ["units" "" "composed unit: source units + coverage"]
    ["unit-edges" "[<unit>]" "cross-unit producer->consumer edges (composed only)"]
@@ -622,11 +623,15 @@
     :props :props))
 
 (defn- print-production-part
-  "One analysis field of a production record: the string `:rhs-form` raw,
-  the data fields pretty-printed."
+  "One analysis field of a production record as its text view: `:lhs` rendered
+  via `render/->display-lhs`, the string `:rhs-form` raw, the data fields
+  pretty-printed."
   [field record]
   (let [v (get record field)]
-    (if (string? v) (println v) (pprint/pprint v))))
+    (cond
+      (= field :lhs) (pprint/pprint (render/->display-lhs v))
+      (string? v) (println v)
+      :else (pprint/pprint v))))
 
 (defn- print-production
   "One production's joined record as text: the index fields, `:resolution`,
@@ -642,7 +647,7 @@
   (print-field "resolution" (pr-str (:resolution record)))
   (print-field "doc" (str (:doc record)))
   (println "lhs:")
-  (doseq [c (:lhs record)]
+  (doseq [c (render/->display-lhs (:lhs record))]
     (pprint/pprint c))
   (println "rhs-form:")
   (println (:rhs-form record)))
@@ -651,9 +656,10 @@
   "`production <fq-name>` over unit dir `dir`: one production's joined record
   from `diff/read-production` — or, with `--annotations`, the merged annotation
   for that name. `--part lhs|rhs|props` prints one analysis field; `--edn`
-  prints the whole record; otherwise the text view prints the index fields,
-  `:lhs`, and `:rhs-form`. `--file` picks the annotation file for
-  `--annotations`."
+  prints the whole record. `--part` and `--edn` combine: `--part` picks the
+  field, `--edn` picks the format, so `--part lhs` renders `:lhs` as Clojure
+  data and `--part lhs --edn` prints the persisted value. `--file` picks the
+  annotation file for `--annotations`."
   [dir name* opts anns productions]
   (let [part (some-> (:part opts) keyword)
         field (some-> part production-part-field)
@@ -674,7 +680,9 @@
             record (try (diff/read-production dir name* needed)
                         (catch Exception e (die (ex-message e))))]
         (cond
-          field (print-production-part field record)
+          field (if (:edn opts)
+                  (pprint/pprint (get record field))
+                  (print-production-part field record))
           (:edn opts) (pprint/pprint record)
           :else (print-production record))))))
 

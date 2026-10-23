@@ -19,7 +19,9 @@
   (:require
    [clara.explorer.artifacts.layout :as layout]
    [clara.explorer.artifacts.cross-unit :as cross-unit]
+   [clara.explorer.artifacts.render :as render]
    [clojure.edn :as edn]
+   [clojure.pprint :as pprint]
    [clojure.set :as set]
    [clojure.string :as str]))
 
@@ -702,10 +704,37 @@
      :before b
      :after a}))
 
+(defn- render-field-side
+  "One changed field's value on one side, as the text of its block body:
+  `:lhs` via `render/->display-lhs` pretty-printed, `:rhs-form` as the raw
+  text, every other field via `pr-str`."
+  [key v]
+  (cond
+    (= key :lhs) (with-out-str (pprint/pprint (render/->display-lhs v)))
+    (= key :rhs-form) (str v)
+    :else (pr-str v)))
+
+(defn- block-field?
+  "Whether a changed field's two sides print as multi-line blocks — the fields
+  whose value is already (or becomes) more than one line: `:lhs` and
+  `:rhs-form`.  Every other field stays inline as today."
+  [key]
+  (contains? #{:lhs :rhs-form} key))
+
+(defn- indent-lines
+  "Prefix every line of `s` with `n` spaces."
+  [n s]
+  (->> (str/split-lines s)
+       (map #(str (apply str (repeat n " ")) %))
+       (str/join "\n")))
+
 (defn rule-detail-text
   "A `rule-detail` value as text: the name and tags, then each changed
-   field's before and after — including both `:rhs-form` texts. A production
-   on one side only names that side and stops there."
+   field's before and after. `:lhs` prints as `render/->display-lhs`,
+   `:rhs-form` as the raw text — both as indented multi-line blocks, since a
+   whole condition vector or a form is more than one line — and every other
+   field stays inline via `pr-str`. A production on one side only names that
+   side and stops there."
   [{rule-name :name :keys [tags before after]}]
   (let [header (cond
                  (nil? before) (format "%s (only in after)" rule-name)
@@ -717,8 +746,14 @@
                       (mapcat (fn [[tag key set?]]
                                 (when (not= (compared-value before key set?)
                                             (compared-value after key set?))
-                                  [(format "%s:" (name tag))
-                                   (format "  before: %s" (pr-str (get before key)))
-                                   (format "  after:  %s" (pr-str (get after key)))]))
+                                  (let [b (get before key)
+                                        a (get after key)]
+                                    (if (block-field? key)
+                                      [(format "%s:" (name tag))
+                                       (str "  before:\n" (indent-lines 4 (render-field-side key b)))
+                                       (str "  after:\n" (indent-lines 4 (render-field-side key a)))]
+                                      [(format "%s:" (name tag))
+                                       (format "  before: %s" (render-field-side key b))
+                                       (format "  after:  %s" (render-field-side key a))]))))
                               compared-fields))]
     (str/join "\n" (into [header] field-lines))))
