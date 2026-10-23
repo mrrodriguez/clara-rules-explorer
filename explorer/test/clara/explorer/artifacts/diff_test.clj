@@ -348,8 +348,24 @@
         (is (= "(b)" (get-in detail [:after :rhs-form])))
         (let [text (d/rule-detail-text detail)]
           (is (str/includes? text "a.ns/p [rhs]"))
-          (is (str/includes? text "before: \"(a)\""))
-          (is (str/includes? text "after:  \"(b)\"")))))
+          (is (str/includes? text "rhs:"))
+          (is (str/includes? text "  before:\n    (a)"))
+          (is (str/includes? text "  after:\n    (b)")))))
+    (testing "a changed :lhs renders as Clojure data, not escaped strings"
+      (let [b (with-prods (unit {}) {"a.ns/p" (prod {:lhs [{:type ":a/T"
+                                                            :constraints "[(= status :new)]"
+                                                            :bindings {}}]})})
+            a (with-prods (unit {}) {"a.ns/p" (prod {:lhs [{:type ":a/T"
+                                                            :constraints "[(= status :approved)]"
+                                                            :bindings {}}]})})
+            detail (d/rule-detail b a "a.ns/p")
+            text (d/rule-detail-text detail)]
+        (is (= [:lhs] (:tags detail)))
+        (is (str/includes? text "lhs:"))
+        (is (str/includes? text ":type :a/T"))
+        (is (str/includes? text "(= status :new)"))
+        (is (str/includes? text "(= status :approved)"))
+        (is (not (str/includes? text ":type \":a/T\"")))))
     (testing "substring matching, as the report's `rule` does"
       (is (= "a.ns/p" (:name (d/rule-detail b a "ns/p")))))
     (testing "a production on one side only"

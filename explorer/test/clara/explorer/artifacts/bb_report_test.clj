@@ -444,18 +444,38 @@
     (do
       (write-artifacts! production-analysis)
 
-      (testing "`production --part lhs` shows a :not condition and its children; --annotations does not"
+      (testing "`production --part lhs` renders :lhs as Clojure data; --annotations does not"
         (let [out (run-report "production" "a.ns/full-rule" "--part" "lhs")]
           (is (str/includes? out ":condition-type :not"))
-          (is (str/includes? out ":type \":a/one\"")))
+          (is (str/includes? out ":type :a/one"))
+          (is (str/includes? out ":constraints []"))
+          (is (not (str/includes? out ":type \":a/one\""))))
         (let [out (run-report "production" "a.ns/full-rule" "--annotations")]
           (is (not (str/includes? out ":condition-type")))))
 
-      (testing "an accumulator condition carries :accumulator :from :result-binding"
+      (testing "`production` text view renders :lhs the same way"
+        (let [out (run-report "production" "a.ns/full-rule")]
+          (is (str/includes? out "lhs:"))
+          (is (str/includes? out ":type :a/one"))
+          (is (not (str/includes? out ":type \":a/one\"")))))
+
+      (testing "an accumulator condition renders :accumulator :form :from :result-binding"
         (let [out (run-report "production" "a.ns/accum-rule" "--part" "lhs")]
           (is (str/includes? out ":accumulator"))
+          (is (str/includes? out ":form max"))
           (is (str/includes? out ":from"))
+          (is (str/includes? out ":type :a/one"))
           (is (str/includes? out ":result-binding"))))
+
+      (testing "`--part lhs --edn` prints the persisted :lhs verbatim"
+        (let [expected (get-in (diff/read-productions (:dir *artifact-opts*)) ["a.ns/full-rule" :lhs])
+              actual (edn/read-string (run-report "production" "a.ns/full-rule" "--part" "lhs" "--edn"))]
+          (is (= expected actual))))
+
+      (testing "`--part rhs --edn` prints the persisted :rhs-form verbatim"
+        (let [expected (get-in (diff/read-productions (:dir *artifact-opts*)) ["a.ns/full-rule" :rhs-form])
+              actual (edn/read-string (run-report "production" "a.ns/full-rule" "--part" "rhs" "--edn"))]
+          (is (= expected actual))))
 
       (testing "a query resolves and prints kind query"
         (let [result (edn/read-string (run-report "production" "a.ns/a-query" "--edn"))]
