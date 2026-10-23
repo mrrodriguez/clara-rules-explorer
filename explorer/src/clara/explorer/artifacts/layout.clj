@@ -2,8 +2,8 @@
   "What the persisted artifacts are called, and how to read back the one of them
   that is not stored literally.
 
-  The one definition every reader shares: the JVM artifact namespaces and the
-  babashka report load this namespace rather than restating its contents, so a
+  The one definition every reader shares: the JVM artifact namespaces and
+  `inspect-artifacts.bb` load this namespace rather than restating its contents, so a
   filename, the layer fold order, or the `merged-annotations.edn` decode cannot
   drift between the two. What belongs here is narrow — a name or a pure function
   both sides need, in plain Clojure. Schema validation, IO, and anything touching
@@ -104,7 +104,7 @@
   "Detection dimension → the annotation key holding its detection map. Three
   callers walk callsites by dimension —
   `clara.explorer.artifacts.overlay`,
-  `clara.explorer.artifacts.compact`, and the babashka report — and
+  `clara.explorer.artifacts.compact`, and `inspect-artifacts.bb` — and
   all three must agree on which keys those are."
   {:insert :clara-rules/dynamic-insert-types-detected
    :retract :clara-rules/dynamic-retract-types-detected})
@@ -183,7 +183,7 @@
 ;; unit placement
 ;;
 ;; The unit → directory mapping both the JVM registry and the babashka
-;; `status` report need: `<root>/<repo>/` for a mainline unit, or
+;; `status` subcommand need: `<root>/<repo>/` for a mainline unit, or
 ;; `<root>/_variants/<repo>/<axis>=<value>/…/ref=<ref>/` for a variant. Pure
 ;; `/`-joins — every downstream use goes back through file IO that accepts them
 ;; on any platform — so both sides share this instead of each joining segments
@@ -419,7 +419,7 @@
 (defn ->short-sha
   "First 7 chars of `sha`, for one-line provenance and verdict summaries.
    nil-safe: a nil sha reads as the empty string. Shared by the babashka
-   `status` report and `clara.explorer.artifacts.diff` so the two cannot
+   `status` subcommand and `clara.explorer.artifacts.diff` so the two cannot
    drift on how a sha is shortened."
   [sha]
   (let [s (str sha)]
@@ -431,7 +431,7 @@
    file's path and returns the layer map; nil skips a layer that is absent.
    A layer whose `:annotations` is not a map is skipped.
 
-   The fold order and the extraction live here, once, so the babashka report
+   The fold order and the extraction live here, once, so `inspect-artifacts.bb`
    (loud `read-layer`) and `clara.explorer.artifacts.diff` (tolerant
    `read-layer`) cannot drift on them;
    `clara.explorer.artifacts.store/->layer-annotations-stack` is the JVM
@@ -448,7 +448,7 @@
 (defn resolve-key
   "`{:exact key}` when `name*` is a key of `m`, else
    `{:candidates [sorted substring matches]}`. Pure; callers decide how to
-   report a non-singleton answer. Shared by the babashka report (prints a
+   report a non-singleton answer. Shared by `inspect-artifacts.bb` (prints a
    resolution or an ambiguity list) and
    `clara.explorer.artifacts.diff/find-production-name` (throws)."
   [m name*]

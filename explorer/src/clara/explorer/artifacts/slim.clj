@@ -42,7 +42,7 @@
 ;;
 ;; THE INVERSE PAIRS. **This comment is the one place these are explained.** The artifact carries
 ;; only the `:dropped` key set and `:written-by` (the writing function, resolvable at the manifest's
-;; sha); every other mention — docs/persisted-artifacts.md and the offline report script — point here
+;; sha); every other mention — docs/persisted-artifacts.md and `inspect-artifacts.bb` — point here
 ;; rather than restating, because five copies of a rule about closure direction is five chances to
 ;; get one of them backwards.
 ;;

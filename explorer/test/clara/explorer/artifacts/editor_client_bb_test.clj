@@ -28,7 +28,7 @@
   "Resolved off the `server/` dir, which is the cwd the test runner runs in."
   (io/file "bin" "editor-client.bb"))
 
-(def ^:private report-script
+(def ^:private inspect-artifacts-script
   (io/file "bin" "inspect-artifacts.bb"))
 
 (defn- runnable?
@@ -36,7 +36,7 @@
   expects them."
   []
   (and (.isFile ^java.io.File editor-client-script)
-       (.isFile ^java.io.File report-script)
+       (.isFile ^java.io.File inspect-artifacts-script)
        (try (zero? (:exit (shell/sh "bb" "--version")))
             (catch java.io.IOException _ false))))
 
@@ -82,11 +82,11 @@
     (is (zero? exit) (str "editor-client.bb exited " exit ": " err))
     (edn/read-string out)))
 
-(defn- run-report
+(defn- run-inspect
   "The `inspect-artifacts.bb` stdout for one subcommand over the composed unit."
   [& args]
   (let [{:keys [exit out err]}
-        (apply shell/sh "bb" (str report-script) (str (composed-unit-dir)) args)]
+        (apply shell/sh "bb" (str inspect-artifacts-script) (str (composed-unit-dir)) args)]
     (is (zero? exit) (str "inspect-artifacts.bb exited " exit ": " err))
     out))
 
@@ -131,11 +131,11 @@
           (is (not (contains? scoped :error)) scoped)
           (is (contains? (set (map :name (:targets scoped))) app-approved))))
       (testing "the bb producer answer agrees with the `producers` subcommand"
-        (let [out (run-report "producers" keyword-outcome)]
+        (let [out (run-inspect "producers" keyword-outcome)]
           (doseq [p (map :name (:targets producer-answer))]
             (is (str/includes? out p)))))
       (testing "the bb consumer answer agrees with the `consumers` subcommand"
-        (let [out (run-report "consumers" keyword-outcome)]
+        (let [out (run-inspect "consumers" keyword-outcome)]
           (doseq [c (map :name (:targets consumer-answer))]
             (is (str/includes? out c))))))))
 

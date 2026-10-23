@@ -416,7 +416,7 @@
 
 (s/defn compose-persist! :- schema/ComposePersistResult
   "Compose a registry selection into one unit-shaped artifact directory the
-   caller names, so the offline bb report (and any single-unit reader) can
+   caller names, so `inspect-artifacts.bb` (and any single-unit reader) can
    consume it without knowing it is a composition.
 
    The analysis is `compose/->composed-analysis`, written to

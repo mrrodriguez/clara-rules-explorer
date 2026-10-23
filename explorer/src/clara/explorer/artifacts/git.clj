@@ -1,6 +1,6 @@
 (ns ^{:clara-rules-explorer/bb-loaded true} clara.explorer.artifacts.git
   "Git reads shared by the JVM manifest writer and the babashka `status`
-  report: a checkout's identity (remote + sha + branch + working-tree), with
+  subcommand: a checkout's identity (remote + sha + branch + working-tree), with
   remote-branch resolution for detached checkouts.
 
   `clara.explorer.artifacts.manifest/get-git-info` delegates to `get-git-info`
