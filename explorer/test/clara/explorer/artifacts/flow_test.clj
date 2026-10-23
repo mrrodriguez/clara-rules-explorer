@@ -75,7 +75,7 @@
   (let [m (store/read-merged-annotations *artifact-opts*)]
     (testing "the merged artifact is a MergedAnnotations value, not a layer"
       (is (= #{:annotations :layers :provenance} (set (keys m))))
-      (is (nil? (:id m))))
+      (is (not (contains? m :id))))
     (testing "it names the layers that folded, in order — props first, as the base"
       (is (= [:props store/generated-layer-id store/agent-layer-id] (mapv :id (:layers m)))))
     (testing "and says per key where each value came from"
