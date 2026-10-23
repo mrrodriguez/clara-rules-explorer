@@ -5,7 +5,7 @@
 ;; The marker is the JVM side's promise that a namespace is bb-safe; this turns
 ;; that promise into a test instead of a docstring comment.
 ;;
-;;   bb bin/bb_shared_smoke_test.bb
+;;   bb bin/bb-shared-smoke-test.bb
 (require '[babashka.fs :as fs]
          '[clojure.java.io :as io]
          '[clojure.string :as str]

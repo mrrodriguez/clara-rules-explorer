@@ -1,5 +1,5 @@
 ;; Compose a registry selection into one unit-shaped artifact directory the
-;; caller names, so `explorer/bin/annotations_report.bb` can read it as a normal
+;; caller names, so `explorer/bin/inspect-artifacts.bb` can read it as a normal
 ;; single unit.
 ;;
 ;; Run from explorer/. The :dev alias puts this file's dir on the classpath, so

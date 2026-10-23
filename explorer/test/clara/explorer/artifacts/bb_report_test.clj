@@ -1,5 +1,5 @@
 (ns clara.explorer.artifacts.bb-report-test
-  "`bin/annotations_report.bb` against a real artifact directory this library
+  "`bin/inspect-artifacts.bb` against a real artifact directory this library
   just wrote.
 
   The script is the main offline reader of these artifacts and it runs under
@@ -40,7 +40,7 @@
 
 (def ^:private report-script
   "Resolved off the `server/` dir, which is the cwd the test runner runs in."
-  (io/file "bin" "annotations_report.bb"))
+  (io/file "bin" "inspect-artifacts.bb"))
 
 (defn- runnable?
   "Both halves have to be there: `bb` on PATH, and the script where the JVM side
@@ -122,7 +122,7 @@
   [& args]
   (let [{:keys [exit out err]}
         (apply shell/sh "bb" (str report-script) (:dir *artifact-opts*) args)]
-    (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
+    (is (zero? exit) (str "inspect-artifacts.bb exited " exit ": " err))
     out))
 
 (defn- run-report-raw
@@ -216,7 +216,7 @@
 
       (testing "`help` lists the subcommands and their signatures"
         (let [out (run-report "help")]
-          (is (str/includes? out "usage: bb annotations_report.bb"))
+          (is (str/includes? out "usage: bb inspect-artifacts.bb"))
           (doseq [sub ["summary" "gaps" "types" "producers" "consumers"
                        "hierarchy" "production" "edges" "units" "unit-edges"
                        "entry-points" "curated" "layers" "status" "diff" "help"]]
@@ -269,7 +269,7 @@
           run (fn [& args]
                 (let [{:keys [exit out err]}
                       (apply shell/sh "bb" (str report-script) (:dir *artifact-opts*) args)]
-                  (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
+                  (is (zero? exit) (str "inspect-artifacts.bb exited " exit ": " err))
                   out))]
       (testing "summary expands the composed merge"
         (is (str/includes? (run "summary") "rules:")))
@@ -365,7 +365,7 @@
               {:keys [exit out err]}
               (shell/sh "bb" (str report-script) dir
                         "producers" ":loan-app/application-outcome")]
-          (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
+          (is (zero? exit) (str "inspect-artifacts.bb exited " exit ": " err))
           (is (str/includes? out "3 producer rule(s)"))
           (is (str/includes? out "(0 exact, 3 via descendants)")))))))
 
@@ -381,7 +381,7 @@
           composed (str (io/file root "_compose" "loan-app-plus-disposition"))
           run (fn [& args]
                 (let [{:keys [exit out err]} (apply shell/sh "bb" (str report-script) args)]
-                  (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
+                  (is (zero? exit) (str "inspect-artifacts.bb exited " exit ": " err))
                   out))]
       (testing "variant diff: the same session at a variant address — no differences"
         (let [out (run disposition "diff" variant)]
@@ -429,7 +429,7 @@
         (testing "--production answers without the dep-graph"
           (let [{:keys [exit out err]}
                 (shell/sh "bb" (str report-script) dir "diff" dir "--production" "full-rule")]
-            (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
+            (is (zero? exit) (str "inspect-artifacts.bb exited " exit ": " err))
             (is (str/includes? out "a.ns/full-rule"))))
         (testing "the full diff still needs it"
           (let [{:keys [exit out err]}
@@ -564,7 +564,7 @@
   "The script's stdout for `status` over `dir`, asserting success."
   [dir & args]
   (let [{:keys [exit out err]} (apply shell/sh "bb" (str report-script) dir "status" args)]
-    (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
+    (is (zero? exit) (str "inspect-artifacts.bb exited " exit ": " err))
     out))
 
 (defn- collapse-whitespace

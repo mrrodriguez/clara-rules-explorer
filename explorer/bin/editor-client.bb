@@ -3,8 +3,8 @@
 ;; persisted artifact units, compose them into one slim analysis, rehydrate it, and answer an EDN
 ;; navigate query.
 ;;
-;;   bb bin/editor_client.bb '<selection-edn>' '<navigate-input-edn>'
-;;   bb bin/editor_client.bb --list-units '<registry-root>'
+;;   bb bin/editor-client.bb '<selection-edn>' '<navigate-input-edn>'
+;;   bb bin/editor-client.bb --list-units '<registry-root>'
 ;;
 ;; `--list-units` prints `[{:key :entry} …]` for every unit under the root, sorted by key:
 ;; `:key` is the display unit-key (`repo`, or `repo@<variant path>` for a variant), `:entry` the
@@ -172,7 +172,7 @@
 (defn- run [selection input]
   (let [{:keys [root units]} selection]
     (when-not (and root (seq units))
-      (throw (ex-info "editor_client.bb needs :root and a non-empty :units selection"
+      (throw (ex-info "editor-client.bb needs :root and a non-empty :units selection"
                       {:selection selection})))
     (let [caps {:read-analysis #(read-slim-analysis root %)
                 :assert-compatible! #(assert-compatible! root %)}
@@ -186,7 +186,7 @@
     (= cmd "--list-units")
     (do
       (when-not arg1
-        (die "usage: bb editor_client.bb --list-units '<registry-root>'"))
+        (die "usage: bb editor-client.bb --list-units '<registry-root>'"))
       (try
         (prn (list-unit-repos arg1))
         (catch Throwable e
@@ -196,7 +196,7 @@
     (let [selection-edn cmd
           input-edn arg1]
       (when-not (and selection-edn input-edn)
-        (die "usage: bb editor_client.bb '<selection-edn>' '<navigate-input-edn>'"))
+        (die "usage: bb editor-client.bb '<selection-edn>' '<navigate-input-edn>'"))
       (let [selection (try (edn/read-string selection-edn)
                            (catch Throwable e
                              (die "Could not read selection-edn:" (.getMessage e))))

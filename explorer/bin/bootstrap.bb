@@ -1,7 +1,7 @@
 #!/usr/bin/env bb
 ;; Add `explorer/src` and the prismatic/schema version pinned in `explorer/deps.edn`
 ;; to a babashka script's classpath, so `shared.*` namespaces (and later the
-;; pure `editor_client.bb` composition) can be `require`d under bb.
+;; pure `editor-client.bb` composition) can be `require`d under bb.
 ;;
 ;; Load this with `load-file` (not `require`) — it is what makes `require` work
 ;; in the first place:

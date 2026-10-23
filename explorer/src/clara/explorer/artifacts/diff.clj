@@ -5,7 +5,7 @@
 
   Every input the diff needs is already on disk in each unit's
   `merged-rulebase-analysis/` and annotation layers, so this runs under
-  babashka (via `annotations_report.bb ... diff ...`) and on the JVM alike:
+  babashka (via `inspect-artifacts.bb ... diff ...`) and on the JVM alike:
 
   - `read-unit`: `dir` → the values the diff compares
   - `diff`: a pure function of two `read-unit` values
