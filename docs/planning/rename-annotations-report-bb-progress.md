@@ -239,3 +239,11 @@ intentionally unchanged.
 plus a targeted run of the renamed namespace to prove the test runner
 discovers it and that the bb tests execute rather than skip.
 
+### Migration guide re-check
+
+Re-ran the guide's §3 commands against the final tree. Its rename table,
+examples, expected `ls`/`find` output, and §4 error text all match. Two edits
+were needed: the §3 exclusion note now names the progress log (it contains old
+names by design), and §2 now states that filename-bearing usage/`die` strings
+move with the rename.
+
