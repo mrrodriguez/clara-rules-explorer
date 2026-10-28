@@ -1,6 +1,6 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.12.4"}
-        com.github.gateless/clara-rules {:mvn/version "1.7.0"}
+        com.github.gateless/clara-rules {:mvn/version "1.7.1"}
         prismatic/schema {:mvn/version "1.4.1"}
         metosin/reitit {:mvn/version "0.10.1"}
         metosin/jsonista {:mvn/version "1.0.0"}
