@@ -4291,7 +4291,30 @@
 		{
 			"doc": null,
 			"dynamic-insert-types-detected": {
-				"fact-instance-derived-types": [":digest-doc-meta"]
+				"callsites": [
+					{
+						"filename": "clara/explorer/test/rules/loan_doc_rules.clj",
+						"ns": "clara.explorer.test.rules.loan-doc-rules",
+						"provenance-chain": [
+							{
+								"label": "rule",
+								"sym": "clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule"
+							},
+							{
+								"label": "boundary",
+								"sym": "clara.rules/insert!"
+							}
+						],
+						"source-str": "digest-doc-meta00000000000000000000000000000000",
+						"status": "none",
+						"via": {
+							"boundary-in-var": "clara.explorer.test.rules.loan-doc-rules/digest-doc-meta-rule",
+							"boundary-var-name-sym": "clara.rules/insert!"
+						}
+					}
+				],
+				"fact-instance-derived-types": [":digest-doc-meta"],
+				"resolution": "none"
 			},
 			"id": "clara.explorer.test.rules.loan-doc-rules-digest-doc-meta-rul-beccrr9b",
 			"insert-types": [
