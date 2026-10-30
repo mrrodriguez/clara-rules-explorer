@@ -3,7 +3,7 @@
 ;; reader: layers, callsites, resolution, curation, provenance. Each subcommand
 ;; reads only the artifact parts it needs.
 ;;
-;;   bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged]
+;;   bb inspect-artifacts.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged]
 ;;
 ;; The subcommand menu, signatures, and options are enumerated by the
 ;; `subcommands` and `usage-line` vars below, and printed by the `help`
@@ -568,7 +568,7 @@
 
 (def ^:private usage-line
   "The invocation skeleton, printed first by `help`."
-  "usage: bb annotations_report.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged] [--checkout PATH [--ref REF]] [--root PATH] [--edn] [--part lhs|rhs|props]")
+  "usage: bb inspect-artifacts.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged] [--checkout PATH [--ref REF]] [--root PATH] [--edn] [--part lhs|rhs|props]")
 
 (def ^:private subcommands
   "The subcommand menu as `[name signature description]`, in dispatch order;
@@ -952,7 +952,7 @@
     (= cmd "diff")
     (do (reject-flags opts #{:edn :production})
         (if (nil? arg)
-          (die "diff needs two unit dirs: bb annotations_report.bb <before-dir> diff <after-dir>")
+          (die "diff needs two unit dirs: bb inspect-artifacts.bb <before-dir> diff <after-dir>")
           (diff-report target arg opts)))
 
     :else

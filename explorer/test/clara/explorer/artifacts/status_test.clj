@@ -3,7 +3,7 @@
   stubbed checkout git reads.
 
   Manifest IO is real (written with `pr-str`, read back through the same path
-  the bb report uses); only the *checkout* side is stubbed, since a status
+  the bb `status` subcommand uses); only the *checkout* side is stubbed, since a status
   comparison needs commits the test would otherwise have to manufacture."
   (:require
    [clara.explorer.artifacts.layout :as layout]

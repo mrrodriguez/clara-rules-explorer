@@ -1,5 +1,5 @@
 (ns clara.explorer.artifacts.editor-client-bb-test
-  "`bin/editor_client.bb` against the checked-in `rules-annos/` example registry.
+  "`bin/editor-client.bb` against the checked-in `rules-annos/` example registry.
 
   The script is the babashka twin of `clara.explorer.server.client/navigate` over a registry
   selection. It composes the selected units on the fly (`shared.selection` → `shared.compose` →
@@ -7,7 +7,7 @@
   delegates to — so the two runtimes cannot drift on the navigation body. What that sharing does
   not cover is the bb-side IO and composition wiring: whether the script reads the right parts,
   composes the same analysis the JVM `compose/->composed-analysis` builds, and reaches the same
-  producer/consumer closures the `annotations_report.bb` `producers`/`consumers` subcommands
+  producer/consumer closures the `inspect-artifacts.bb` `producers`/`consumers` subcommands
   report. That is what these pin.
 
   Skipped, loudly, when `bb` is not installed: the script is developer tooling and its absence
@@ -26,17 +26,17 @@
 
 (def ^:private editor-client-script
   "Resolved off the `server/` dir, which is the cwd the test runner runs in."
-  (io/file "bin" "editor_client.bb"))
+  (io/file "bin" "editor-client.bb"))
 
-(def ^:private report-script
-  (io/file "bin" "annotations_report.bb"))
+(def ^:private inspect-artifacts-script
+  (io/file "bin" "inspect-artifacts.bb"))
 
 (defn- runnable?
   "Both halves have to be there: `bb` on PATH, and the scripts where the JVM side
   expects them."
   []
   (and (.isFile ^java.io.File editor-client-script)
-       (.isFile ^java.io.File report-script)
+       (.isFile ^java.io.File inspect-artifacts-script)
        (try (zero? (:exit (shell/sh "bb" "--version")))
             (catch java.io.IOException _ false))))
 
@@ -79,15 +79,15 @@
   [input]
   (let [{:keys [exit out err]}
         (shell/sh "bb" (str editor-client-script) (pr-str selection) (pr-str input))]
-    (is (zero? exit) (str "editor_client.bb exited " exit ": " err))
+    (is (zero? exit) (str "editor-client.bb exited " exit ": " err))
     (edn/read-string out)))
 
-(defn- run-report
-  "The `annotations_report.bb` stdout for one subcommand over the composed unit."
+(defn- run-inspect
+  "The `inspect-artifacts.bb` stdout for one subcommand over the composed unit."
   [& args]
   (let [{:keys [exit out err]}
-        (apply shell/sh "bb" (str report-script) (str (composed-unit-dir)) args)]
-    (is (zero? exit) (str "annotations_report.bb exited " exit ": " err))
+        (apply shell/sh "bb" (str inspect-artifacts-script) (str (composed-unit-dir)) args)]
+    (is (zero? exit) (str "inspect-artifacts.bb exited " exit ": " err))
     out))
 
 (deftest editor-client-lists-unit-repos-test
@@ -95,7 +95,7 @@
     (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")
     (let [{:keys [exit out err]}
           (shell/sh "bb" (str editor-client-script) "--list-units" (registry-root))]
-      (is (zero? exit) (str "editor_client.bb --list-units exited " exit ": " err))
+      (is (zero? exit) (str "editor-client.bb --list-units exited " exit ": " err))
       (is (= [{:key "_compose/loan-app-plus-disposition"
                :entry "{:repo \"_compose/loan-app-plus-disposition\"}"}
               {:key "loan-app-ruleset"
@@ -131,11 +131,11 @@
           (is (not (contains? scoped :error)) scoped)
           (is (contains? (set (map :name (:targets scoped))) app-approved))))
       (testing "the bb producer answer agrees with the `producers` subcommand"
-        (let [out (run-report "producers" keyword-outcome)]
+        (let [out (run-inspect "producers" keyword-outcome)]
           (doseq [p (map :name (:targets producer-answer))]
             (is (str/includes? out p)))))
       (testing "the bb consumer answer agrees with the `consumers` subcommand"
-        (let [out (run-report "consumers" keyword-outcome)]
+        (let [out (run-inspect "consumers" keyword-outcome)]
           (doseq [c (map :name (:targets consumer-answer))]
             (is (str/includes? out c))))))))
 
@@ -152,7 +152,7 @@
           (shell/sh "bb" (str editor-client-script)
                     (pr-str single-selection) (pr-str input))
           answer (edn/read-string out)]
-      (is (zero? exit) (str "editor_client.bb exited " exit ": " err))
+      (is (zero? exit) (str "editor-client.bb exited " exit ": " err))
       (testing "a record-ctor token normalizes to its class type and finds consumers"
         (is (not (contains? answer :error)) answer)
         (is (= "clara.explorer.test.rules.loan_app_rules.ApplicationOutcome"
@@ -171,7 +171,7 @@
                 (let [{:keys [exit out err]}
                       (shell/sh "bb" (str editor-client-script)
                                 (pr-str selection) (pr-str input))]
-                  (is (zero? exit) (str "editor_client.bb exited " exit ": " err))
+                  (is (zero? exit) (str "editor-client.bb exited " exit ": " err))
                   (edn/read-string out)))]
       (testing "a variant unit is read from _variants/<repo>/<variant path> and answers like the mainline"
         (let [mainline-answer (run mainline)

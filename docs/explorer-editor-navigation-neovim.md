@@ -44,7 +44,7 @@ AstroNvim — not mise/brew.
 Navigation queries default to the `"auto"` transport: nREPL
 (`client/navigate` over Conjure) when the connected session has a running
 explorer system, otherwise the babashka transport (shelling out to
-`bb editor_client.bb` over the persisted artifact set — no Clara session is
+`bb editor-client.bb` over the persisted artifact set — no Clara session is
 loaded and no Jetty server is started on the repl). The connected repl is
 still required in both modes: it resolves aliased/`::` symbols to
 fully-qualified form and maps namespaces to source files. Set
@@ -55,8 +55,8 @@ toggle it with `:ClaraExplorerToggleTransport`.
 - **`g:clara_explorer_registry_root`** — the registry root (the `rules-annos/`
   tree). When unset, `CLARA_RULES_EXPLORER_REGISTRY` is read from the
   environment.
-- **`g:clara_explorer_bb_script`** — path to `editor_client.bb`. When unset,
-  the `editor_client.bb` symlink shipped beside `conjure.lua` is used (the
+- **`g:clara_explorer_bb_script`** — path to `editor-client.bb`. When unset,
+  the `editor-client.bb` symlink shipped beside `conjure.lua` is used (the
   plugin build step must materialize that repo-relative symlink into the
   plugin-local directory before release).
 

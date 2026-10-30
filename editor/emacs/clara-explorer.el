@@ -48,7 +48,7 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
 `auto' uses nREPL when the CIDER session has a running explorer system,
 otherwise babashka (default);
 `nrepl' evals `client/navigate' over the CIDER session;
-`bb' shells out to `editor_client.bb' over the persisted artifacts."
+`bb' shells out to `editor-client.bb' over the persisted artifacts."
   :type '(choice (const :tag "Auto (nREPL when the explorer server is running, else babashka)" auto)
                  (const :tag "nREPL (live session)" nrepl)
                  (const :tag "babashka (offline artifacts)" bb))
@@ -62,7 +62,7 @@ When nil, `CLARA_RULES_EXPLORER_REGISTRY' is read from the environment."
   :group 'clara-explorer)
 
 (defcustom clara-explorer-bb-script nil
-  "Path to `editor_client.bb' for the babashka transport.
+  "Path to `editor-client.bb' for the babashka transport.
 When nil, it is resolved beside `clara-explorer.el' (a symlink in the repo)."
   :type '(choice (const :tag "Beside clara-explorer.el" nil)
                  (file))
@@ -218,12 +218,12 @@ Reads `CLARA_RULES_EXPLORER_REGISTRY' if `clara-explorer-registry-root' is nil."
     (when root (expand-file-name root))))
 
 (defun clara-explorer--bb-script ()
-  "Path to `editor_client.bb': `clara-explorer-bb-script', else beside this file."
+  "Path to `editor-client.bb': `clara-explorer-bb-script', else beside this file."
   (or clara-explorer-bb-script
       (progn
         (unless clara-explorer--directory
-          (user-error "clara-explorer: cannot locate editor_client.bb (eval'd from a non-file buffer?)"))
-        (file-truename (expand-file-name "editor_client.bb" clara-explorer--directory)))))
+          (user-error "clara-explorer: cannot locate editor-client.bb (eval'd from a non-file buffer?)"))
+        (file-truename (expand-file-name "editor-client.bb" clara-explorer--directory)))))
 
 (defvar clara-explorer--bb-selection-cache nil
   "Cached registry-selection EDN for the babashka transport.")
@@ -234,7 +234,7 @@ Signals `user-error' on a missing script or `bb', a non-zero exit, or invalid
 EDN.  ARGS is a list of argument strings appended after the script path."
   (let ((script (clara-explorer--bb-script)))
     (unless (file-readable-p script)
-      (user-error "clara-explorer: editor_client.bb not found at %s" script))
+      (user-error "clara-explorer: editor-client.bb not found at %s" script))
     (with-temp-buffer
       (let ((status (condition-case err
                         (apply #'call-process "bb" nil (current-buffer) nil
@@ -251,7 +251,7 @@ EDN.  ARGS is a list of argument strings appended after the script path."
 
 (defun clara-explorer--bb-list-unit-repos (root)
   "`{:key entry}' maps for every unit under ROOT, sorted by key.
-Discovery and EDN serialization live in `bb editor_client.bb --list-units' —
+Discovery and EDN serialization live in `bb editor-client.bb --list-units' —
 the one place that knows the registry layout — so this function only shells
 out and returns the result."
   (let* ((result (clara-explorer--bb-run (list "--list-units" root)))
@@ -286,7 +286,7 @@ out and returns the result."
       (setq clara-explorer--bb-selection-cache (clara-explorer--bb-prompt-selection))))
 
 (defun clara-explorer--bb-eval (selection-edn input-edn)
-  "Run `bb editor_client.bb SELECTION-EDN INPUT-EDN' and parse the EDN result."
+  "Run `bb editor-client.bb SELECTION-EDN INPUT-EDN' and parse the EDN result."
   (clara-explorer--bb-run (list selection-edn input-edn)))
 
 ;; ---------------------------------------------------------------------------

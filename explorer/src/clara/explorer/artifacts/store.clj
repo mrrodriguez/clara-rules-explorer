@@ -83,7 +83,7 @@
 ;; ===========================================================================
 ;; layer identity
 ;;
-;; Defined in `layout`, which has no dependencies so the babashka report script
+;; Defined in `layout`, which has no dependencies so `inspect-artifacts.bb`
 ;; can load it rather than restate it, and exposed here because this is the
 ;; namespace that owns layer identity. Same objects, one definition.
 ;; ===========================================================================
@@ -143,7 +143,7 @@
   a DIRECTORY: `clara.explorer.artifacts.parts` splits the analysis by
   access pattern and `parts/part-files` names what goes in it.
 
-  Defined in `layout/artifact-files` so the babashka report script shares it."
+  Defined in `layout/artifact-files` so `inspect-artifacts.bb` shares it."
   layout/artifact-files)
 
 (def unit-artifact-files

@@ -1024,11 +1024,11 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
                    "{:root \"/reg\" :units [{:repo \"loan-disposition-ruleset\", :variant [[:ref \"feature/new-tax\"]]}]}"))))
 
 (ert-deftest bb-list-unit-repos-shells-out ()
-  (cl-letf (((symbol-function 'clara-explorer--bb-script) (lambda () "/p/editor_client.bb"))
+  (cl-letf (((symbol-function 'clara-explorer--bb-script) (lambda () "/p/editor-client.bb"))
             ((symbol-function 'file-readable-p) (lambda (_f) t))
             ((symbol-function 'call-process)
              (lambda (_prog _in _dest _disp script &rest args)
-               (should (equal script "/p/editor_client.bb"))
+               (should (equal script "/p/editor-client.bb"))
                (should (equal args '("--list-units" "/reg")))
                (insert "ignored")
                0))
@@ -1053,11 +1053,11 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
         (should (equal (clara-explorer--bb-selection) "{cached}"))))))
 
 (ert-deftest bb-eval-runs-and-parses ()
-  (cl-letf (((symbol-function 'clara-explorer--bb-script) (lambda () "/p/editor_client.bb"))
+  (cl-letf (((symbol-function 'clara-explorer--bb-script) (lambda () "/p/editor-client.bb"))
             ((symbol-function 'file-readable-p) (lambda (_f) t))
             ((symbol-function 'call-process)
              (lambda (_prog _in _dest _disp script sel input)
-               (should (equal script "/p/editor_client.bb"))
+               (should (equal script "/p/editor-client.bb"))
                (should (equal sel "{sel}"))
                (should (equal input "{input}"))
                (insert "{:direction :consumer}")
@@ -1070,10 +1070,10 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
   "`clara-explorer--bb-script' must not depend on the navigation-time buffer."
   (let ((clara-explorer-bb-script nil))
     (should clara-explorer--directory)
-    (should (string-suffix-p "editor_client.bb" (clara-explorer--bb-script)))
+    (should (string-suffix-p "editor-client.bb" (clara-explorer--bb-script)))
     (with-temp-buffer
       (setq buffer-file-name "/elsewhere/loan_app_rules.clj")
-      (should (string-suffix-p "editor_client.bb" (clara-explorer--bb-script))))))
+      (should (string-suffix-p "editor-client.bb" (clara-explorer--bb-script))))))
 
 (ert-deftest effective-transport-auto-probes-server ()
   (let ((clara-explorer-transport 'auto))

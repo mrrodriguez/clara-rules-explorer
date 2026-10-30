@@ -315,7 +315,7 @@ function M.eval_edn(opts)
   })
 end
 
---- babashka transport — shell out to `bb editor_client.bb` over the
+--- babashka transport — shell out to `bb editor-client.bb` over the
 -- persisted artifacts instead of evaling over Conjure.
 
 --- The configured transport: `"auto"` (default), `"nrepl"`, or `"bb"`.
@@ -380,26 +380,26 @@ function M.registry_root()
   return vim.fn.fnamemodify(root, ":p")
 end
 
---- Path to `editor_client.bb`: `g:clara_explorer_bb_script` when set, else the
+--- Path to `editor-client.bb`: `g:clara_explorer_bb_script` when set, else the
 -- repo symlink beside this module.
 function M.bb_script()
   local script = vim.g.clara_explorer_bb_script
   if script and script ~= "" then return script end
-  return vim.fn.fnamemodify(this_dir .. "editor_client.bb", ":p")
+  return vim.fn.fnamemodify(this_dir .. "editor-client.bb", ":p")
 end
 
 --- `{key=…, entry=…}` maps for every unit under ROOT, sorted by key. `key` is
 -- the display unit-key (`repo` or `repo@variant path`); `entry` the serialized
 -- `UnitRef` EDN for a `:units` selection entry, ready to splice into either
 -- the bb client or a running server's `:registry` config. Discovery and EDN
--- serialization live in `bb editor_client.bb --list-units` — the one place
+-- serialization live in `bb editor-client.bb --list-units` — the one place
 -- that knows the registry layout — so this function only runs the subprocess
 -- and decodes the EDN vector it prints. Mirrors
 -- `editor/emacs/clara-explorer.el`'s `clara-explorer--bb-list-unit-repos`.
 function M.bb_list_unit_repos(root)
   local script = M.bb_script()
   if vim.fn.filereadable(script) ~= 1 then
-    vim.notify("clara-explorer: editor_client.bb not found at " .. script, vim.log.levels.ERROR)
+    vim.notify("clara-explorer: editor-client.bb not found at " .. script, vim.log.levels.ERROR)
     return {}
   end
   local out = vim.system({ "bb", script, "--list-units", root }, { text = true }):wait()
@@ -488,7 +488,7 @@ function M.bb_select_unit(cb)
   M.bb_selection(cb)
 end
 
---- Run `bb editor_client.bb SELECTION INPUT` and call `cb(result, err)` with
+--- Run `bb editor-client.bb SELECTION INPUT` and call `cb(result, err)` with
 -- the decoded EDN result (or `cb(nil, err)` on transport/EDN failure). Mirrors
 -- `editor/emacs/clara-explorer.el`'s `clara-explorer--bb-eval`.
 function M.bb_eval(selection_edn, input_edn, cb)
@@ -497,7 +497,7 @@ function M.bb_eval(selection_edn, input_edn, cb)
   M.debug_log("bb-eval selection=" .. selection_edn)
   M.debug_log("bb-eval input=" .. input_edn)
   if vim.fn.filereadable(script) ~= 1 then
-    cb(nil, "clara-explorer: editor_client.bb not found at " .. script)
+    cb(nil, "clara-explorer: editor-client.bb not found at " .. script)
     return
   end
   local function on_exit(out)

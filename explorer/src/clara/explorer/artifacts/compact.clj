@@ -39,8 +39,8 @@
   ## Expansion lives in `layout`
 
   `<-compact` here is a schema-validating wrapper over
-  `layout/expand-merged-annotations`. The decode has to be shared with the
-  babashka report script, which cannot load `schema.core` — see that namespace.
+  `layout/expand-merged-annotations`. The decode has to be shared with
+  `inspect-artifacts.bb`, which cannot load `schema.core` — see that namespace.
   Compaction stays here: it is a write-time concern needing the fold's own layer
   stack, and no reader performs it.
 

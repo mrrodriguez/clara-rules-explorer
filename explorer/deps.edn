@@ -1,13 +1,13 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.12.4"}
-        com.github.gateless/clara-rules {:mvn/version "1.7.0"}
+        com.github.gateless/clara-rules {:mvn/version "1.7.1"}
         prismatic/schema {:mvn/version "1.4.1"}
         metosin/reitit {:mvn/version "0.10.1"}
         metosin/jsonista {:mvn/version "1.0.0"}
         metosin/muuntaja {:mvn/version "0.6.11"}
         ring/ring-jetty-adapter {:mvn/version "1.15.4"}
         org.clojure/tools.cli {:mvn/version "1.0.214"}
-        clj-kondo/clj-kondo {:mvn/version "2026.10.20"}
+        clj-kondo/clj-kondo {:mvn/version "2026.10.26"}
 
         ;; The EDN pretty-printer every persisted artifact goes through
         ;; (`clara.explorer.edn-io`), and the `:form-printer` the
