@@ -417,46 +417,169 @@ present, is the unit's variant — not git's branch, which stays under
 
 `bb inspect-artifacts.bb <dir> status` answers "is this unit current?" from
 the manifest (and, for a composed unit, its sources' manifests) — no JVM, no
-analysis parts. A source unit compares against `--checkout PATH` (`--ref`,
-default `HEAD`): a remote mismatch, a sha drift, a dirty generation tree, or an
-`:updated` older than the policy's `:max-age-days` makes it stale. Without
-`--checkout` only the checkout-independent checks run and the report says the
-sha was not compared. Without an explicit `--ref`, a checkout on a branch other
-than the unit's `:source :branch` reports `checkout-off-ref` and leaves the
-verdict unknown: that checkout cannot say whether the unit's branch moved. An
-explicit `--ref` names the commit to compare and skips that guard; a detached
-checkout names no branch, so there too the sha alone decides.
+analysis parts. The comparison itself is
+`clara.explorer.artifacts.status/unit-status`, so a host can call it with the
+same arguments and append its own `:reasons` (tool versions, configuration
+slices kept in `:blocks`) before rendering.
 
-A composed unit's manifest records one sha per source unit, and being current
-needs two things of every source. **Link B:** the source unit's manifest still
-holds the sha the composition recorded. **Link A:** that source unit is itself
-current with its code — which the composition cannot answer, since where a
-reader's checkouts live is the reader's business. The caller supplies them, and
-the report gives both links. `--source-checkout <repo>=<path>` (repeatable, once
-per repo) compares each source unit against its repo's checkout: two sources of
-one repo share it, and a source whose repo has no entry states that its sha was
-not compared. A host that needs more than these checks passes
-`:source-status-fn`, which returns each source unit's whole status report. With
-neither, a composition reports `:unknown`, not `:current` — no code was
-compared. `:sources` carries `{:unit-key :composition :unit-status :verdict}`
-per source, where `:composition` is link B's `{:recorded :unit-sha :verdict}`
-and `:unit-status` is the report link A produced (absent when the source unit is
-gone). Every verdict, at every level, is `:current`, `:stale`, or `:unknown`;
-what kind of drift it was lives in `:reasons`, where link B contributes
-`:source-sha-drift` and `:source-missing` keyed by `:unit-key`, and link A nests
-under `:unit-stale` and `:unit-unknown` with that report's own reasons. A source
-whose own report cannot be established is unknown, never current: a source
-already on the walk is `:source-cycle` (a composition that reaches itself is
-reported, not followed forever), and a `:source-status-fn` returning nothing
-usable is `:unit-report-missing`. `--root` locates the source units (default:
-`<dir>` with the manifest's `:repo` and `_variants/<repo>/<variant…>` stripped
-off); `--checkout` is rejected for a composed unit and `--source-checkout` for a
-source unit. An aggregate with no per-source shas is reported by kind and source
-provenance, with no verdict. `--edn` prints the result map the text report renders. The
-comparison itself is `clara.explorer.artifacts.status/unit-status`, so a host
-can call it, pass `:source-checkouts` or `:source-status-fn`, and append its own
-`:reasons` (tool versions, configuration slices kept in `:blocks`) before
-rendering.
+#### A source unit: one record against one checkout
+
+A source unit's manifest records the commit it analyzed; a checkout is the
+code now. `status` asks whether they are the same commit:
+
+```
+   /src/repo-a (checkout)          <root>/repo-a/ (source unit)
+   git HEAD = bbb2222              :source :sha = aaa1111
+
+              same commit?
+       yes ──► :current
+        no ──► :stale   sha-drift aaa1111 -> bbb2222
+```
+
+`--checkout PATH` names the checkout and `--ref REF` the commit to compare
+(default `HEAD`). A comparison that cannot run says why instead of guessing: a
+different origin is `remote-mismatch`, a path that is not a repository is
+`checkout-not-a-repo`, a ref that does not resolve is `ref-unresolvable`, and a
+checkout on a branch other than the unit's `:source :branch` is
+`checkout-off-ref` — it cannot say whether the unit's branch moved. An explicit
+`--ref` names the commit and skips that guard; a detached checkout names no
+branch, so the sha alone decides.
+
+Without `--checkout` the checkout-independent checks still run — a dirty
+generation tree (`generated-dirty`) and an `:updated` older than the policy's
+`:max-age-days` (`age-exceeded`) — and the report says the sha was not compared:
+
+```bash
+$ bb inspect-artifacts.bb /reg/repo-a status --checkout /src/repo-a
+unit       repo-a
+kind       source unit
+source     aaa1111 (main, clean)   updated 2026-10-30
+policy     review-when-any-source-sha-drifts
+verdict    stale | sha-drift aaa1111 -> bbb2222
+```
+
+#### A composed unit: two comparisons per source
+
+A composition's manifest records one sha per source unit: the sha each source
+unit's manifest held when the composition was built. A source is current only
+when two comparisons hold:
+
+```
+   checkout                 source unit manifest       composed unit manifest
+   /src/repo-a              <root>/repo-a/             <root>/_compose/pair/
+   git HEAD bbb2222         :source :sha aaa1111       "repo-a": aaa1111
+
+        ◄──────────────────────────────►  ◄────────────────────────────────►
+        1. is the source unit current      2. does the composition still record
+           with its code?                     the sha the source unit holds?
+```
+
+The first needs a checkout, which only the caller can name; the second needs
+only the two manifests. The first is the source unit's whole status report —
+exactly what `status` produces for that unit on its own — so the caller
+supplies either the checkouts or that report:
+
+```bash
+# one checkout per repo, repeatable; two sources of one repo share it
+bb inspect-artifacts.bb /reg/_compose/pair status \
+  --source-checkout repo-a=/src/repo-a \
+  --source-checkout repo-b=/src/repo-b
+```
+
+```clojure
+;; or one function, called once per source unit
+(status/unit-status {:dir "/reg/_compose/pair"
+                     :source-status-fn #(host/unit-status {:dir (:dir %)})})
+```
+
+`:source-checkouts` is shorthand for a `:source-status-fn` that calls back into
+`unit-status` with the repo's checkout. Giving both throws. Giving neither makes
+every source's own status `:unknown`, so the composition is `:unknown`, never
+`:current` — no code was compared.
+
+A source can move four ways:
+
+| step | event | checkout HEAD | source unit sha | composition records | unit current with its code? | composition record current? | verdict |
+|---|---|---|---|---|---|---|---|
+| 1 | analyze, then compose | `aaa` | `aaa` | `aaa` | yes | yes | `:current` |
+| 2 | a commit lands, nothing regenerated | `bbb` | `aaa` | `aaa` | **no** | yes | `:stale` |
+| 3 | that source unit regenerated | `bbb` | `bbb` | `aaa` | yes | **no** | `:stale` |
+| 4 | recompose | `bbb` | `bbb` | `bbb` | yes | yes | `:current` |
+
+The report shows both comparisons on each `sources` line, then folds them into
+one verdict (step 2 above):
+
+```
+unit       _compose/pair
+kind       aggregate unit (mode :compose)
+source     d4e5f6a (main, clean)   updated 2026-10-30
+policy     review-when-any-source-sha-drifts
+sources    repo-a                    composition current   unit stale (sha-drift aaa1111 -> bbb2222)
+           repo-b@env=dev/ref=main   composition current   unit current
+verdict    stale | repo-a: unit sha-drift aaa1111 -> bbb2222
+```
+
+Omit `--source-checkout` and the `unit` cell has nothing to compare:
+
+```
+sources    repo-a                   composition current  unit unknown (sha not compared)
+           repo-b@env=dev/ref=main  composition current  unit unknown (sha not compared)
+verdict    unknown | repo-a: unit sha not compared; repo-b@env=dev/ref=main: unit sha not compared
+```
+
+Each row cell names its `:sources` key and the reasons it can contribute:
+
+| row cell | `:sources` key | compares | reasons |
+|---|---|---|---|
+| `composition` | `:composition` | the composition's recorded sha vs the source unit's manifest | `:source-sha-drift`, `:source-missing`, keyed by `:unit-key` |
+| `unit` | `:unit-status` | the source unit's own status report, against its code | `:unit-stale`, `:unit-unknown`, nesting that report's reasons |
+
+`--edn` prints the whole result map:
+
+```clojure
+{:dir "/reg/_compose/pair"
+ :kind :aggregate
+ :mode :compose
+ :verdict :stale
+ :reasons [{:check :unit-stale
+            :unit-key "repo-a"
+            :reasons [{:check :sha-drift
+                       :recorded "aaa1111" :current "bbb2222"}]}]
+ :sources [{:unit-key "repo-a"
+            :composition {:recorded "aaa1111" :unit-sha "aaa1111" :verdict :current}
+            :unit-status {...the report unit-status returned for that unit...}
+            :verdict :stale}
+           {:unit-key "repo-b@env=dev/ref=main"
+            :composition {:recorded "ccc3333" :unit-sha "ccc3333" :verdict :current}
+            :unit-status {... :verdict :current}
+            :verdict :current}]}
+```
+
+Only the keys under discussion are shown; a real map also carries `:repo`,
+`:source`, `:updated`, `:staleness`, and each full `:unit-status` report. Every
+verdict, at every level, is `:current`, `:stale`, or `:unknown`.
+
+#### Absences are unknown, never current
+
+A source whose own status cannot be established contributes `:unit-unknown`, so
+it can never read as current:
+
+| situation | `:sources` row | reason |
+|---|---|---|
+| the source unit's dir is gone | `unit missing` | `:source-missing` on `:composition` |
+| the composition reaches itself | `unit not checked (composition cycle)` | `:source-cycle` |
+| `:source-status-fn` returned nothing usable | `unit report missing` | `:unit-report-missing` |
+| the source's repo has no checkout | `unit unknown (sha not compared)` | `:sha-not-compared` |
+
+#### Flags and defaults
+
+`--root PATH` locates the source units (default: `<dir>` with the manifest's
+`:repo` and `_variants/<repo>/<variant…>` stripped off). The flags do not cross
+kinds: `--checkout` is rejected for a composed unit and `--source-checkout` for
+a source unit, each with a message naming the flag. An aggregate with no
+per-source shas — a composition whose `:staleness` has no `:sources` — is
+reported by kind and source provenance, with no verdict
+(`aggregate-no-sources`).
 
 ## The artifact registry
 
@@ -560,9 +683,9 @@ present), `:coverage` records the `:unknown-namespaces` the selection named
 but no unit covered (an open map a host can add to), and `:staleness` names
 the `review-when-any-source-sha-drifts` policy with those per-source shas — so
 a reader holding only the directory can tell whether the composition's record
-still matches its source units. That is one of the two links a verdict needs:
-each source unit must also still match its own code, which `status` reports
-beside it rather than assuming.
+still matches its source units. That is one of the two comparisons a verdict
+needs: each source unit must also still match its own code, which `status`
+reports beside it rather than assuming.
 
 ## Related
 

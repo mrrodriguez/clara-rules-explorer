@@ -50,7 +50,7 @@
   [dir]
   (str/blank? (git dir "status" "--porcelain")))
 
-(defn attached-branch
+(defn get-attached-branch
   "The local branch `dir`'s checkout is on, or nil when it is detached (git
   reports the literal `HEAD`) or unreadable. This is the attached read behind
   `get-git-info`'s `:branch`; unlike that field it does not resolve a detached
@@ -146,7 +146,7 @@
 
 (defn- resolve-branch
   "The branch the analyzed commit belongs to. An attached checkout names its
-  own branch (`attached-branch`), pushed or not. A detached checkout names none,
+  own branch (`get-attached-branch`), pushed or not. A detached checkout names none,
   so it resolves to the remote branch — on the checkout's `origin` — pointing at
   the commit: the remote default first, then the first sorted remote branch.
   `HEAD` is not a branch, so an unresolvable commit records nil."
@@ -178,6 +178,6 @@
     {:remote (remote-url dir)
      :sha sha
      :sha-short (subs sha 0 7)
-     :branch (resolve-branch dir sha "origin" (attached-branch dir))
+     :branch (resolve-branch dir sha "origin" (get-attached-branch dir))
      :default-branch (default-branch dir "origin")
      :working-tree (if (clean-tree? dir) "clean" "dirty")}))

@@ -32,7 +32,7 @@ the old shape twice; 5 depends on 2–3 existing; 7 depends on all of them.
 - **Off-ref needs a branch read that does not exist yet.** `git/ref-sha`,
   `git/remote-url`, `git/clean-tree?` are the checkout seam `status.clj`
   compares through; none reports the checkout's branch. Add
-  `git/attached-branch`: `rev-parse --abbrev-ref HEAD`, nil when detached
+  `git/get-attached-branch`: `rev-parse --abbrev-ref HEAD`, nil when detached
   (`HEAD`) or unreadable. It belongs beside the other three reads, since bb and
   the JVM must resolve the same way.
 - **A detached checkout is not off-ref.** §4.4 says compare the checkout's
@@ -82,7 +82,7 @@ the old shape twice; 5 depends on 2–3 existing; 7 depends on all of them.
 
 Worked top to bottom; each entry is a checkpoint, not a diary.
 
-- [x] 1 `git/attached-branch`; `:checkout-off-ref` in `sha-reasons`
+- [x] 1 `git/get-attached-branch`; `:checkout-off-ref` in `sha-reasons`
 - [x] 2 `:source-checkouts` / `:source-status-fn` on a composed unit
 - [x] 3 `:sources` shape + `:unit-stale` / `:unit-unknown`
 - [x] 4 docstrings
@@ -173,7 +173,7 @@ A review of the shipped branch found the design implemented, and these gaps:
   `composed-unit-status` to dissoc.
 - **`unit-status` mixed argument guards with delegation**; the guards moved to
   `assert-kind-args!`.
-- **`git/attached-branch` duplicated the attached-branch read** that
+- **`git/get-attached-branch` duplicated the branch read** that
   `get-git-info` performed inline, guard included. `get-git-info` now calls it,
   so one function owns the read — and the new function inherits real-git tests.
 - **CLI:** `--source-checkout =<path>` was silently ignored (no empty side
@@ -181,7 +181,7 @@ A review of the shipped branch found the design implemented, and these gaps:
   usage skeleton did not mark the flag repeatable; each `status` usage row
   aligned its own continuation lines, so the long flag shifted its column. The
   rows are now one table with a computed syntax width.
-- **Tests:** `attached-branch` had none (now real-git + boundary cases);
+- **Tests:** `get-attached-branch` had none (now real-git + boundary cases);
   off-ref was unreachable in the composed suite (fixtures recorded no branch,
   and the stub defaulted to detached — it now defaults to the fixtures' branch,
   and a composed off-ref case exists); both-links-broken, report-missing,

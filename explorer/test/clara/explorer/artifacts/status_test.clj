@@ -74,7 +74,7 @@
   [{:keys [ref-shas remote clean? branch] :or {clean? true branch "feature-x"}} & body]
   `(let [per-dir# (fn [v# dir#] (if (fn? v#) (v# dir#) v#))]
      (with-redefs [git/ref-sha (fn [dir# ref#] (get (per-dir# ~ref-shas dir#) ref#))
-                   git/attached-branch (fn [dir#] (per-dir# ~branch dir#))
+                   git/get-attached-branch (fn [dir#] (per-dir# ~branch dir#))
                    git/remote-url (fn [dir#] (per-dir# ~remote dir#))
                    git/clean-tree? (fn [dir#] (per-dir# ~clean? dir#))]
        ~@body)))
@@ -285,7 +285,8 @@
                          :checkouts {"aaa" "/co-aaa" "bbb" "/co-bbb"}}))))
 
 (deftest composed-unit-status-test
-  (testing "both links hold, but with no checkout there is no link A: unknown"
+  (testing "the composition's record holds, but with no checkout the unit's own
+            status is unknown"
     (with-composed-unit*
       (fn [{:keys [dir]}]
         (let [result (status/unit-status {:dir dir})]
@@ -304,7 +305,8 @@
           (is (= [:unknown :unknown] (mapv :verdict (:sources result))))
           (is (every? #(= #{:unit-key :composition :unit-status :verdict} (set (keys %)))
                       (:sources result))
-              "a source entry carries both links and nothing else — no stray :reasons")
+              "a source entry carries the composition's record and the unit's report,
+              and nothing else — no stray :reasons")
           (is (= :source (get-in result [:sources 0 :unit-status :kind])))))))
 
   (testing "an explicit :root is honored"
@@ -314,7 +316,8 @@
           (is (= :unknown (:verdict result)))
           (is (= "111aaaa" (get-in result [:sources 0 :composition :unit-sha])))))))
 
-  (testing "link B drifted: composition stale, reasons keyed by unit-key"
+  (testing "the composition's recorded sha drifted: composition stale, reasons
+            keyed by unit-key"
     (with-composed-unit*
       (fn [{:keys [root dir]}]
         (write-sources! root "111aaaa" "9999999")
@@ -373,7 +376,7 @@
          dir)))
 
 (deftest composed-source-status-test
-  (testing "both links hold for every source: current"
+  (testing "both comparisons hold for every source: current"
     (with-composed-unit*
       (fn [{:keys [dir checkouts]}]
         (with-checkout {:ref-shas (->checkout-ref-shas "111aaaa" "222bbbb")}
@@ -384,7 +387,8 @@
             (is (= {:checkout "/co-aaa" :ref "HEAD" :sha "111aaaa"}
                    (get-in result [:sources 0 :unit-status :compared]))))))))
 
-  (testing "link B holds, link A broken: the unit is behind its checkout"
+  (testing "the composition's record holds, the unit's own status is stale: the
+            unit is behind its checkout"
     (with-composed-unit*
       (fn [{:keys [dir checkouts]}]
         (with-checkout {:ref-shas (->checkout-ref-shas "999aaa" "222bbbb")}
@@ -398,7 +402,8 @@
             (is (= {:recorded "111aaaa" :unit-sha "111aaaa" :verdict :current}
                    (get-in result [:sources 0 :composition]))))))))
 
-  (testing "link B drifted, link A holds: the composition's record is stale"
+  (testing "the composition's recorded sha drifted, the unit's own status holds:
+            the composition is stale"
     (with-composed-unit*
       (fn [{:keys [root dir checkouts]}]
         (write-sources! root "111aaaa" "9999999")
@@ -410,7 +415,8 @@
                    (:reasons result)))
             (is (= [:current :stale] (mapv :verdict (:sources result)))))))))
 
-  (testing "both links broken for one source: the composition and the unit each report"
+  (testing "both comparisons broken for one source: the composition and the unit
+            each report"
     (with-composed-unit*
       (fn [{:keys [root dir checkouts]}]
         (write-sources! root "111aaaa" "9999999")

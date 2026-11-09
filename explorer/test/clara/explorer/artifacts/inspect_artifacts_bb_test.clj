@@ -639,7 +639,7 @@
             (is (str/includes? out "demo-b@ref=x composition current unit unknown (sha not compared)"))
             (is (str/includes? out "verdict unknown | demo-a: unit sha not compared")))
 
-          (testing "--edn prints both links per source and nothing else"
+          (testing "--edn prints both per-source comparisons and nothing else"
             (let [result (edn/read-string (run-status dir "--edn"))]
               (is (= :aggregate (:kind result)))
               (is (= [{:unit-key "demo-a"

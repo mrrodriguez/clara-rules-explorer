@@ -565,13 +565,12 @@
   the widest row so every description starts in the same column, and
   continuation lines aligned under it."
   [rows]
-  (let [width (reduce (fn [w [syntax]] (max w (count syntax))) 0 rows)]
+  (let [width (reduce (fn [w [syntax]] (max w (count syntax))) 0 rows)
+        row-fmt (str "  %-" width "s  %s")]
     (doseq [[syntax desc & more] rows]
-      (let [head (str "  " (format (str "%-" width "s") syntax) "  ")
-            pad (apply str (repeat (count head) " "))]
-        (println (str head desc))
-        (doseq [line more]
-          (println (str pad line)))))))
+      (println (format row-fmt syntax desc))
+      (doseq [line more]
+        (println (format row-fmt "" line))))))
 
 (def ^:private usage-line
   "The invocation skeleton, printed first by `help`."
@@ -762,14 +761,14 @@
   "A source unit's own verdict and the reasons behind it, as one cell of a
   `sources` row: `unit current`, `unit stale (sha-drift aaa1111 -> bbb2222)`."
   [{:keys [verdict reasons]}]
-  (str "unit " (name verdict)
-       (when (seq reasons)
-         (str " (" (str/join "; " (map reason-summary reasons)) ")"))))
+  (if (seq reasons)
+    (format "unit %s (%s)" (name verdict) (str/join "; " (map reason-summary reasons)))
+    (format "unit %s" (name verdict))))
 
 (defn- unit-absence
-  "Why a source with no link-A cell has none, read from the report's top-level
-  reasons: `:source-cycle` or `:unit-report-missing`, or nil when the source
-  unit itself is gone (link B says `:source-missing`)."
+  "Why a source with no unit-status cell has none, read from the report's
+  top-level reasons: `:source-cycle` or `:unit-report-missing`, or nil when the
+  source unit itself is gone (the composition's record says `:source-missing`)."
   [reasons unit-key]
   (->> reasons
        (filter #(= unit-key (:unit-key %)))
@@ -780,14 +779,14 @@
 
 (defn- source-cells
   "One `:sources` entry as `[unit-key composition unit]` text cells: the
-  composition's verdict on that source (link B), then the source unit's own
-  verdict with its reasons (link A). A source with no report of its own says
-  which absence it is rather than claiming anything. `reasons` are the report's
-  top-level reasons, which name the absence."
+  composition's verdict on the sha it recorded for that source, then the source
+  unit's own status verdict with its reasons. A source with no report of its own
+  says which absence it is rather than claiming anything. `reasons` are the
+  report's top-level reasons, which name the absence."
   [reasons {:keys [unit-key composition unit-status]}]
   (let [absence (unit-absence reasons unit-key)]
     [unit-key
-     (str "composition " (name (:verdict composition)))
+     (format "composition %s" (name (:verdict composition)))
      (cond
        (some? unit-status) (unit-fragment unit-status)
        (= :source-cycle absence) "unit not checked (composition cycle)"
@@ -815,9 +814,12 @@
     (doseq [[i [unit-key composition unit]] (map-indexed vector rows)]
       (print-field (if (zero? i) "sources" "")
                    (format fmt unit-key composition unit))))
-  (print-field "verdict" (str (name verdict)
-                                (when (seq reasons)
-                                  (str " | " (str/join "; " (map reason-summary reasons)))))))
+  (print-field "verdict"
+               (if (seq reasons)
+                 (format "%s | %s"
+                         (name verdict)
+                         (str/join "; " (map reason-summary reasons)))
+                 (name verdict))))
 
 (defn- source-checkouts
   "`--source-checkout <repo>=<path>` values as `{repo path}`, dying on a value

@@ -153,7 +153,7 @@
    :ref (or ref "HEAD")
    :ref-given? (some? ref)
    :sha (git/ref-sha checkout (or ref "HEAD"))
-   :branch (git/attached-branch checkout)
+   :branch (git/get-attached-branch checkout)
    :remote (git/remote-url checkout)
    :clean? (git/clean-tree? checkout)})
 
@@ -265,9 +265,10 @@
     (assoc locator :dir (layout/->unit-dir (assoc locator :root root)))))
 
 (defn- composition-report
-  "Link B for one source: `:recorded` is the sha the composition recorded,
-  `:unit-sha` the sha the source unit's manifest holds now (nil when that unit
-  or its manifest is gone), and `:verdict` whether the two agree."
+  "The composition's side of one source: `:recorded` is the sha the
+  composition recorded, `:unit-sha` the sha the source unit's manifest holds
+  now (nil when that unit or its manifest is gone), and `:verdict` whether the
+  two agree."
   [recorded unit-sha]
   {:recorded (:sha recorded)
    :unit-sha unit-sha
@@ -276,8 +277,8 @@
               :stale)})
 
 (defn- composition-reasons
-  "Link B's reason when the composition's recorded sha no longer matches the
-  source unit's manifest: `:source-sha-drift` when there is a sha to compare,
+  "The composition's reason when its recorded sha no longer matches the source
+  unit's manifest: `:source-sha-drift` when there is a sha to compare,
   `:source-missing` when the unit (or its manifest) is gone. Nothing when the
   two agree."
   [unit-key {:keys [verdict recorded unit-sha]}]
@@ -301,8 +302,8 @@
    :reasons [{:check why :unit-key unit-key}]})
 
 (defn- source-unit-reasons
-  "Link A's contribution for one source: its own report's verdict, with that
-  report's reasons nested so a reader sees which source decided it and why. A
+  "A source unit's own contribution: its report's verdict, with that report's
+  reasons nested so a reader sees which source decided it and why. A
   `:current` report contributes nothing."
   [unit-key report]
   (case (:verdict report)
@@ -324,15 +325,16 @@
        (contains? #{:current :stale :unknown} (:verdict report))))
 
 (defn- check-source
-  "One composed source, judged on both links, as `{:entry <the report's
+  "One composed source, judged on both comparisons, as `{:entry <the report's
   :sources entry> :reasons <its top-level reasons>}`.
 
-  `:composition` is link B, read from the source unit's manifest under `root`.
-  `:unit-status` is link A, `status-fn`'s report on that unit — absent when the
-  unit is gone (link B says so, and there is nothing to check, so `status-fn` is
-  not called) and when `status-fn` returns nothing usable. A unit already on the
-  walk (`:seen`) is not checked either: composing it again would recurse
-  forever, so its own link is `:source-cycle`, an unknown comparison."
+  `:composition` compares the sha the composition recorded with the source
+  unit's manifest under `root`. `:unit-status` is `status-fn`'s report on that
+  unit — absent when the unit is gone (the composition's record says so, and
+  there is nothing to check, so `status-fn` is not called) and when `status-fn`
+  returns nothing usable. A unit already on the walk (`:seen`) is not checked
+  either: composing it again would recurse forever, so its own status is
+  `:source-cycle`, an unknown comparison."
   [{:keys [manifest root status-fn seen unit-key recorded]}]
   (let [{:keys [repo variant dir]} (get-source-unit manifest root unit-key)
         unit-sha (some-> dir read-manifest-or-nil (get-in [:source :sha]))
@@ -358,9 +360,9 @@
 
 (defn- composed-unit-status
   "Result map for a composed unit (`:analysis-run :mode` present with
-  `:staleness :sources`). Current only if both links hold for every source: the
-  composition's record still matches the source unit, and `status-fn`'s report
-  on that unit says it still matches its code."
+  `:staleness :sources`). Current only when every source passes both
+  comparisons: the composition's record still matches the source unit, and
+  `status-fn`'s report on that unit says it still matches its code."
   [{:keys [base manifest root status-fn seen]}]
   (let [sources (get-in manifest [:staleness :sources])
         mode (get-in manifest [:analysis-run :mode])]
@@ -476,18 +478,17 @@
      :compared  `{:checkout :ref :sha}`, when `--checkout` was given
      :verdict   `:current`, `:stale`, or `:unknown`
      :reasons   what decided the verdict (informational entries marked)
-     :sources   both links per source, composed units only}
+     :sources   both comparisons per source, composed units only}
 
   A source unit is current when its manifest's `:source :sha` is the sha its
   checkout resolves to. A composed unit's manifest records a sha per source
-  unit; being current needs two things of every source, and this function
-  reports both — the composition's record (`:composition`) and that source
-  unit's own report (`:unit-status`), under `:sources`:
+  unit; being current needs two comparisons per source, both reported under
+  `:sources`:
 
-  - link B: the source unit's manifest still holds the sha the composition
-    recorded;
-  - link A: that source unit is itself current with its code — which the
-    composition cannot know, since a checkout is the reader's to name.
+  - `:composition` — the source unit's manifest still holds the sha the
+    composition recorded;
+  - `:unit-status` — that source unit is itself current with its code, which
+    the composition cannot know, since a checkout is the reader's to name.
 
   `:manifest` skips the read from `dir` (tests, hosts holding it already).
   `:checkout`/`:ref` compare a source unit against a checkout (`:ref` defaults
