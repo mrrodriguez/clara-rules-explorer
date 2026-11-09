@@ -547,7 +547,12 @@
   [["status --checkout PATH [--ref REF]"
     "compare a source unit against"
     "the checkout at PATH (REF defaults"
-    "to HEAD)"]
+    "to HEAD, which compares only on the"
+    "unit's own branch)"]
+   ["status --source-checkout <repo>=<path>"
+    "compare a composed unit's source"
+    "units against their repos' checkouts;"
+    "repeat once per repo"]
    ["status --root PATH"
     "registry root a composed unit's"
     "sources are read from (default:"
@@ -568,7 +573,7 @@
 
 (def ^:private usage-line
   "The invocation skeleton, printed first by `help`."
-  "usage: bb inspect-artifacts.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged] [--checkout PATH [--ref REF]] [--root PATH] [--edn] [--part lhs|rhs|props]")
+  "usage: bb inspect-artifacts.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged] [--checkout PATH [--ref REF]] [--source-checkout <repo>=<path>] [--root PATH] [--edn] [--part lhs|rhs|props]")
 
 (def ^:private subcommands
   "The subcommand menu as `[name signature description]`, in dispatch order;
@@ -698,6 +703,7 @@
   {:file {:coerce :string}
    :checkout {:coerce :string}
    :ref {:coerce :string}
+   :source-checkout {:coerce [:string]}
    :root {:coerce :string}
    :production {:coerce :string}
    :part {:coerce :string}
@@ -727,22 +733,45 @@
          (str/join ", " (map #(str "--" (name %)) (sort bad))))))
 
 (defn- reason-summary
-  "One reason as a `--edn`-free fragment of the verdict line."
-  [{:keys [check recorded current updated max-age-days ref checkout source]}]
+  "One reason as a `--edn`-free fragment of the verdict line. `:unit-stale` and
+  `:unit-unknown` recurse: a source's verdict is only as readable as the
+  reasons its own report gave."
+  [{:keys [check unit-key recorded current updated max-age-days ref checkout reasons]}]
   (case check
     :sha-drift (format "sha-drift %s -> %s" (layout/->short-sha recorded) (layout/->short-sha current))
     :remote-mismatch (format "remote-mismatch (recorded %s, checkout %s)" recorded current)
     :generated-dirty "generated-dirty (the unit describes no single commit)"
     :checkout-dirty "checkout-dirty (informational)"
     :age-exceeded (format "age-exceeded (updated %s, older than %s days)" updated max-age-days)
-    :sha-not-compared "sha not compared (no --checkout)"
+    :sha-not-compared "sha not compared"
     :ref-unresolvable (format "ref %s unresolvable in %s" ref checkout)
     :checkout-not-a-repo (format "%s is not a git checkout" checkout)
-    :source-sha-drift (format "%s: sha-drift %s -> %s"
-                              source (layout/->short-sha recorded) (layout/->short-sha current))
-    :source-missing (format "%s: missing" source)
+    :checkout-off-ref (format "checkout on %s, unit recorded %s" current recorded)
+    :source-sha-drift (format "%s: composition sha-drift %s -> %s"
+                              unit-key (layout/->short-sha recorded) (layout/->short-sha current))
+    :source-missing (format "%s: composition missing" unit-key)
+    (:unit-stale :unit-unknown)
+    (format "%s: unit %s" unit-key (str/join "; " (map reason-summary reasons)))
     :aggregate-no-sources "aggregate without per-source shas (no verdict)"
     (str check)))
+
+(defn- unit-fragment
+  "A source unit's own verdict and the reasons behind it, as one cell of a
+  `sources` row: `unit current`, `unit stale (sha-drift aaa1111 -> bbb2222)`."
+  [{:keys [verdict reasons]}]
+  (str "unit " (name verdict)
+       (when (seq reasons)
+         (str " (" (str/join "; " (map reason-summary reasons)) ")"))))
+
+(defn- source-cells
+  "One `:sources` entry as `[unit-key composition unit]` text cells: the
+  composition's verdict on that source (link B), then the source unit's own
+  verdict with its reasons (link A). A missing source unit has no report of its
+  own, so its cell says so rather than claiming anything."
+  [{:keys [unit-key composition unit-status]}]
+  [unit-key
+   (str "composition " (name (:verdict composition)))
+   (if unit-status (unit-fragment unit-status) "unit missing")])
 
 (defn- print-status
   "The `status/unit-status` result map as aligned `label  value` lines."
@@ -759,31 +788,54 @@
   (print-field "policy" (str (:policy staleness)
                                (when-let [d (:max-age-days staleness)]
                                  (format " (max %s days)" d))))
-  (doseq [[i {:keys [source recorded current verdict]}] (map-indexed vector sources)]
-    (print-field (if (zero? i) "sources" "")
-                  (str source ": " (name verdict)
-                       (when (= :sha-drift verdict)
-                         (format " %s -> %s" (layout/->short-sha recorded) (layout/->short-sha current))))))
+  (let [rows (mapv source-cells sources)
+        widths (reduce (fn [acc row] (mapv max acc (map count row))) [0 0 0] rows)
+        fmt (str "%-" (widths 0) "s  %-" (widths 1) "s  %s")]
+    (doseq [[i [unit-key composition unit]] (map-indexed vector rows)]
+      (print-field (if (zero? i) "sources" "")
+                   (format fmt unit-key composition unit))))
   (print-field "verdict" (str (name verdict)
                                 (when (seq reasons)
                                   (str " | " (str/join "; " (map reason-summary reasons)))))))
 
+(defn- source-checkouts
+  "`--source-checkout <repo>=<path>` values as `{repo path}`, dying on a value
+  without `=` or on the same repo given twice. The map is what
+  `status/unit-status` takes as `:source-checkouts`; whether it applies is the
+  manifest's business, so a source unit's rejection is that namespace's."
+  [values]
+  (reduce (fn [acc value]
+            (let [i (str/index-of (str value) "=")]
+              (when (nil? i)
+                (die (format "--source-checkout needs <repo>=<path>, got %s" value)))
+              (let [repo (subs (str value) 0 i)
+                    path (subs (str value) (inc i))]
+                (when (contains? acc repo)
+                  (die (format "--source-checkout given twice for %s" repo)))
+                (assoc acc repo path))))
+          {}
+          values))
+
 (defn- status
-  "`status [--checkout PATH [--ref REF]] [--root PATH] [--edn]` over unit dir
-  `dir`: presentation over `status/unit-status`, which reads
-  rules-inspect-manifest.edn (and, for a composed unit, its sources'
-  manifests) and nothing else."
+  "`status [--checkout PATH [--ref REF]] [--source-checkout <repo>=<path> …]
+  [--root PATH] [--edn]` over unit dir `dir`: presentation over
+  `status/unit-status`, which reads rules-inspect-manifest.edn (and, for a
+  composed unit, its sources' manifests) and nothing else. `--checkout` is for a
+  source unit, `--source-checkout` for a composed one; giving a flag to the
+  kind it does not apply to is rejected, not ignored."
   [dir opts]
   (when (and (:ref opts) (nil? (:checkout opts)))
     (die "--ref needs --checkout"))
-  (let [result (try
-                  (status/unit-status
-                   (cond-> {:dir dir}
-                     (:checkout opts) (assoc :checkout (:checkout opts))
-                     (:ref opts) (assoc :ref (:ref opts))
-                     (:root opts) (assoc :root (:root opts))))
-                  (catch Exception e
-                    (die (ex-message e))))]
+  (let [checkouts (some-> (:source-checkout opts) source-checkouts)
+        result (try
+                 (status/unit-status
+                  (cond-> {:dir dir}
+                    (:checkout opts) (assoc :checkout (:checkout opts))
+                    (:ref opts) (assoc :ref (:ref opts))
+                    (:root opts) (assoc :root (:root opts))
+                    checkouts (assoc :source-checkouts checkouts)))
+                 (catch Exception e
+                   (die (ex-message e))))]
     (if (:edn opts)
       (pprint/pprint result)
       (print-status result))))
@@ -944,7 +996,7 @@
     (nil? target) (help)
 
     (= (or cmd "summary") "status")
-    (do (reject-flags opts #{:checkout :ref :root :edn})
+    (do (reject-flags opts #{:checkout :ref :source-checkout :root :edn})
         (if arg
           (die "status takes no positional arg")
           (status target opts)))

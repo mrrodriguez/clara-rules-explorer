@@ -50,6 +50,17 @@
   [dir]
   (str/blank? (git dir "status" "--porcelain")))
 
+(defn attached-branch
+  "The local branch `dir`'s checkout is on, or nil when it is detached (git
+  reports the literal `HEAD`) or unreadable. Unlike `get-git-info`'s `:branch`
+  this does not resolve a detached checkout through the remote: it answers
+  which branch the checkout is *on*, which is what a status comparison needs
+  before comparing a sha."
+  [dir]
+  (let [branch (git dir "rev-parse" "--abbrev-ref" "HEAD")]
+    (when (and (seq branch) (not= "HEAD" branch))
+      branch)))
+
 (defn- strip-remote
   "Remote-tracking ref → branch name: `origin/main` becomes `main`.
   `origin/HEAD` is not a branch, so it strips to nil rather than to `HEAD`."

@@ -1,6 +1,7 @@
 # A composed unit's status never compares code
 
-Status: **proposed**. Nothing is implemented.
+Status: **implemented** — see
+[`composed-unit-status-code-drift-plan.md`](composed-unit-status-code-drift-plan.md).
 
 ## 1. Summary
 

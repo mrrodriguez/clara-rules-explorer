@@ -421,16 +421,35 @@ analysis parts. A source unit compares against `--checkout PATH` (`--ref`,
 default `HEAD`): a remote mismatch, a sha drift, a dirty generation tree, or an
 `:updated` older than the policy's `:max-age-days` makes it stale. Without
 `--checkout` only the checkout-independent checks run and the report says the
-sha was not compared. A composed unit compares each recorded per-source sha
-against that source's manifest under `--root` (default: `<dir>` with the
-manifest's `:repo` and `_variants/<repo>/<variant…>` stripped off) and is current only if
-every source is; `--checkout` is rejected for it, since it has one checkout per
-source. An aggregate with no per-source shas is reported by kind and source
-provenance, with no verdict. `--edn` prints the result map the text report
-renders. The comparison itself is
-`clara.explorer.artifacts.status/unit-status`, so a host can call it and
-append its own `:reasons` (tool versions, configuration slices kept in
-`:blocks`) before rendering.
+sha was not compared. Without an explicit `--ref`, a checkout on a branch other
+than the unit's `:source :branch` reports `checkout-off-ref` and leaves the
+verdict unknown: that checkout cannot say whether the unit's branch moved. An
+explicit `--ref` names the commit to compare and skips that guard; a detached
+checkout names no branch, so there too the sha alone decides.
+
+A composed unit's manifest records one sha per source unit, and being current
+needs two things of every source. **Link B:** the source unit's manifest still
+holds the sha the composition recorded. **Link A:** that source unit is itself
+current with its code — which the composition cannot answer, since where a
+reader's checkouts live is the reader's business. The caller supplies them, and
+the report gives both links. `--source-checkout <repo>=<path>` (repeatable, once
+per repo) compares each source unit against its repo's checkout: two sources of
+one repo share it, and a source whose repo is missing reads the sha was not
+compared. A host that needs more than these checks passes
+`:source-status-fn`, which returns each source unit's whole status report. With
+neither, a composition reports `:unknown`, not `:current` — no code was
+compared. `:sources` carries `{:unit-key :composition :unit-status :verdict}`
+per source, where `:composition` is link B's `{:recorded :unit-sha :verdict}`
+and `:unit-status` is the report link A produced (absent when the source unit is
+gone). `--root` locates the source units (default: `<dir>` with the manifest's
+`:repo` and `_variants/<repo>/<variant…>` stripped off); `--checkout` is
+rejected for a composed unit and `--source-checkout` for a source unit. An
+aggregate with no per-source shas is reported by kind and source provenance,
+with no verdict. `--edn` prints the result map the text report renders. The
+comparison itself is `clara.explorer.artifacts.status/unit-status`, so a host
+can call it, pass `:source-checkouts` or `:source-status-fn`, and append its own
+`:reasons` (tool versions, configuration slices kept in `:blocks`) before
+rendering.
 
 ## The artifact registry
 
@@ -531,11 +550,12 @@ exactly the aggregate marker `registry/unit-info` reads back, so a composed
 unit is not mistaken for a source unit when discovered again. Each `:units`
 entry also carries its source's `:sha` and `:created` (and `:variant` when
 present), `:coverage` records the `:unknown-namespaces` the selection named
-but no unit covered (an open map a host can add to), and `:staleness` names the
-`review-when-any-source-sha-drifts` policy with those per-source shas — so a
-reader holding only the directory can answer "is this current?" for a
-composition that is stale as soon as any of its N independently-moving sources
-has moved.
+but no unit covered (an open map a host can add to), and `:staleness` names
+the `review-when-any-source-sha-drifts` policy with those per-source shas — so
+a reader holding only the directory can tell whether the composition's record
+still matches its source units. That is one of the two links a verdict needs:
+each source unit must also still match its own code, which `status` reports
+beside it rather than assuming.
 
 ## Related
 

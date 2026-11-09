@@ -624,19 +624,46 @@
                                           (status-composed-manifest))]
           (let [out (collapse-whitespace (run-status dir))]
             (is (str/includes? out "kind aggregate unit (mode :compose)"))
-            (is (str/includes? out "demo-a: current"))
-            (is (str/includes? out "demo-b@ref=x: current"))
-            (is (str/includes? out "verdict current")))
+            (is (str/includes? out "demo-a composition current unit unknown (sha not compared)"))
+            (is (str/includes? out "demo-b@ref=x composition current unit unknown (sha not compared)"))
+            (is (str/includes? out "verdict unknown | demo-a: unit sha not compared")))
           (write-src "111aaaa" "9999999")
           (let [out (collapse-whitespace (run-status dir))]
-            (is (str/includes? out "demo-b@ref=x: sha-drift 222bbbb -> 9999999"))
-            (is (str/includes? out "verdict stale")))
+            (is (str/includes? out "demo-b@ref=x composition stale unit unknown (sha not compared)"))
+            (is (str/includes? out "demo-b@ref=x: composition sha-drift 222bbbb -> 9999999")))
           (write-src "111aaaa" nil)
           (let [dir-file (io/file root "_variants" "demo-b")]
             (doseq [f (reverse (file-seq dir-file))] (io/delete-file f true)))
           (let [out (collapse-whitespace (run-status dir))]
-            (is (str/includes? out "demo-b@ref=x: missing"))
-            (is (str/includes? out "verdict stale"))))
+            (is (str/includes? out "demo-b@ref=x composition stale unit missing"))
+            (is (str/includes? out "demo-b@ref=x: composition missing")))
+
+          (testing "--source-checkout compares one source against its repo's checkout"
+            (write-src "111aaaa" "222bbbb")
+            (let [out (collapse-whitespace
+                       (run-status dir "--source-checkout"
+                                   (str "demo-a=" (System/getProperty "user.dir"))))]
+              ;; The runner's own checkout is a real repo, so its origin is
+              ;; never this unit's nil remote: the covered source is stale and
+              ;; the uncovered one unknown, whatever the shas.
+              (is (str/includes? out "demo-a composition current unit stale (remote-mismatch"))
+              (is (str/includes? out "demo-b@ref=x composition current unit unknown (sha not compared)"))
+              (is (str/includes? out "verdict stale | demo-a: unit remote-mismatch")))))
+
+        (testing "--source-checkout values are <repo>=<path>"
+          (let [{:keys [exit out err]} (shell/sh "bb" (str inspect-artifacts-script) root "status"
+                                                 "--source-checkout" "oops")]
+            (is (not (zero? exit)))
+            (is (str/includes? (str out err) "needs <repo>=<path>"))))
+
+        (testing "--source-checkout on a source unit fails"
+          (let [source-dir (write-status-manifest! (str (io/file root "demo-single"))
+                                                   (assoc (status-source-manifest) :repo "demo-single"))
+                {:keys [exit out err]} (shell/sh "bb" (str inspect-artifacts-script) source-dir "status"
+                                                 "--source-checkout"
+                                                 (str "demo-a=" (System/getProperty "user.dir")))]
+            (is (not (zero? exit)))
+            (is (str/includes? (str out err) "apply only to a composed unit"))))
 
         (testing "--checkout on a composed unit fails"
           (let [dir (write-status-manifest! (str (io/file root "demo-composed"))
