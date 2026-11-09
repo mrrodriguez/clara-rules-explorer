@@ -168,6 +168,31 @@
                       (sh! (:dir repo) "checkout" "-q" "--detach" "HEAD")
                       (is (not= "HEAD" (:branch (git/get-git-info (:dir repo)))))))))))
 
+(deftest attached-branch-test
+  (if-not (and (git-available?) (repo-fixture-works?))
+    (println "SKIPPING attached-branch-test — git is not on PATH, or this environment cannot create git repos")
+    (do
+      (testing "an attached checkout names the branch it is on"
+        (with-repo* (fn [repo]
+                      (is (= "main" (git/attached-branch (:dir repo))))
+                      (sh! (:dir repo) "checkout" "-q" "-b" "feature/x")
+                      (is (= "feature/x" (git/attached-branch (:dir repo)))))))
+
+      (testing "a detached checkout names no branch, even when a remote branch points at it"
+        (with-repo* (fn [repo]
+                      (point-origin! (:dir repo) (:sha repo) "main" "main")
+                      (sh! (:dir repo) "checkout" "-q" "--detach" "HEAD")
+                      (is (nil? (git/attached-branch (:dir repo)))))))
+
+      (testing "a missing dir, a non-repo, and a blank dir are nil, not the working directory"
+        (is (nil? (git/attached-branch "/no/such/dir/clara-git-test")))
+        (is (nil? (git/attached-branch nil)))
+        (is (nil? (git/attached-branch "")))
+        (let [dir (make-temp-dir "clara-git-test")]
+          (try
+            (is (nil? (git/attached-branch dir)))
+            (finally (delete-tree dir))))))))
+
 (deftest git-info-boundaries-test
   (if-not (git-available?)
     (println "SKIPPING git-boundaries-test — git is not on PATH")

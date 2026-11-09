@@ -541,9 +541,8 @@
   (println (format (str "%-" field-width "s %s") label value)))
 
 (def ^:private status-usage-rows
-  "The `status` flag rows as `[syntax desc-first & desc-rest]`. Continuation
-  lines align under the description column via `print-flag-row`, so a longer
-  flag never means recounting spaces."
+  "The `status` flag rows as `[syntax desc-first & desc-rest]`. One table, so a
+  longer flag never means recounting spaces or shifting its own column."
   [["status --checkout PATH [--ref REF]"
     "compare a source unit against"
     "the checkout at PATH (REF defaults"
@@ -561,19 +560,22 @@
     "print the result map, not the text"
     "report"]])
 
-(defn- print-flag-row
-  "Print one `[syntax desc-first & desc-rest]` row: syntax plus the first
-  description line together, remaining lines aligned under the description."
-  [syntax desc-first & desc-rest]
-  (let [head (str "  " syntax "  ")
-        pad (apply str (repeat (count head) " "))]
-    (println (str head desc-first))
-    (doseq [line desc-rest]
-      (println (str pad line)))))
+(defn- print-flag-rows
+  "Print `[syntax desc-first & desc-rest]` rows as one table: syntax padded to
+  the widest row so every description starts in the same column, and
+  continuation lines aligned under it."
+  [rows]
+  (let [width (reduce (fn [w [syntax]] (max w (count syntax))) 0 rows)]
+    (doseq [[syntax desc & more] rows]
+      (let [head (str "  " (format (str "%-" width "s") syntax) "  ")
+            pad (apply str (repeat (count head) " "))]
+        (println (str head desc))
+        (doseq [line more]
+          (println (str pad line)))))))
 
 (def ^:private usage-line
   "The invocation skeleton, printed first by `help`."
-  "usage: bb inspect-artifacts.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged] [--checkout PATH [--ref REF]] [--source-checkout <repo>=<path>] [--root PATH] [--edn] [--part lhs|rhs|props]")
+  "usage: bb inspect-artifacts.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged] [--checkout PATH [--ref REF]] [--source-checkout <repo>=<path> ...] [--root PATH] [--edn] [--part lhs|rhs|props]")
 
 (def ^:private subcommands
   "The subcommand menu as `[name signature description]`, in dispatch order;
@@ -591,7 +593,7 @@
    ["entry-points" "[<unit>]" "consumed types no rule produces"]
    ["curated" "" "what the agent overlay changed vs auto-gen"]
    ["layers" "[<fq-name>]" "the fold: layers + per-key provenance"]
-   ["status" "[--checkout]" "is this unit current? (needs only the manifest)"]
+   ["status" "[flags]" "is this unit current? (--checkout for a source unit, --source-checkout for a composed one; needs only the manifest)"]
    ["diff" "<after-dir>" "production-level diff of this unit vs <after-dir> (--edn, --production NAME)"]
    ["help" "" "this help"]])
 
@@ -611,8 +613,7 @@
   (println)
   (println "status checks one unit directory (a source, variant, or composed unit)")
   (println "reading only its rules-inspect-manifest.edn:")
-  (doseq [row status-usage-rows]
-    (apply print-flag-row row)))
+  (print-flag-rows status-usage-rows))
 
 ;; ---------------------------------------------------------------------------
 ;; production — one production's joined record
@@ -750,6 +751,8 @@
     :source-sha-drift (format "%s: composition sha-drift %s -> %s"
                               unit-key (layout/->short-sha recorded) (layout/->short-sha current))
     :source-missing (format "%s: composition missing" unit-key)
+    :source-cycle "composition cycle (not followed)"
+    :unit-report-missing "no report from the source status function"
     (:unit-stale :unit-unknown)
     (format "%s: unit %s" unit-key (str/join "; " (map reason-summary reasons)))
     :aggregate-no-sources "aggregate without per-source shas (no verdict)"
@@ -763,15 +766,33 @@
        (when (seq reasons)
          (str " (" (str/join "; " (map reason-summary reasons)) ")"))))
 
+(defn- unit-absence
+  "Why a source with no link-A cell has none, read from the report's top-level
+  reasons: `:source-cycle` or `:unit-report-missing`, or nil when the source
+  unit itself is gone (link B says `:source-missing`)."
+  [reasons unit-key]
+  (->> reasons
+       (filter #(= unit-key (:unit-key %)))
+       (mapcat :reasons)
+       (map :check)
+       (filter #{:source-cycle :unit-report-missing})
+       first))
+
 (defn- source-cells
   "One `:sources` entry as `[unit-key composition unit]` text cells: the
   composition's verdict on that source (link B), then the source unit's own
-  verdict with its reasons (link A). A missing source unit has no report of its
-  own, so its cell says so rather than claiming anything."
-  [{:keys [unit-key composition unit-status]}]
-  [unit-key
-   (str "composition " (name (:verdict composition)))
-   (if unit-status (unit-fragment unit-status) "unit missing")])
+  verdict with its reasons (link A). A source with no report of its own says
+  which absence it is rather than claiming anything. `reasons` are the report's
+  top-level reasons, which name the absence."
+  [reasons {:keys [unit-key composition unit-status]}]
+  (let [absence (unit-absence reasons unit-key)]
+    [unit-key
+     (str "composition " (name (:verdict composition)))
+     (cond
+       (some? unit-status) (unit-fragment unit-status)
+       (= :source-cycle absence) "unit not checked (composition cycle)"
+       (= :unit-report-missing absence) "unit report missing"
+       :else "unit missing")]))
 
 (defn- print-status
   "The `status/unit-status` result map as aligned `label  value` lines."
@@ -788,7 +809,7 @@
   (print-field "policy" (str (:policy staleness)
                                (when-let [d (:max-age-days staleness)]
                                  (format " (max %s days)" d))))
-  (let [rows (mapv source-cells sources)
+  (let [rows (mapv #(source-cells reasons %) sources)
         widths (reduce (fn [acc row] (mapv max acc (map count row))) [0 0 0] rows)
         fmt (str "%-" (widths 0) "s  %-" (widths 1) "s  %s")]
     (doseq [[i [unit-key composition unit]] (map-indexed vector rows)]
@@ -800,9 +821,10 @@
 
 (defn- source-checkouts
   "`--source-checkout <repo>=<path>` values as `{repo path}`, dying on a value
-  without `=` or on the same repo given twice. The map is what
-  `status/unit-status` takes as `:source-checkouts`; whether it applies is the
-  manifest's business, so a source unit's rejection is that namespace's."
+  without `=`, on an empty repo or path, and on the same repo given twice. The
+  map is what `status/unit-status` takes as `:source-checkouts`; whether it
+  applies is the manifest's business, so a source unit's rejection is that
+  namespace's."
   [values]
   (reduce (fn [acc value]
             (let [i (str/index-of (str value) "=")]
@@ -810,6 +832,8 @@
                 (die (format "--source-checkout needs <repo>=<path>, got %s" value)))
               (let [repo (subs (str value) 0 i)
                     path (subs (str value) (inc i))]
+                (when (or (str/blank? repo) (str/blank? path))
+                  (die (format "--source-checkout needs both a repo and a path, got %s" value)))
                 (when (contains? acc repo)
                   (die (format "--source-checkout given twice for %s" repo)))
                 (assoc acc repo path))))

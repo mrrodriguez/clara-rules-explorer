@@ -118,7 +118,7 @@ Worked top to bottom; each entry is a checkpoint, not a diary.
 
 ```bash
 cd explorer
-make test             # 517 tests, 3429 assertions, 0 failures
+make test             # 519 tests, 3477 assertions, 0 failures
 make lint             # 0 errors, 0 warnings
 make reflection-check # no warnings in project code
 make format-check     # all source files formatted correctly
@@ -126,9 +126,13 @@ make bb-smoke-test    # all 15 bb-loaded namespaces require
 ```
 
 The `inspect-artifacts.bb` suite also runs `status` end to end through `bb`, and
-now covers the composed rows, `--source-checkout` (using the runner's own
-checkout as a real repo, so the verdict is hermetic), a malformed flag value,
-`--source-checkout` on a source unit, and `--checkout` on a composed unit.
+now covers the composed rows, `--edn`'s per-source shape, `--source-checkout`
+against a path that is no checkout at all (so the covered source reads
+`checkout-not-a-repo` and the uncovered one `sha not compared` — hermetic, with
+no dependence on the runner's own checkout), a malformed flag value, either
+empty side of `<repo>=<path>`, a repo named twice, `--source-checkout` on a
+source unit, `--checkout` on a composed unit, and a composition-of-a-composition
+(the nested `sources` and `verdict` lines, pinned whole).
 
 A hand check over a manifest-only registry in `explorer/target/tmp/reg` (three
 units, no git repos — this sandbox denies writes under `.git`, so a checkout
@@ -142,4 +146,46 @@ verdict    unknown | repo-a: unit sha not compared; repo-b@env=dev/ref=main: uni
 ```
 
 The real-checkout path (drift, off-ref, remote mismatch) is covered by the unit
-suite's stubbed git reads and by the bb suite's use of the runner's checkout.
+suite's stubbed git reads. The one CLI assertion that still reads the runner's
+own checkout is the pre-existing `--checkout` one; it needs that checkout to
+have an `origin` remote, which a clone does.
+
+## 5. Review pass: what the first implementation left open
+
+A review of the shipped branch found the design implemented, and these gaps:
+
+- **A report function that returns nothing restored the old bug.** `nil` (or a
+  map without `:verdict`) was folded into "no report", so the source and the
+  composition read `:current` — the very verdict the change exists to stop.
+  Now such a source is `:unit-unknown` with `:unit-report-missing`, and a
+  report that is not usable is never taken as current.
+- **The new recursion had no cycle guard.** A composition that reaches itself
+  stack-overflowed the CLI. The walk of unit dirs (`:seen`, seeded per call and
+  threaded through `->source-status-fn`) now reports `:source-cycle` under
+  `:unit-unknown` instead of recursing.
+- **`merge-verdicts` was a second encoding of `->verdict`'s precedence** and is
+  derivable from a source's own reasons. Deleted: a source's `:verdict` is
+  `(->verdict reasons)`, so a per-source verdict can no longer disagree with
+  the reasons nested under it.
+- **`check-source` (5 args) and `composed-unit-status` (4) took positional
+  argument lists**; both now take one map. `check-source` also returns
+  `{:entry :reasons}` instead of building a `:unit-status nil` key for
+  `composed-unit-status` to dissoc.
+- **`unit-status` mixed argument guards with delegation**; the guards moved to
+  `assert-kind-args!`.
+- **`git/attached-branch` duplicated the attached-branch read** that
+  `get-git-info` performed inline, guard included. `get-git-info` now calls it,
+  so one function owns the read — and the new function inherits real-git tests.
+- **CLI:** `--source-checkout =<path>` was silently ignored (no empty side
+  check); the `subcommands` row still advertised `status [--checkout]`; the
+  usage skeleton did not mark the flag repeatable; each `status` usage row
+  aligned its own continuation lines, so the long flag shifted its column. The
+  rows are now one table with a computed syntax width.
+- **Tests:** `attached-branch` had none (now real-git + boundary cases);
+  off-ref was unreachable in the composed suite (fixtures recorded no branch,
+  and the stub defaulted to detached — it now defaults to the fixtures' branch,
+  and a composed off-ref case exists); both-links-broken, report-missing,
+  cycle, duplicate/empty `--source-checkout`, and `:source-status-fn` on a
+  source unit are now covered; `:sources` entry key sets are pinned; each
+  composed case gets its own root instead of mutating a shared one;
+  `:checkout-off-ref` and the nested CLI lines are asserted.

@@ -52,10 +52,10 @@
 
 (defn attached-branch
   "The local branch `dir`'s checkout is on, or nil when it is detached (git
-  reports the literal `HEAD`) or unreadable. Unlike `get-git-info`'s `:branch`
-  this does not resolve a detached checkout through the remote: it answers
-  which branch the checkout is *on*, which is what a status comparison needs
-  before comparing a sha."
+  reports the literal `HEAD`) or unreadable. This is the attached read behind
+  `get-git-info`'s `:branch`; unlike that field it does not resolve a detached
+  checkout through the remote, since it answers which branch the checkout is
+  *on*, which is what a status comparison needs before comparing a sha."
   [dir]
   (let [branch (git dir "rev-parse" "--abbrev-ref" "HEAD")]
     (when (and (seq branch) (not= "HEAD" branch))
@@ -146,13 +146,12 @@
 
 (defn- resolve-branch
   "The branch the analyzed commit belongs to. An attached checkout names its
-  own branch, pushed or not. A detached checkout (`rev-parse --abbrev-ref HEAD`
-  reporting the literal `HEAD`) resolves to the remote branch — on the checkout's
-  `origin` — pointing at the commit: the remote default first, then the first
-  sorted remote branch. `HEAD` is not a branch, so an unresolvable commit
-  records nil."
+  own branch (`attached-branch`), pushed or not. A detached checkout names none,
+  so it resolves to the remote branch — on the checkout's `origin` — pointing at
+  the commit: the remote default first, then the first sorted remote branch.
+  `HEAD` is not a branch, so an unresolvable commit records nil."
   ^String [dir sha remote branch]
-  (if (and (seq branch) (not= "HEAD" branch))
+  (if (some? branch)
     branch
     (let [layout (get-remote-branch-layout dir remote)]
       (or (default-branch-at dir sha layout)
@@ -179,7 +178,6 @@
     {:remote (remote-url dir)
      :sha sha
      :sha-short (subs sha 0 7)
-     :branch (resolve-branch dir sha "origin"
-                             (git dir "rev-parse" "--abbrev-ref" "HEAD"))
+     :branch (resolve-branch dir sha "origin" (attached-branch dir))
      :default-branch (default-branch dir "origin")
      :working-tree (if (clean-tree? dir) "clean" "dirty")}))

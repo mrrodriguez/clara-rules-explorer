@@ -434,18 +434,25 @@ current with its code — which the composition cannot answer, since where a
 reader's checkouts live is the reader's business. The caller supplies them, and
 the report gives both links. `--source-checkout <repo>=<path>` (repeatable, once
 per repo) compares each source unit against its repo's checkout: two sources of
-one repo share it, and a source whose repo is missing reads the sha was not
-compared. A host that needs more than these checks passes
+one repo share it, and a source whose repo has no entry states that its sha was
+not compared. A host that needs more than these checks passes
 `:source-status-fn`, which returns each source unit's whole status report. With
 neither, a composition reports `:unknown`, not `:current` — no code was
 compared. `:sources` carries `{:unit-key :composition :unit-status :verdict}`
 per source, where `:composition` is link B's `{:recorded :unit-sha :verdict}`
 and `:unit-status` is the report link A produced (absent when the source unit is
-gone). `--root` locates the source units (default: `<dir>` with the manifest's
-`:repo` and `_variants/<repo>/<variant…>` stripped off); `--checkout` is
-rejected for a composed unit and `--source-checkout` for a source unit. An
-aggregate with no per-source shas is reported by kind and source provenance,
-with no verdict. `--edn` prints the result map the text report renders. The
+gone). Every verdict, at every level, is `:current`, `:stale`, or `:unknown`;
+what kind of drift it was lives in `:reasons`, where link B contributes
+`:source-sha-drift` and `:source-missing` keyed by `:unit-key`, and link A nests
+under `:unit-stale` and `:unit-unknown` with that report's own reasons. A source
+whose own report cannot be established is unknown, never current: a source
+already on the walk is `:source-cycle` (a composition that reaches itself is
+reported, not followed forever), and a `:source-status-fn` returning nothing
+usable is `:unit-report-missing`. `--root` locates the source units (default:
+`<dir>` with the manifest's `:repo` and `_variants/<repo>/<variant…>` stripped
+off); `--checkout` is rejected for a composed unit and `--source-checkout` for a
+source unit. An aggregate with no per-source shas is reported by kind and source
+provenance, with no verdict. `--edn` prints the result map the text report renders. The
 comparison itself is `clara.explorer.artifacts.status/unit-status`, so a host
 can call it, pass `:source-checkouts` or `:source-status-fn`, and append its own
 `:reasons` (tool versions, configuration slices kept in `:blocks`) before

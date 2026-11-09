@@ -66,10 +66,12 @@
 (defmacro ^:private with-checkout
   "Stub the checkout git reads: refs resolve via `ref-shas`, the origin is
   `remote`, the tree is clean unless `clean?` is false, and the checkout is on
-  `branch` (nil = detached). Each of `ref-shas`, `remote`, `clean?`, and
-  `branch` may instead be a function of the checkout dir, so one test can stub
-  several checkouts at once."
-  [{:keys [ref-shas remote clean? branch] :or {clean? true}} & body]
+  `branch` (nil = detached). The branch defaults to `feature-x`, the branch the
+  fixtures' source units record, so the ordinary case is an attached checkout on
+  the unit's own branch and a detached one is what a test asks for. Each of
+  `ref-shas`, `remote`, `clean?`, and `branch` may instead be a function of the
+  checkout dir, so one test can stub several checkouts at once."
+  [{:keys [ref-shas remote clean? branch] :or {clean? true branch "feature-x"}} & body]
   `(let [per-dir# (fn [v# dir#] (if (fn? v#) (v# dir#) v#))]
      (with-redefs [git/ref-sha (fn [dir# ref#] (get (per-dir# ~ref-shas dir#) ref#))
                    git/attached-branch (fn [dir#] (per-dir# ~branch dir#))
@@ -219,20 +221,23 @@
 ;; ===========================================================================
 
 (defn- minimal-source-manifest
-  [repo sha]
-  {:repo repo
-   :generated-by "status-test"
-   :created today
-   :updated today
-   :source {:working-tree-notes ""
-            :remote nil
-            :sha sha
-            :sha-short (subs sha 0 7)
-            :branch nil
-            :working-tree "clean"}
-   :analysis-run {:method "status-test"}
-   :staleness {:policy "review-when-sha-drifts" :max-age-days 90}
-   :history []})
+  "A source manifest for `repo` at `sha`, analyzed on `branch` (nil when its
+  commit belongs to no branch)."
+  ([repo sha] (minimal-source-manifest repo sha nil))
+  ([repo sha branch]
+   {:repo repo
+    :generated-by "status-test"
+    :created today
+    :updated today
+    :source {:working-tree-notes ""
+             :remote nil
+             :sha sha
+             :sha-short (subs sha 0 7)
+             :branch branch
+             :working-tree "clean"}
+    :analysis-run {:method "status-test"}
+    :staleness {:policy "review-when-sha-drifts" :max-age-days 90}
+    :history []}))
 
 (defn- write-sources!
   "Source manifests under `root`: `aaa` at `aaa-sha`,
@@ -266,78 +271,98 @@
                          "bbb@ref=x" {:sha "222bbbb" :created today}}}
    :history []})
 
-(deftest composed-unit-status-test
+(defn- with-composed-unit*
+  "Run `(f {:root :dir :checkouts})` with a fresh root holding
+  `composed-manifest`'s two source units at the shas it records, plus the
+  composed unit itself. Fresh per case, so a case that rewrites or deletes a
+  source cannot change what a later case sees."
+  [f]
   (with-temp-root* (fn [root]
                      (write-sources! root "111aaaa" "222bbbb")
-                     (let [dir (write-manifest! (str (io/file root "composed-all"))
-                                                (composed-manifest))]
+                     (f {:root root
+                         :dir (write-manifest! (str (io/file root "composed-all"))
+                                               (composed-manifest))
+                         :checkouts {"aaa" "/co-aaa" "bbb" "/co-bbb"}}))))
 
-                       (testing "both links hold, but with no checkout there is no link A: unknown"
-                         (let [result (status/unit-status {:dir dir})]
-                           (is (= :unknown (:verdict result)))
-                           (is (= :aggregate (:kind result)))
-                           (is (= :compose (:mode result)))
-                           (is (= [{:check :unit-unknown :unit-key "aaa"
-                                    :reasons [{:check :sha-not-compared}]}
-                                   {:check :unit-unknown :unit-key "bbb@ref=x"
-                                    :reasons [{:check :sha-not-compared}]}]
-                                  (:reasons result)))
-                           (is (= ["aaa" "bbb@ref=x"] (mapv :unit-key (:sources result))))
-                           (is (= [{:recorded "111aaaa" :unit-sha "111aaaa" :verdict :current}
-                                   {:recorded "222bbbb" :unit-sha "222bbbb" :verdict :current}]
-                                  (mapv :composition (:sources result))))
-                           (is (= [:unknown :unknown] (mapv :verdict (:sources result))))
-                           (is (= :source (get-in result [:sources 0 :unit-status :kind])))))
+(deftest composed-unit-status-test
+  (testing "both links hold, but with no checkout there is no link A: unknown"
+    (with-composed-unit*
+      (fn [{:keys [dir]}]
+        (let [result (status/unit-status {:dir dir})]
+          (is (= :unknown (:verdict result)))
+          (is (= :aggregate (:kind result)))
+          (is (= :compose (:mode result)))
+          (is (= [{:check :unit-unknown :unit-key "aaa"
+                   :reasons [{:check :sha-not-compared}]}
+                  {:check :unit-unknown :unit-key "bbb@ref=x"
+                   :reasons [{:check :sha-not-compared}]}]
+                 (:reasons result)))
+          (is (= ["aaa" "bbb@ref=x"] (mapv :unit-key (:sources result))))
+          (is (= [{:recorded "111aaaa" :unit-sha "111aaaa" :verdict :current}
+                  {:recorded "222bbbb" :unit-sha "222bbbb" :verdict :current}]
+                 (mapv :composition (:sources result))))
+          (is (= [:unknown :unknown] (mapv :verdict (:sources result))))
+          (is (every? #(= #{:unit-key :composition :unit-status :verdict} (set (keys %)))
+                      (:sources result))
+              "a source entry carries both links and nothing else — no stray :reasons")
+          (is (= :source (get-in result [:sources 0 :unit-status :kind])))))))
 
-                       (testing "an explicit :root is honored"
-                         (let [result (status/unit-status {:dir dir :root root})]
-                           (is (= :unknown (:verdict result)))
-                           (is (= "111aaaa" (get-in result [:sources 0 :composition :unit-sha])))))
+  (testing "an explicit :root is honored"
+    (with-composed-unit*
+      (fn [{:keys [root dir]}]
+        (let [result (status/unit-status {:dir dir :root root})]
+          (is (= :unknown (:verdict result)))
+          (is (= "111aaaa" (get-in result [:sources 0 :composition :unit-sha])))))))
 
-                       (testing "link B drifted: composition stale, reasons keyed by unit-key"
-                         (write-sources! root "111aaaa" "9999999")
-                         (let [result (status/unit-status {:dir dir})]
-                           (is (= :stale (:verdict result)))
-                           (is (= [{:check :unit-unknown :unit-key "aaa"
-                                    :reasons [{:check :sha-not-compared}]}
-                                   {:check :source-sha-drift :unit-key "bbb@ref=x"
-                                    :recorded "222bbbb" :current "9999999"}
-                                   {:check :unit-unknown :unit-key "bbb@ref=x"
-                                    :reasons [{:check :sha-not-compared}]}]
-                                  (:reasons result)))
-                           (is (= [:unknown :stale] (mapv :verdict (:sources result))))
-                           (is (= {:recorded "222bbbb" :unit-sha "9999999" :verdict :stale}
-                                  (get-in result [:sources 1 :composition])))))
+  (testing "link B drifted: composition stale, reasons keyed by unit-key"
+    (with-composed-unit*
+      (fn [{:keys [root dir]}]
+        (write-sources! root "111aaaa" "9999999")
+        (let [result (status/unit-status {:dir dir})]
+          (is (= :stale (:verdict result)))
+          (is (= [{:check :unit-unknown :unit-key "aaa"
+                   :reasons [{:check :sha-not-compared}]}
+                  {:check :source-sha-drift :unit-key "bbb@ref=x"
+                   :recorded "222bbbb" :current "9999999"}
+                  {:check :unit-unknown :unit-key "bbb@ref=x"
+                   :reasons [{:check :sha-not-compared}]}]
+                 (:reasons result)))
+          (is (= [:unknown :stale] (mapv :verdict (:sources result))))
+          (is (= {:recorded "222bbbb" :unit-sha "9999999" :verdict :stale}
+                 (get-in result [:sources 1 :composition])))))))
 
-                       (testing "a removed source is missing, with no unit report of its own"
-                         (write-sources! root "111aaaa" nil)
-                         (delete-tree (str (io/file root "_variants" "bbb")))
-                         (let [result (status/unit-status {:dir dir})]
-                           (is (= :stale (:verdict result)))
-                           (is (= [{:check :unit-unknown :unit-key "aaa"
-                                    :reasons [{:check :sha-not-compared}]}
-                                   {:check :source-missing :unit-key "bbb@ref=x"}]
-                                  (:reasons result)))
-                           (is (= {:recorded "222bbbb" :unit-sha nil :verdict :stale}
-                                  (get-in result [:sources 1 :composition])))
-                           (is (= :stale (get-in result [:sources 1 :verdict])))
-                           (is (not (contains? (get-in result [:sources 1]) :unit-status)))))
+  (testing "a removed source is missing, with no unit report of its own"
+    (with-composed-unit*
+      (fn [{:keys [root dir]}]
+        (delete-tree (str (io/file root "_variants" "bbb")))
+        (let [result (status/unit-status {:dir dir})]
+          (is (= :stale (:verdict result)))
+          (is (= [{:check :unit-unknown :unit-key "aaa"
+                   :reasons [{:check :sha-not-compared}]}
+                  {:check :source-missing :unit-key "bbb@ref=x"}]
+                 (:reasons result)))
+          (is (= {:recorded "222bbbb" :unit-sha nil :verdict :stale}
+                 (get-in result [:sources 1 :composition])))
+          (is (= :stale (get-in result [:sources 1 :verdict])))
+          (is (not (contains? (get-in result [:sources 1]) :unit-status)))))))
 
-                       (testing "--checkout on a composed unit is rejected"
-                         (is (thrown? clojure.lang.ExceptionInfo
-                                      (status/unit-status {:dir dir :checkout "/co"}))))))))
+  (testing "--checkout on a composed unit is rejected"
+    (with-composed-unit*
+      (fn [{:keys [dir]}]
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (status/unit-status {:dir dir :checkout "/co"})))))))
 
 (deftest variant-composed-unit-status-test
   (with-temp-root* (fn [root]
                      (write-sources! root "111aaaa" "222bbbb")
                      (let [dir (write-manifest! (str (io/file root "_variants" "composed-all" "ref=alt"))
-                                                (assoc (composed-manifest) :variant [[:ref "alt"]]))]
+                                                (assoc (composed-manifest) :variant [[:ref "alt"]]))
+                           result (status/unit-status {:dir dir})]
                        (testing "the root is stripped through the variant path too"
-                         (is (= :unknown (:verdict (status/unit-status {:dir dir}))))
-                         (is (= "222bbbb" (get-in (status/unit-status {:dir dir})
-                                                  [:sources 1 :composition :unit-sha]))))))))
+                         (is (= :unknown (:verdict result)))
+                         (is (= "222bbbb" (get-in result [:sources 1 :composition :unit-sha]))))))))
 
-(defn- checkout-ref-shas
+(defn- ->checkout-ref-shas
   "`git/ref-sha` stub for two checkouts: `/co-aaa` at `aaa` and `/co-bbb` at
   `bbb`, so each source of `composed-manifest` is compared against its own
   repo's checkout."
@@ -348,92 +373,145 @@
          dir)))
 
 (deftest composed-source-status-test
-  (with-temp-root* (fn [root]
-                     (write-sources! root "111aaaa" "222bbbb")
-                     (let [dir (write-manifest! (str (io/file root "composed-all"))
-                                                (composed-manifest))
-                           checkouts {"aaa" "/co-aaa" "bbb" "/co-bbb"}]
+  (testing "both links hold for every source: current"
+    (with-composed-unit*
+      (fn [{:keys [dir checkouts]}]
+        (with-checkout {:ref-shas (->checkout-ref-shas "111aaaa" "222bbbb")}
+          (let [result (status/unit-status {:dir dir :source-checkouts checkouts})]
+            (is (= :current (:verdict result)))
+            (is (= [] (:reasons result)))
+            (is (= [:current :current] (mapv :verdict (:sources result))))
+            (is (= {:checkout "/co-aaa" :ref "HEAD" :sha "111aaaa"}
+                   (get-in result [:sources 0 :unit-status :compared]))))))))
 
-                       (testing "both links hold for every source: current"
-                         (with-checkout {:ref-shas (checkout-ref-shas "111aaaa" "222bbbb")}
-                           (let [result (status/unit-status {:dir dir :source-checkouts checkouts})]
-                             (is (= :current (:verdict result)))
-                             (is (= [] (:reasons result)))
-                             (is (= [:current :current] (mapv :verdict (:sources result))))
-                             (is (= {:checkout "/co-aaa" :ref "HEAD" :sha "111aaaa"}
-                                    (get-in result [:sources 0 :unit-status :compared]))))))
+  (testing "link B holds, link A broken: the unit is behind its checkout"
+    (with-composed-unit*
+      (fn [{:keys [dir checkouts]}]
+        (with-checkout {:ref-shas (->checkout-ref-shas "999aaa" "222bbbb")}
+          (let [result (status/unit-status {:dir dir :source-checkouts checkouts})]
+            (is (= :stale (:verdict result)))
+            (is (= [{:check :unit-stale :unit-key "aaa"
+                     :reasons [{:check :sha-drift
+                                :recorded "111aaaa" :current "999aaa"}]}]
+                   (:reasons result)))
+            (is (= [:stale :current] (mapv :verdict (:sources result))))
+            (is (= {:recorded "111aaaa" :unit-sha "111aaaa" :verdict :current}
+                   (get-in result [:sources 0 :composition]))))))))
 
-                       (testing "link B holds, link A broken: the unit is behind its checkout"
-                         (with-checkout {:ref-shas (checkout-ref-shas "999aaa" "222bbbb")}
-                           (let [result (status/unit-status {:dir dir :source-checkouts checkouts})]
-                             (is (= :stale (:verdict result)))
-                             (is (= [{:check :unit-stale :unit-key "aaa"
-                                      :reasons [{:check :sha-drift
-                                                 :recorded "111aaaa" :current "999aaa"}]}]
-                                    (:reasons result)))
-                             (is (= [:stale :current] (mapv :verdict (:sources result))))
-                             (is (= {:recorded "111aaaa" :unit-sha "111aaaa" :verdict :current}
-                                    (get-in result [:sources 0 :composition]))))))
+  (testing "link B drifted, link A holds: the composition's record is stale"
+    (with-composed-unit*
+      (fn [{:keys [root dir checkouts]}]
+        (write-sources! root "111aaaa" "9999999")
+        (with-checkout {:ref-shas (->checkout-ref-shas "111aaaa" "9999999")}
+          (let [result (status/unit-status {:dir dir :source-checkouts checkouts})]
+            (is (= :stale (:verdict result)))
+            (is (= [{:check :source-sha-drift :unit-key "bbb@ref=x"
+                     :recorded "222bbbb" :current "9999999"}]
+                   (:reasons result)))
+            (is (= [:current :stale] (mapv :verdict (:sources result)))))))))
 
-                       (testing "link B drifted, link A holds: the composition's record is stale"
-                         (write-sources! root "111aaaa" "9999999")
-                         (with-checkout {:ref-shas (checkout-ref-shas "111aaaa" "9999999")}
-                           (let [result (status/unit-status {:dir dir :source-checkouts checkouts})]
-                             (is (= :stale (:verdict result)))
-                             (is (= [{:check :source-sha-drift :unit-key "bbb@ref=x"
-                                      :recorded "222bbbb" :current "9999999"}]
-                                    (:reasons result)))
-                             (is (= [:current :stale] (mapv :verdict (:sources result)))))))
+  (testing "both links broken for one source: the composition and the unit each report"
+    (with-composed-unit*
+      (fn [{:keys [root dir checkouts]}]
+        (write-sources! root "111aaaa" "9999999")
+        (with-checkout {:ref-shas (->checkout-ref-shas "111aaaa" "222bbbb")}
+          (let [result (status/unit-status {:dir dir :source-checkouts checkouts})]
+            (is (= :stale (:verdict result)))
+            (is (= [{:check :source-sha-drift :unit-key "bbb@ref=x"
+                     :recorded "222bbbb" :current "9999999"}
+                    {:check :unit-stale :unit-key "bbb@ref=x"
+                     :reasons [{:check :sha-drift
+                                :recorded "9999999" :current "222bbbb"}]}]
+                   (:reasons result)))
+            (is (= {:recorded "222bbbb" :unit-sha "9999999" :verdict :stale}
+                   (get-in result [:sources 1 :composition])))
+            (is (= :stale (get-in result [:sources 1 :verdict]))))))))
 
-                       (testing "a source only some repos have a checkout for reads unknown"
-                         (write-sources! root "111aaaa" "222bbbb")
-                         (with-checkout {:ref-shas (checkout-ref-shas "111aaaa" "222bbbb")}
-                           (let [result (status/unit-status {:dir dir
-                                                             :source-checkouts {"aaa" "/co-aaa"}})]
-                             (is (= :unknown (:verdict result)))
-                             (is (= [:current :unknown] (mapv :verdict (:sources result))))
-                             (is (= [{:check :unit-unknown :unit-key "bbb@ref=x"
-                                      :reasons [{:check :sha-not-compared}]}]
-                                    (:reasons result))))))
+  (testing "a source only some repos have a checkout for reads unknown"
+    (with-composed-unit*
+      (fn [{:keys [dir]}]
+        (with-checkout {:ref-shas (->checkout-ref-shas "111aaaa" "222bbbb")}
+          (let [result (status/unit-status {:dir dir :source-checkouts {"aaa" "/co-aaa"}})]
+            (is (= :unknown (:verdict result)))
+            (is (= [:current :unknown] (mapv :verdict (:sources result))))
+            (is (= [{:check :unit-unknown :unit-key "bbb@ref=x"
+                     :reasons [{:check :sha-not-compared}]}]
+                   (:reasons result))))))))
 
-                       (testing ":source-status-fn decides a source whose sha still matches"
-                         (write-sources! root "111aaaa" "222bbbb")
-                         (let [report (fn [{:keys [dir unit-key]}]
-                                        {:dir dir
-                                         :verdict (if (= unit-key "aaa") :stale :current)
-                                         :reasons (if (= unit-key "aaa")
-                                                    [{:check :host-drift}]
-                                                    [])})
-                               result (status/unit-status {:dir dir :source-status-fn report})]
-                           (is (= :stale (:verdict result)))
-                           (is (= [{:check :unit-stale :unit-key "aaa"
-                                    :reasons [{:check :host-drift}]}]
-                                  (:reasons result)))
-                           (is (= [:stale :current] (mapv :verdict (:sources result))))))
+  (testing "a source checkout on another branch is unknown, not sha-drift"
+    (with-composed-unit*
+      (fn [{:keys [root dir]}]
+        (write-manifest! (str (io/file root "aaa"))
+                         (minimal-source-manifest "aaa" "111aaaa" "main"))
+        (with-checkout {:ref-shas (fn [dir] (get {"/co-aaa" {"HEAD" "999aaa"}} dir))
+                        :branch "feature-x"}
+          (let [result (status/unit-status {:dir dir :source-checkouts {"aaa" "/co-aaa"}})]
+            (is (= :unknown (get-in result [:sources 0 :verdict])))
+            (is (= [{:check :unit-unknown :unit-key "aaa"
+                     :reasons [{:check :checkout-off-ref
+                                :recorded "main" :current "feature-x"}]}]
+                   (filterv #(= "aaa" (:unit-key %)) (:reasons result))))
+            (is (= :unknown (get-in result [:sources 0 :unit-status :verdict]))))))))
 
-                       (testing ":source-status-fn is not called for a missing source"
-                         (write-sources! root "111aaaa" nil)
-                         (delete-tree (str (io/file root "_variants" "bbb")))
-                         (let [calls (atom [])
-                               report (fn [{:keys [unit-key] :as source}]
-                                        (swap! calls conj unit-key)
-                                        (assoc source :verdict :current :reasons []))
-                               result (status/unit-status {:dir dir :source-status-fn report})]
-                           (is (= ["aaa"] @calls))
-                           (is (= [{:check :source-missing :unit-key "bbb@ref=x"}]
-                                  (:reasons result)))
-                           (is (not (contains? (get-in result [:sources 1]) :unit-status)))))
+  (testing ":source-status-fn decides a source whose sha still matches"
+    (with-composed-unit*
+      (fn [{:keys [dir]}]
+        (let [report (fn [{:keys [unit-key]}]
+                       {:verdict (if (= unit-key "aaa") :stale :current)
+                        :reasons (if (= unit-key "aaa")
+                                   [{:check :host-drift}]
+                                   [])})
+              result (status/unit-status {:dir dir :source-status-fn report})]
+          (is (= :stale (:verdict result)))
+          (is (= [{:check :unit-stale :unit-key "aaa"
+                   :reasons [{:check :host-drift}]}]
+                 (:reasons result)))
+          (is (= [:stale :current] (mapv :verdict (:sources result))))))))
 
-                       (testing ":source-checkouts and :source-status-fn together throw"
-                         (is (thrown? clojure.lang.ExceptionInfo
-                                      (status/unit-status {:dir dir
-                                                           :source-checkouts checkouts
-                                                           :source-status-fn (constantly nil)}))))
+  (testing "a report function that returns nothing is unknown, not current"
+    (doseq [[label report] [["nil" (constantly nil)]
+                            ["no :verdict" (constantly {:reasons []})]]]
+      (with-composed-unit*
+        (fn [{:keys [dir]}]
+          (let [result (status/unit-status {:dir dir :source-status-fn report})]
+            (is (= :unknown (:verdict result)) label)
+            (is (= [{:check :unit-unknown :unit-key "aaa"
+                     :reasons [{:check :unit-report-missing :unit-key "aaa"}]}
+                    {:check :unit-unknown :unit-key "bbb@ref=x"
+                     :reasons [{:check :unit-report-missing :unit-key "bbb@ref=x"}]}]
+                   (:reasons result))
+                label)
+            (is (every? #(not (contains? % :unit-status)) (:sources result)) label))))))
 
-                       (testing ":source-checkouts on a source unit is rejected"
-                         (is (thrown? clojure.lang.ExceptionInfo
-                                      (status/unit-status {:dir (str (io/file root "aaa"))
-                                                           :source-checkouts checkouts}))))))))
+  (testing ":source-status-fn is not called for a missing source"
+    (with-composed-unit*
+      (fn [{:keys [root dir]}]
+        (delete-tree (str (io/file root "_variants" "bbb")))
+        (let [calls (atom [])
+              report (fn [{:keys [unit-key]}]
+                       (swap! calls conj unit-key)
+                       {:verdict :current :reasons []})
+              result (status/unit-status {:dir dir :source-status-fn report})]
+          (is (= ["aaa"] @calls))
+          (is (= [{:check :source-missing :unit-key "bbb@ref=x"}]
+                 (:reasons result)))
+          (is (not (contains? (get-in result [:sources 1]) :unit-status)))))))
+
+  (testing ":source-checkouts and :source-status-fn together throw"
+    (with-composed-unit*
+      (fn [{:keys [dir checkouts]}]
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (status/unit-status {:dir dir
+                                          :source-checkouts checkouts
+                                          :source-status-fn (constantly nil)}))))))
+
+  (testing ":source-checkouts and :source-status-fn on a source unit are rejected"
+    (with-composed-unit*
+      (fn [{:keys [root checkouts]}]
+        (doseq [args [{:source-checkouts checkouts}
+                      {:source-status-fn (constantly nil)}]]
+          (is (thrown? clojure.lang.ExceptionInfo
+                       (status/unit-status (assoc args :dir (str (io/file root "aaa")))))))))))
 
 (deftest composition-as-a-source-test
   (with-temp-root* (fn [root]
@@ -475,7 +553,7 @@
                                            :reasons [{:check :sha-not-compared}]}]}]
                               (:reasons result)))
                        (testing "the same checkouts reach a composition's own sources"
-                         (with-checkout {:ref-shas (checkout-ref-shas "111aaaa" "222bbbb")}
+                         (with-checkout {:ref-shas (->checkout-ref-shas "111aaaa" "222bbbb")}
                            (let [checked (status/unit-status
                                           {:dir outer-dir
                                            :source-checkouts {"aaa" "/co-aaa"
@@ -485,6 +563,36 @@
                              (is (= [:current :current]
                                     (mapv :verdict
                                           (get-in checked [:sources 0 :unit-status :sources])))))))))))
+
+(deftest composed-unit-cycle-test
+  (with-temp-root* (fn [root]
+                     (write-sources! root "111aaaa" "222bbbb")
+                     (let [a-sha "a0a0a0a0"
+                           b-sha "b0b0b0b0"
+                           compose-of (fn [repo sha other-repo other-sha]
+                                        (-> (composed-manifest)
+                                            (assoc :repo repo)
+                                            (assoc-in [:source :sha] sha)
+                                            (assoc :analysis-run
+                                                   {:mode :compose
+                                                    :units [{:repo other-repo :sha other-sha}]})
+                                            (assoc :staleness
+                                                   {:policy "review-when-any-source-sha-drifts"
+                                                    :sources {other-repo {:sha other-sha}}})))
+                           a-dir (write-manifest! (str (io/file root "_compose" "a"))
+                                                  (compose-of "_compose/a" a-sha "_compose/b" b-sha))]
+                       (write-manifest! (str (io/file root "_compose" "b"))
+                                        (compose-of "_compose/b" b-sha "_compose/a" a-sha))
+
+                       (testing "a composition that reaches itself is reported, not recursed into"
+                         (let [result (status/unit-status {:dir a-dir})]
+                           (is (= :unknown (:verdict result)))
+                           (is (= :current (get-in result [:sources 0 :composition :verdict])))
+                           (is (= [{:check :unit-unknown :unit-key "_compose/b"
+                                    :reasons [{:check :unit-unknown :unit-key "_compose/a"
+                                               :reasons [{:check :source-cycle
+                                                          :unit-key "_compose/a"}]}]}]
+                                  (:reasons result)))))))))
 
 (deftest aggregate-without-sources-test
   (with-temp-root* (fn [root]
