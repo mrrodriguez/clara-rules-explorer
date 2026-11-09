@@ -279,20 +279,20 @@
               :current
               :stale)})
 
-(defn- ->composition-reasons
+(defn- ->composition-reason
   "The composition's reason when its recorded sha no longer matches the source
   unit's manifest: `:source-sha-drift` when there is a sha to compare,
   `:source-missing` when the unit (or its manifest) is gone. Nothing when the
   two agree."
   [unit-key {:keys [verdict recorded unit-sha]}]
   (when (not= :current verdict)
-    [(if (some? unit-sha)
-       {:check :source-sha-drift
-        :unit-key unit-key
-        :recorded recorded
-        :current unit-sha}
-       {:check :source-missing
-        :unit-key unit-key})]))
+    (if (some? unit-sha)
+      {:check :source-sha-drift
+       :unit-key unit-key
+       :recorded recorded
+       :current unit-sha}
+      {:check :source-missing
+       :unit-key unit-key})))
 
 (defn- ->unit-unknown-reason
   "The `:unit-unknown` reason for a source whose own report could not be
@@ -304,18 +304,18 @@
    :unit-key unit-key
    :reasons [{:check why :unit-key unit-key}]})
 
-(defn- ->source-unit-reasons
+(defn- ->source-unit-reason
   "A source unit's own contribution: its report's verdict, with that report's
   reasons nested so a reader sees which source decided it and why. A
   `:current` report contributes nothing."
   [unit-key report]
   (case (:verdict report)
-    :stale [{:check :unit-stale
-             :unit-key unit-key
-             :reasons (:reasons report)}]
-    :unknown [{:check :unit-unknown
-               :unit-key unit-key
-               :reasons (:reasons report)}]
+    :stale {:check :unit-stale
+            :unit-key unit-key
+            :reasons (:reasons report)}
+    :unknown {:check :unit-unknown
+              :unit-key unit-key
+              :reasons (:reasons report)}
     nil))
 
 (defn- report?
@@ -349,14 +349,15 @@
                                      :dir dir}
                               (seq variant) (assoc :variant variant))))
         report (when (report? report) report)
-        reasons (into [] cat
-                      [(->composition-reasons unit-key composition)
-                       (when (some? unit-sha)
-                         (cond
-                           cycled? [(->unit-unknown-reason unit-key :source-cycle)]
-                           (nil? report) [(->unit-unknown-reason
-                                           unit-key :unit-report-missing)]
-                           :else (->source-unit-reasons unit-key report)))])]
+        composition-reason (->composition-reason unit-key composition)
+        own-reason (when (some? unit-sha)
+                     (cond
+                       cycled? (->unit-unknown-reason unit-key :source-cycle)
+                       (nil? report) (->unit-unknown-reason unit-key :unit-report-missing)
+                       :else (->source-unit-reason unit-key report)))
+        reasons (cond-> []
+                  (some? composition-reason) (conj composition-reason)
+                  (some? own-reason) (conj own-reason))]
     {:entry (cond-> {:unit-key unit-key
                      :composition composition
                      :verdict (->verdict reasons)}
