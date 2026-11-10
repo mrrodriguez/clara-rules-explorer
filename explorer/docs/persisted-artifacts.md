@@ -487,13 +487,18 @@ bb inspect-artifacts.bb /reg/_compose/pair status \
 ```
 
 ```clojure
-;; or one function, called once per source unit
+;; or one function, called once per source unit (a unit with no :mode)
 (status/unit-status {:dir "/reg/_compose/pair"
                      :source-status-fn #(host/unit-status {:dir (:dir %)})})
 ```
 
-`:source-checkouts` is shorthand for a `:source-status-fn` that calls back into
-`unit-status` with the repo's checkout. Giving both throws. Giving neither makes
+Without a function, each source unit is checked by calling back into
+`unit-status` with its repo's checkout. With one, the library still walks
+composition sources itself, so the function never receives a composition and
+never recurses — it reports source units only. It receives the caller's
+checkout for that source's repo as `:checkout` (nil when the caller named
+none), so `:source-checkouts` and `:source-status-fn` combine: the map locates
+the checkouts, the function judges the units. Giving neither makes
 every source's own status `:unknown`, so the composition is `:unknown`, never
 `:current` — no code was compared.
 
@@ -516,7 +521,7 @@ source     d4e5f6a (main, clean)   updated 2026-10-30
 policy     review-when-any-source-sha-drifts
 sources    repo-a                    composition current   unit stale (sha-drift aaa1111 -> bbb2222)
            repo-b@env=dev/ref=main   composition current   unit current
-verdict    stale | repo-a: unit sha-drift aaa1111 -> bbb2222
+verdict    stale | unit-stale 1
 ```
 
 Omit `--source-checkout` and the `unit` cell has nothing to compare:
@@ -524,8 +529,16 @@ Omit `--source-checkout` and the `unit` cell has nothing to compare:
 ```
 sources    repo-a                   composition current  unit unknown (sha not compared)
            repo-b@env=dev/ref=main  composition current  unit unknown (sha not compared)
-verdict    unknown | repo-a: unit sha not compared; repo-b@env=dev/ref=main: unit sha not compared
+verdict    unknown | unit-unknown 2
 ```
+
+A composed verdict counts its reasons by kind — the `sources` rows already name
+each source and what moved, so listing them again would make the line unreadable
+once unit keys carry several variant axes. Informational reasons
+(`checkout-dirty`) never decide a verdict; they print under `notes`, not beside
+the reasons that did. Text rendering, including each reason's fragment and the
+`--source-checkout` parsing, is `clara.explorer.artifacts.status-report`: a host
+command line requires that namespace instead of copying the script.
 
 Each row cell names its `:sources` key and the reasons it can contribute:
 
@@ -575,11 +588,14 @@ it can never read as current:
 
 `--root PATH` locates the source units (default: `<dir>` with the manifest's
 `:repo` and `_variants/<repo>/<variant…>` stripped off). The flags do not cross
-kinds: `--checkout` is rejected for a composed unit and `--source-checkout` for
-a source unit, each with a message naming the flag. An aggregate with no
+kinds: `--checkout` and `--ref` are rejected for a composed unit
+(it has one checkout per source) and `--source-checkout` for
+a source unit, each with a message naming the flag. Every argument guard
+throws with `:clara.explorer.artifacts.status/invalid-args` in its `ex-data`. An aggregate with no
 per-source shas — a composition whose `:staleness` has no `:sources` — is
 reported by kind and source provenance, with no verdict
-(`aggregate-no-sources`).
+(`aggregate-no-sources`); checkout-ish flags are rejected for it with their own
+message, since it has neither sources nor a checkout.
 
 ## The artifact registry
 

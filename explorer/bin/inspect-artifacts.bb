@@ -31,7 +31,8 @@
          '[clara.explorer.artifacts.cross-unit :as cross-unit]
          '[clara.explorer.artifacts.diff :as diff]
          '[clara.explorer.artifacts.render :as render]
-         '[clara.explorer.artifacts.status :as status])
+         '[clara.explorer.artifacts.status :as status]
+         '[clara.explorer.artifacts.status-report :as report])
 
 (def ^:private dims
   [[:clara-rules/dynamic-insert-types-detected :clara-rules/insert-types "insert"]
@@ -732,127 +733,21 @@
     (die "Flag(s) not used by this subcommand:"
          (str/join ", " (map #(str "--" (name %)) (sort bad))))))
 
-(defn- reason-summary
-  "One reason as a `--edn`-free fragment of the verdict line. `:unit-stale` and
-  `:unit-unknown` recurse: a source's verdict is only as readable as the
-  reasons its own report gave."
-  [{:keys [check unit-key recorded current updated max-age-days ref checkout reasons]}]
-  (case check
-    :sha-drift (format "sha-drift %s -> %s" (layout/->short-sha recorded) (layout/->short-sha current))
-    :remote-mismatch (format "remote-mismatch (recorded %s, checkout %s)" recorded current)
-    :generated-dirty "generated-dirty (the unit describes no single commit)"
-    :checkout-dirty "checkout-dirty (informational)"
-    :age-exceeded (format "age-exceeded (updated %s, older than %s days)" updated max-age-days)
-    :sha-not-compared "sha not compared"
-    :ref-unresolvable (format "ref %s unresolvable in %s" ref checkout)
-    :checkout-not-a-repo (format "%s is not a git checkout" checkout)
-    :checkout-off-ref (format "checkout on %s, unit recorded %s" current recorded)
-    :source-sha-drift (format "%s: composition sha-drift %s -> %s"
-                              unit-key (layout/->short-sha recorded) (layout/->short-sha current))
-    :source-missing (format "%s: composition missing" unit-key)
-    :source-cycle "composition cycle (not followed)"
-    :unit-report-missing "no report from the source status function"
-    (:unit-stale :unit-unknown)
-    (format "%s: unit %s" unit-key (str/join "; " (map reason-summary reasons)))
-    :aggregate-no-sources "aggregate without per-source shas (no verdict)"
-    (str check)))
-
-(defn- unit-fragment
-  "A source unit's own verdict and the reasons behind it, as one cell of a
-  `sources` row: `unit current`, `unit stale (sha-drift aaa1111 -> bbb2222)`."
-  [{:keys [verdict reasons]}]
-  (if (seq reasons)
-    (format "unit %s (%s)" (name verdict) (str/join "; " (map reason-summary reasons)))
-    (format "unit %s" (name verdict))))
-
-(defn- unit-absence
-  "Why a source with no unit-status cell has none, read from the report's
-  top-level reasons: `:source-cycle` or `:unit-report-missing`, or nil when the
-  source unit itself is gone (the composition's record says `:source-missing`)."
-  [reasons unit-key]
-  (->> reasons
-       (filter #(= unit-key (:unit-key %)))
-       (mapcat :reasons)
-       (map :check)
-       (filter #{:source-cycle :unit-report-missing})
-       first))
-
-(defn- source-cells
-  "One `:sources` entry as `[unit-key composition unit]` text cells: the
-  composition's verdict on the sha it recorded for that source, then the source
-  unit's own status verdict with its reasons. A source with no report of its own
-  says which absence it is rather than claiming anything. `reasons` are the
-  report's top-level reasons, which name the absence."
-  [reasons {:keys [unit-key composition unit-status]}]
-  (let [absence (unit-absence reasons unit-key)]
-    [unit-key
-     (format "composition %s" (name (:verdict composition)))
-     (cond
-       (some? unit-status) (unit-fragment unit-status)
-       (= :source-cycle absence) "unit not checked (composition cycle)"
-       (= :unit-report-missing absence) "unit report missing"
-       :else "unit missing")]))
-
-(defn- print-status
-  "The `status/unit-status` result map as aligned `label  value` lines."
-  [{:keys [repo variant kind mode source updated staleness verdict reasons sources]}]
-  (print-field "unit" (str repo (when (seq variant) (str "@" (layout/variant->path variant)))))
-  (print-field "kind" (str (name kind) " unit"
-                             (when (seq variant) (str " (variant " (layout/variant->path variant) ")"))
-                             (when mode (str " (mode " mode ")"))))
-  (print-field "source" (format "%s (%s, %s)   updated %s"
-                                  (layout/->short-sha (:sha source))
-                                  (or (:branch source) "no branch")
-                                  (:working-tree source)
-                                  updated))
-  (print-field "policy" (str (:policy staleness)
-                               (when-let [d (:max-age-days staleness)]
-                                 (format " (max %s days)" d))))
-  (let [rows (mapv #(source-cells reasons %) sources)
-        widths (reduce (fn [acc row] (mapv max acc (map count row))) [0 0 0] rows)
-        fmt (str "%-" (widths 0) "s  %-" (widths 1) "s  %s")]
-    (doseq [[i [unit-key composition unit]] (map-indexed vector rows)]
-      (print-field (if (zero? i) "sources" "")
-                   (format fmt unit-key composition unit))))
-  (print-field "verdict"
-               (if (seq reasons)
-                 (format "%s | %s"
-                         (name verdict)
-                         (str/join "; " (map reason-summary reasons)))
-                 (name verdict))))
-
-(defn- source-checkouts
-  "`--source-checkout <repo>=<path>` values as `{repo path}`, dying on a value
-  without `=`, on an empty repo or path, and on the same repo given twice. The
-  map is what `status/unit-status` takes as `:source-checkouts`; whether it
-  applies is the manifest's business, so a source unit's rejection is that
-  namespace's."
-  [values]
-  (reduce (fn [acc value]
-            (let [i (str/index-of (str value) "=")]
-              (when (nil? i)
-                (die (format "--source-checkout needs <repo>=<path>, got %s" value)))
-              (let [repo (subs (str value) 0 i)
-                    path (subs (str value) (inc i))]
-                (when (or (str/blank? repo) (str/blank? path))
-                  (die (format "--source-checkout needs both a repo and a path, got %s" value)))
-                (when (contains? acc repo)
-                  (die (format "--source-checkout given twice for %s" repo)))
-                (assoc acc repo path))))
-          {}
-          values))
-
 (defn- status
   "`status [--checkout PATH [--ref REF]] [--source-checkout <repo>=<path> …]
   [--root PATH] [--edn]` over unit dir `dir`: presentation over
   `status/unit-status`, which reads rules-inspect-manifest.edn (and, for a
   composed unit, its sources' manifests) and nothing else. `--checkout` is for a
   source unit, `--source-checkout` for a composed one; giving a flag to the
-  kind it does not apply to is rejected, not ignored."
+  kind it does not apply to is rejected, not ignored. Rendering is
+  `status-report/->report-fields` plus `status-report/print-fields!`."
   [dir opts]
   (when (and (:ref opts) (nil? (:checkout opts)))
     (die "--ref needs --checkout"))
-  (let [checkouts (some-> (:source-checkout opts) source-checkouts)
+  (let [checkouts (try
+                    (some-> (:source-checkout opts) report/parse-source-checkouts)
+                    (catch Exception e
+                      (die (ex-message e))))
         result (try
                  (status/unit-status
                   (cond-> {:dir dir}
@@ -861,10 +756,13 @@
                     (:root opts) (assoc :root (:root opts))
                     checkouts (assoc :source-checkouts checkouts)))
                  (catch Exception e
-                   (die (ex-message e))))]
+                   (if (-> e ex-data :clara.explorer.artifacts.status/invalid-args)
+                     (do (binding [*out* *err*] (println (ex-message e)))
+                         (System/exit 2))
+                     (die (ex-message e)))))]
     (if (:edn opts)
       (pprint/pprint result)
-      (print-status result))))
+      (report/print-fields! (report/->report-fields result)))))
 
 ;; ---------------------------------------------------------------------------
 ;; cross-unit readings over a (composed) analysis

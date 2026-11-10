@@ -637,7 +637,7 @@
             (is (str/includes? out "kind aggregate unit (mode :compose)"))
             (is (str/includes? out "demo-a composition current unit unknown (sha not compared)"))
             (is (str/includes? out "demo-b@ref=x composition current unit unknown (sha not compared)"))
-            (is (str/includes? out "verdict unknown | demo-a: unit sha not compared")))
+            (is (str/includes? out "verdict unknown | unit-unknown 2")))
 
           (testing "--edn prints both per-source comparisons and nothing else"
             (let [result (edn/read-string (run-status dir "--edn"))]
@@ -656,12 +656,12 @@
           (write-status-sources! root "111aaaa" "9999999")
           (let [out (collapse-whitespace (run-status dir))]
             (is (str/includes? out "demo-b@ref=x composition stale unit unknown (sha not compared)"))
-            (is (str/includes? out "demo-b@ref=x: composition sha-drift 222bbbb -> 9999999")))
+            (is (str/includes? out "verdict stale | unit-unknown 2, source-sha-drift 1")))
 
           (delete-tree (str (io/file root "_variants" "demo-b")))
           (let [out (collapse-whitespace (run-status dir))]
             (is (str/includes? out "demo-b@ref=x composition stale unit missing"))
-            (is (str/includes? out "demo-b@ref=x: composition missing")))
+            (is (str/includes? out "verdict stale | unit-unknown 1, source-missing 1")))
 
           (testing "--source-checkout compares only the source whose repo it names"
             (write-status-sources! root "111aaaa" "222bbbb")
@@ -674,8 +674,7 @@
               (is (str/includes? out (str "demo-a composition current "
                                           "unit unknown (" no-checkout " is not a git checkout)")))
               (is (str/includes? out "demo-b@ref=x composition current unit unknown (sha not compared)"))
-              (is (str/includes? out (str "verdict unknown | demo-a: unit "
-                                          no-checkout " is not a git checkout")))))
+              (is (str/includes? out "verdict unknown | unit-unknown 2"))))
 
           (testing "--source-checkout rejects a value without =, either empty side, and a repeated repo"
             (doseq [values [["--source-checkout" "oops"]
@@ -730,7 +729,4 @@
                  (str "sources _compose/inner composition current "
                       "unit unknown (demo-a: unit sha not compared; "
                       "demo-b@ref=x: unit sha not compared)")))
-            (is (str/includes?
-                 out
-                 (str "verdict unknown | _compose/inner: unit demo-a: unit sha not compared; "
-                      "demo-b@ref=x: unit sha not compared")))))))))
+            (is (str/includes? out "verdict unknown | unit-unknown 1"))))))))

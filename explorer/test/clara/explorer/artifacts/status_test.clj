@@ -503,13 +503,97 @@
                  (:reasons result)))
           (is (not (contains? (get-in result [:sources 1]) :unit-status)))))))
 
-  (testing ":source-checkouts and :source-status-fn together throw"
+  (testing ":source-checkouts and :source-status-fn together are accepted, and the function receives :checkout"
     (with-composed-unit*
       (fn [{:keys [dir checkouts]}]
-        (is (thrown? clojure.lang.ExceptionInfo
-                     (status/unit-status {:dir dir
+        (let [seen (atom [])
+              report (fn [args]
+                       (swap! seen conj args)
+                       {:verdict :current :reasons []})
+              result (status/unit-status {:dir dir
                                           :source-checkouts checkouts
-                                          :source-status-fn (constantly nil)}))))))
+                                          :source-status-fn report})]
+          (is (= :current (:verdict result)))
+          (is (= [["aaa" "/co-aaa"] ["bbb@ref=x" "/co-bbb"]]
+                 (mapv (juxt :unit-key :checkout) @seen))
+              "the host function gets the caller's checkout per repo")
+          (is (= [:current :current] (mapv :verdict (:sources result))))
+          (is (= [:current :current] (mapv #(get-in % [:unit-status :verdict]) (:sources result))))))))
+
+  (testing "the host function gets nil :checkout for a repo without an entry"
+    (with-composed-unit*
+      (fn [{:keys [dir]}]
+        (let [seen (atom [])
+              report (fn [args]
+                       (swap! seen conj args)
+                       {:verdict :current :reasons []})
+              result (status/unit-status {:dir dir
+                                          :source-checkouts {"aaa" "/co-aaa"}
+                                          :source-status-fn report})]
+          (is (= :current (:verdict result)))
+          (is (= {"aaa" "/co-aaa" "bbb" nil} (into {} (map (juxt :repo :checkout)) @seen)))))))
+
+  (testing "the host function is never called for a composition source"
+    (with-temp-root*
+      (fn [root]
+        (write-sources! root "111aaaa" "222bbbb")
+        (let [inner-sha "1nner0000000"
+              _ (write-manifest! (str (io/file root "_compose" "inner"))
+                                 (-> (composed-manifest)
+                                     (assoc :repo "_compose/inner")
+                                     (assoc-in [:source :sha] inner-sha)))
+              outer-dir (write-manifest!
+                         (str (io/file root "_compose" "outer"))
+                         (-> (composed-manifest)
+                             (assoc :repo "_compose/outer")
+                             (assoc :analysis-run
+                                    {:mode :compose
+                                     :units [{:repo "_compose/inner"
+                                              :sha inner-sha
+                                              :created today}]})
+                             (assoc :staleness
+                                    {:policy "review-when-any-source-sha-drifts"
+                                     :sources {"_compose/inner"
+                                               {:sha inner-sha :created today}}})))
+              calls (atom [])
+              report (fn [{:keys [unit-key]}]
+                       (swap! calls conj unit-key)
+                       {:verdict :current :reasons []})
+              result (status/unit-status {:dir outer-dir :source-status-fn report})]
+          (is (= ["aaa" "bbb@ref=x"] (sort @calls))
+              "only source units reach the host function")
+          (is (= :current (:verdict result)))))))
+
+  (testing "every argument guard carries the usage marker, and :ref on a composed unit throws"
+    (with-composed-unit*
+      (fn [{:keys [root dir checkouts]}]
+        (let [marked? (fn [thunk]
+                        (try (thunk) false
+                             (catch clojure.lang.ExceptionInfo e
+                               (true? (:clara.explorer.artifacts.status/invalid-args (ex-data e))))))]
+          (is (marked? #(status/unit-status {:dir dir :checkout "/co"})))
+          (is (marked? #(status/unit-status {:dir dir :ref "main"})))
+          (is (marked? #(status/unit-status (assoc {:dir (str (io/file root "aaa"))} :root "/r"))))
+          (is (marked? #(status/unit-status {:dir (str (io/file root "aaa")) :source-checkouts checkouts})))
+          (is (marked? #(status/unit-status {:dir (str (io/file root "aaa")) :source-status-fn (constantly nil)})))))))
+
+  (testing "an aggregate with no :staleness :sources rejects checkout-ish args with its own message"
+    (with-temp-root*
+      (fn [root]
+        (let [dir (write-manifest!
+                   (str (io/file root "host-all"))
+                   (assoc (composed-manifest)
+                          :repo "host-all"
+                          :analysis-run {:mode :host-whole}
+                          :staleness {:policy "host-policy"}))]
+          (doseq [args [{:checkout "/co"} {:ref "main"}
+                        {:source-checkouts {"a" "/co"}}
+                        {:source-status-fn (constantly nil)}]]
+            (try (status/unit-status (assoc args :dir dir))
+                 (is false (str "should throw for " (pr-str args)))
+                 (catch clojure.lang.ExceptionInfo e
+                   (is (true? (:clara.explorer.artifacts.status/invalid-args (ex-data e))))
+                   (is (re-find #"no :staleness :sources" (ex-message e))))))))))
 
   (testing ":source-checkouts and :source-status-fn on a source unit are rejected"
     (with-composed-unit*
@@ -518,6 +602,39 @@
                       {:source-status-fn (constantly nil)}]]
           (is (thrown? clojure.lang.ExceptionInfo
                        (status/unit-status (assoc args :dir (str (io/file root "aaa")))))))))))
+
+(deftest composition-cycle-with-host-fn-test
+  (with-temp-root* (fn [root]
+                     (write-sources! root "111aaaa" "222bbbb")
+                     (let [a-sha "a0a0a0a0"
+                           b-sha "b0b0b0b0"
+                           compose-of (fn [repo sha other-repo other-sha]
+                                        (-> (composed-manifest)
+                                            (assoc :repo repo)
+                                            (assoc-in [:source :sha] sha)
+                                            (assoc :analysis-run
+                                                   {:mode :compose
+                                                    :units [{:repo other-repo :sha other-sha}]})
+                                            (assoc :staleness
+                                                   {:policy "review-when-any-source-sha-drifts"
+                                                    :sources {other-repo {:sha other-sha}}})))
+                           a-dir (write-manifest! (str (io/file root "_compose" "a"))
+                                                  (compose-of "_compose/a" a-sha "_compose/b" b-sha))]
+                       (write-manifest! (str (io/file root "_compose" "b"))
+                                        (compose-of "_compose/b" b-sha "_compose/a" a-sha))
+                       (testing "a cycle through two compositions with a host function reports :source-cycle, not overflow"
+                         (let [calls (atom [])
+                               report (fn [{:keys [unit-key]}]
+                                        (swap! calls conj unit-key)
+                                        {:verdict :current :reasons []})
+                               result (status/unit-status {:dir a-dir :source-status-fn report})]
+                           (is (= :unknown (:verdict result)))
+                           (is (= [] @calls) "the host function never sees a composition")
+                           (is (= [{:check :unit-unknown :unit-key "_compose/b"
+                                    :reasons [{:check :unit-unknown :unit-key "_compose/a"
+                                               :reasons [{:check :source-cycle
+                                                          :unit-key "_compose/a"}]}]}]
+                                  (:reasons result)))))))))
 
 (deftest composition-as-a-source-test
   (with-temp-root* (fn [root]

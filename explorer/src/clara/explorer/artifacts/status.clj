@@ -9,8 +9,9 @@
 
   A composed unit is only as current as its sources: `unit-status` reports the
   composition's record beside each source unit's own status report, and the
-  caller says where checkouts live (`:source-checkouts`) or supplies that report
-  itself (`:source-status-fn`). A composition cannot look for checkouts on its
+  caller says where checkouts live (`:source-checkouts`) and optionally supplies
+  that report itself (`:source-status-fn`, which receives each source's checkout).
+  A composition cannot look for checkouts on its
   own — where a reader's checkouts live is the reader's business, as
   `clara.explorer.artifacts.manifest` says of the manifest it writes. A source
   unit whose report cannot be established — missing, or a source already on the
@@ -21,7 +22,8 @@
    [clara.explorer.artifacts.shared.registry :as shared-registry]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [clojure.string :as str])
+   [clojure.string :as str]
+   [schema.core :as s])
   (:import
    (java.time LocalDate)
    (java.time.temporal ChronoUnit)))
@@ -328,26 +330,35 @@
        (contains? #{:current :stale :unknown} (:verdict report))))
 
 (defn- check-source
-  "One composed source, judged on both comparisons, as `{:entry <the report's
-  :sources entry> :reasons <its top-level reasons>}`.
-
-  `:composition` compares the sha the composition recorded with the source
-  unit's manifest under `root`. `:unit-status` is `status-fn`'s report on that
-  unit — absent when the unit is gone (the composition's record says so, and
-  there is nothing to check, so `status-fn` is not called) and when `status-fn`
-  returns nothing usable. A unit already on the walk (`:seen`) is not checked
-  either: composing it again would recurse forever, so its own status is
-  `:source-cycle`, an unknown comparison."
-  [{:keys [manifest root status-fn seen unit-key recorded]}]
+  "Both comparisons for one composed source, as a `SourceEntry` plus its
+  top-level reasons: the composition's record against the source unit's
+  manifest, beside that unit's own status report."
+  [{:keys [manifest root source-checkouts source-status-fn status-fn seen unit-key recorded]}]
   (let [{:keys [repo variant dir]} (get-source-unit manifest root unit-key)
-        unit-sha (some-> dir read-manifest-or-nil (get-in [:source :sha]))
+        source-manifest (read-manifest-or-nil dir)
+        unit-sha (get-in source-manifest [:source :sha])
+        source-mode (get-in source-manifest [:analysis-run :mode])
         composition (->composition-report recorded unit-sha)
         cycled? (contains? seen (->dir-key dir))
+        checkout (get source-checkouts repo)
         report (when (and (some? unit-sha) (not cycled?))
-                 (status-fn (cond-> {:unit-key unit-key
-                                     :repo repo
-                                     :dir dir}
-                              (seq variant) (assoc :variant variant))))
+                 (if (some? source-mode)
+                   (status-fn {:dir dir
+                               :manifest source-manifest
+                               :root root
+                               :source-checkouts source-checkouts
+                               :source-status-fn source-status-fn
+                               :seen (conj seen (->dir-key dir))})
+                   (if (some? source-status-fn)
+                     (source-status-fn (cond-> {:unit-key unit-key
+                                                :repo repo
+                                                :dir dir
+                                                :checkout checkout}
+                                         (seq variant) (assoc :variant variant)))
+                     (status-fn (cond-> {:dir dir
+                                         :manifest source-manifest
+                                         :seen (conj seen (->dir-key dir))}
+                                  (some? checkout) (assoc :checkout checkout))))))
         report (when (report? report) report)
         composition-reason (->composition-reason unit-key composition)
         own-reason (when (some? unit-sha)
@@ -368,8 +379,8 @@
   "Result map for a composed unit (`:analysis-run :mode` present with
   `:staleness :sources`). Current only when every source passes both
   comparisons: the composition's record still matches the source unit, and
-  `status-fn`'s report on that unit says it still matches its code."
-  [{:keys [base manifest root status-fn seen]}]
+  that unit's own report says it still matches its code."
+  [{:keys [base manifest root source-checkouts source-status-fn status-fn seen]}]
   (let [sources (get-in manifest [:staleness :sources])
         mode (get-in manifest [:analysis-run :mode])]
     (if-not (seq sources)
@@ -381,6 +392,8 @@
       (let [checked (mapv (fn [[unit-key recorded]]
                             (check-source {:manifest manifest
                                            :root root
+                                           :source-checkouts source-checkouts
+                                           :source-status-fn source-status-fn
                                            :status-fn status-fn
                                            :seen seen
                                            :unit-key (str unit-key)
@@ -395,33 +408,110 @@
                :sources (mapv :entry checked))))))
 
 ;; ===========================================================================
+;; schemas
+;; ===========================================================================
+
+(s/defschema StatusVerdict
+  "Every verdict, at every level of a `StatusReport`: whether the unit drifted,
+  could not be compared, or is current."
+  (s/enum :current :stale :unknown))
+
+(s/defschema StatusReason
+  "One entry of a `StatusReport`'s `:reasons`. Open, because a host's
+  `:source-status-fn` report may carry checks only the host knows, which
+  `clara.explorer.artifacts.status-report/reason-summary` renders through the
+  host's own method."
+  {:check s/Keyword
+   s/Keyword s/Any})
+
+(s/defschema StatusVariant
+  "A source unit's `:variant`: the ordered `[axis value]` vector naming its
+  place under `_variants/<repo>/`, always ending in `[:ref …]`."
+  [[(s/one s/Keyword "axis") (s/one s/Str "value")]])
+
+(s/defschema SourceComposition
+  "The composition's side of one `StatusReport` `:sources` entry: the sha the
+  composition recorded against the sha the source unit's manifest holds now
+  (nil when that unit or its manifest is gone), and whether the two agree."
+  {:recorded s/Str
+   :unit-sha (s/maybe s/Str)
+   :verdict StatusVerdict})
+
+(s/defschema HostStatusReport
+  "A host's own source-unit report, as a `:source-status-fn` returns it: any map
+  carrying at least a `:verdict`. This namespace's own per-source reports are
+  full `StatusReport` maps, which satisfy this shape too."
+  {(s/required-key :verdict) StatusVerdict
+   s/Keyword s/Any})
+
+(s/defschema SourceEntry
+  "One `StatusReport` `:sources` entry: the two comparisons for one source —
+  the composition's record beside the source unit's own status report — and
+  their fold. `:unit-status` is absent when the source unit is gone or its
+  report was not usable; it is a `HostStatusReport` — a full `StatusReport`
+  from this namespace, or the host's own report — so a composition as a
+  source nests whole."
+  {:unit-key s/Str
+   :composition SourceComposition
+   :verdict StatusVerdict
+   (s/optional-key :unit-status) HostStatusReport})
+
+(s/defschema StatusReport
+  "What `unit-status` returns: the unit's identity from its manifest, the
+  `:verdict` those comparisons decide, what decided it (`:reasons`,
+  informational entries marked), and — for a composed unit — both comparisons
+  per source (`:sources`)."
+  {:dir s/Str
+   :repo s/Str
+   (s/optional-key :variant) StatusVariant
+   :kind (s/enum :source :aggregate)
+   (s/optional-key :mode) s/Any
+   :source {s/Keyword s/Any}
+   :updated s/Str
+   :staleness {s/Keyword s/Any}
+   (s/optional-key :compared) {:checkout s/Str
+                               :ref s/Str
+                               :sha (s/maybe s/Str)}
+   :verdict StatusVerdict
+   :reasons [StatusReason]
+   (s/optional-key :sources) [SourceEntry]})
+
+(s/defschema SourceStatusFnArg
+  "What a `:source-status-fn` is called with, once per source unit: the unit's
+  key, repo, and dir, plus the caller's checkout for that source's repo — nil
+  when the caller named none, leaving the host free to use its own default."
+  {:unit-key s/Str
+   :repo s/Str
+   :dir s/Str
+   :checkout (s/maybe s/Str)
+   (s/optional-key :variant) StatusVariant})
+
+(s/defschema StatusOptions
+  "Options for `unit-status`: the unit `:dir`, an already-read `:manifest`
+  that skips the read, `:checkout`/`:ref` comparing a source unit against a
+  checkout, and `:root`, `:source-checkouts`, and `:source-status-fn` judging
+  a composed unit's sources. `:seen` is the walk of unit dirs that led here;
+  the public call never passes it — recursion threads it, so a composition
+  that reaches itself is reported rather than recursed into."
+  {:dir s/Str
+   (s/optional-key :manifest) {s/Keyword s/Any}
+   (s/optional-key :checkout) s/Str
+   (s/optional-key :ref) s/Str
+   (s/optional-key :root) s/Str
+   (s/optional-key :source-checkouts) {s/Str s/Str}
+   (s/optional-key :source-status-fn) (s/=> StatusReport SourceStatusFnArg)
+   (s/optional-key :seen) #{s/Str}})
+
+;; ===========================================================================
 ;; entry point
 ;; ===========================================================================
 
-(defn- ->source-status-fn
-  "The per-source report function a composed unit uses: `:source-status-fn` when
-  the caller gave one, else `:status-fn` (this namespace's `->unit-status`, passed
-  in to avoid a forward reference) applied to each source unit with its repo's
-  checkout. `:source-checkouts` and the walk so far (`:seen`) go down with it, so
-  a source that is itself a composition checks its own sources the same way, and
-  a composition that contains itself stops instead of recursing."
-  [{:keys [source-status-fn source-checkouts status-fn seen]}]
-  (or source-status-fn
-      (fn [{:keys [repo dir]}]
-        (status-fn (cond-> {:dir dir
-                            :source-checkouts source-checkouts
-                            :seen (conj seen (->dir-key dir))}
-                     (get source-checkouts repo)
-                     (assoc :checkout (get source-checkouts repo)))))))
-
 (defn- ->unit-status
   "The comparison `unit-status` reports, given that the arguments applying to
-  this unit's kind have already been vetted: `:checkout` is ignored for a
-  composed unit and `:source-checkouts`/`:source-status-fn` for a source unit,
-  where the public entry point rejects them instead. `:seen` is the walk of unit
-  dirs that led here; it is seeded with this dir, so a composition that
-  (directly or through another unit) contains itself is reported rather than
-  recursed into."
+  this unit's kind have already been vetted by `assert-kind-args!`. `:seen` is
+  the walk of unit dirs that led here; it is seeded with this dir, so a
+  composition that (directly or through another unit) contains itself is
+  reported rather than recursed into."
   [{:keys [dir manifest checkout ref root source-checkouts source-status-fn seen]}]
   (let [dir (str dir)
         manifest (or manifest (read-manifest! dir))
@@ -439,81 +529,71 @@
         :manifest manifest
         :root (or root (layout/->default-root dir
                                               (select-keys manifest [:repo :variant])))
-        :status-fn (->source-status-fn {:source-status-fn source-status-fn
-                                        :source-checkouts source-checkouts
-                                        :status-fn ->unit-status
-                                        :seen seen})
+        :source-checkouts source-checkouts
+        :source-status-fn source-status-fn
+        :status-fn ->unit-status
         :seen seen})
       (->source-unit-status base manifest
                             (when (some? checkout)
                               (->checkout-comparison checkout ref))
                             (LocalDate/now)))))
 
+(defn- ->invalid-args-ex
+  "An argument-guard failure: a usage error a host command line can tell apart
+  from a failed comparison. Every guard throws through here, so `ex-data` always
+  carries `::invalid-args`."
+  [message data]
+  (ex-info message (assoc data ::invalid-args true)))
+
 (defn- assert-kind-args!
   "Reject the arguments that do not apply to `manifest`'s kind: a composed unit
   has one checkout per source, and a source unit has no sources to locate or
   judge. Each message names both the keyword and the flag, since one guard
-  serves a host and the bb `status` subcommand."
-  [dir manifest {:keys [checkout root source-checkouts source-status-fn]}]
+  serves a host and the bb `status` subcommand. Every throw carries
+  `::invalid-args`, so a host command line can report a usage error (exit 2)
+  without matching message text."
+  [dir manifest {:keys [checkout ref root source-checkouts source-status-fn]}]
   (if (some? (get-in manifest [:analysis-run :mode]))
-    (do
-      (when (some? checkout)
-        (throw (ex-info "A composed unit has one checkout per source: pass :source-checkouts (--source-checkout), not :checkout (--checkout)"
-                        {:dir (str dir) :checkout (str checkout)})))
-      (when (and (some? source-checkouts) (some? source-status-fn))
-        (throw (ex-info "Give :source-checkouts or :source-status-fn, not both"
-                        {:dir (str dir)}))))
+    (if (seq (get-in manifest [:staleness :sources]))
+      (do
+        (when (some? checkout)
+          (throw (->invalid-args-ex
+                  "A composed unit has one checkout per source: pass :source-checkouts (--source-checkout), not :checkout (--checkout)"
+                  {:dir (str dir) :checkout (str checkout)})))
+        (when (some? ref)
+          (throw (->invalid-args-ex
+                  "A composed unit has one checkout per source: :ref (--ref) names a commit in one checkout, so it applies only with :checkout (--checkout) on a source unit"
+                  {:dir (str dir) :ref (str ref)}))))
+      (do
+        (when (some? checkout)
+          (throw (->invalid-args-ex
+                  "An aggregate with no :staleness :sources has no sources and no checkout: :checkout (--checkout) does not apply"
+                  {:dir (str dir) :checkout (str checkout)})))
+        (when (some? ref)
+          (throw (->invalid-args-ex
+                  "An aggregate with no :staleness :sources has no sources and no checkout: :ref (--ref) does not apply"
+                  {:dir (str dir) :ref (str ref)})))
+        (when (some? source-checkouts)
+          (throw (->invalid-args-ex
+                  "An aggregate with no :staleness :sources has no sources and no checkout: :source-checkouts (--source-checkout) does not apply"
+                  {:dir (str dir)})))
+        (when (some? source-status-fn)
+          (throw (->invalid-args-ex
+                  "An aggregate with no :staleness :sources has no sources and no checkout: :source-status-fn does not apply"
+                  {:dir (str dir)})))))
     (do
       (when (some? root)
-        (throw (ex-info "A source unit has no sources to locate: :root (--root) applies only to a composed unit"
-                        {:dir (str dir) :root (str root)})))
+        (throw (->invalid-args-ex
+                "A source unit has no sources to locate: :root (--root) applies only to a composed unit"
+                {:dir (str dir) :root (str root)})))
       (when (or (some? source-checkouts) (some? source-status-fn))
-        (throw (ex-info "A source unit has no sources to judge: :source-checkouts (--source-checkout) and :source-status-fn apply only to a composed unit"
-                        {:dir (str dir)}))))))
+        (throw (->invalid-args-ex
+                "A source unit has no sources to judge: :source-checkouts (--source-checkout) and :source-status-fn apply only to a composed unit"
+                {:dir (str dir)}))))))
 
-(defn unit-status
-  "Is the unit in `dir` current? Returns the report map:
-
-    {:dir       the unit dir, as given
-     :repo      the manifest's `:repo`
-     :variant   the manifest's top-level `:variant`, when it has one
-     :kind      `:source`, or `:aggregate` with `:mode`
-     :source    the manifest's `:source` git identity
-     :updated   the manifest's `:updated`
-     :staleness the manifest's `:staleness` policy
-     :compared  `{:checkout :ref :sha}`, when `--checkout` was given
-     :verdict   `:current`, `:stale`, or `:unknown`
-     :reasons   what decided the verdict (informational entries marked)
-     :sources   both comparisons per source, composed units only}
-
-  A source unit is current when its manifest's `:source :sha` is the sha its
-  checkout resolves to. A composed unit's manifest records a sha per source
-  unit; being current needs two comparisons per source, both reported under
-  `:sources`:
-
-  - `:composition` — the source unit's manifest still holds the sha the
-    composition recorded;
-  - `:unit-status` — that source unit is itself current with its code, which
-    the composition cannot know, since a checkout is the reader's to name.
-
-  `:manifest` skips the read from `dir` (tests, hosts holding it already).
-  `:checkout`/`:ref` compare a source unit against a checkout (`:ref` defaults
-  to `HEAD`, which compares only when the checkout is on the unit's recorded
-  branch; an explicit `:ref` names the commit to compare). `:checkout` on an
-  aggregate throws, since it has one checkout per source, and `:root` on a
-  source unit throws, since it has no sources to locate.
-
-  A composed unit takes at most one of `:source-checkouts` and
-  `:source-status-fn`; giving both throws. `:source-checkouts` maps a repo name
-  to a checkout path, and each source unit is checked against its repo's
-  checkout — two sources of one repo share it. `:source-status-fn` is
-  `(fn [{:keys [unit-key repo variant dir]}] -> status-report)`, called once per
-  source unit whose manifest exists: a host uses it when its own report for a
-  source unit carries more than this namespace's checks. A report it does not
-  produce — nil, or a map without a `:verdict` — is reported as `:unit-unknown`
-  with `:unit-report-missing`, never taken as current. Neither applies to a
-  source unit."
-  [{:keys [dir manifest] :as opts}]
+(s/defn unit-status :- StatusReport
+  "Is the unit in `dir` current? Takes `StatusOptions`, returns a `StatusReport`."
+  [{:keys [dir manifest] :as opts} :- StatusOptions]
   (let [manifest (or manifest (read-manifest! (str dir)))]
     (assert-kind-args! dir manifest opts)
     (->unit-status (assoc opts :manifest manifest))))
