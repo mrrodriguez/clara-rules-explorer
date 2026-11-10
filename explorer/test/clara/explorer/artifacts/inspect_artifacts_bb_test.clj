@@ -560,6 +560,33 @@
                          "demo-b@ref=x" {:sha "222bbbb" :created status-today}}}
    :history []})
 
+(defn- delete-tree
+  "Remove `dir` and everything under it."
+  [dir]
+  (doseq [f (reverse (file-seq (io/file dir)))]
+    (io/delete-file f true)))
+
+(defn- write-status-sources!
+  "The two source units `status-composed-manifest` names, under `root`: `demo-a`
+  at `a` and `_variants/demo-b/ref=x` at `b` (nil = absent unit). Neither is a
+  git checkout: no remote, no branch."
+  [root a b]
+  (when a
+    (write-status-manifest!
+     (str (io/file root "demo-a"))
+     (assoc (status-source-manifest) :repo "demo-a"
+            :source {:working-tree-notes "" :remote nil
+                     :sha a :sha-short (subs a 0 7)
+                     :branch nil :working-tree "clean"})))
+  (when b
+    (write-status-manifest!
+     (str (io/file root "_variants" "demo-b" "ref=x"))
+     (assoc (status-source-manifest) :repo "demo-b"
+            :variant [[:ref "x"]]
+            :source {:working-tree-notes "" :remote nil
+                     :sha b :sha-short (subs b 0 7)
+                     :branch nil :working-tree "clean"}))))
+
 (defn- run-status
   "The script's stdout for `status` over `dir`, asserting success."
   [dir & args]
@@ -601,47 +628,105 @@
         (let [out (collapse-whitespace (run-status unit "--checkout" (System/getProperty "user.dir")))]
           (is (str/includes? out "verdict stale | remote-mismatch"))))
 
-      (testing "a composed unit is current, then stale, then missing"
+      (testing "a composed unit: unknown without checkouts, stale, then missing"
         (let [root (str (io/file (:dir *artifact-opts*) "status-composed"))
-              write-src (fn [a b]
-                          (when a
-                            (write-status-manifest!
-                             (str (io/file root "demo-a"))
-                             (assoc (status-source-manifest) :repo "demo-a"
-                                    :source {:working-tree-notes "" :remote nil
-                                             :sha a :sha-short (subs a 0 7)
-                                             :branch nil :working-tree "clean"})))
-                          (when b
-                            (write-status-manifest!
-                             (str (io/file root "_variants" "demo-b" "ref=x"))
-                             (assoc (status-source-manifest) :repo "demo-b"
-                                    :variant [[:ref "x"]]
-                                    :source {:working-tree-notes "" :remote nil
-                                             :sha b :sha-short (subs b 0 7)
-                                             :branch nil :working-tree "clean"}))))
-              _ (write-src "111aaaa" "222bbbb")
               dir (write-status-manifest! (str (io/file root "demo-composed"))
                                           (status-composed-manifest))]
+          (write-status-sources! root "111aaaa" "222bbbb")
           (let [out (collapse-whitespace (run-status dir))]
             (is (str/includes? out "kind aggregate unit (mode :compose)"))
-            (is (str/includes? out "demo-a: current"))
-            (is (str/includes? out "demo-b@ref=x: current"))
-            (is (str/includes? out "verdict current")))
-          (write-src "111aaaa" "9999999")
-          (let [out (collapse-whitespace (run-status dir))]
-            (is (str/includes? out "demo-b@ref=x: sha-drift 222bbbb -> 9999999"))
-            (is (str/includes? out "verdict stale")))
-          (write-src "111aaaa" nil)
-          (let [dir-file (io/file root "_variants" "demo-b")]
-            (doseq [f (reverse (file-seq dir-file))] (io/delete-file f true)))
-          (let [out (collapse-whitespace (run-status dir))]
-            (is (str/includes? out "demo-b@ref=x: missing"))
-            (is (str/includes? out "verdict stale"))))
+            (is (str/includes? out "demo-a composition current unit unknown (sha not compared)"))
+            (is (str/includes? out "demo-b@ref=x composition current unit unknown (sha not compared)"))
+            (is (str/includes? out "verdict unknown | unit-unknown 2")))
 
-        (testing "--checkout on a composed unit fails"
-          (let [dir (write-status-manifest! (str (io/file root "demo-composed"))
-                                            (status-composed-manifest))
-                {:keys [exit out err]} (shell/sh "bb" (str inspect-artifacts-script) dir "status"
-                                                 "--checkout" (System/getProperty "user.dir"))]
-            (is (not (zero? exit)))
-            (is (str/includes? (str out err) "one checkout per source"))))))))
+          (testing "--edn prints both per-source comparisons and nothing else"
+            (let [result (edn/read-string (run-status dir "--edn"))]
+              (is (= :aggregate (:kind result)))
+              (is (= [{:unit-key "demo-a"
+                       :composition {:recorded "111aaaa" :unit-sha "111aaaa" :verdict :current}}
+                      {:unit-key "demo-b@ref=x"
+                       :composition {:recorded "222bbbb" :unit-sha "222bbbb" :verdict :current}}]
+                     (mapv #(select-keys % [:unit-key :composition]) (:sources result))))
+              (is (= [{:check :unit-unknown :unit-key "demo-a"
+                       :reasons [{:check :sha-not-compared}]}
+                      {:check :unit-unknown :unit-key "demo-b@ref=x"
+                       :reasons [{:check :sha-not-compared}]}]
+                     (:reasons result)))))
+
+          (write-status-sources! root "111aaaa" "9999999")
+          (let [out (collapse-whitespace (run-status dir))]
+            (is (str/includes? out "demo-b@ref=x composition stale unit unknown (sha not compared)"))
+            (is (str/includes? out "verdict stale | unit-unknown 2, source-sha-drift 1")))
+
+          (delete-tree (str (io/file root "_variants" "demo-b")))
+          (let [out (collapse-whitespace (run-status dir))]
+            (is (str/includes? out "demo-b@ref=x composition stale unit missing"))
+            (is (str/includes? out "verdict stale | unit-unknown 1, source-missing 1")))
+
+          (testing "--source-checkout compares only the source whose repo it names"
+            (write-status-sources! root "111aaaa" "222bbbb")
+            ;; A path that is no checkout at all: the covered source reads
+            ;; "not a git checkout" (unknown) and the uncovered one "sha not
+            ;; compared" — no dependence on what the runner's own checkout is.
+            (let [no-checkout (str (io/file root "not-a-checkout"))
+                  out (collapse-whitespace
+                       (run-status dir "--source-checkout" (str "demo-a=" no-checkout)))]
+              (is (str/includes? out (str "demo-a composition current "
+                                          "unit unknown (" no-checkout " is not a git checkout)")))
+              (is (str/includes? out "demo-b@ref=x composition current unit unknown (sha not compared)"))
+              (is (str/includes? out "verdict unknown | unit-unknown 2"))))
+
+          (testing "--source-checkout rejects a value without =, either empty side, and a repeated repo"
+            (doseq [values [["--source-checkout" "oops"]
+                            ["--source-checkout" "=./checkout"]
+                            ["--source-checkout" "demo-a="]
+                            ["--source-checkout" "demo-a=./one" "--source-checkout" "demo-a=./two"]]]
+              (let [{:keys [exit out err]} (apply shell/sh "bb" (str inspect-artifacts-script) dir "status" values)]
+                (is (not (zero? exit)) (pr-str values))
+                (is (str/includes? (str out err) "--source-checkout") (pr-str values)))))
+
+          (testing "--source-checkout on a source unit fails"
+            (let [source-dir (write-status-manifest! (str (io/file root "demo-single"))
+                                                     (assoc (status-source-manifest) :repo "demo-single"))
+                  {:keys [exit out err]} (shell/sh "bb" (str inspect-artifacts-script) source-dir "status"
+                                                   "--source-checkout"
+                                                   (str "demo-a=" (System/getProperty "user.dir")))]
+              (is (not (zero? exit)))
+              (is (str/includes? (str out err) "apply only to a composed unit"))))
+
+          (testing "--checkout on a composed unit fails"
+            (let [{:keys [exit out err]} (shell/sh "bb" (str inspect-artifacts-script) dir "status"
+                                                   "--checkout" (System/getProperty "user.dir"))]
+              (is (not (zero? exit)))
+              (is (str/includes? (str out err) "one checkout per source"))))))
+
+      (testing "a composition of a composition renders the nested verdicts"
+        (let [root (str (io/file (:dir *artifact-opts*) "status-nested"))
+              inner-sha "1nner0000000"
+              outer-sha "0uter0000000"]
+          (write-status-sources! root "111aaaa" "222bbbb")
+          (write-status-manifest! (str (io/file root "_compose" "inner"))
+                                  (-> (status-composed-manifest)
+                                      (assoc :repo "_compose/inner")
+                                      (assoc-in [:source :sha] inner-sha)))
+          (let [outer-dir (write-status-manifest!
+                           (str (io/file root "_compose" "outer"))
+                           (-> (status-composed-manifest)
+                               (assoc :repo "_compose/outer")
+                               (assoc-in [:source :sha] outer-sha)
+                               (assoc :analysis-run
+                                      {:mode :compose
+                                       :units [{:repo "_compose/inner"
+                                                :sha inner-sha
+                                                :created status-today}]})
+                               (assoc :staleness
+                                      {:policy "review-when-any-source-sha-drifts"
+                                       :sources {"_compose/inner"
+                                                 {:sha inner-sha :created status-today}}})))
+                out (collapse-whitespace (run-status outer-dir))]
+            (is (str/includes?
+                 out
+                 (str "sources _compose/inner composition current "
+                      "unit unknown (demo-a: unit sha not compared; "
+                      "demo-b@ref=x: unit sha not compared)")))
+            (is (str/includes? out "verdict unknown | unit-unknown 1"))))))))
