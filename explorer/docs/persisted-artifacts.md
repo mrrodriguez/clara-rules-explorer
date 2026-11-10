@@ -515,28 +515,30 @@ The report shows both comparisons on each `sources` line, then folds them into
 one verdict (step 2 above):
 
 ```
-unit       _compose/pair
-kind       aggregate unit (mode :compose)
-source     d4e5f6a (main, clean)   updated 2026-10-30
-policy     review-when-any-source-sha-drifts
-sources    repo-a                    composition current   unit stale (sha-drift aaa1111 -> bbb2222)
-           repo-b@env=dev/ref=main   composition current   unit current
-verdict    stale | unit-stale 1
+unit    _compose/pair
+kind    aggregate unit (mode :compose)
+source  d4e5f6a (main, clean)   updated 2026-10-30
+policy  review-when-any-source-sha-drifts
+sources repo-a                   composition current  unit stale (sha-drift aaa1111 -> bbb2222)
+        repo-b@env=dev/ref=main  composition current  unit current
+verdict stale | unit-stale 1
 ```
 
 Omit `--source-checkout` and the `unit` cell has nothing to compare:
 
 ```
-sources    repo-a                   composition current  unit unknown (sha not compared)
-           repo-b@env=dev/ref=main  composition current  unit unknown (sha not compared)
-verdict    unknown | unit-unknown 2
+sources repo-a                   composition current  unit unknown (sha not compared)
+        repo-b@env=dev/ref=main  composition current  unit unknown (sha not compared)
+verdict unknown | unit-unknown 2
 ```
 
 A composed verdict counts its reasons by kind — the `sources` rows already name
 each source and what moved, so listing them again would make the line unreadable
 once unit keys carry several variant axes. Informational reasons
 (`checkout-dirty`) never decide a verdict; they print under `notes`, not beside
-the reasons that did. Text rendering, including each reason's fragment and the
+the reasons that did. Each distinct note prints once: a source's own note names
+that source, and one several sources share is counted
+(`checkout-dirty (informational) (3 sources)`). Text rendering, including each reason's fragment and the
 `--source-checkout` parsing, is `clara.explorer.artifacts.status-report`: a host
 command line requires that namespace instead of copying the script.
 
@@ -547,7 +549,7 @@ Each row cell names its `:sources` key and the reasons it can contribute:
 | `composition` | `:composition` | the composition's recorded sha vs the source unit's manifest | `:source-sha-drift`, `:source-missing`, keyed by `:unit-key` |
 | `unit` | `:unit-status` | the source unit's own status report, against its code | `:unit-stale`, `:unit-unknown`, nesting that report's reasons |
 
-`--edn` prints the whole result map:
+`--edn` prints the result map:
 
 ```clojure
 {:dir "/reg/_compose/pair"
@@ -560,17 +562,26 @@ Each row cell names its `:sources` key and the reasons it can contribute:
                        :recorded "aaa1111" :current "bbb2222"}]}]
  :sources [{:unit-key "repo-a"
             :composition {:recorded "aaa1111" :unit-sha "aaa1111" :verdict :current}
-            :unit-status {...the report unit-status returned for that unit...}
+            :unit-status {:verdict :stale
+                          :reasons [{:check :sha-drift
+                                     :recorded "aaa1111" :current "bbb2222"}]
+                          :compared {:checkout "/src/repo-a" :ref "HEAD" :sha "bbb2222"}}
             :verdict :stale}
            {:unit-key "repo-b@env=dev/ref=main"
             :composition {:recorded "ccc3333" :unit-sha "ccc3333" :verdict :current}
-            :unit-status {... :verdict :current}
+            :unit-status {:verdict :current
+                          :reasons []
+                          :compared {:checkout "/src/repo-b" :ref "HEAD" :sha "ccc3333"}}
             :verdict :current}]}
 ```
 
-Only the keys under discussion are shown; a real map also carries `:repo`,
-`:source`, `:updated`, `:staleness`, and each full `:unit-status` report. Every
-verdict, at every level, is `:current`, `:stale`, or `:unknown`.
+The map also carries the unit's own `:repo`, `:source`, `:updated`, and
+`:staleness` (its policy; the per-source shas are what `:sources` reports). A
+source's `:unit-status` keeps only what judges it — `:verdict`, `:reasons`,
+`:compared`, and a composition's own `:sources` — whether this namespace or a
+host's `:source-status-fn` produced the report: the entry's `:unit-key` names
+the unit, and the rest of its provenance is in its own manifest. Every verdict,
+at every level, is `:current`, `:stale`, or `:unknown`.
 
 #### Absences are unknown, never current
 

@@ -307,7 +307,12 @@
                       (:sources result))
               "a source entry carries the composition's record and the unit's report,
               and nothing else — no stray :reasons")
-          (is (= :source (get-in result [:sources 0 :unit-status :kind])))))))
+          (is (= {:verdict :unknown :reasons [{:check :sha-not-compared}]}
+                 (get-in result [:sources 0 :unit-status]))
+              "a source's status keeps its verdict and reasons; its identity is the
+              entry's :unit-key and its provenance is in its own manifest")
+          (is (= {:policy "review-when-any-source-sha-drifts"} (:staleness result))
+              "the per-source shas are reported under :sources, not copied into :staleness")))))
 
   (testing "an explicit :root is honored"
     (with-composed-unit*
@@ -662,9 +667,9 @@
                        (is (= "_compose/inner" (:unit-key entry)))
                        (is (= {:recorded inner-sha :unit-sha inner-sha :verdict :current}
                               (:composition entry)))
-                       (testing "its report nests whole, sources and all"
-                         (is (= :aggregate (get-in entry [:unit-status :kind])))
-                         (is (= :compose (get-in entry [:unit-status :mode])))
+                       (testing "its verdict, reasons and sources nest"
+                         (is (= #{:verdict :reasons :sources}
+                                (set (keys (:unit-status entry)))))
                          (is (= :unknown (get-in entry [:unit-status :verdict])))
                          (is (= ["aaa" "bbb@ref=x"]
                                 (mapv :unit-key (get-in entry [:unit-status :sources])))))

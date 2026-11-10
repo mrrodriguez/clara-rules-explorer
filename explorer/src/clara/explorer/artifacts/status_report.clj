@@ -11,12 +11,16 @@
 ;; ===========================================================================
 
 (defn- ->invalid-args-ex
-  "A `--source-checkout` usage failure. Carries\n  `:clara.explorer.artifacts.status/invalid-args`, so a host command line tells a\n  usage error apart from a failed comparison without matching message text."
+  "A `--source-checkout` usage failure. Carries
+  `:clara.explorer.artifacts.status/invalid-args`, so a host command line tells a
+  usage error apart from a failed comparison without matching message text."
   [message data]
   (ex-info message (assoc data :clara.explorer.artifacts.status/invalid-args true)))
 
 (defn parse-source-checkouts
-  "`--source-checkout <repo>=<path>` values as `{repo path}`. Throws a usage\n  error (see `->invalid-args-ex`) on a value without `=`, on an empty repo or\n  path, and on a repo named twice. Any command line parser can call this."
+  "`--source-checkout <repo>=<path>` values as `{repo path}`. Throws a usage
+  error (see `->invalid-args-ex`) on a value without `=`, on an empty repo or
+  path, and on a repo named twice. Any command line parser can call this."
   [values]
   (reduce (fn [acc value]
             (let [s (str value)
@@ -44,7 +48,10 @@
 ;; ===========================================================================
 
 (defmulti reason-summary
-  "One reason as a `--edn`-free fragment of the verdict line. The library defines\n  a method for each of its checks; a host adds a method for each of its own.\n  `:default` prints the reason as data. `:unit-stale` and `:unit-unknown`\n  recurse over the nested reasons, leaving out the informational ones."
+  "One reason as a `--edn`-free fragment of the verdict line. The library defines
+  a method for each of its checks; a host adds a method for each of its own.
+  `:default` prints the reason as data. `:unit-stale` and `:unit-unknown`
+  recurse over the nested reasons, leaving out the informational ones."
   :check)
 
 (defmethod reason-summary :sha-drift
@@ -130,7 +137,9 @@
 ;; ===========================================================================
 
 (defn- unit-fragment
-  "A source unit's own verdict and the reasons behind it, as one cell of a\n  `sources` row: `unit current`, or `unit stale (sha-drift aaa1111 -> bbb2222)`.\n  Informational reasons live in `notes`, not in the cell."
+  "A source unit's own verdict and the reasons behind it, as one cell of a
+  `sources` row: `unit current`, or `unit stale (sha-drift aaa1111 -> bbb2222)`.
+  Informational reasons live in `notes`, not in the cell."
   [{:keys [verdict reasons]}]
   (let [fragments (map reason-summary (informative-reasons reasons))]
     (if (seq fragments)
@@ -138,7 +147,9 @@
       (format "unit %s" (name verdict)))))
 
 (defn- unit-absence
-  "Why a source with no unit-status cell has none, read from the report's\n  top-level reasons: `:source-cycle` or `:unit-report-missing`, or nil when the\n  source unit itself is gone (the composition's record says `:source-missing`)."
+  "Why a source with no unit-status cell has none, read from the report's
+  top-level reasons: `:source-cycle` or `:unit-report-missing`, or nil when the
+  source unit itself is gone (the composition's record says `:source-missing`)."
   [reasons unit-key]
   (->> reasons
        (filter #(= unit-key (:unit-key %)))
@@ -148,7 +159,10 @@
        first))
 
 (defn ->source-rows
-  "A composed report's `:sources` as `[unit-key composition unit]` text cells:\n  the composition's verdict on the sha it recorded for that source, then the\n  source unit's own status verdict with its reasons. A source with no report of\n  its own says which absence it is rather than claiming anything."
+  "A composed report's `:sources` as `[unit-key composition unit]` text cells:
+  the composition's verdict on the sha it recorded for that source, then the
+  source unit's own status verdict with its reasons. A source with no report of
+  its own says which absence it is rather than claiming anything."
   [{:keys [reasons sources]}]
   (mapv (fn [{:keys [unit-key composition unit-status]}]
           (let [absence (unit-absence reasons unit-key)]
@@ -166,25 +180,49 @@
 ;; ===========================================================================
 
 (defn- collect-informational
-  "Every informational reason in `report`, top level and nested under each\n  `:sources` entry's `:unit-status` (recursing into compositions)."
+  "Every informational reason in `report`, as `[unit-key reason]` pairs: a nil
+  key for the report's own, else the key of the `:sources` entry whose
+  `:unit-status` holds it, recursing into compositions. A source's reasons are
+  read once, from its `:unit-status`, not again from the `:unit-stale` /
+  `:unit-unknown` reason that nests them."
   [report]
-  (letfn [(from-reasons [reasons]
-            (mapcat (fn [reason]
-                      (cond
-                        (:informational reason) [reason]
-                        (contains? #{:unit-stale :unit-unknown} (:check reason))
-                        (from-reasons (:reasons reason))
-                        :else []))
-                    reasons))
-          (from-report [r]
-            (concat (from-reasons (:reasons r))
-                    (mapcat (fn [entry] (when-let [u (:unit-status entry)]
-                                          (from-report u)))
-                            (:sources r))))]
-    (vec (from-report report))))
+  (letfn [(from-report [unit-key {:keys [reasons sources]}]
+            (concat (->> reasons
+                         (filter :informational)
+                         (map (fn [reason] [unit-key reason])))
+                    (mapcat (fn [{entry-key :unit-key :keys [unit-status]}]
+                              (when unit-status
+                                (from-report entry-key unit-status)))
+                            sources)))]
+    (vec (from-report nil report))))
+
+(defn- ->notes
+  "The `notes` cell: each distinct informational fragment once, in first-seen
+  order. A source's own note names that source; one that several sources share
+  is counted instead (`tools-drift … (11 sources)`)."
+  [report]
+  (let [tagged (map (fn [[unit-key reason]] [unit-key (reason-summary reason)])
+                    (collect-informational report))
+        keys-by-text (reduce (fn [acc [unit-key text]]
+                               (update acc text (fnil conj []) unit-key))
+                             {}
+                             tagged)]
+    (->> tagged
+         (map second)
+         distinct
+         (map (fn [text]
+                (let [unit-keys (->> (keys-by-text text) (remove nil?) distinct)]
+                  (case (count unit-keys)
+                    0 text
+                    1 (format "%s: %s" (first unit-keys) text)
+                    (format "%s (%d sources)" text (count unit-keys))))))
+         (str/join "; "))))
 
 (defn- verdict-summary
-  "The `verdict` cell: for a composed report with `:sources`, the verdict plus\n  one count per top-level reason kind (`stale | unit-stale 2, source-sha-drift\n  1`) — the `sources` rows already name each source and what moved. Otherwise\n  the verdict plus each deciding fragment, informational reasons aside."
+  "The `verdict` cell: for a composed report with `:sources`, the verdict plus
+  one count per top-level reason kind (`stale | unit-stale 2, source-sha-drift
+  1`) — the `sources` rows already name each source and what moved. Otherwise
+  the verdict plus each deciding fragment, informational reasons aside."
   [{:keys [verdict reasons sources]}]
   (let [deciding (informative-reasons reasons)]
     (if (seq sources)
@@ -231,24 +269,29 @@
          (format " (max %s days)" d))))
 
 (defn ->report-fields
-  "The whole report as ordered `[label value]` pairs: `unit`, `kind`, `source`,\n  `compared` (when the report carries one), `policy`, `sources` (one pair per\n  row, the label only on the first), `verdict`, and `notes` (when informational\n  reasons exist). A host splices fields of its own in with\n  `insert-fields-after`; `print-fields!` prints the pairs."
+  "The whole report as ordered `[label value]` pairs: `unit`, `kind`, `source`,
+  `compared` (when the report carries one), `policy`, `sources` (one pair per
+  row, the label only on the first), `verdict`, and `notes` (when informational
+  reasons exist). A value is a string, or, for a `sources` row, the vector of its
+  cells. A host splices fields of its own in with `insert-fields-after`;
+  `print-fields!` prints the pairs."
   [{:keys [repo variant kind mode source updated staleness compared] :as report}]
   (let [rows (->source-rows report)
-        notes (collect-informational report)]
+        notes (->notes report)]
     (cond-> [["unit" (->unit-label repo variant)]
              ["kind" (->kind-label kind variant mode)]
              ["source" (->source-label source updated)]]
       (some? compared) (conj ["compared" (->compared-label compared)])
       true (conj ["policy" (->policy-label staleness)])
       (seq rows) (into (map-indexed (fn [i cells]
-                                      [(if (zero? i) "sources" "")
-                                       (str/join "  " cells)])
-                                    rows))
+                                      [(if (zero? i) "sources" "") cells]))
+                       rows)
       true (conj ["verdict" (verdict-summary report)])
-      (seq notes) (conj ["notes" (str/join "; " (map reason-summary notes))]))))
+      (seq notes) (conj ["notes" notes]))))
 
 (defn insert-fields-after
-  "Splice `new-pairs` (`[[label value] ...]`) into `fields` after the first pair\n  whose label is `label`. Throws when no pair carries that label."
+  "Splice `new-pairs` (`[[label value] ...]`) into `fields` after the first pair
+  whose label is `label`. Throws when no pair carries that label."
   [fields label new-pairs]
   (let [idx (first (keep-indexed (fn [i [l _]] (when (= label l) i)) fields))]
     (when (nil? idx)
@@ -256,26 +299,33 @@
                       {:label label})))
     (vec (concat (subvec (vec fields) 0 (inc idx)) new-pairs (subvec (vec fields) (inc idx))))))
 
+(defn- ->cell-widths
+  "The widest cell in each column across `rows` of cells."
+  [rows]
+  (reduce (fn [widths cells]
+            (mapv #(max (get widths % 0) (count (get cells % "")))
+                  (range (max (count widths) (count cells)))))
+          []
+          rows))
+
+(defn- ->cells-text
+  "`cells` padded to `widths` and `  `-joined. The last cell is not padded, so a
+  row never ends in spaces."
+  [widths cells]
+  (->> cells
+       (map-indexed (fn [i cell]
+                      (if (= i (dec (count cells)))
+                        cell
+                        (format (format "%%-%ds" (widths i)) cell))))
+       (str/join "  ")))
+
 (defn print-fields!
-  "Print `[label value]` pairs with an aligned label column. `sources` rows (the\n  `sources` pair and its `\"\"` continuations) are aligned as columns too, so a\n  long unit key never misaligns the cells."
+  "Print `[label value]` pairs with an aligned label column. A value that is a
+  vector of cells (a `sources` row) is aligned in columns with every other such
+  value, so a long unit key never misaligns the cells."
   [fields]
-  (let [fields (vec fields)
-        label-width (reduce (fn [w [label]] (max w (count (str label)))) 0 fields)
-        row-fmt (str "%-" label-width "s %s")
-        source-idxs (keep-indexed (fn [i [label _]]
-                                    (when (or (= "sources" label) (= "" label)) i))
-                                  fields)
-        source-cells (mapv #(str/split (str (second (nth fields %))) #"  +") source-idxs)
-        cell-widths (if (seq source-cells)
-                      (reduce (fn [acc cells] (mapv max acc (map count cells)))
-                              (repeat (apply max (map count source-cells)) 0)
-                              source-cells)
-                      [])
-        cell-set (set source-idxs)]
-    (doseq [[i [label value]] (map-indexed vector fields)]
-      (if (and (seq cell-widths) (contains? cell-set i))
-        (let [cells (str/split (str value) #"  +")
-              padded (map-indexed (fn [ci c] (format (format "%%-%ds" (nth cell-widths ci)) c))
-                                  cells)]
-          (println (format row-fmt label (str/join "  " padded))))
-        (println (format row-fmt label value))))))
+  (let [label-width (reduce (fn [w [label]] (max w (count (str label)))) 0 fields)
+        row-fmt (format "%%-%ds %%s" label-width)
+        widths (->> fields (map second) (filter vector?) ->cell-widths)]
+    (doseq [[label value] fields]
+      (println (format row-fmt label (if (vector? value) (->cells-text widths value) value))))))

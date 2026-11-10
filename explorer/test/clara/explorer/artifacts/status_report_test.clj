@@ -109,6 +109,50 @@
           out (report/insert-fields-after fields "kind" [["coords" "x"]])]
       (is (= [["unit" "a"] ["kind" "b"] ["coords" "x"] ["verdict" "c"]] out)))))
 
+(defmethod report/reason-summary ::note
+  [{:keys [text]}]
+  text)
+
+(deftest notes-test
+  (let [note (fn [text] {:check ::note :text text :informational true})
+        fields (report/->report-fields
+                {:dir "/reg/pair" :repo "_compose/pair" :kind :aggregate :mode :compose
+                 :source {:sha "d4e5f6a" :branch "main" :working-tree "clean"}
+                 :updated "2026-10-30"
+                 :staleness {:policy "review-when-any-source-sha-drifts"}
+                 :verdict :stale
+                 :reasons [(note "own")
+                           {:check :unit-stale :unit-key "a"
+                            :reasons [{:check :sha-drift :recorded "111" :current "999"}
+                                      (note "shared")]}]
+                 :sources [{:unit-key "a" :composition {:verdict :current}
+                            :unit-status {:verdict :stale
+                                          :reasons [{:check :sha-drift
+                                                     :recorded "111" :current "999"}
+                                                    (note "shared")]}}
+                           {:unit-key "b" :composition {:verdict :current}
+                            :unit-status {:verdict :current
+                                          :reasons [(note "shared") (note "only b")]}}]})]
+    (is (= "own; shared (2 sources); b: only b"
+           (second (last fields)))
+        "a source's note names it, a shared one is counted, and a stale source's notes are
+        read once, not again from the :unit-stale reason that nests them")))
+
+(deftest print-fields-test
+  (let [out (with-out-str
+              (report/print-fields! [["unit" "x"]
+                                     ["sources" ["a-long-key" "composition current" "unit  two spaces"]]
+                                     ["" ["b" "composition stale" "unit missing"]]
+                                     ["" "a host field"]
+                                     ["verdict" "stale"]]))]
+    (is (= ["unit    x"
+            "sources a-long-key  composition current  unit  two spaces"
+            "        b           composition stale    unit missing"
+            "        a host field"
+            "verdict stale"]
+           (str/split-lines out))
+        "cells align by column whatever spaces they hold; a plain value is printed as is")))
+
 (deftest parse-source-checkouts-test
   (is (= {"a" "/x" "b" "/y"} (report/parse-source-checkouts ["a=/x" "b=/y"])))
   (doseq [values [["oops"] ["=./checkout"] ["a="] ["a=/one" "a=/two"]]]

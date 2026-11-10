@@ -329,10 +329,20 @@
   (and (map? report)
        (contains? #{:current :stale :unknown} (:verdict report))))
 
+(defn- ->unit-status-entry
+  "What a `:sources` entry keeps of a source unit's status report: its verdict,
+  the reasons behind it, what it was compared against, and a composition's own
+  `:sources`. The unit's identity is the entry's `:unit-key`, and the rest of its
+  provenance is in its own manifest, so the entry does not copy it."
+  [report]
+  (-> report
+      (select-keys [:verdict :reasons :compared :sources])
+      (update :reasons vec)))
+
 (defn- check-source
   "Both comparisons for one composed source, as a `SourceEntry` plus its
   top-level reasons: the composition's record against the source unit's
-  manifest, beside that unit's own status report."
+  manifest, beside the verdict of that unit's own status report."
   [{:keys [manifest root source-checkouts source-status-fn status-fn seen unit-key recorded]}]
   (let [{:keys [repo variant dir]} (get-source-unit manifest root unit-key)
         source-manifest (read-manifest-or-nil dir)
@@ -372,7 +382,7 @@
     {:entry (cond-> {:unit-key unit-key
                      :composition composition
                      :verdict (->verdict reasons)}
-              (some? report) (assoc :unit-status report))
+              (some? report) (assoc :unit-status (->unit-status-entry report)))
      :reasons reasons}))
 
 (defn- ->composed-unit-status
@@ -439,28 +449,39 @@
 
 (s/defschema HostStatusReport
   "A host's own source-unit report, as a `:source-status-fn` returns it: any map
-  carrying at least a `:verdict`. This namespace's own per-source reports are
-  full `StatusReport` maps, which satisfy this shape too."
+  carrying at least a `:verdict`. A `:sources` entry keeps the
+  `SourceUnitStatus` part of it."
   {(s/required-key :verdict) StatusVerdict
    s/Keyword s/Any})
 
+(declare SourceEntry)
+
+(s/defschema SourceUnitStatus
+  "What a `:sources` entry keeps of a source unit's status report, whether this
+  namespace or a host's `:source-status-fn` made it: the verdict, the reasons
+  behind it, what it was compared against, and, for a composition as a source,
+  its own `:sources`."
+  {:verdict StatusVerdict
+   :reasons [StatusReason]
+   (s/optional-key :compared) {s/Keyword s/Any}
+   (s/optional-key :sources) [(s/recursive #'SourceEntry)]})
+
 (s/defschema SourceEntry
   "One `StatusReport` `:sources` entry: the two comparisons for one source —
-  the composition's record beside the source unit's own status report — and
-  their fold. `:unit-status` is absent when the source unit is gone or its
-  report was not usable; it is a `HostStatusReport` — a full `StatusReport`
-  from this namespace, or the host's own report — so a composition as a
-  source nests whole."
+  the composition's record beside the source unit's own status — and their
+  fold. `:unit-status` is absent when the source unit is gone or its report was
+  not usable."
   {:unit-key s/Str
    :composition SourceComposition
    :verdict StatusVerdict
-   (s/optional-key :unit-status) HostStatusReport})
+   (s/optional-key :unit-status) SourceUnitStatus})
 
 (s/defschema StatusReport
   "What `unit-status` returns: the unit's identity from its manifest, the
   `:verdict` those comparisons decide, what decided it (`:reasons`,
   informational entries marked), and — for a composed unit — both comparisons
-  per source (`:sources`)."
+  per source (`:sources`). `:staleness` is the manifest's policy without its
+  per-source shas, which `:sources` reports."
   {:dir s/Str
    :repo s/Str
    (s/optional-key :variant) StatusVariant
@@ -499,7 +520,7 @@
    (s/optional-key :ref) s/Str
    (s/optional-key :root) s/Str
    (s/optional-key :source-checkouts) {s/Str s/Str}
-   (s/optional-key :source-status-fn) (s/=> StatusReport SourceStatusFnArg)
+   (s/optional-key :source-status-fn) (s/=> HostStatusReport SourceStatusFnArg)
    (s/optional-key :seen) #{s/Str}})
 
 ;; ===========================================================================
@@ -521,7 +542,7 @@
                       :repo (:repo manifest)
                       :source (:source manifest)
                       :updated (:updated manifest)
-                      :staleness (:staleness manifest)}
+                      :staleness (dissoc (:staleness manifest) :sources)}
                (:variant manifest) (assoc :variant (:variant manifest)))]
     (if (some? mode)
       (->composed-unit-status
