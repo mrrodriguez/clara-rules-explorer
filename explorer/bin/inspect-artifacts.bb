@@ -31,7 +31,8 @@
          '[clara.explorer.artifacts.cross-unit :as cross-unit]
          '[clara.explorer.artifacts.diff :as diff]
          '[clara.explorer.artifacts.render :as render]
-         '[clara.explorer.artifacts.status :as status])
+         '[clara.explorer.artifacts.status :as status]
+         '[clara.explorer.artifacts.status-report :as report])
 
 (def ^:private dims
   [[:clara-rules/dynamic-insert-types-detected :clara-rules/insert-types "insert"]
@@ -541,13 +542,17 @@
   (println (format (str "%-" field-width "s %s") label value)))
 
 (def ^:private status-usage-rows
-  "The `status` flag rows as `[syntax desc-first & desc-rest]`. Continuation
-  lines align under the description column via `print-flag-row`, so a longer
-  flag never means recounting spaces."
+  "The `status` flag rows as `[syntax desc-first & desc-rest]`. One table, so a
+  longer flag never means recounting spaces or shifting its own column."
   [["status --checkout PATH [--ref REF]"
     "compare a source unit against"
     "the checkout at PATH (REF defaults"
-    "to HEAD)"]
+    "to HEAD, which compares only on the"
+    "unit's own branch)"]
+   ["status --source-checkout <repo>=<path>"
+    "compare a composed unit's source"
+    "units against their repos' checkouts;"
+    "repeat once per repo"]
    ["status --root PATH"
     "registry root a composed unit's"
     "sources are read from (default:"
@@ -556,19 +561,21 @@
     "print the result map, not the text"
     "report"]])
 
-(defn- print-flag-row
-  "Print one `[syntax desc-first & desc-rest]` row: syntax plus the first
-  description line together, remaining lines aligned under the description."
-  [syntax desc-first & desc-rest]
-  (let [head (str "  " syntax "  ")
-        pad (apply str (repeat (count head) " "))]
-    (println (str head desc-first))
-    (doseq [line desc-rest]
-      (println (str pad line)))))
+(defn- print-flag-rows
+  "Print `[syntax desc-first & desc-rest]` rows as one table: syntax padded to
+  the widest row so every description starts in the same column, and
+  continuation lines aligned under it."
+  [rows]
+  (let [width (reduce (fn [w [syntax]] (max w (count syntax))) 0 rows)
+        row-fmt (str "  %-" width "s  %s")]
+    (doseq [[syntax desc & more] rows]
+      (println (format row-fmt syntax desc))
+      (doseq [line more]
+        (println (format row-fmt "" line))))))
 
 (def ^:private usage-line
   "The invocation skeleton, printed first by `help`."
-  "usage: bb inspect-artifacts.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged] [--checkout PATH [--ref REF]] [--root PATH] [--edn] [--part lhs|rhs|props]")
+  "usage: bb inspect-artifacts.bb <dir|file.edn> [subcommand [arg]] [--file auto|memory|agent|merged] [--checkout PATH [--ref REF]] [--source-checkout <repo>=<path> ...] [--root PATH] [--edn] [--part lhs|rhs|props]")
 
 (def ^:private subcommands
   "The subcommand menu as `[name signature description]`, in dispatch order;
@@ -586,7 +593,7 @@
    ["entry-points" "[<unit>]" "consumed types no rule produces"]
    ["curated" "" "what the agent overlay changed vs auto-gen"]
    ["layers" "[<fq-name>]" "the fold: layers + per-key provenance"]
-   ["status" "[--checkout]" "is this unit current? (needs only the manifest)"]
+   ["status" "[flags]" "is this unit current? (--checkout for a source unit, --source-checkout for a composed one; needs only the manifest)"]
    ["diff" "<after-dir>" "production-level diff of this unit vs <after-dir> (--edn, --production NAME)"]
    ["help" "" "this help"]])
 
@@ -606,8 +613,7 @@
   (println)
   (println "status checks one unit directory (a source, variant, or composed unit)")
   (println "reading only its rules-inspect-manifest.edn:")
-  (doseq [row status-usage-rows]
-    (apply print-flag-row row)))
+  (print-flag-rows status-usage-rows))
 
 ;; ---------------------------------------------------------------------------
 ;; production — one production's joined record
@@ -698,6 +704,7 @@
   {:file {:coerce :string}
    :checkout {:coerce :string}
    :ref {:coerce :string}
+   :source-checkout {:coerce [:string]}
    :root {:coerce :string}
    :production {:coerce :string}
    :part {:coerce :string}
@@ -726,67 +733,36 @@
     (die "Flag(s) not used by this subcommand:"
          (str/join ", " (map #(str "--" (name %)) (sort bad))))))
 
-(defn- reason-summary
-  "One reason as a `--edn`-free fragment of the verdict line."
-  [{:keys [check recorded current updated max-age-days ref checkout source]}]
-  (case check
-    :sha-drift (format "sha-drift %s -> %s" (layout/->short-sha recorded) (layout/->short-sha current))
-    :remote-mismatch (format "remote-mismatch (recorded %s, checkout %s)" recorded current)
-    :generated-dirty "generated-dirty (the unit describes no single commit)"
-    :checkout-dirty "checkout-dirty (informational)"
-    :age-exceeded (format "age-exceeded (updated %s, older than %s days)" updated max-age-days)
-    :sha-not-compared "sha not compared (no --checkout)"
-    :ref-unresolvable (format "ref %s unresolvable in %s" ref checkout)
-    :checkout-not-a-repo (format "%s is not a git checkout" checkout)
-    :source-sha-drift (format "%s: sha-drift %s -> %s"
-                              source (layout/->short-sha recorded) (layout/->short-sha current))
-    :source-missing (format "%s: missing" source)
-    :aggregate-no-sources "aggregate without per-source shas (no verdict)"
-    (str check)))
-
-(defn- print-status
-  "The `status/unit-status` result map as aligned `label  value` lines."
-  [{:keys [repo variant kind mode source updated staleness verdict reasons sources]}]
-  (print-field "unit" (str repo (when (seq variant) (str "@" (layout/variant->path variant)))))
-  (print-field "kind" (str (name kind) " unit"
-                             (when (seq variant) (str " (variant " (layout/variant->path variant) ")"))
-                             (when mode (str " (mode " mode ")"))))
-  (print-field "source" (format "%s (%s, %s)   updated %s"
-                                  (layout/->short-sha (:sha source))
-                                  (or (:branch source) "no branch")
-                                  (:working-tree source)
-                                  updated))
-  (print-field "policy" (str (:policy staleness)
-                               (when-let [d (:max-age-days staleness)]
-                                 (format " (max %s days)" d))))
-  (doseq [[i {:keys [source recorded current verdict]}] (map-indexed vector sources)]
-    (print-field (if (zero? i) "sources" "")
-                  (str source ": " (name verdict)
-                       (when (= :sha-drift verdict)
-                         (format " %s -> %s" (layout/->short-sha recorded) (layout/->short-sha current))))))
-  (print-field "verdict" (str (name verdict)
-                                (when (seq reasons)
-                                  (str " | " (str/join "; " (map reason-summary reasons)))))))
-
 (defn- status
-  "`status [--checkout PATH [--ref REF]] [--root PATH] [--edn]` over unit dir
-  `dir`: presentation over `status/unit-status`, which reads
-  rules-inspect-manifest.edn (and, for a composed unit, its sources'
-  manifests) and nothing else."
+  "`status [--checkout PATH [--ref REF]] [--source-checkout <repo>=<path> …]
+  [--root PATH] [--edn]` over unit dir `dir`: presentation over
+  `status/unit-status`, which reads rules-inspect-manifest.edn (and, for a
+  composed unit, its sources' manifests) and nothing else. `--checkout` is for a
+  source unit, `--source-checkout` for a composed one; giving a flag to the
+  kind it does not apply to is rejected, not ignored. Rendering is
+  `status-report/->report-fields` plus `status-report/print-fields!`."
   [dir opts]
   (when (and (:ref opts) (nil? (:checkout opts)))
     (die "--ref needs --checkout"))
-  (let [result (try
-                  (status/unit-status
-                   (cond-> {:dir dir}
-                     (:checkout opts) (assoc :checkout (:checkout opts))
-                     (:ref opts) (assoc :ref (:ref opts))
-                     (:root opts) (assoc :root (:root opts))))
-                  (catch Exception e
-                    (die (ex-message e))))]
+  (let [checkouts (try
+                    (some-> (:source-checkout opts) report/parse-source-checkouts)
+                    (catch Exception e
+                      (die (ex-message e))))
+        result (try
+                 (status/unit-status
+                  (cond-> {:dir dir}
+                    (:checkout opts) (assoc :checkout (:checkout opts))
+                    (:ref opts) (assoc :ref (:ref opts))
+                    (:root opts) (assoc :root (:root opts))
+                    checkouts (assoc :source-checkouts checkouts)))
+                 (catch Exception e
+                   (if (-> e ex-data :clara.explorer.artifacts.status/invalid-args)
+                     (do (binding [*out* *err*] (println (ex-message e)))
+                         (System/exit 2))
+                     (die (ex-message e)))))]
     (if (:edn opts)
       (pprint/pprint result)
-      (print-status result))))
+      (report/print-fields! (report/->report-fields result)))))
 
 ;; ---------------------------------------------------------------------------
 ;; cross-unit readings over a (composed) analysis
@@ -944,7 +920,7 @@
     (nil? target) (help)
 
     (= (or cmd "summary") "status")
-    (do (reject-flags opts #{:checkout :ref :root :edn})
+    (do (reject-flags opts #{:checkout :ref :source-checkout :root :edn})
         (if arg
           (die "status takes no positional arg")
           (status target opts)))
