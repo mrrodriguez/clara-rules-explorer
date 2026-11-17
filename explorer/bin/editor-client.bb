@@ -5,11 +5,15 @@
 ;;
 ;;   bb bin/editor-client.bb '<selection-edn>' '<navigate-input-edn>'
 ;;   bb bin/editor-client.bb --list-units '<registry-root>'
+;;   bb bin/editor-client.bb --lhs-producers '<selection-edn>' '{:production "ns/rule"}'
 ;;
 ;; `--list-units` prints `[{:key :entry} …]` for every unit under the root, sorted by key:
 ;; `:key` is the display unit-key (`repo`, or `repo@<variant path>` for a variant), `:entry` the
 ;; serialized `UnitRef` EDN ready to splice into a `:units` selection for either the bb client
 ;; or a running server's `:registry` config.
+;;
+;; `--lhs-producers` answers `clara.explorer.server.navigate/lhs-producers` — each LHS fact type of
+;; one production with its producers — so editors can walk the producer hierarchy upstream.
 ;;
 ;; <selection-edn> is a registry selection `{:root "…" :units [{:repo "…"}]}` — the same shape the
 ;; server's `:registry` mode takes; the editor resolves the `CLARA_RULES_EXPLORER_REGISTRY` root
@@ -169,7 +173,10 @@
    :token->fq-sym bb-token->fq-sym
    :production-source (fn [_fq-name] {:var? false})})
 
-(defn- run [selection input]
+(defn- run
+  "Composes and rehydrates `selection`, then answers `input` with `op`
+  (`navigate/navigate` or `navigate/lhs-producers`)."
+  [op selection input]
   (let [{:keys [root units]} selection]
     (when-not (and root (seq units))
       (throw (ex-info "editor-client.bb needs :root and a non-empty :units selection"
@@ -178,7 +185,23 @@
                 :assert-compatible! #(assert-compatible! root %)}
           analysis (shared-compose/->composed-analysis caps units)
           rehydrated (shared-rehydrate/rehydrate-analysis analysis)]
-      (navigate/navigate rehydrated bb-runtime input))))
+      (op rehydrated bb-runtime input))))
+
+(defn- read-args-and-run
+  "Reads the selection and input EDN strings and prints `op`'s answer."
+  [op selection-edn input-edn usage]
+  (when-not (and selection-edn input-edn)
+    (die usage))
+  (let [selection (try (edn/read-string selection-edn)
+                       (catch Throwable e
+                         (die "Could not read selection-edn:" (.getMessage e))))
+        input (try (edn/read-string input-edn)
+                   (catch Throwable e
+                     (die "Could not read input-edn:" (.getMessage e))))]
+    (try
+      (prn (run op selection input))
+      (catch Throwable e
+        (print-error e)))))
 
 (let [[cmd arg1] *command-line-args*]
   (cond
@@ -192,18 +215,12 @@
         (catch Throwable e
           (print-error e))))
 
+    ;; One level of the producer hierarchy: each LHS type of a production + its producers.
+    (= cmd "--lhs-producers")
+    (let [[_ selection-edn input-edn] *command-line-args*]
+      (read-args-and-run navigate/lhs-producers selection-edn input-edn
+                         "usage: bb editor-client.bb --lhs-producers '<selection-edn>' '{:production \"ns/rule\"}'"))
+
     :else
-    (let [selection-edn cmd
-          input-edn arg1]
-      (when-not (and selection-edn input-edn)
-        (die "usage: bb editor-client.bb '<selection-edn>' '<navigate-input-edn>'"))
-      (let [selection (try (edn/read-string selection-edn)
-                           (catch Throwable e
-                             (die "Could not read selection-edn:" (.getMessage e))))
-            input (try (edn/read-string input-edn)
-                       (catch Throwable e
-                         (die "Could not read navigate-input-edn:" (.getMessage e))))]
-        (try
-          (prn (run selection input))
-          (catch Throwable e
-            (print-error e)))))))
+    (read-args-and-run navigate/navigate cmd arg1
+                       "usage: bb editor-client.bb '<selection-edn>' '<navigate-input-edn>'")))

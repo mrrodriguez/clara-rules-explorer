@@ -260,3 +260,21 @@
         {:error (str "internal error: "
                      (or (some-> e .getCause .getMessage)
                          (.getMessage e)))}))))
+
+(s/defn lhs-producers :- schema/LhsProducersResponse
+  "One level of the producer hierarchy for `(:production input)`: each LHS fact
+   type with its producing productions. See `nav/lhs-producers`."
+  [input]
+  (let [{:keys [production]} input]
+    (log/infof "lhs-producers: production=%s" production)
+    (try
+      (if-let [sys (get-current-system)]
+        (let [{:keys [state-atom cache]} sys
+              analysis (cache/get-rulebase-analysis cache @state-atom)]
+          (nav/lhs-producers analysis (jvm-runtime) input))
+        {:error "no explorer system registered"})
+      (catch Exception e
+        (log/errorf e "lhs-producers failed: production=%s" production)
+        {:error (str "internal error: "
+                     (or (some-> e .getCause .getMessage)
+                         (.getMessage e)))}))))

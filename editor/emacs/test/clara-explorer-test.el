@@ -1225,5 +1225,97 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
       (should (equal clara-explorer--bb-selection-cache "{unit}"))
       (should (string-match-p "bb unit set" msg)))))
 
+;; ---------------------------------------------------------------------------
+;; Producer hierarchy tree building (no treemacs needed)
+;; ---------------------------------------------------------------------------
+
+(defun test--edn (&rest kvs)
+  "A parseedn-style hash-table map from KVS."
+  (let ((h (make-hash-table :test 'equal)))
+    (while kvs (puthash (pop kvs) (pop kvs) h))
+    h))
+
+(defun test--target (name &optional via)
+  (test--edn :name name :ns (car (split-string name "/")) :type "rule"
+             :via (or via :insert) :source (test--edn :var? nil)))
+
+(defun test--expand (node)
+  "Children of NODE via its :children-async, called synchronously."
+  (let (out)
+    (funcall (plist-get node :children-async) node (lambda (c) (setq out c)))
+    out))
+
+(ert-deftest hierarchy-short-type-name ()
+  (should (equal (clara-explorer--short-type-name "a.b_c.DocumentCheck") "DocumentCheck"))
+  (should (equal (clara-explorer--short-type-name ":loan-app/outcome") ":loan-app/outcome"))
+  (should (equal (clara-explorer--short-type-name "\"a.b\"") "\"a.b\"")))
+
+(ert-deftest hierarchy-type-node-lists-producers ()
+  (let* ((node (clara-explorer--hierarchy-type-node
+                "a.T" (vector (test--target "ns/p1") (test--target "ns/p2" :retract))
+                nil #'ignore))
+         (kids (plist-get node :children)))
+    (should (equal (plist-get node :key) "a.T"))
+    (should (equal (mapcar (lambda (k) (plist-get k :key)) kids)
+                   '(("ns/p1" :insert) ("ns/p2" :retract))))
+    (should (string-match-p "(retract)" (plist-get (nth 1 kids) :label)))
+    (should (plist-get (car kids) :children-async))))
+
+(ert-deftest hierarchy-type-node-without-producers-is-external-leaf ()
+  (let ((node (clara-explorer--hierarchy-type-node "a.T" [] nil #'ignore)))
+    (should-not (plist-get node :children))
+    (should (string-match-p "(external)" (plist-get node :label)))))
+
+(ert-deftest hierarchy-producer-expands-via-query ()
+  (let* ((calls '())
+         (query (lambda (production)
+                  (push production calls)
+                  (test--edn :production production
+                             :types (vector (test--edn :type "a.U"
+                                                       :targets (vector (test--target "ns/up")))
+                                            (test--edn :type "a.Ext" :targets [])))))
+         (node (clara-explorer--hierarchy-producer-node (test--target "ns/p1") nil query))
+         (kids (test--expand node)))
+    (should (equal calls '("ns/p1")))
+    (should (equal (mapcar (lambda (k) (plist-get k :key)) kids) '("a.U" "a.Ext")))
+    (should (string-match-p "(external)" (plist-get (nth 1 kids) :label)))
+    (let ((up (car (plist-get (car kids) :children))))
+      (should (equal (plist-get up :key) '("ns/up" :insert)))
+      (test--expand up)
+      (should (equal calls '("ns/up" "ns/p1"))))))
+
+(ert-deftest hierarchy-cycle-is-not-expandable ()
+  (let* ((query (lambda (_p)
+                  (test--edn :types (vector (test--edn :type "a.T"
+                                                       :targets (vector (test--target "ns/p1")))))))
+         (node (clara-explorer--hierarchy-producer-node (test--target "ns/p1") nil query))
+         (back (car (plist-get (car (test--expand node)) :children))))
+    (should (string-match-p "cycle" (plist-get back :label)))
+    (should-not (plist-get back :children-async))
+    (should (plist-get back :ret-action))))
+
+(ert-deftest hierarchy-query-errors-become-message-leaves ()
+  (let ((server-error (clara-explorer--hierarchy-children
+                       "ns/p" nil (lambda (_p) (test--edn :error "no production named ns/p"))))
+        (signalled (clara-explorer--hierarchy-children
+                    "ns/p" nil (lambda (_p) (user-error "boom")))))
+    (should (equal (mapcar (lambda (k) (plist-get k :key)) server-error)
+                   '("no production named ns/p")))
+    (should (string-match-p "boom" (plist-get (car signalled) :label)))
+    (should-not (plist-get (car signalled) :children-async))))
+
+(ert-deftest hierarchy-lhs-producers-transports ()
+  (cl-letf (((symbol-function 'clara-explorer--bb-selection) (lambda () "{sel}"))
+            ((symbol-function 'clara-explorer--bb-run)
+             (lambda (args) (should (equal args '("--lhs-producers" "{sel}" "{:production \"ns/p\"}")))
+               'bb-result))
+            ((symbol-function 'clara-explorer--eval-edn)
+             (lambda (code conn)
+               (should (eq conn 'conn))
+               (should (equal code "((requiring-resolve 'clara.explorer.server.client/lhs-producers) {:production \"ns/p\"})"))
+               'nrepl-result)))
+    (should (eq (clara-explorer--lhs-producers "ns/p" 'bb nil) 'bb-result))
+    (should (eq (clara-explorer--lhs-producers "ns/p" 'nrepl 'conn) 'nrepl-result))))
+
 (provide 'clara-explorer-test)
 ;;; clara-explorer-test.el ends here

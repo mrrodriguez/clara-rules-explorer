@@ -21,6 +21,7 @@
 ;; Spike workflow: open this file, M-x eval-buffer, then:
 ;;   M-x clara-explorer-navigate-producer   (LHS type -> producer)
 ;;   M-x clara-explorer-navigate-consumer   (RHS type -> consumer)
+;;   M-x clara-explorer-producer-hierarchy  (LHS type -> producer tree; needs lsp-treemacs)
 ;;   M-x clara-explorer-refresh             (re-warm annotations/analysis)
 ;;   M-x clara-explorer-swap-session        (swap in a rebuilt session)
 
@@ -171,7 +172,7 @@ comment to end of line, repeatedly until point stops moving.  Uses
         (message "clara-explorer nREPL error:\n%s\n--- code ---\n%s" err code))
       (user-error "clara-explorer: %s%s"
                   (or ex root "eval failed")
-                  (if-let ((summary (clara-explorer--err-summary err)))
+                  (if-let* ((summary (clara-explorer--err-summary err)))
                       (format " — %s" summary)
                     "")))
      (t nil))))
@@ -914,8 +915,10 @@ file (a symlink to the `clara.explorer.server.tokens` canonical text)."
        (clara-explorer--edn-get :type result)
        (clara-explorer--edn-get :targets result)))))
 
-(defun clara-explorer--navigate (side)
-  "Shared dispatcher for producer (:lhs) / consumer (:rhs) navigation.
+(defun clara-explorer--query-at-point (side)
+  "Run the navigate query for the fact type at point on SIDE (:lhs / :rhs).
+Return a plist (:result RESULT :ctx CTX :transport TRANSPORT :conn CONN),
+or nil after messaging why no query was made or no result came back.
 The transport is resolved at call time: `auto' picks nREPL when the connected
 CIDER session has a running explorer system, otherwise bb."
   (unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))
@@ -927,27 +930,32 @@ CIDER session has a running explorer system, otherwise bb."
          (caller-ns (plist-get ctx :caller-ns))
          (token (plist-get ctx :token)))
     (cond
-     ((null token) (message "not on a fact type"))
+     ((null token) (message "not on a fact type") nil)
      ((and (eq side :rhs) (eq kind 'query))
-      (message "queries have no RHS"))
+      (message "queries have no RHS") nil)
      (t
-      (let* ((eff-side side)
-             (resolved (clara-explorer--resolve-token token caller-ns conn))
+      (let* ((resolved (clara-explorer--resolve-token token caller-ns conn))
              (result (if (eq transport 'bb)
                          (clara-explorer--bb-eval
                           (clara-explorer--bb-selection)
                           (clara-explorer--edn-map
                            (list :production production
-                                 :side eff-side
+                                 :side side
                                  :caller-ns caller-ns
                                  :token (or resolved token))))
                        (clara-explorer--eval-edn
-                        (clara-explorer--navigate-code production eff-side caller-ns
+                        (clara-explorer--navigate-code production side caller-ns
                                                        (or resolved token))
                         conn))))
         (if result
-            (clara-explorer--handle-result result)
-          (message "clara-explorer: no result from navigate")))))))
+            (list :result result :ctx ctx :transport transport :conn conn)
+          (message "clara-explorer: no result from navigate")
+          nil))))))
+
+(defun clara-explorer--navigate (side)
+  "Shared dispatcher for producer (:lhs) / consumer (:rhs) navigation."
+  (when-let* ((query (clara-explorer--query-at-point side)))
+    (clara-explorer--handle-result (plist-get query :result))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public commands (§9.6, §9.9)
@@ -1056,6 +1064,187 @@ Has no effect on the nREPL transport."
         (setq clara-explorer--bb-selection-cache (clara-explorer--bb-prompt-selection))
         (message "clara-explorer: bb unit set"))
     (message "clara-explorer: warning — unit selection only affects the bb transport (currently nrepl)")))
+
+;; ---------------------------------------------------------------------------
+;; Producer hierarchy (treemacs view, à la `lsp-treemacs-call-hierarchy')
+;; ---------------------------------------------------------------------------
+;;
+;; The tree alternates two node kinds, walking producers upstream:
+;;
+;;   fact type          — children: the productions that insert/retract it
+;;     producer rule    — children (lazy): the rule's LHS fact types, one
+;;                        `lhs-producers' query per expansion
+;;       fact type      — ...
+;;
+;; `lsp-treemacs' is an optional dependency: it is required only when the
+;; command runs, so the rest of the package works without it.
+
+(declare-function lsp-treemacs-render "lsp-treemacs-generic"
+                  (tree title expand-depth &optional buffer-name right-click-actions clear-cache?))
+
+(defcustom clara-explorer-hierarchy-expand-depth 1
+  "Initial expansion depth for `clara-explorer-producer-hierarchy'.
+Depth 1 shows the producers of the type at point.  Deeper levels each run one
+query per expanded producer, which is slow on the babashka transport."
+  :type '(choice (const :tag "Collapsed" nil) integer)
+  :group 'clara-explorer)
+
+(defcustom clara-explorer-hierarchy-window-params nil
+  "Alist for `display-buffer-in-side-window' when showing the hierarchy.
+nil uses the side-window defaults, the same as `lsp-treemacs-call-hierarchy'.
+Example: \\='((side . right) (window-width . 0.3))."
+  :type '(alist :key-type symbol :value-type sexp)
+  :group 'clara-explorer)
+
+(defconst clara-explorer--hierarchy-buffer-name "*Clara Producer Hierarchy*"
+  "Buffer name of the producer hierarchy view.")
+
+(defun clara-explorer--lhs-producers-code (production)
+  "Clojure form string calling `client/lhs-producers' for PRODUCTION."
+  (format "((requiring-resolve 'clara.explorer.server.client/lhs-producers) %s)"
+          (clara-explorer--edn-map (list :production production))))
+
+(defun clara-explorer--lhs-producers (production transport conn)
+  "Query one level of the producer hierarchy for PRODUCTION.
+TRANSPORT is `nrepl' or `bb' (resolved once, when the view was opened) and
+CONN the CIDER connection used for nREPL.  Return the parsed EDN result."
+  (if (eq transport 'bb)
+      (clara-explorer--bb-run
+       (list "--lhs-producers"
+             (clara-explorer--bb-selection)
+             (clara-explorer--edn-map (list :production production))))
+    (clara-explorer--eval-edn (clara-explorer--lhs-producers-code production) conn)))
+
+(defun clara-explorer--short-type-name (type-name)
+  "The short display name of TYPE-NAME: the class name after the last `.' for
+Java/record types, else TYPE-NAME unchanged (keywords, strings, symbols)."
+  (if (and (not (string-prefix-p ":" type-name))
+           (not (string-prefix-p "\"" type-name))
+           (string-match "\\.\\([^./]+\\)\\'" type-name))
+      (match-string 1 type-name)
+    type-name))
+
+(defun clara-explorer--hierarchy-type-label (type-name)
+  "Treemacs label for TYPE-NAME: short name, then the full name dimmed."
+  (let ((short (clara-explorer--short-type-name type-name)))
+    (if (string= short type-name)
+        type-name
+      (concat short " " (propertize type-name 'face 'shadow)))))
+
+(defun clara-explorer--hierarchy-producer-label (target cycle)
+  "Treemacs label for producer TARGET: rule name, ns dimmed, plus markers.
+CYCLE non-nil marks a production already on the path from the root."
+  (let ((name (clara-explorer--edn-get :name target))
+        (ns (clara-explorer--edn-get :ns target)))
+    (concat (propertize (clara-explorer--unqualified-name name)
+                        'face 'font-lock-function-name-face)
+            (when ns (concat " " (propertize ns 'face 'shadow)))
+            (when (eq (clara-explorer--edn-get :via target) :retract)
+              (propertize " (retract)" 'face 'warning))
+            (when cycle (propertize " ↻ cycle" 'face 'shadow)))))
+
+(defun clara-explorer--hierarchy-visit (target)
+  "Jump to producer TARGET in the most recently used non-hierarchy window."
+  (when-let* ((win (get-mru-window nil nil t)))
+    (select-window win))
+  (clara-explorer--goto target))
+
+(defun clara-explorer--hierarchy-message-node (text)
+  "A leaf node showing TEXT (an empty level or a query error)."
+  (list :label (propertize text 'face 'shadow)
+        :key text
+        :icon-literal "  "))
+
+(defun clara-explorer--hierarchy-type-node (type-name targets ancestors query)
+  "Node for fact TYPE-NAME whose producers are TARGETS.
+ANCESTORS lists the production names on the path from the root; QUERY is the
+one-level fetch function passed to producer nodes."
+  (let ((targets (if (vectorp targets) (append targets nil) targets)))
+    (append
+     (list :label (concat (clara-explorer--hierarchy-type-label type-name)
+                          ;; No producers: inserted from outside the rulebase.
+                          (unless targets (propertize " (external)" 'face 'shadow)))
+           :key type-name
+           :icon-literal (propertize "◆ " 'face 'font-lock-type-face))
+     (when targets
+       (list :children
+             (mapcar (lambda (target)
+                       (clara-explorer--hierarchy-producer-node target ancestors query))
+                     targets))))))
+
+(defun clara-explorer--hierarchy-producer-node (target ancestors query)
+  "Node for producer TARGET under ANCESTORS (production names from the root).
+Expanding it calls QUERY with the production name for its LHS types.  A
+production already in ANCESTORS is a cycle and is not expandable."
+  (let* ((name (clara-explorer--edn-get :name target))
+         (cycle (member name ancestors)))
+    (append
+     (list :label (clara-explorer--hierarchy-producer-label target cycle)
+           :key (list name (clara-explorer--edn-get :via target))
+           :icon-literal (propertize "λ " 'face 'font-lock-keyword-face)
+           :ret-action (lambda (&rest _)
+                         (interactive)
+                         (clara-explorer--hierarchy-visit target)))
+     (unless cycle
+       (list :children-async
+             (lambda (_node callback)
+               (funcall callback
+                        (clara-explorer--hierarchy-children
+                         name (cons name ancestors) query))))))))
+
+(defun clara-explorer--hierarchy-children (production ancestors query)
+  "Child nodes of PRODUCTION: one type node per LHS type, each with its producers.
+Query failures render as a message leaf so one bad expansion keeps the tree."
+  (condition-case err
+      (let* ((result (funcall query production))
+             (error-text (and (hash-table-p result)
+                              (clara-explorer--edn-get :error result)))
+             (types (and (hash-table-p result)
+                         (append (clara-explorer--edn-get :types result) nil))))
+        (cond
+         (error-text (list (clara-explorer--hierarchy-message-node error-text)))
+         ((null types) (list (clara-explorer--hierarchy-message-node "no LHS fact types")))
+         (t (mapcar (lambda (entry)
+                      (clara-explorer--hierarchy-type-node
+                       (clara-explorer--edn-get :type entry)
+                       (clara-explorer--edn-get :targets entry)
+                       ancestors query))
+                    types))))
+    (error (list (clara-explorer--hierarchy-message-node
+                  (format "error: %s" (error-message-string err)))))))
+
+;;;###autoload
+(defun clara-explorer-producer-hierarchy ()
+  "Show the producer hierarchy of the fact type at point in a treemacs view.
+The root is the type at point; its children are its producers, the same set
+`clara-explorer-navigate-producer' offers.  Expanding a producer lists its LHS
+fact types and their producers, walking upstream like
+`lsp-treemacs-call-hierarchy'.  RET on a producer jumps to it.
+Requires the `lsp-treemacs' package."
+  (interactive)
+  (unless (require 'lsp-treemacs nil t)
+    (user-error "clara-explorer: the producer hierarchy needs the lsp-treemacs package"))
+  (when-let* ((query (clara-explorer--query-at-point :lhs)))
+    (let* ((result (plist-get query :result))
+           (error-text (clara-explorer--edn-get :error result)))
+      (if error-text
+          (message "%s" error-text)
+        (let* ((transport (plist-get query :transport))
+               (conn (plist-get query :conn))
+               (fetch (lambda (production)
+                        (clara-explorer--lhs-producers production transport conn)))
+               (production (plist-get (plist-get query :ctx) :production))
+               (root (clara-explorer--hierarchy-type-node
+                      (clara-explorer--edn-get :type result)
+                      (clara-explorer--edn-get :targets result)
+                      (when production (list production))
+                      fetch)))
+          (select-window
+           (display-buffer-in-side-window
+            (lsp-treemacs-render (list root) " Clara Producer Hierarchy "
+                                 clara-explorer-hierarchy-expand-depth
+                                 clara-explorer--hierarchy-buffer-name)
+            clara-explorer-hierarchy-window-params)))))))
 
 (provide 'clara-explorer)
 ;;; clara-explorer.el ends here

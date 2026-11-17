@@ -139,6 +139,23 @@
           (doseq [c (map :name (:targets consumer-answer))]
             (is (str/includes? out c))))))))
 
+(deftest editor-client-lhs-producers-test
+  (if-not (runnable?)
+    (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")
+    (let [{:keys [exit out err]}
+          (shell/sh "bb" (str editor-client-script) "--lhs-producers"
+                    (pr-str selection) (pr-str {:production notice-approved}))
+          answer (edn/read-string out)]
+      (is (zero? exit) (str "editor-client.bb --lhs-producers exited " exit ": " err))
+      (is (not (contains? answer :error)) answer)
+      (testing "the cross-unit producer edge is one hierarchy step upstream"
+        (is (contains? (->> (:types answer)
+                            (filter #(= keyword-outcome (:type %)))
+                            (mapcat :targets)
+                            (map :name)
+                            set)
+                       app-approved))))))
+
 (deftest editor-client-single-unit-resolves-record-ctor-token-test
   (if-not (runnable?)
     (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")

@@ -43,6 +43,26 @@
   (s/conditional #(contains? % :error) NavigateError
                  #(contains? % :direction) NavigateResult))
 
+(s/defschema LhsProducersInput
+  "Input for `lhs-producers`: the fq production whose LHS fact types to expand."
+  {:production s/Str})
+
+(s/defschema LhsProducersEntry
+  "One LHS fact type of a production and the productions that produce it (scoped:
+   the querying production itself is excluded). Empty `:targets` marks an
+   externally inserted type — a leaf of the producer hierarchy."
+  {:type    s/Str
+   :targets [NavigateTarget]})
+
+(s/defschema LhsProducersResult
+  {:production s/Str
+   :types      [LhsProducersEntry]})
+
+(s/defschema LhsProducersResponse
+  "An `lhs-producers` result: either a `LhsProducersResult` or an error map."
+  (s/conditional #(contains? % :error) NavigateError
+                 #(contains? % :types) LhsProducersResult))
+
 (s/defschema NavigateRuntime
   "Runtime-provided capabilities for `clara.explorer.server.navigate`: resolution and source location, which differ
    per runtime. The JVM resolves aliased and bare symbols over the editor's live namespaces and
