@@ -5,15 +5,11 @@
 ;;
 ;;   bb bin/editor-client.bb '<selection-edn>' '<navigate-input-edn>'
 ;;   bb bin/editor-client.bb --list-units '<registry-root>'
-;;   bb bin/editor-client.bb --lhs-producers '<selection-edn>' '{:production "ns/rule"}'
 ;;
 ;; `--list-units` prints `[{:key :entry} …]` for every unit under the root, sorted by key:
 ;; `:key` is the display unit-key (`repo`, or `repo@<variant path>` for a variant), `:entry` the
 ;; serialized `UnitRef` EDN ready to splice into a `:units` selection for either the bb client
 ;; or a running server's `:registry` config.
-;;
-;; `--lhs-producers` answers `clara.explorer.server.navigate/lhs-producers` — each LHS fact type of
-;; one production with its producers — so editors can walk the producer hierarchy upstream.
 ;;
 ;; <selection-edn> is a registry selection `{:root "…" :units [{:repo "…"}]}` — the same shape the
 ;; server's `:registry` mode takes; the editor resolves the `CLARA_RULES_EXPLORER_REGISTRY` root
@@ -175,7 +171,7 @@
 
 (defn- run
   "Composes and rehydrates `selection`, then answers `input` with `op`
-  (`navigate/navigate` or `navigate/lhs-producers`)."
+  (`navigate/navigate`)."
   [op selection input]
   (let [{:keys [root units]} selection]
     (when-not (and root (seq units))
@@ -214,12 +210,6 @@
         (prn (list-unit-repos arg1))
         (catch Throwable e
           (print-error e))))
-
-    ;; One level of the producer hierarchy: each LHS type of a production + its producers.
-    (= cmd "--lhs-producers")
-    (let [[_ selection-edn input-edn] *command-line-args*]
-      (read-args-and-run navigate/lhs-producers selection-edn input-edn
-                         "usage: bb editor-client.bb --lhs-producers '<selection-edn>' '{:production \"ns/rule\"}'"))
 
     :else
     (read-args-and-run navigate/navigate cmd arg1

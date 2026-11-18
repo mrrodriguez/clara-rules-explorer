@@ -90,6 +90,8 @@
     (let [target (first (:targets result))]
       (is (= "rule" (:type target)))
       (is (= :insert (:via target)))
+      (is (not (contains? target :unit))
+          "a live session has no unit identity; only a composed selection tags one")
       (is (true? (:var? (:source target))))
       (is (str/ends-with? (:file (:source target)) "loan_doc_rules.clj")))))
 
@@ -251,33 +253,6 @@
                 "clara.explorer.test.rules.loan-app-rules/app-outcome-pending?"
                 "clara.explorer.test.rules.loan-app-rules/find-app-outcome"]
                (mapv :name (:targets result))))))))
-
-;; ---------------------------------------------------------------------------
-;; lhs-producers — one level of the producer hierarchy per call.
-;; ---------------------------------------------------------------------------
-
-(deftest test-lhs-producers
-  (register! loan-app-session loan-app-annotations)
-  (testing "each LHS type in declaration order, with its scoped producers"
-    (let [result (client/lhs-producers {:production (str loan-app "/app-outcome-approved?")})
-          by-type (into {} (map (juxt :type :targets)) (:types result))]
-      (is (= (str loan-app "/app-outcome-approved?") (:production result)))
-      (is (= ["clara.explorer.test.rules.loan_app_facts.Application"
-              "clara.explorer.test.rules.loan_app_facts.DocumentCheck"
-              "clara.explorer.test.rules.loan_app_facts.IdentityCheck"
-              "clara.explorer.test.rules.loan_app_facts.FraudCheck"]
-             (mapv :type (:types result))))
-      (is (= ["clara.explorer.test.rules.loan-doc-rules/app-has-all-required-docs"]
-             (mapv :name (by-type "clara.explorer.test.rules.loan_app_facts.DocumentCheck"))))
-      (testing "an externally inserted type is a leaf"
-        (is (= [] (by-type "clara.explorer.test.rules.loan_app_facts.Application"))))))
-  (testing "the querying production is excluded from its own producers"
-    (let [denied? (str loan-app "/app-outcome-denied?")
-          result (client/lhs-producers {:production denied?})]
-      (is (not-any? #(= denied? (:name %)) (mapcat :targets (:types result))))))
-  (testing "an unknown production errors"
-    (is (= {:error (str "no production named " loan-app "/nope")}
-           (client/lhs-producers {:production (str loan-app "/nope")})))))
 
 (defn- eval-editor-resolve
   "Evals the editor resolve form for CALLER-NS + TOKEN as the editors would.

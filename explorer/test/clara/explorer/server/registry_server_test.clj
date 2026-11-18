@@ -2,7 +2,8 @@
   "Registry-backed serving: `start-system!` with `:registry` composes a selection
   and serves the analysis routes with no live session. Session routes answer
   409 `:no-session`."
-  (:require [clara.explorer.server.serve :as server]
+  (:require [clara.explorer.server.client :as client]
+            [clara.explorer.server.serve :as server]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [jsonista.core :as j]
@@ -26,6 +27,21 @@
   {:root (registry-root)
    :units [{:repo "loan-app-ruleset"}
            {:repo "loan-disposition-ruleset"}]})
+
+(deftest navigate-targets-carry-the-composed-unit-test
+  (testing "a registry-mode navigate target names the unit it came from"
+    (let [system (server/start-system! {:registry (->registry-config) :port 0})]
+      (try
+        (client/register! system)
+        (let [result (client/navigate {:production nil
+                                       :side :lhs
+                                       :token ":loan-app/application-outcome"})]
+          (is (= :producer (:direction result)) result)
+          (is (seq (:targets result)) result)
+          (is (= #{"loan-app-ruleset"} (into #{} (map :unit) (:targets result)))))
+        (finally
+          (client/register! nil)
+          (server/stop! system))))))
 
 (deftest start-system-builds-registry-state-test
   (let [system (server/start-system! {:registry (->registry-config) :port 0})

@@ -65,6 +65,7 @@
    :id s/Str
    :ns s/Str
    :type s/Str
+   (s/optional-key :unit) s/Str
    (s/optional-key :match) [TypeBridgeMatch]})
 
 (s/defschema AccumulatorInfo

@@ -536,8 +536,14 @@ Checkpoints, not a diary. Update in place as work lands.
       resolution, root `:production` semantics, producer dedupe, leaf kinds,
       Emacs path keys, and the concrete test matrix (§6.1). This doc now stands
       alone; the review docs are superseded.
-- [ ] 1 Rename/delete POC vocabulary
-- [ ] 2 Fix composed `:unknown-fact-types` + `:unit` on `ProductionDep` / `NavigateTarget`
+- [x] 1 Rename/delete POC vocabulary — `lhs-producers` (navigate, schema, client,
+      bb `--lhs-producers`, its tests) and the elisp treemacs view are gone;
+      only subtype-sense "hierarchy" names remain
+- [x] 2 Fix composed `:unknown-fact-types` + `:unit` on `ProductionDep` /
+      `NavigateTarget` — `->composed-slim` now subtracts directly-referenced
+      types; `_compose` `meta.edn` regenerated (manifest churn reverted, only the
+      slim block kept); `compose_test` pins both bridge types `:known true` and
+      dep `:unit`; registry-mode `navigate` carries `:unit`, live mode omits it
 - [ ] 3 Shared `fact-type-provenance` (both directions, bridge, `:cycle?`, `:seen?`, depth)
 - [ ] 4 Provenance schemas
 - [ ] 5 JVM `client/fact-type-provenance` (live + registry tests)

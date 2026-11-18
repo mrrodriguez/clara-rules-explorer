@@ -74,14 +74,15 @@
 
 (defn- dep->target
   "Builds a `schema/NavigateTarget` from a serialized production dep plus `via`, with the
-  source location from the runtime."
+  source location from the runtime. `:unit` rides along when the composition tagged the dep."
   [runtime dep via]
   (let [source (:production-source runtime)]
-    {:name   (:name dep)
-     :ns     (:ns dep)
-     :type   (:type dep)
-     :via    via
-     :source (source (:name dep))}))
+    (cond-> {:name   (:name dep)
+             :ns     (:ns dep)
+             :type   (:type dep)
+             :via    via
+             :source (source (:name dep))}
+      (:unit dep) (assoc :unit (:unit dep)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Global closures (hierarchy-aware production refs per fact type)
@@ -310,22 +311,3 @@
     (if (nil? production)
       (navigate-global runtime analysis caller-ns-sym token side)
       (navigate-scoped runtime analysis production side caller-ns-sym token))))
-
-(s/defn lhs-producers :- schema/LhsProducersResponse
-  "Expands one level of the producer hierarchy: for each declared LHS fact type of
-   `production` (declaration order, distinct), the productions that produce it,
-   scoped like `navigate`'s LHS path (the production itself excluded, deduped with
-   `:retract` winning). Editors call this repeatedly to walk producers upstream."
-  [analysis :- s/Any runtime :- schema/NavigateRuntime input :- schema/LhsProducersInput]
-  (let [{:keys [production]} input]
-    (if-let [summary (production-summary analysis production)]
-      {:production production
-       :types (into []
-                    (comp (keep :name)
-                          (distinct)
-                          (map (fn [type-name]
-                                 {:type type-name
-                                  :targets (scoped-producer-targets
-                                            runtime analysis production type-name)})))
-                    (:lhs-types summary))}
-      {:error (str "no production named " production)})))

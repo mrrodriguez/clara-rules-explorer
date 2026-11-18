@@ -35,6 +35,12 @@
 (def ^:private notice-denied
   "clara.explorer.test.rules.loan-outcome-notices/notice-denied-app")
 
+(def ^:private outcome-record
+  "clara.explorer.test.rules.loan_app_rules.ApplicationOutcome")
+
+(def ^:private outcome-keyword
+  ":loan-app/application-outcome")
+
 (defn- registry-root []
   (-> (io/resource "rules-annos/loan-app-ruleset/rules-inspect-manifest.edn")
       .getPath
@@ -123,6 +129,25 @@
           "notice-approved-app is downstream of the app-outcome producer")
       (is (contains? (get-in composed [:dep-graph notice-denied :upstream])
                      app-denied)))
+
+    (testing "cross-unit bridge types are known, not hierarchy ghosts"
+      (let [unknown (get-in composed [:slim :unknown-fact-types])]
+        (is (not (contains? unknown outcome-record)))
+        (is (not (contains? unknown outcome-keyword)))
+        (is (true? (-> composed :rules (get app-approved) :insert-types first :known))
+            "the record, produced by the upstream unit")
+        (is (true? (-> composed :rules (get notice-approved) :lhs-types first :known))
+            "the keyword supertype, only matched by the downstream unit")
+        (is (true? (-> composed :fact-types (get outcome-record) :ancestors first :known)))))
+
+    (testing "rehydrated production deps carry the unit"
+      (is (= #{"loan-app-ruleset"}
+             (into #{} (keep :unit)
+                   (-> composed :fact-types (get outcome-keyword) :inserted-by-rules))))
+      (is (= "loan-app-ruleset" (-> composed :rules (get app-approved) :upstream first :unit)))
+      (is (= #{"loan-disposition-ruleset"}
+             (into #{} (keep :unit)
+                   (-> composed :fact-types (get outcome-keyword) :used-by-rules)))))
 
     (testing "the composition rehydrates without the still-absent live-only keys"
       (is (nil? (:nodes composed)))
