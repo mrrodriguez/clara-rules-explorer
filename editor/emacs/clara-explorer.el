@@ -1064,18 +1064,5 @@ Has no effect on the nREPL transport."
         (message "clara-explorer: bb unit set"))
     (message "clara-explorer: warning — unit selection only affects the bb transport (currently nrepl)")))
 
-;; ---------------------------------------------------------------------------
-;; Type-name display
-;; ---------------------------------------------------------------------------
-
-(defun clara-explorer--short-type-name (type-name)
-  "The short display name of TYPE-NAME: the class name after the last `.' for
-Java/record types, else TYPE-NAME unchanged (keywords, strings, symbols)."
-  (if (and (not (string-prefix-p ":" type-name))
-           (not (string-prefix-p "\"" type-name))
-           (string-match "\\.\\([^./]+\\)\\'" type-name))
-      (match-string 1 type-name)
-    type-name))
-
 (provide 'clara-explorer)
 ;;; clara-explorer.el ends here

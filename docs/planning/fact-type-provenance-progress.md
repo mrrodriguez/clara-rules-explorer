@@ -127,7 +127,8 @@ or, expanding a rendered production node:
 
 ```clojure
 {:node {:kind :fact-type
-        :type "com.example.DocumentCheck"
+        :type "com.example.DocumentCheck"     ; full serialized fact-type name
+        :type-short "DocumentCheck"           ; display form; editors never derive it
         :external? false                       ; true when no producer has :via :insert
         :vias [:insert]                        ; consumer direction only: how the parent
                                                ; production's RHS produces this type
@@ -140,7 +141,10 @@ or, expanding a rendered production node:
         :unit "loan-app-ruleset"               ; absent for live single sessions
         :via :insert | :retract | :consume     ; edge kind from parent type (absent at root)
         :vias [:insert :retract]               ; when a producer both inserts & retracts
-        :matches ["com.example.DocumentCheck"] ; exact bridge type(s) (absent at root)
+        :matches [{:name "com.example.DocumentCheck" :short "DocumentCheck"}]
+                                               ; bridge type(s) from the parent type
+                                               ; (absent at root), name-sorted
+        :bridge? false                         ; :matches differs from the parent type
         :outputs :unknown                      ; present when :unlinked-rule
         :source {...}
         :cycle? false
@@ -155,7 +159,7 @@ or, expanding a rendered production node:
   `:no-output-types` rules, `:unlinked-rule` rules, and zero-LHS rules so the UI
   never wastes a `TAB` round-trip on a leaf.
 - `:cycle?` and `:seen?` are always present (booleans) on `:production` nodes;
-  `:via` and `:matches` are not (they need a parent fact type).
+  `:via`, `:matches`, and `:bridge?` are not (they need a parent fact type).
 - `:external?` appears only on **producer-direction** `:fact-type` nodes, at any
   depth: `true` when no producer has `:via :insert` (so a type with only a
   retracting producer is still external). It is derived from producer vias,
@@ -169,6 +173,14 @@ or, expanding a rendered production node:
   unions both its matching insert and retract types. `:vias` is absent at a
   root, and on producer-direction LHS `:fact-type` children (there the edge
   means "consumes").
+- **Display names are contract data, not editor logic.** `:type-short` on a
+  fact-type node and `:short` on each `:matches` entry are the backend's short
+  forms of those names; `:bridge?` is the backend's answer to "does this edge
+  reach the parent type through the hierarchy". Fact-type names have several
+  kinds (class/record, keyword, string, tuple, map) and only the class-like ones
+  shorten, so deriving this per editor would duplicate a fact-type rule in
+  Emacs, Neovim, and anything else. No editor computes or shortens a fact-type
+  name.
 - `:outputs :unknown` is present exactly when the production carries
   `:unlinked-rule` — the one "RHS effects exist but none resolved" signal that
   survives slimming. Its `:children` is then `[]`, and the renderer labels it
@@ -191,7 +203,7 @@ or, expanding a rendered production node:
   its `:lhs-types` in declaration order (already `distinct` in
   `clara.explorer.conditions/extract-lhs-fact-types`); a consumer production's
   children are `:insert-types` then the remaining `:retract-types`, both in
-  declaration order; `:matches` is sorted; `:vias` is `[:insert]`, `[:retract]`,
+  declaration order; `:matches` is name-sorted; `:vias` is `[:insert]`, `[:retract]`,
   or `[:insert :retract]`.
 - Errors (`no fact type found`, `no production named …`) come back as
   `{:error "…"}`, the same shape `navigate` uses.
@@ -294,8 +306,8 @@ both bridge types in `compose_test.clj`.
 | `explorer/src/clara/explorer/artifacts/shared/compose.clj` | `->composed-slim` takes the merged rules/queries and subtracts the productions' direct types from the unioned `:unknown-fact-types` |
 | `explorer/src/clara/explorer/artifacts/shared/rehydrate.clj` | propagate `:unit` onto `ProductionDep` in `->production-ref` |
 | `explorer/src/clara/explorer/server/api.clj` | `(s/optional-key :unit) s/Str` on `ProductionDep`, so rehydrated dep vectors stay schema-valid |
-| `explorer/src/clara/explorer/server/schema.clj` | `:unit` optional on `NavigateTarget`; delete `LhsProducers*`; add `FactTypeProvenanceInput` (`:depth` as `(s/cond-pre s/Int (s/eq :full))`; the `:cursor :input` is a `NavigateInput` with `:side` omitted when there is no structural side), recursive `FactTypeProvenanceNode`, `FactTypeProvenanceResult/Response` |
-| `explorer/src/clara/explorer/server/navigate.clj` | delete `lhs-producers`; add `fact-type-provenance`, `resolve-cursor-fact-type`, and their direction-aware `->*` helpers; attach `:unit` in `dep->target` |
+| `explorer/src/clara/explorer/server/schema.clj` | `:unit` optional on `NavigateTarget`; delete `LhsProducers*`; add `FactTypeProvenanceInput` (`:depth` as `(s/cond-pre s/Int (s/eq :full))`; the `:cursor :input` is a `NavigateInput` with `:side` omitted when there is no structural side), recursive `FactTypeProvenanceNode` (including `:type-short`, `:matches` entries as `{:name :short}`, and `:bridge?`), `FactTypeProvenanceResult/Response` |
+| `explorer/src/clara/explorer/server/navigate.clj` | delete `lhs-producers`; add `fact-type-provenance`, `resolve-cursor-fact-type`, a `type-name->short-name` helper (class-like names only; keywords/strings/tuples/maps stay whole), and their direction-aware `->*` helpers; attach `:unit` in `dep->target` |
 | `explorer/src/clara/explorer/server/client.clj` | replace `lhs-producers` with `fact-type-provenance` (same system/cache/log shell as `navigate`) |
 | `explorer/bin/editor-client.bb` | replace `--lhs-producers` with `--provenance` |
 | `explorer/test/.../server/navigate_test.clj` | **new** — pure unit tests over hand-built rehydrated analyses (N1–N12) |
@@ -313,10 +325,11 @@ cycles, insert+retract, and unlinked outputs would bloat `rules-annos` and shift
 every existing count.
 
 Helpers stay small and follow repo naming conventions (`->` prefix for
-builders): `resolve-cursor-fact-type`, `->producer-targets`,
-`->consumer-targets`, `->bridge-types`, `->provenance-fact-type-node`,
-`->provenance-production-node`, `->provenance-production-children`. Mutual
-recursion via `declare`, not one monolithic expander.
+builders): `resolve-cursor-fact-type`, `type-name->short-name`,
+`->producer-targets`, `->consumer-targets`, `->bridge-types`,
+`->provenance-fact-type-node`, `->provenance-production-node`,
+`->provenance-production-children`. Mutual recursion via `declare`, not one
+monolithic expander.
 
 ## 3. The editor stays thin
 
@@ -325,12 +338,14 @@ not a second implementation:
 
 - **The editor may:** gather structural context (enclosing production, side,
   token text), resolve aliases/`::` to fq, choose the transport, build the
-  cursor input, call the op, cache returned children, render labels, and
-  dispatch `RET` / toggle.
+  cursor input, call the op, cache returned children, render labels from the
+  contract's fields, and dispatch `RET` / toggle.
 - **The editor may not:** read `:inserted-by-rules`, `:used-by-rules`,
   `:descendants`, `:ancestors`, `:dep-graph`, or `:lhs-types`; compute
   closures; dedupe targets; decide which productions match a type; detect
-  cycles; compute bridge types.
+  cycles; compute bridge types; derive short display names from fact-type
+  names (the contract carries `:type-short`, `:matches`' `:short`, and
+  `:bridge?`).
 
 If a change makes the editor inspect analysis data, it belongs in
 `navigate.clj`. The contract is plain EDN over both transports; no
@@ -345,8 +360,8 @@ match the backend contract so a future split is mechanical.
 
 ## 4. "via T" for hierarchy bridges
 
-Every child production node carries `:matches` (sorted vector of strings),
-computed in shared code:
+Every child production node carries `:matches` (name-sorted vector of
+`{:name <full> :short <short>}`) and `:bridge?`, computed in shared code:
 
 ```
 producer: (P's insert-types when :insert, ∪ P's retract-types when :retract)
@@ -355,11 +370,18 @@ consumer: P's lhs-types
           ∩ ({T} ∪ ancestors(T))
 ```
 
-The renderer compares the full strings in `:matches` against `[T]` and appends
-`via <short-types>` only when `:matches` is not equal to `[T]`. The equality
-check runs on the full names; only the rendered suffix is shortened. `:matches`
-is a distinct key alongside `:type` because `NavigateTarget:type` is
+`:bridge?` is true exactly when `:matches` is not `[{:name T …}]` — that is,
+when the edge reaches the parent type through the hierarchy rather than
+directly. The backend decides it because it already holds both sides; an
+editor only renders `via <shorts>` when `:bridge?` is true, joining the
+`:short` forms. No name comparison or shortening happens in the editor.
+`:matches` is a distinct key alongside `:type` because `NavigateTarget:type` is
 `"rule"`/`"query"`, not a fact type.
+
+Only class-like names shorten (`java.lang.Object` → `Object`); keywords,
+strings, tuples (`[:loan/status "verified"]`), and maps stay whole, because
+only the class form has a disposable package prefix. That rule lives in
+`navigate.clj` once, beside the node builders.
 
 Two cases this must show on the composed `loan-app-ruleset` +
 `loan-disposition-ruleset` registry:
@@ -416,11 +438,11 @@ work stays in `editor/emacs/clara-explorer.el`. No new file, no
     and for a `TAB` expansion alike;
   - `RET` on a production: existing `clara-explorer--goto` with the node's
     target fields;
-  - labels: short type + dim full name, rule name + dim ns, `@unit`,
+  - labels: `:type-short` + dim `:type`, rule name + dim ns, `@unit`,
     `(retract)` on producer edges, an insert/retract aside for consumer
     children, `↻ cycle`, `↑ shown above` (for `:seen?`), `(external)` (for
     `:external? true`), `(query)`, `(no outputs)`, `(outputs unknown)`,
-    `via <short-matches>`;
+    and `via <:matches :short>` when `:bridge?`;
   - depth defcustom with three choices: `0`, an integer, or `full` (passes
     `:depth :full`);
   - `g` re-runs the root from the stored query, `q` buries;
@@ -450,15 +472,18 @@ This is the authoritative "done when" for steps 3–8. Expected values come from
 the checked-in two-unit composition (`loan-app-ruleset` +
 `loan-disposition-ruleset`). `la/` = `clara.explorer.test.rules.loan-app-rules/`,
 `ldr/` = `…loan-doc-rules/`, `AO` = `…loan_app_rules.ApplicationOutcome`,
-`KW` = `:loan-app/application-outcome`.
+`KW` = `:loan-app/application-outcome`. Below, `:matches [X]` means
+`(mapv :name (:matches node))` = `[X]` — the node's `:matches` itself is a
+vector of `{:name … :short …}` maps, and each fact-type node also carries
+`:type-short`.
 
 #### N — pure `navigate_test.clj` (hand-built analyses through `shared.rehydrate`)
 
 | # | Case | Input | Must assert |
 | --- | --- | --- | --- |
-| N1 | Direct producer | `P` inserts `T`; cursor on `T`, producer | one `:production` child `P`, `:via :insert`, `:matches ["T"]` |
-| N2 | Subtype bridge (producer) | `S ⊂ T`; `P` inserts `S` | `P` under `T` with `:matches ["S"]` |
-| N3 | Supertype bridge (consumer) | `S ⊂ T`; `C` consumes `T`; root `S` | `C` under `S` with `:matches ["T"]` |
+| N1 | Direct producer | `P` inserts `T`; cursor on `T`, producer | one `:production` child `P`, `:via :insert`, `:matches [T]`, `:bridge? false` |
+| N2 | Subtype bridge (producer) | `S ⊂ T`; `P` inserts `S` | `P` under `T` with `:matches [S]`, `:bridge? true`, `:short` on the match |
+| N3 | Supertype bridge (consumer) | `S ⊂ T`; `C` consumes `T`; root `S` | `C` under `S` with `:matches [T]`, `:bridge? true` |
 | N4 | Insert + retract one type | `P` inserts `T` and retracts `T` | `P` appears **once** under `T`; `:via :retract`, `:vias [:insert :retract]`; `:matches` unions both sides, not just the retract side |
 | N5 | Self-loop | `P` consumes and inserts `T` | `P` at level 1 is expandable; expanding it lists `P` under its `T` child with `:cycle? true` and no `:children` |
 | N6 | Cross-type cycle | `A: T→U`, `B: U→T` | `:depth :full` terminates; the second `A` is `:cycle? true` |
@@ -466,7 +491,7 @@ the checked-in two-unit composition (`loan-app-ruleset` +
 | N8 | Depth semantics | chain of 3 productions | levels *below the requested root*: `:depth 0` / `1` / `:full` give 1 / 2 / 3, for both `:cursor` and `:production` roots |
 | N9 | Leaf kinds | a query; a `:no-output-types` rule; an `:unlinked-rule` rule; a zero-LHS rule | `[]` + `:type "query"`; `[]` + no-outputs; `[]` + `:outputs :unknown` (not plain leaf); `[]` — all present **at `:depth 0`** |
 | N10 | External vs retract-only producer | `T` with only a retracting producer | `:external? true` on the `T` node although it has one child |
-| N11 | Ordering | several producers/consumers, both directions | exact vectors match §2.2: name-sorted production children, declaration-order `:fact-type` children, sorted `:matches`, `:vias` order |
+| N11 | Ordering | several producers/consumers, both directions | exact vectors match §2.2: name-sorted production children, declaration-order `:fact-type` children, name-sorted `:matches`, `:vias` order |
 | N12 | Errors | unknown production; empty token; `:depth -1`; `:direction :sideways`; `:node :kind :fact-type`; `:ancestors ["nope/nope"]` | `{:error …}` and schema-valid |
 
 There is no `:polarity` test: v1 emits none (§2.3).
@@ -475,8 +500,8 @@ There is no `:polarity` test: v1 emits none (§2.3).
 
 | # | Root | Expected |
 | --- | --- | --- |
-| R1 | producer, cursor `KW` | children `la/app-outcome-approved?`, `la/app-outcome-denied?`, `la/app-outcome-pending?`; each `:via :insert`, `:matches [AO]`, `:unit "loan-app-ruleset"` |
-| R2 | consumer, cursor `AO` | includes `notice-approved-app` / `notice-denied-app` with `:matches [KW]`, `:unit "loan-disposition-ruleset"`; includes `la/app-outcome-denied?` and `la/app-outcome-pending?` (the `:not`-as-consumer decision); `la/find-app-outcome` has `:type "query"` and `:children []`; `la/app-outcome-approved-args-demo` has `:children []` (no outputs) |
+| R1 | producer, cursor `KW` | children `la/app-outcome-approved?`, `la/app-outcome-denied?`, `la/app-outcome-pending?`; each `:via :insert`, `:matches [AO]`, `:bridge? true`, `:unit "loan-app-ruleset"` |
+| R2 | consumer, cursor `AO` | includes `notice-approved-app` / `notice-denied-app` with `:matches [KW]`, `:bridge? true`, `:unit "loan-disposition-ruleset"`; includes `la/app-outcome-denied?` and `la/app-outcome-pending?` (the `:not`-as-consumer decision); `la/find-app-outcome` has `:type "query"` and `:children []`; `la/app-outcome-approved-args-demo` has `:children []` (no outputs) |
 | R3 | producer, cursor `…loan_app_facts.Application` | **no error**; `:children []`; `:external? true` |
 | R4 | consumer, cursor `…loan_app_facts.DocumentCheck` | includes `ldr/dynamic-retract-stale-notice`, whose `…StaleDocumentNotice` child has `:vias [:retract]` (retract-only is not a leaf) |
 | R5 | producer, `{:kind :production :name "la/app-outcome-denied?"}` `:ancestors []` | its `AO` child lists `la/app-outcome-denied?` `:cycle? true`; `approved?` / `pending?` present and expandable |
@@ -506,7 +531,7 @@ There is no `:polarity` test: v1 emits none (§2.3).
 | # | Case | Expected |
 | --- | --- | --- |
 | E1 | `--prepare-query` | sends no op; returns `:input` carrying `:production` + structural `:side`; works inside a `defquery` |
-| E2 | Render from recorded EDN | given a stored R2-shaped response, the rows/labels are right: `via :loan-app/application-outcome`, `@loan-disposition-ruleset`, `(query)`, `(external)`, `↻ cycle` |
+| E2 | Render from recorded EDN | given a stored R2-shaped response, the rows/labels are right: `via :loan-app/application-outcome` from `:matches`/`:bridge?`, `:type-short` beside dim `:type`, `@loan-disposition-ruleset`, `(query)`, `(external)`, `↻ cycle` — with no name shortening in the elisp |
 | E3 | Sibling key collision | the same production under two fact types toggles independently |
 | E4 | Pre-expanded depth | a `:depth 1` response renders expanded with no extra fetch |
 | E5 | `TAB` request shape | sends `:ancestors` = path production names minus self; sends nothing for cycle, `:seen?`, `:message`, `:outputs :unknown`, or empty-leaf rows |
@@ -525,6 +550,9 @@ Checkpoints, not a diary. Update in place as work lands.
 - [x] Decide no `lsp-treemacs`; built-in `tabulated-list-mode`
 - [x] Decide single-file Emacs implementation for now
 - [x] Decide `:matches` drives `via <type>` only when it differs from the node
+- [x] Decide short fact-type display names are contract data, not editor logic:
+      `:type-short` on fact-type nodes, `{:name :short}` entries in `:matches`,
+      and `:bridge?` for the `via` decision; the elisp shortener is deleted
 - [x] Decide consumer children are inserts **and** retracts, distinguished by
       `:vias`; a query has no children, a retract-only production is not a leaf
 - [x] Decide default depth `0`, with `:full` bounded by `:cycle?` + `:seen?`
@@ -581,10 +609,10 @@ bb explorer/bin/editor-client.bb --provenance \
 ```
 
 Expect: a root `:production` node with `:unit "loan-app-ruleset"` and **no**
-`:matches` / `:via` (no parent type); its `ApplicationOutcome` fact-type child
-carries a `:production` child `…/app-outcome-denied?` with `:cycle? true`; the
-`app-outcome-approved?` / `app-outcome-pending?` siblings are expandable and
-carry `:matches` naming the record.
+`:matches` / `:via` / `:bridge?` (no parent type); its `ApplicationOutcome`
+fact-type child carries a `:production` child `…/app-outcome-denied?` with
+`:cycle? true`; the `app-outcome-approved?` / `app-outcome-pending?` siblings
+are expandable, with `:matches` naming the record (`:bridge? true`).
 
 And the consumer `:cursor` form at `:depth :full`:
 
@@ -598,9 +626,10 @@ bb explorer/bin/editor-client.bb --provenance \
 ```
 
 Expect: `…/notice-approved-app` and `…/notice-denied-app` with
-`:matches [":loan-app/application-outcome"]` and
-`:unit "loan-disposition-ruleset"`; `la/find-app-outcome` as a `(query)` leaf;
-`:seen?` markers where the DAG reconverges.
+`:matches` naming `:loan-app/application-outcome` (`:bridge? true`), the
+fact-type nodes carrying `:type-short`, and `:unit "loan-disposition-ruleset"`;
+`la/find-app-outcome` as a `(query)` leaf; `:seen?` markers where the DAG
+reconverges.
 
 The `:depth :full` run is also the size guard: it must finish well inside the
 bb process budget, and B3 pins its node count so a regression that reintroduces
@@ -630,8 +659,9 @@ the CLI against an explicit classpath instead; record the workaround in
   LHS children in the producer tree); cursor on a logical wrapper resolves the
   inner type. v1 emits no `:polarity` label and documents that limitation.
 - Composed `:unknown-fact-types` defect: fixed in `shared/compose.clj` in Step 2.
-- `:matches` shown only when it differs from `[T]` (compared on full names,
-  rendered with short names).
+- `:matches` shown only when `:bridge?` is true, which the backend decides;
+  short names ride in the contract (`:type-short`, `:matches` `:short`), never
+  derived in an editor.
 - Ghost / hierarchy-only types are valid roots; nothing special-cases them.
 
 ## 10. Deferred

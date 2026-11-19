@@ -1225,14 +1225,5 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
       (should (equal clara-explorer--bb-selection-cache "{unit}"))
       (should (string-match-p "bb unit set" msg)))))
 
-;; ---------------------------------------------------------------------------
-;; Type-name display
-;; ---------------------------------------------------------------------------
-
-(ert-deftest short-type-name ()
-  (should (equal (clara-explorer--short-type-name "a.b_c.DocumentCheck") "DocumentCheck"))
-  (should (equal (clara-explorer--short-type-name ":loan-app/outcome") ":loan-app/outcome"))
-  (should (equal (clara-explorer--short-type-name "\"a.b\"") "\"a.b\"")))
-
 (provide 'clara-explorer-test)
 ;;; clara-explorer-test.el ends here

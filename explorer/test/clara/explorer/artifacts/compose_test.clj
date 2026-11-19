@@ -41,6 +41,9 @@
 (def ^:private outcome-keyword
   ":loan-app/application-outcome")
 
+(def ^:private application-type
+  "clara.explorer.test.rules.loan_app_facts.Application")
+
 (defn- registry-root []
   (-> (io/resource "rules-annos/loan-app-ruleset/rules-inspect-manifest.edn")
       .getPath
@@ -140,6 +143,17 @@
             "the keyword supertype, only matched by the downstream unit")
         (is (true? (-> composed :fact-types (get outcome-record) :ancestors first :known)))))
 
+    (testing "hierarchy-only ghosts stay unknown after the subtraction"
+      (let [unknown (get-in composed [:slim :unknown-fact-types])
+            ghost (->> (-> composed :fact-types (get application-type) :ancestors)
+                       (filter #(= "java.lang.Object" (:name %)))
+                       first)]
+        (is (every? string? unknown)
+            "a flat name set, not a set of per-unit sets")
+        (is (contains? unknown "java.lang.Object"))
+        (is (some? ghost) "the ghost is still referenced as an ancestor")
+        (is (false? (:known ghost)))))
+
     (testing "rehydrated production deps carry the unit"
       (is (= #{"loan-app-ruleset"}
              (into #{} (keep :unit)
@@ -169,7 +183,13 @@
     (testing "a production from the filtered-out namespace is absent"
       (is (not (contains? (:rules composed) app-approved))))
     (testing "the unfiltered unit still contributes its productions"
-      (is (contains? (:rules composed) notice-approved)))))
+      (is (contains? (:rules composed) notice-approved)))
+    (testing "the composed slim block keeps flat keyword/string sets"
+      (let [dropped (get-in composed [:slim :dropped])]
+        (is (contains? dropped :nodes))
+        (is (every? keyword? dropped) "the per-unit drops are unioned, not nested")
+        (is (every? string? (get-in composed [:slim :unknown-fact-types]))
+            "the per-unit unknown sets are unioned, not nested")))))
 
 (deftest composed-analysis-refuses-a-name-collision-test
   (let [reg (->registry)]

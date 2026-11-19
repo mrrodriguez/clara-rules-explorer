@@ -90,6 +90,22 @@
     (is (zero? exit) (str "inspect-artifacts.bb exited " exit ": " err))
     out))
 
+(deftest editor-client-dispatch-usage-test
+  (if-not (runnable?)
+    (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")
+    (do
+      (testing "no arguments: the unflagged usage, non-zero exit"
+        (let [{:keys [exit err]} (shell/sh "bb" (str editor-client-script))]
+          (is (not (zero? exit)))
+          (is (str/includes? err "usage: bb editor-client.bb '<selection-edn>' '<navigate-input-edn>'")
+              err)))
+
+      (testing "--list-units without a root: its own usage, non-zero exit"
+        (let [{:keys [exit err]} (shell/sh "bb" (str editor-client-script) "--list-units")]
+          (is (not (zero? exit)))
+          (is (str/includes? err "usage: bb editor-client.bb --list-units '<registry-root>'")
+              err))))))
+
 (deftest editor-client-lists-unit-repos-test
   (if-not (runnable?)
     (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")

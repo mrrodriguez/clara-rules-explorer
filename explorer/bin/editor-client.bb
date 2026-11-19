@@ -28,8 +28,7 @@
 ;; fq-in and does only pure normalization + callsite string matching. Source locations are always
 ;; `:var? false` — bb loads no rule namespaces.
 (require '[babashka.fs :as fs]
-         '[clojure.edn :as edn]
-         '[clojure.string :as str])
+         '[clojure.edn :as edn])
 
 (load-file (str (fs/file (fs/parent (fs/canonicalize *file*)) "bootstrap.bb")))
 
@@ -170,8 +169,10 @@
    :production-source (fn [_fq-name] {:var? false})})
 
 (defn- run
-  "Composes and rehydrates `selection`, then answers `input` with `op`
-  (`navigate/navigate`)."
+  "Composes and rehydrates `selection`, then answers `input` by calling `op` with the
+  rehydrated analysis, `bb-runtime`, and `input`. `op` is any pure operation from
+  `clara.explorer.server.navigate`, so the script's dispatch decides which one; this fn
+  stays op-agnostic."
   [op selection input]
   (let [{:keys [root units]} selection]
     (when-not (and root (seq units))
@@ -199,18 +200,22 @@
       (catch Throwable e
         (print-error e)))))
 
-(let [[cmd arg1] *command-line-args*]
+(let [args *command-line-args*
+      flag (first args)]
   (cond
     ;; Registry discovery: the editors shell out here rather than walking the tree themselves.
-    (= cmd "--list-units")
-    (do
-      (when-not arg1
+    (= flag "--list-units")
+    (let [[_ root] args]
+      (when-not root
         (die "usage: bb editor-client.bb --list-units '<registry-root>'"))
       (try
-        (prn (list-unit-repos arg1))
+        (prn (list-unit-repos root))
         (catch Throwable e
           (print-error e))))
 
+    ;; Unflagged invocation: the first two positional arguments are the selection and the
+    ;; operation input, in that order.
     :else
-    (read-args-and-run navigate/navigate cmd arg1
-                       "usage: bb editor-client.bb '<selection-edn>' '<navigate-input-edn>'")))
+    (let [[selection-edn input-edn] args]
+      (read-args-and-run navigate/navigate selection-edn input-edn
+                         "usage: bb editor-client.bb '<selection-edn>' '<navigate-input-edn>'"))))

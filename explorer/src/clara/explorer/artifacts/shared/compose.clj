@@ -156,11 +156,13 @@
   case, where one unit produces the record and another matches its keyword supertype)."
   [analyses rules queries]
   {:written-by 'clara.explorer.artifacts.compose/->composed-analysis
-   :dropped (set/union #{:nodes}
-                       (apply set/union (map #(get-in % [:slim :dropped]) analyses)))
+   :dropped (into #{:nodes}
+                  (mapcat #(get-in % [:slim :dropped]))
+                  analyses)
    :unknown-fact-types (set/difference
-                        (apply set/union
-                               (map #(get-in % [:slim :unknown-fact-types]) analyses))
+                        (into #{}
+                              (mapcat #(get-in % [:slim :unknown-fact-types]))
+                              analyses)
                         (->direct-type-names rules queries))})
 
 (defn ->composed-analysis-from-selection
