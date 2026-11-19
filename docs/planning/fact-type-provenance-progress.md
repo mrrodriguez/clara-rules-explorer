@@ -77,9 +77,11 @@ or, expanding a rendered production node:
   (`:fact-type` is output-only and refused). `:direction` is required
   (`:producer` | `:consumer`). `:depth` is required: a non-negative integer or
   `:full`. `:ancestors` is required (a vector of production names, `[]` at a
-  root); an entry naming no production is an error, not silence. A violation
-  comes back as `{:error "…"}`, the same shape `navigate` uses — the schema is
-  the authority for shape, not a defensive branch.
+  root); an entry naming no production is an error, not silence. **Shape**
+  violations are the schema's job (the test fixture throws, the JVM shell turns
+  an exception into `{:error "…"}`); what the schema cannot express — an unknown
+  production name, an ancestor that names nothing, a negative depth, a token
+  resolving to nothing — comes back as `{:error "…"}` from the operation itself.
 - **Cursor token resolution (`resolve-cursor-fact-type`):** decoupled from
   `navigate`'s non-empty-target check, so a consumer or producer tree can root
   from any token — LHS (including inside `:not`, `:exists`, `:and`, `:or`, or
@@ -314,7 +316,7 @@ both bridge types in `compose_test.clj`.
 | `explorer/src/clara/explorer/artifacts/shared/compose.clj` | `->composed-slim` takes the merged rules/queries and subtracts the productions' direct types from the unioned `:unknown-fact-types` |
 | `explorer/src/clara/explorer/artifacts/shared/rehydrate.clj` | propagate `:unit` onto `ProductionDep` in `->production-ref` |
 | `explorer/src/clara/explorer/server/api.clj` | `(s/optional-key :unit) s/Str` on `ProductionDep`, so rehydrated dep vectors stay schema-valid |
-| `explorer/src/clara/explorer/server/schema.clj` | `:unit` optional on `NavigateTarget`; delete `LhsProducers*`; add `FactTypeProvenanceInput` (`:depth` as `(s/cond-pre s/Int (s/eq :full))`; the `:cursor :input` is a `NavigateInput` with `:side` omitted when there is no structural side), recursive `FactTypeProvenanceNode` (including `:type-short`, `:matches` entries as `{:name :short}`, and `:bridge?`), `FactTypeProvenanceResult/Response` |
+| `explorer/src/clara/explorer/server/schema.clj` | `:unit` optional on `NavigateTarget`; delete `LhsProducers*`; add `FactTypeProvenanceInput` (`:depth` as `(s/cond-pre s/Int (s/eq :full))`; the `:cursor :input` is a `NavigateInput` with `:side` omitted when there is no structural side), recursive `FactTypeProvenanceNode` (`s/recursive` over its own var, since schema 1.4.1 does not resolve a bare self-reference; includes `:type-short`, `:matches` entries as `{:name :short}`, and `:bridge?`), `FactTypeProvenanceResult/Response` |
 | `explorer/src/clara/explorer/server/navigate.clj` | delete `lhs-producers`; add `fact-type-provenance`, `resolve-cursor-fact-type`, a `type-name->short-name` helper (class-like names only; keywords/strings/tuples/maps stay whole), and their direction-aware `->*` helpers; attach `:unit` in `dep->target` |
 | `explorer/src/clara/explorer/server/client.clj` | replace `lhs-producers` with `fact-type-provenance` (same system/cache/log shell as `navigate`) |
 | `explorer/bin/editor-client.bb` | replace `--lhs-producers` with `--provenance` |
@@ -501,7 +503,7 @@ vector of `{:name … :short …}` maps, and each fact-type node also carries
 | N9 | Leaf kinds | a query; a `:no-output-types` rule; an `:unlinked-rule` rule; a zero-LHS rule | `[]` + `:type "query"`; `[]` + no-outputs; `[]` + `:outputs :unknown` (not plain leaf); `[]` — all present **at `:depth 0`** |
 | N10 | External vs retract-only producer | `T` with only a retracting producer | `:external? true` on the `T` node although it has one child |
 | N11 | Ordering | several producers/consumers, both directions | exact vectors match §2.2: name-sorted production children, declaration-order `:fact-type` children, name-sorted `:matches`, `:vias` order |
-| N12 | Errors | unknown production; empty token; `:depth -1`; `:direction :sideways`; `:node :kind :fact-type`; `:ancestors ["nope/nope"]` | `{:error …}` and schema-valid |
+| N12 | Errors | unknown production; empty token; `:depth -1`; `:ancestors ["nope/nope"]`; plus `:direction :sideways` / `:node :kind :fact-type` as shape cases | `{:error …}` from the operation for what the schema cannot express; `s/check` rejects the shape cases |
 
 There is no `:polarity` test: v1 emits none (§2.3).
 
@@ -581,8 +583,12 @@ Checkpoints, not a diary. Update in place as work lands.
       types; `_compose` `meta.edn` regenerated (manifest churn reverted, only the
       slim block kept); `compose_test` pins both bridge types `:known true` and
       dep `:unit`; registry-mode `navigate` carries `:unit`, live mode omits it
-- [ ] 3 Shared `fact-type-provenance` (both directions, bridge, `:cycle?`, `:seen?`, depth)
-- [ ] 4 Provenance schemas
+- [x] 3 Shared `fact-type-provenance` (both directions, bridge, `:cycle?`, `:seen?`, depth) —
+      `resolve-cursor-fact-type` + `type-name->short-name` + direction-aware builders in
+      `navigate.clj`; `navigate_test.clj` pins N1–N12 (hand-built analyses through the real
+      rehydrate closures)
+- [x] 4 Provenance schemas — `FactTypeProvenanceInput` / recursive node / result+response in
+      `schema.clj`, N1–N12 run under `st/validate-schemas`
 - [ ] 5 JVM `client/fact-type-provenance` (live + registry tests)
 - [ ] 6 bb `--provenance` + parity test
 - [ ] 7 Emacs `:not` wrapper fallback + `--prepare-query` + op runner refactor
