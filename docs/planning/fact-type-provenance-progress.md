@@ -197,6 +197,14 @@ or, expanding a rendered production node:
   builders copy it through. It is present whenever the selection was composed
   (a single-unit registry selection still composes, so it carries `:unit`) and
   absent for a live session with no unit identity.
+- **Production display names stay editor-side.** A `:production` node carries
+  `:name` (fq `ns/var`) and `:ns`; the unqualified var name is the suffix after
+  `ns/`, so a renderer derives it mechanically and the contract carries no
+  separate key. (If one is ever added it is `:unqualified-name` — never
+  `:name-short`, since Clojure's `name` already means the unqualified part.)
+  Contrast `:type-short`: fact-type names come in several kinds and only the
+  class-like ones shorten, so that rule is non-trivial and belongs in the
+  backend, where both transports and every editor share it.
 - **Ordering is deterministic** and every exact-vector assertion depends on it:
   the `:production` children of a `:fact-type` node follow the closure's
   name-sorted production refs; a producer production's `:fact-type` children are
@@ -345,7 +353,8 @@ not a second implementation:
   closures; dedupe targets; decide which productions match a type; detect
   cycles; compute bridge types; derive short display names from fact-type
   names (the contract carries `:type-short`, `:matches`' `:short`, and
-  `:bridge?`).
+  `:bridge?`). Deriving a production's unqualified name from `:ns` is fine — it
+  is prefix removal on two contract fields, not a fact-type rule.
 
 If a change makes the editor inspect analysis data, it belongs in
 `navigate.clj`. The contract is plain EDN over both transports; no
@@ -531,7 +540,7 @@ There is no `:polarity` test: v1 emits none (§2.3).
 | # | Case | Expected |
 | --- | --- | --- |
 | E1 | `--prepare-query` | sends no op; returns `:input` carrying `:production` + structural `:side`; works inside a `defquery` |
-| E2 | Render from recorded EDN | given a stored R2-shaped response, the rows/labels are right: `via :loan-app/application-outcome` from `:matches`/`:bridge?`, `:type-short` beside dim `:type`, `@loan-disposition-ruleset`, `(query)`, `(external)`, `↻ cycle` — with no name shortening in the elisp |
+| E2 | Render from recorded EDN | given a stored R2-shaped response, the rows/labels are right: `via :loan-app/application-outcome` from `:matches`/`:bridge?`, `:type-short` beside dim `:type`, `@loan-disposition-ruleset`, `(query)`, `(external)`, `↻ cycle` — no fact-type name shortening in the elisp |
 | E3 | Sibling key collision | the same production under two fact types toggles independently |
 | E4 | Pre-expanded depth | a `:depth 1` response renders expanded with no extra fetch |
 | E5 | `TAB` request shape | sends `:ancestors` = path production names minus self; sends nothing for cycle, `:seen?`, `:message`, `:outputs :unknown`, or empty-leaf rows |
@@ -661,7 +670,8 @@ the CLI against an explicit classpath instead; record the workaround in
 - Composed `:unknown-fact-types` defect: fixed in `shared/compose.clj` in Step 2.
 - `:matches` shown only when `:bridge?` is true, which the backend decides;
   short names ride in the contract (`:type-short`, `:matches` `:short`), never
-  derived in an editor.
+  derived in an editor. Production unqualified names are the exception: they
+  are mechanical prefix removal from `:ns`, so v1 keeps that in the editors.
 - Ghost / hierarchy-only types are valid roots; nothing special-cases them.
 
 ## 10. Deferred
@@ -671,6 +681,18 @@ the CLI against an explicit classpath instead; record the workaround in
 - **REPL-free bb token resolution** — the enabling change for running without
   CIDER/Conjure at all. Not needed for this feature; it remains a separate
   follow-up.
+- **`:unqualified-name` on navigate targets and production nodes** — additive
+  and response-only: `ProductionDep`s are rebuilt from name strings on
+  rehydrate and never persisted (`dep-graph.edn` holds fq-name sets,
+  `production-index.edn` holds production summaries, and slim drops the
+  fact-type usage vectors). The editors derive the value from `:ns` today, so
+  v1 leaves it there; adopt the field when the second renderer is touched.
+- **`:name` semantic cleanup** — on production shapes `:name` holds the
+  *qualified* name while Clojure's `name` is the unqualified part, and `:type`
+  is the production kind. Renaming (`:name` → `:fq-name`, `:name` for the local
+  part, `:type` → `:kind`) touches persisted artifacts (`production-index.edn`,
+  `dep-graph.edn` keys), the HTTP graph API, the UI types, both editors, and
+  `route-id` inputs — its own change, with a migration path.
 - **`:polarity` labels** (`:positive` / `:negated` / `:exists` / `:accumulated`)
   on production nodes — §2.3 ships without them. Adding them means reading the
   persisted `production-conditions.edn` part in `bin/editor-client.bb`, which is
