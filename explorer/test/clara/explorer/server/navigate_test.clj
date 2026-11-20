@@ -145,6 +145,7 @@
                               :rules {"t/both" {:lhs ["T"] :insert ["S"] :retract ["S2"]}}})
         root (:node (provenance analysis (cursor-input "T" :producer 0)))]
     (is (= ["t/both"] (child-names root)) "one node, not one per via")
+    (is (false? (:external? root)) "an insert+retract producer still inserts T")
     (let [p (first (:children root))]
       (is (= :retract (:via p)))
       (is (= [:insert :retract] (:vias p)))
@@ -163,6 +164,19 @@
     (is (= "T" (:type back-type)))
     (is (true? (:cycle? (first back))))
     (is (not (contains? (first back) :children)))))
+
+(deftest n5b-production-root-in-ancestors-is-a-cycle-test
+  (testing "a production root that is already on the path reports a cycle"
+    (let [analysis (->analysis {:fact-types {"T" #{}}
+                                :rules {"t/p" {:lhs ["T"] :insert ["T"]}}})
+          node (:node (provenance analysis {:node {:kind :production :name "t/p"}
+                                            :direction :producer
+                                            :depth 0
+                                            :ancestors ["t/p"]}))]
+      (is (= :production (:kind node)))
+      (is (true? (:cycle? node)))
+      (is (false? (:seen? node)))
+      (is (not (contains? node :children))))))
 
 (deftest n6-cross-type-cycle-terminates-test
   (let [analysis (->analysis {:fact-types {"T" #{} "U" #{}}

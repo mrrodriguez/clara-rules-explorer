@@ -349,7 +349,7 @@
        (mapv (fn [type-name]
                {:name type-name :short (type-name->short-name type-name)}))))
 
-(defn- ->bridge?
+(defn- hierarchy-bridge?
   "True when the edge reaches `parent-type` through the hierarchy rather than directly."
   [matches parent-type]
   (not= (mapv :name matches) [parent-type]))
@@ -379,7 +379,7 @@
                     :via      (if (contains? vias :retract) :retract :insert)
                     :vias     (when (> (count vias) 1) (->vias vias))
                     :matches  matches
-                    :bridge?  (->bridge? matches type-name)}))))))
+                    :bridge?  (hierarchy-bridge? matches type-name)}))))))
 
 (defn- ->consumer-targets
   "The productions that consume `type-name` (or an ancestor), one entry per production, with the
@@ -398,25 +398,25 @@
                    {:name     p-name
                     :via      :consume
                     :matches  matches
-                    :bridge?  (->bridge? matches type-name)}))))))
+                    :bridge?  (hierarchy-bridge? matches type-name)}))))))
 
-(defn- production-type
+(defn- get-production-type
   "`\"rule\"` or `\"query\"` — which map the analysis keeps the production in."
   [analysis p-name]
   (if (contains? (:queries analysis) p-name) "query" "rule"))
 
-(defn- producer-leaf
+(defn- ->producer-leaf
   "`{:children []}` for a production with no LHS types, else nil."
   [summary]
   (when (empty? (:lhs-types summary)) {:children []}))
 
-(defn- consumer-leaf
+(defn- ->consumer-leaf
   "`{:children []}` (plus `:outputs :unknown` for an unlinked rule) when a consumer production
    resolves nothing downstream, else nil."
   [analysis summary p-name]
   (let [outputs (concat (:insert-types summary) (:retract-types summary))]
     (cond
-      (= "query" (production-type analysis p-name)) {:children []}
+      (= "query" (get-production-type analysis p-name)) {:children []}
       (:no-output-types summary) {:children []}
       (:unlinked-rule summary) {:children [] :outputs :unknown}
       (empty? outputs) {:children []}
@@ -431,7 +431,7 @@
      (cond-> {:kind   :production
               :name   name
               :ns     (:ns summary)
-              :type   (production-type analysis name)
+              :type   (get-production-type analysis name)
               :source ((:production-source runtime) name)}
        (:unit summary) (assoc :unit (:unit summary))
        via (assoc :via via)
@@ -453,8 +453,8 @@
                      (or (= :full remaining) (and (integer? remaining) (pos? remaining))))
         leaf (when (and (not cycle?) (not seen?) (not expand?))
                (if (= :producer direction)
-                 (producer-leaf summary)
-                 (consumer-leaf analysis summary name)))]
+                 (->producer-leaf summary)
+                 (->consumer-leaf analysis summary name)))]
     (if expand?
       (do
         (vswap! seen conj name)
@@ -474,12 +474,14 @@
    `:retract-types`, each with its `:vias`."
   [summary]
   (let [inserted (keep :name (:insert-types summary))
-        retracted (keep :name (:retract-types summary))]
+        retracted (keep :name (:retract-types summary))
+        inserted? (set inserted)
+        retracted? (set retracted)]
     (->> (distinct (concat inserted retracted))
          (mapv (fn [type-name]
                  [type-name (->vias (cond-> #{}
-                                      (some #{type-name} inserted) (conj :insert)
-                                      (some #{type-name} retracted) (conj :retract)))])))))
+                                      (inserted? type-name) (conj :insert)
+                                      (retracted? type-name) (conj :retract)))])))))
 
 (defn- ->production-children
   "The fact-type children of production `name` — its LHS types upstream, its insert/retract types
@@ -493,6 +495,14 @@
       (mapv (fn [[type-name vias]] (->fact-type-node ctx type-name vias))
             (->consumer-child-types summary)))))
 
+(defn- ->insert-side?
+  "True when a producer target carries an insert edge, whether or not it also retracts: `:via`
+   is the deduped edge, so `:vias` is what tells an insert+retract production apart from a
+   retract-only one."
+  [target]
+  (or (= :insert (:via target))
+      (contains? (set (:vias target)) :insert)))
+
 (defn- ->fact-type-node
   "One fact-type node: its production children in `direction`, with `:external?` on the producer
    side when nothing inserts the type, and `:vias` when it is a consumer production's child."
@@ -505,17 +515,23 @@
              :type-short (type-name->short-name type-name)
              :children (mapv #(->production-node ctx %) targets)}
       (= :producer direction)
-      (assoc :external? (not-any? #(= :insert (:via %)) targets))
+      (assoc :external? (not-any? ->insert-side? targets))
       (seq vias) (assoc :vias vias))))
 
 (defn- ->production-root-node
-  "The requested `{:kind :production}` root: always expanded, and absent `:via` / `:matches`
-   because there is no parent type."
-  [{:keys [ancestors] :as ctx} name]
-  (if (nil? (production-summary (:analysis ctx) name))
+  "The requested `{:kind :production}` root: expanded unless `name` already appears in
+   `:ancestors` (a path cycle), and absent `:via` / `:matches` because there is no parent type."
+  [{:keys [analysis ancestors seen] :as ctx} name]
+  (cond
+    (nil? (production-summary analysis name))
     {:error (str "no production named " name)}
+
+    (contains? ancestors name)
+    (->production-node* ctx {:name name} {:cycle? true :seen? false})
+
+    :else
     (let [ctx (assoc ctx :ancestors (conj ancestors name))]
-      (vswap! (:seen ctx) conj name)
+      (vswap! seen conj name)
       (->production-node* ctx {:name name}
                           {:cycle? false
                            :seen? false

@@ -58,6 +58,8 @@ cd editor/emacs && make package
   :load-path "~/src/clara-rules-explorer/editor/emacs"
   :commands (clara-explorer-navigate-producer
              clara-explorer-navigate-consumer
+             clara-explorer-show-producer-provenance
+             clara-explorer-show-consumer-provenance
              clara-explorer-refresh
              clara-explorer-swap-session
              clara-explorer-toggle-transport
@@ -71,6 +73,48 @@ the same way any Emacs package does.
 
 **Evil:** `C-o` (`evil-jump-backward`) / `C-i` work for every navigation —
 see _Jump history_ below.
+
+## Fact type provenance view
+
+`clara-explorer-show-producer-provenance` and
+`clara-explorer-show-consumer-provenance` open a side window showing the
+upstream or downstream reference tree of the fact type at point. The shared
+contract (node kinds, depth, `:cycle?` / `:seen?`, `:type-short` / `:matches`
+/ `:bridge?`, and the v1 no-polarity limitation) is documented in the
+[shared navigation doc](./explorer-editor-navigation.md#fact-type-provenance-shared);
+this section is the Emacs surface.
+
+The view is built-in `tabulated-list-mode` — no `lsp-treemacs` and no extra
+package:
+
+| Key | Action |
+| --- | ------ |
+| `TAB` | expand/collapse the production on the row (fetches `:depth 0` for that production, using the path's productions as `:ancestors` minus the row itself) |
+| `RET` / `<return>` | jump to the production (the same target machinery as navigate) |
+| `g` | re-run the root call (through `revert-buffer-function`) |
+| `q` | bury the view |
+
+Only `TAB`, `RET`, and `<return>` are bound in the mode map; `g`/`q` come from
+`special-mode`, so a setup that shadows `g` (evil's `g` prefix, for example)
+can bind `clara-explorer-provenance-refresh` itself. Rows are keyed by their
+full tree path, so the same production under two sibling fact types toggles
+independently. A response that already carries `:children` (from a configured
+depth) renders expanded without another request.
+
+Two defcustoms control the view:
+
+- `clara-explorer-provenance-depth` — `0` (the root's immediate production
+  layer), an integer `n` (inline `n` further levels), or `full` (`:depth
+  :full`).
+- `clara-explorer-provenance-window-params` — `display-buffer-in-side-window`
+  arguments; `nil` uses the side-window defaults.
+
+Backend and transport failures (an `{:error …}` answer or a non-zero babashka
+exit) render as `:message` rows for both the root call and a `TAB` expansion,
+so a failed request never breaks the buffer. `RET` reports why it cannot jump
+when a registry/offline tree names a namespace that is not on the connected
+REPL's classpath; load that namespace, or use the nREPL transport with a live
+session.
 
 ## Emacs implementation notes
 

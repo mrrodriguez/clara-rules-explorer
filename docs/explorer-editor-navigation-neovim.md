@@ -27,6 +27,17 @@ Direct jump when exactly one candidate; `vim.ui.select` picker when more than
 one (delegates to Telescope/snacks/fzf-lua if you have a `ui-select`
 integration configured).
 
+### Fact type provenance — not yet rendered
+
+The shared backend already answers the provenance contract
+(`client/fact-type-provenance` on nREPL, `--provenance` on the babashka
+transport); see
+[Fact type provenance (shared)](./explorer-editor-navigation.md#fact-type-provenance-shared).
+There is **no Neovim command for it in this version**. A future
+`:ClaraExplorerShowProvenance` only has to gather the same cursor input, call
+the same operation, and render the returned `:fact-type` / `:production` /
+`:message` nodes — no Clojure or contract change should be needed.
+
 ## Requirements
 
 - **Neovim 0.10+** (developed and tested on 0.12; `vim.ui.select` needs 0.9+,

@@ -121,7 +121,8 @@ or, expanding a rendered production node:
     across diamond DAGs while keeping `:cycle?` strictly for path cycles. There
     is no node budget: `:seen?` is the bound.
   - **`:ancestors` at a `:production` root:** the backend checks
-    `(contains? (set ancestors) P)` for the root `P` itself, then expands `P`'s
+    `(contains? (set ancestors) P)` for the root `P` itself — if true, the root
+    comes back `:cycle? true` with no `:children` — otherwise it expands `P`'s
     `:fact-type` children with `(conj (set ancestors) P)`, so a direct
     self-loop (`P → T → P`) is marked `:cycle? true` on the child production.
 
@@ -183,14 +184,15 @@ or, expanding a rendered production node:
   shorten, so deriving this per editor would duplicate a fact-type rule in
   Emacs, Neovim, and anything else. No editor computes or shortens a fact-type
   name.
-- `:outputs :unknown` is present exactly when the production carries
-  `:unlinked-rule` — the one "RHS effects exist but none resolved" signal that
-  survives slimming. Its `:children` is then `[]`, and the renderer labels it
-  `(outputs unknown)` rather than `(no outputs)`: nothing was resolved to show,
-  but the node is not known to be a sink. (`:resolution` on the dynamic
-  detections is richer, but `compose` drops `:dynamic-*-detected` from slim
-  analyses, so using it would make bb and registry-mode disagree with live
-  sessions. Not in v1.)
+- `:outputs :unknown` is present exactly when a **consumer-direction**
+  production carries `:unlinked-rule` — the one "RHS effects exist but none
+  resolved" signal that survives slimming. Its `:children` is then `[]`, and
+  the renderer labels it `(outputs unknown)` rather than `(no outputs)`:
+  nothing was resolved to show, but the node is not known to be a sink. A
+  producer-direction node expands its LHS types instead, so the flag would be
+  misleading there. (`:resolution` on the dynamic detections is richer, but
+  `compose` drops `:dynamic-*-detected` from slim analyses, so using it would
+  make bb and registry-mode disagree with live sessions. Not in v1.)
 - `:polarity` is **not** part of v1: a production node does not say whether it
   matches the parent type positively, negated, or through an accumulator. See
   §2.3 and §10.
@@ -511,8 +513,8 @@ vector of `{:name … :short …}` maps, and each fact-type node also carries
 | N1 | Direct producer | `P` inserts `T`; cursor on `T`, producer | one `:production` child `P`, `:via :insert`, `:matches [T]`, `:bridge? false` |
 | N2 | Subtype bridge (producer) | `S ⊂ T`; `P` inserts `S` | `P` under `T` with `:matches [S]`, `:bridge? true`, `:short` on the match |
 | N3 | Supertype bridge (consumer) | `S ⊂ T`; `C` consumes `T`; root `S` | `C` under `S` with `:matches [T]`, `:bridge? true` |
-| N4 | Insert + retract one type | `P` inserts `T` and retracts `T` | `P` appears **once** under `T`; `:via :retract`, `:vias [:insert :retract]`; `:matches` unions both sides, not just the retract side |
-| N5 | Self-loop | `P` consumes and inserts `T` | `P` at level 1 is expandable; expanding it lists `P` under its `T` child with `:cycle? true` and no `:children` |
+| N4 | Insert + retract one type | `P` inserts `T` and retracts `T` | `P` appears **once** under `T`; `:via :retract`, `:vias [:insert :retract]`; `:matches` unions both sides, not just the retract side; the `T` node is **not** `:external?` |
+| N5 | Self-loop | `P` consumes and inserts `T`; also a `:production` root `P` with `P` in `:ancestors` | `P` at level 1 is expandable; expanding it lists `P` under its `T` child with `:cycle? true` and no `:children`; a root already on the path comes back `:cycle? true` with no `:children` |
 | N6 | Cross-type cycle | `A: T→U`, `B: U→T` | `:depth :full` terminates; the second `A` is `:cycle? true` |
 | N7 | Diamond / `:full` growth | `A→{B,C}→D` repeated k levels | node count stays linear in k; repeats carry `:seen? true` and `:cycle? false` |
 | N8 | Depth semantics | chain of 3 productions | levels *below the requested root*: `:depth 0` / `1` / `:full` give 1 / 2 / 3, for both `:cursor` and `:production` roots |
@@ -562,7 +564,7 @@ There is no `:polarity` test: v1 emits none (§2.3).
 | E2 | Render from recorded EDN | given a stored R2-shaped response, the rows/labels are right: `via :loan-app/application-outcome` from `:matches`/`:bridge?`, `:type-short` beside dim `:type`, `@loan-disposition-ruleset`, `(query)`, `(external)`, `↻ cycle` — no fact-type name shortening in the elisp |
 | E3 | Sibling key collision | the same production under two fact types toggles independently |
 | E4 | Pre-expanded depth | a `:depth 1` response renders expanded with no extra fetch |
-| E5 | `TAB` request shape | sends `:ancestors` = path production names minus self; sends nothing for cycle, `:seen?`, `:message`, `:outputs :unknown`, or empty-leaf rows |
+| E5 | `TAB` request shape | sends `:ancestors` = path production names minus self; sends nothing for cycle, `:message`, `:outputs :unknown`, or empty-leaf rows; a `:seen?` row expands on demand |
 | E6 | Errors | `{:error …}` and bb non-zero exit render as message rows, for the root and for an expansion |
 | E7 | Transports | provenance op → `--provenance` on bb and `client/fact-type-provenance` on nREPL (the POC's `hierarchy-lhs-producers-transports`, renamed) |
 | E8 | Navigate unchanged | the existing `navigate-*` tests pass untouched after step 7 |
@@ -640,8 +642,20 @@ Checkpoints, not a diary. Update in place as work lands.
       `RET`/`<return>` jump, stale rows ask for a refresh, the ns fallback
       reports a namespace that is not on the REPL's classpath, and `g` re-runs
       the root through `revert-buffer-function` rather than a private binding
-- [ ] 9 Docs + bb header + `editor/AGENTS.md`
-- [ ] 10 Full verification
+- [x] 9 Docs + bb header + `editor/AGENTS.md` — the provenance contract, node
+      kinds, depth/cycle semantics, thin-editor rule, and the v1 no-polarity
+      limitation are in `docs/explorer-editor-navigation.md`; the Emacs
+      commands + `tabulated-list-mode` view/keys/defcustoms are in
+      `docs/explorer-editor-navigation-emacs.md`; the Neovim doc records that
+      the contract is ready and a renderer is the only remaining work;
+      `editor/AGENTS.md` gains the transport table, the provenance section, and
+      the babashka `.cpcache` sandbox note; the `editor-client.bb` header already
+      documents `--provenance`
+- [x] 10 Full verification — `explorer` `make test` / `lint` / `format-check` /
+      `reflection-check` / `bb-smoke-test` and `editor/emacs` `make test`
+      (Tier 2), `make test-tier1`, `make check-elisp` all green; the §8
+      production-root and `:depth :full` consumer smokes match the expected
+      shapes
 
 ## 8. Verification
 
