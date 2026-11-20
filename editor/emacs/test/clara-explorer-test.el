@@ -1227,3 +1227,101 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
 
 (provide 'clara-explorer-test)
 ;;; clara-explorer-test.el ends here
+
+;; ---------------------------------------------------------------------------
+;; Wrapper heads — point on `:not`/`:and` (or the wrapper bracket)
+;; ---------------------------------------------------------------------------
+
+(ert-deftest lhs-type-not-wrapper-head-resolves-inner-type ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [:not [:my-ns/my-type]] => 1)"
+    (should (equal (test--search-token ":not") ":my-ns/my-type"))))
+
+(ert-deftest lhs-type-not-wrapper-bracket-resolves-inner-type ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [:not [:my-ns/my-type]] => 1)"
+    (search-forward "[:not")
+    (search-backward "[")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc))
+           (side (clara-explorer--side-at-point form-start)))
+      (should (equal (clara-explorer--token-at-point form-start side) ":my-ns/my-type")))))
+
+(ert-deftest lhs-type-and-wrapper-head-resolves-first-child ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [:and [P] [Q]] => 1)"
+    (should (equal (test--search-token ":and") "P"))))
+
+;; ---------------------------------------------------------------------------
+;; Operation prep and dispatch (`--prepare-query' / `--op-result')
+;; ---------------------------------------------------------------------------
+
+(ert-deftest prepare-query-sends-no-operation ()
+  (let (sent)
+    (cl-letf (((symbol-function 'cider-connected-p) (lambda () t))
+              ((symbol-function 'cider-current-repl) (lambda (&rest _) 'conn))
+              ((symbol-function 'clara-explorer--effective-transport) (lambda (_c) 'bb))
+              ((symbol-function 'clara-explorer--context)
+               (lambda () (list :production "ns/q" :kind 'query :side :lhs
+                                :caller-ns "ns" :token "Doc")))
+              ((symbol-function 'clara-explorer--resolve-token) (lambda (_t _ns _c) "fq.Doc"))
+              ((symbol-function 'clara-explorer--bb-eval) (lambda (&rest _) (setq sent 'bb-eval)))
+              ((symbol-function 'clara-explorer--bb-run) (lambda (&rest _) (setq sent 'bb-run)))
+              ((symbol-function 'clara-explorer--eval-edn) (lambda (&rest _) (setq sent 'nrepl))))
+      (let ((query (clara-explorer--prepare-query)))
+        (should query)
+        (should (eq (plist-get query :transport) 'bb))
+        (should (equal (plist-get (plist-get query :input) :production) "ns/q"))
+        (should (equal (plist-get (plist-get query :input) :side) :lhs))
+        (should (equal (plist-get (plist-get query :input) :caller-ns) "ns"))
+        (should (equal (plist-get (plist-get query :input) :token) "fq.Doc"))
+        (should (eq (plist-get (plist-get query :ctx) :kind) 'query))
+        (should (equal (plist-get query :conn) 'conn))))
+    (should-not sent)))
+
+(ert-deftest prepare-query-works-inside-a-defquery ()
+  (with-clara-buffer "(ns test) (r/defquery find-x [?x] [DocumentCheck (= status :pass)])"
+    (search-forward "DocumentCheck")
+    (cl-letf (((symbol-function 'cider-connected-p) (lambda () t))
+              ((symbol-function 'cider-current-repl) (lambda (&rest _) 'conn))
+              ((symbol-function 'cider-current-ns) (lambda (&rest _) "test"))
+              ((symbol-function 'clara-explorer--effective-transport) (lambda (_c) 'nrepl))
+              ((symbol-function 'clara-explorer--resolve-token) (lambda (_t _ns _c) nil)))
+      (let ((query (clara-explorer--prepare-query)))
+        (should query)
+        (should (eq (plist-get (plist-get query :ctx) :kind) 'query))
+        (should (equal (plist-get (plist-get query :input) :production) "test/find-x"))
+        (should (equal (plist-get (plist-get query :input) :token) "DocumentCheck"))))))
+
+(ert-deftest op-result-provenance-transports ()
+  (let (bb-args nrepl-code
+        (input (list :node (list :kind :production :name "ns/p")
+                     :direction :producer
+                     :depth 0
+                     :ancestors ["ns/outer"]))
+        (bb-query (list :input (list :token "Doc") :transport 'bb :conn nil))
+        (nrepl-query (list :input (list :token "Doc") :transport 'nrepl :conn nil)))
+    (cl-letf (((symbol-function 'clara-explorer--bb-selection) (lambda () "{sel}"))
+              ((symbol-function 'clara-explorer--bb-run)
+               (lambda (args) (setq bb-args args) 'bb-result))
+              ((symbol-function 'clara-explorer--eval-edn)
+               (lambda (code _conn) (setq nrepl-code code) 'nrepl-result)))
+      (should (eq (clara-explorer--op-result bb-query 'fact-type-provenance input) 'bb-result))
+      (should (equal (car bb-args) "--provenance"))
+      (should (equal (cadr bb-args) "{sel}"))
+      (should (string-match-p (regexp-quote ":node {:kind :production :name \"ns/p\"}")
+                              (caddr bb-args)))
+      (should (string-match-p (regexp-quote ":ancestors [\"ns/outer\"]") (caddr bb-args)))
+      (should (eq (clara-explorer--op-result nrepl-query 'fact-type-provenance input)
+                  'nrepl-result))
+      (should (string-match-p (regexp-quote "client/fact-type-provenance") nrepl-code))
+      (should (string-match-p (regexp-quote ":direction :producer") nrepl-code)))))
+
+(ert-deftest op-result-navigate-keeps-the-wire-contract ()
+  (let (bb-input
+        (query (list :input (list :production "ns/p" :side :lhs :caller-ns "ns" :token "T")
+                     :transport 'bb
+                     :conn nil)))
+    (cl-letf (((symbol-function 'clara-explorer--bb-selection) (lambda () "{sel}"))
+              ((symbol-function 'clara-explorer--bb-eval)
+               (lambda (_sel input) (setq bb-input input) 'bb-result)))
+      (should (eq (clara-explorer--op-result query 'navigate) 'bb-result))
+      (should (string-match-p (regexp-quote ":side :lhs") bb-input))
+      (should (string-match-p (regexp-quote ":token \"T\"") bb-input)))))

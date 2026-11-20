@@ -123,12 +123,16 @@ comment to end of line, repeatedly until point stops moving.  Uses
   (gethash key map))
 
 (defun clara-explorer--edn-value (x)
-  "Print an elisp value X as an EDN literal string."
+  "Print an elisp value X as an EDN literal string.
+A keyword-keyed plist prints as a nested map, so an operation input that carries
+maps (`fact-type-provenance`'s `:node` / `:input`) serializes without a second
+printer."
   (cond
    ((null x) "nil")
    ((eq x t) "true")
    ((stringp x) (prin1-to-string (substring-no-properties x)))
    ((symbolp x) (substring-no-properties (symbol-name x)))
+   ((keywordp (car-safe x)) (clara-explorer--edn-map x))
    (t (prin1-to-string x))))
 
 (defun clara-explorer--edn-map (entries)
@@ -540,7 +544,10 @@ without moving point."
 (defun clara-explorer--wrapper-inner-type-bounds (beg orig)
   "For wrapper vector at BEG, return fact-type bounds of inner containing ORIG.
 BEG must be a vector whose first element is a logical operator
-\(`:and'/`:or'/`:not'/`:exists').  Recurses for nested wrappers."
+\(`:and'/`:or'/`:not'/`:exists').  Recurses for nested wrappers.  When ORIG
+sits on the wrapper head or its opening bracket — before the first child
+condition — the first child's type bounds are returned: the user is pointing at
+the condition, not at an operator."
   (let ((wrapper-end (save-excursion
                        (goto-char beg)
                        (forward-sexp 1)
@@ -555,9 +562,12 @@ BEG must be a vector whose first element is a logical operator
          ((eq (char-after) ?\[)
           (let ((inner-beg (point))
                 (inner-end (save-excursion (forward-sexp 1) (point))))
-            (if (and (>= orig inner-beg) (<= orig inner-end))
-                (throw 'found (clara-explorer--type-bounds-in-condition-at-point inner-beg orig))
-              (goto-char inner-end))))
+            (cond
+             ((and (>= orig inner-beg) (<= orig inner-end))
+              (throw 'found (clara-explorer--type-bounds-in-condition-at-point inner-beg orig)))
+             ((< orig inner-beg)
+              (throw 'found (clara-explorer--type-bounds-in-condition-at-point inner-beg inner-beg)))
+             (t (goto-char inner-end)))))
          ((eq (char-after) ?\()
           (forward-sexp 1))
          (t
@@ -751,17 +761,14 @@ Used for RHS and global cases where LHS-structure is not applicable."
 ;; Remote navigation (§9.3, §9.4)
 ;; ---------------------------------------------------------------------------
 
-(defun clara-explorer--navigate-code (production side caller-ns token)
-  "Build the Clojure form string that calls `client/navigate`.
-   Uses `requiring-resolve` so the namespace is loaded at runtime rather than
-   resolved at compile time (which would fail if the namespace is not yet
-   loaded in the REPL)."
-  (format "((requiring-resolve 'clara.explorer.server.client/navigate) %s)"
-          (clara-explorer--edn-map
-           (list :production production
-                 :side side
-                 :caller-ns caller-ns
-                 :token token))))
+(defun clara-explorer--op-code (op input)
+  "The Clojure form string that calls OP's `client/' fn with INPUT.
+   OP is `navigate' or `fact-type-provenance'.  Uses `requiring-resolve' so the
+   namespace is loaded at runtime rather than resolved at compile time (which
+   would fail if the namespace is not yet loaded in the REPL)."
+  (format "((requiring-resolve 'clara.explorer.server.client/%s) %s)"
+          (if (eq op 'navigate) "navigate" "fact-type-provenance")
+          (clara-explorer--edn-map input)))
 
 (defun clara-explorer--resolve-template-file ()
   "Absolute path of the canonical resolve-form template shipped beside this
@@ -914,47 +921,73 @@ file (a symlink to the `clara.explorer.server.tokens` canonical text)."
        (clara-explorer--edn-get :type result)
        (clara-explorer--edn-get :targets result)))))
 
-(defun clara-explorer--query-at-point (side)
-  "Run the navigate query for the fact type at point on SIDE (:lhs / :rhs).
-Return a plist (:result RESULT :ctx CTX :transport TRANSPORT :conn CONN),
-or nil after messaging why no query was made or no result came back.
-The transport is resolved at call time: `auto' picks nREPL when the connected
-CIDER session has a running explorer system, otherwise bb."
+(defun clara-explorer--prepare-query ()
+  "Gather the navigation context at point and resolve the token, without
+sending an operation.  Returns a plist (:input :ctx :transport :conn), or nil
+after messaging why not.  `:input' carries the *structural* side at point; an
+operation that needs a traversal direction sets its own (see
+`clara-explorer--navigate-input').  The transport is resolved at call time:
+`auto' picks nREPL when the connected CIDER session has a running explorer
+system, otherwise bb."
   (unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))
   (let* ((conn (cider-current-repl 'infer 'ensure))
          (transport (clara-explorer--effective-transport conn))
          (ctx (clara-explorer--context))
-         (production (plist-get ctx :production))
-         (kind (plist-get ctx :kind))
          (caller-ns (plist-get ctx :caller-ns))
          (token (plist-get ctx :token)))
-    (cond
-     ((null token) (message "not on a fact type") nil)
-     ((and (eq side :rhs) (eq kind 'query))
-      (message "queries have no RHS") nil)
-     (t
+    (if (null token)
+        (progn (message "not on a fact type") nil)
       (let* ((resolved (clara-explorer--resolve-token token caller-ns conn))
-             (result (if (eq transport 'bb)
-                         (clara-explorer--bb-eval
-                          (clara-explorer--bb-selection)
-                          (clara-explorer--edn-map
-                           (list :production production
-                                 :side side
-                                 :caller-ns caller-ns
-                                 :token (or resolved token))))
-                       (clara-explorer--eval-edn
-                        (clara-explorer--navigate-code production side caller-ns
-                                                       (or resolved token))
-                        conn))))
-        (if result
-            (list :result result :ctx ctx :transport transport :conn conn)
-          (message "clara-explorer: no result from navigate")
-          nil))))))
+             (input (list :production (plist-get ctx :production)
+                          :side (plist-get ctx :side)
+                          :caller-ns caller-ns
+                          :token (or resolved token))))
+        (list :input input :ctx ctx :transport transport :conn conn)))))
 
-(defun clara-explorer--navigate (side)
-  "Shared dispatcher for producer (:lhs) / consumer (:rhs) navigation."
-  (when-let* ((query (clara-explorer--query-at-point side)))
-    (clara-explorer--handle-result (plist-get query :result))))
+(defun clara-explorer--navigate-input (query direction)
+  "QUERY's prepared input with `:side' set to DIRECTION's navigate side
+\(`:lhs' for producer, `:rhs' for consumer).  `navigate' reads `:side' as the
+traversal direction; `fact-type-provenance' keeps the structural side instead."
+  (let ((input (copy-sequence (plist-get query :input))))
+    (plist-put input :side direction)
+    input))
+
+(defun clara-explorer--bb-provenance (selection-edn input-edn)
+  "Run `bb editor-client.bb --provenance SEL INPUT' and parse the result."
+  (clara-explorer--bb-run (list "--provenance" selection-edn input-edn)))
+
+(defun clara-explorer--op-result (query op &optional input)
+  "Send the prepared QUERY to OP and return the parsed result, or nil after
+messaging why not.  OP is `navigate' or `fact-type-provenance'; INPUT is that
+operation's input map (defaulting to QUERY's prepared input).  bb shells out to
+`editor-client.bb' (no flag for navigate, `--provenance' for provenance); nREPL
+evals the matching call in `client`."
+  (let* ((transport (plist-get query :transport))
+         (conn (plist-get query :conn))
+         (input (or input (plist-get query :input)))
+         (input-edn (clara-explorer--edn-map input))
+         (result (if (eq transport 'bb)
+                     (if (eq op 'navigate)
+                         (clara-explorer--bb-eval (clara-explorer--bb-selection) input-edn)
+                       (clara-explorer--bb-provenance (clara-explorer--bb-selection) input-edn))
+                   (clara-explorer--eval-edn (clara-explorer--op-code op input) conn))))
+    (if result
+        result
+      (message "clara-explorer: no result from %s" op)
+      nil)))
+
+(defun clara-explorer--navigate (direction)
+  "Shared dispatcher for producer (:lhs) / consumer (:rhs) navigation.  A query
+has no RHS, so only the consumer direction rejects one; provenance accepts any
+token."
+  (when-let* ((query (clara-explorer--prepare-query)))
+    (if (and (eq direction :rhs)
+             (eq (plist-get (plist-get query :ctx) :kind) 'query))
+        (message "queries have no RHS")
+      (when-let* ((result (clara-explorer--op-result
+                           query 'navigate
+                           (clara-explorer--navigate-input query direction))))
+        (clara-explorer--handle-result result)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public commands (§9.6, §9.9)

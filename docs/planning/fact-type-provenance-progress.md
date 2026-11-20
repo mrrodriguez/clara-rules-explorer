@@ -426,7 +426,9 @@ work stays in `editor/emacs/clara-explorer.el`. No new file, no
   consumer); provenance allows any token inside a `defquery`.
 - Add `clara-explorer--op-result QUERY OP &optional INPUT`: `navigate` → bb no
   flag / nREPL `client/navigate`; `fact-type-provenance` → bb `--provenance` /
-  nREPL `client/fact-type-provenance`.
+  nREPL `client/fact-type-provenance`. `clara-explorer--edn-value` learns to
+  print keyword-keyed plists as nested maps, so a provenance input's `:node` /
+  `:input` maps serialize for both wires without a second printer.
 - Two autoloaded commands sharing one implementation:
   `clara-explorer-show-producer-provenance` and
   `clara-explorer-show-consumer-provenance`.
@@ -551,6 +553,10 @@ There is no `:polarity` test: v1 emits none (§2.3).
 | E7 | Transports | provenance op → `--provenance` on bb and `client/fact-type-provenance` on nREPL (the POC's `hierarchy-lhs-producers-transports`, renamed) |
 | E8 | Navigate unchanged | the existing `navigate-*` tests pass untouched after step 7 |
 
+Step 7 additionally pins the wrapper-head fallback: point on `:not`/`:and` or on
+the wrapper's opening bracket resolves to the first child condition's type
+(`lhs-type-not-wrapper-head-…`, `…-bracket-…`, `lhs-type-and-wrapper-head-…`).
+
 ## 7. Progress log
 
 Checkpoints, not a diary. Update in place as work lands.
@@ -598,7 +604,11 @@ Checkpoints, not a diary. Update in place as work lands.
       `navigate/fact-type-provenance`; B1 compares the five registry-mode trees to the JVM answer
       (sources stripped), B2 compares a variant unit to its mainline, B3 pins the `:full` node
       count against the JVM and the process finishing
-- [ ] 7 Emacs `:not` wrapper fallback + `--prepare-query` + op runner refactor
+- [x] 7 Emacs `:not` wrapper fallback + `--prepare-query` + op runner refactor —
+      `--prepare-query` gathers context/transport/token and sends nothing (the query
+      guard now lives in the consumer navigate command); `--op-result` +
+      `--op-code`/`--bb-provenance` dispatch both ops; `--edn-value` prints nested
+      plists as maps; wrapper heads and brackets resolve the first child
 - [ ] 8 Emacs provenance view, both commands, built-in tree
 - [ ] 9 Docs + bb header + `editor/AGENTS.md`
 - [ ] 10 Full verification
