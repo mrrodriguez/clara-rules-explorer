@@ -557,6 +557,15 @@ Step 7 additionally pins the wrapper-head fallback: point on `:not`/`:and` or on
 the wrapper's opening bracket resolves to the first child condition's type
 (`lhs-type-not-wrapper-head-…`, `…-bracket-…`, `lhs-type-and-wrapper-head-…`).
 
+Step 8 implements this matrix as `provenance-row-labels-render-the-contract-test`
+and `provenance-labels-use-contract-short-names-and-markers-test` (E2),
+`provenance-toggle-is-keyed-by-full-path-test` (E3),
+`provenance-pre-expanded-depth-needs-no-fetch-test` (E4),
+`provenance-tab-request-shape-test` (E5), and
+`provenance-request-turns-errors-into-message-nodes-test` (E6). The automated
+tests exercise the row/label/request seams; the interactive view (side window,
+`RET` jump) is smoke-tested by loading the file in a real Emacs.
+
 ## 7. Progress log
 
 Checkpoints, not a diary. Update in place as work lands.
@@ -609,7 +618,11 @@ Checkpoints, not a diary. Update in place as work lands.
       guard now lives in the consumer navigate command); `--op-result` +
       `--op-code`/`--bb-provenance` dispatch both ops; `--edn-value` prints nested
       plists as maps; wrapper heads and brackets resolve the first child
-- [ ] 8 Emacs provenance view, both commands, built-in tree
+- [x] 8 Emacs provenance view, both commands, built-in tree —
+      `clara-explorer-provenance-mode` (`tabulated-list-mode`), two autoloaded
+      commands, full-path-keyed `expanded`/`children` tables, inline seeding at
+      `:depth > 0`/`:full`, `TAB` fetch at `:depth 0`, `RET` → `--goto`, `g`
+      re-runs the stored root input, message rows for backend/transport errors
 - [ ] 9 Docs + bb header + `editor/AGENTS.md`
 - [ ] 10 Full verification
 

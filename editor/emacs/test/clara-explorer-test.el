@@ -1325,3 +1325,229 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
       (should (eq (clara-explorer--op-result query 'navigate) 'bb-result))
       (should (string-match-p (regexp-quote ":side :lhs") bb-input))
       (should (string-match-p (regexp-quote ":token \"T\"") bb-input)))))
+
+;; ---------------------------------------------------------------------------
+;; Provenance view (tabulated-list-mode, no packages)
+;; ---------------------------------------------------------------------------
+
+;; ERT has no clojure.test-style grouping form; this names a group of assertions
+;; without changing how failures are reported (the enclosing deftest is the unit).
+(defmacro test--group (_string &rest body)
+  (declare (indent 1))
+  `(progn ,@body))
+
+(defun test--prov (&rest kvs)
+  "A provenance node shaped as parseedn returns one: a hash-table, vectors for lists."
+  (let ((h (make-hash-table :test 'equal)))
+    (while kvs (puthash (pop kvs) (pop kvs) h))
+    h))
+
+(defun test--prov-labels (entries)
+  "The plain-text label of each tabulated-list ENTRY."
+  (mapcar (lambda (row) (substring-no-properties (aref (cadr row) 0))) entries))
+
+(defun test--prov-ids (entries)
+  (mapcar #'car entries))
+
+(ert-deftest provenance-row-labels-render-the-contract-test ()
+  (let* ((matches (vector (test--prov :name ":loan-app/application-outcome"
+                                      :short ":loan-app/application-outcome")))
+         (root (test--prov
+                :kind :fact-type
+                :type "clara.explorer.test.rules.loan_app_rules.ApplicationOutcome"
+                :type-short "ApplicationOutcome"
+                :children
+                (vector
+                 (test--prov :kind :production
+                             :name "clara.explorer.test.rules.loan-outcome-notices/notice-approved-app"
+                             :ns "clara.explorer.test.rules.loan-outcome-notices"
+                             :type "rule"
+                             :unit "loan-disposition-ruleset"
+                             :via :consume
+                             :matches matches
+                             :bridge? t
+                             :children [])
+                 (test--prov :kind :production
+                             :name "clara.explorer.test.rules.loan-app-rules/find-app-outcome"
+                             :ns "clara.explorer.test.rules.loan-app-rules"
+                             :type "query"
+                             :children [])
+                 (test--prov :kind :production
+                             :name "clara.explorer.test.rules.loan-app-rules/app-outcome-approved-args-demo"
+                             :ns "clara.explorer.test.rules.loan-app-rules"
+                             :type "rule"
+                             :children [])
+                 (test--prov :kind :production
+                             :name "clara.explorer.test.rules.loan-app-rules/unresolved"
+                             :ns "clara.explorer.test.rules.loan-app-rules"
+                             :type "rule"
+                             :outputs :unknown
+                             :children []))))
+         (labels (with-temp-buffer
+                   (test--prov-labels (clara-explorer--provenance-load root :consumer nil nil)))))
+    (test--group "the fact type shows its contract short name"
+      (should (string-match-p "^ApplicationOutcome" (car labels))))
+    (test--group "a bridge production says via <short match>"
+      (should (cl-find-if (lambda (l) (string-match-p "via :loan-app/application-outcome" l))
+                          labels)))
+    (test--group "the unit and the kind markers"
+      (should (cl-find-if (lambda (l) (string-match-p "@loan-disposition-ruleset" l)) labels))
+      (should (cl-find-if (lambda (l) (string-match-p "(query)" l)) labels)))
+    (test--group "leaf kinds"
+      (should (cl-find-if (lambda (l) (string-match-p "(no outputs)" l)) labels))
+      (should (cl-find-if (lambda (l) (string-match-p "(outputs unknown)" l)) labels)))))
+
+(ert-deftest provenance-labels-use-contract-short-names-and-markers-test ()
+  (test--group "the short name is the contract's :type-short, never derived from :type"
+    (let* ((node (test--prov :kind :fact-type
+                             :type "some.deep.Klass"
+                             :type-short "SHORT"
+                             :external? t
+                             :children []))
+           (label (substring-no-properties
+                   (clara-explorer--provenance-fact-type-label node))))
+      (should (string-prefix-p "SHORT" label))
+      (should (string-match-p "some\\.deep\\.Klass" label))
+      (should (string-match-p "(external)" label))))
+  (test--group "cycle and already-shown markers"
+    (let ((cycle (test--prov :kind :production :name "ns/a" :ns "ns" :type "rule"
+                             :cycle? t :children []))
+          (seen (test--prov :kind :production :name "ns/b" :ns "ns" :type "rule"
+                            :seen? t :children [])))
+      (should (string-match-p "↻ cycle"
+                              (clara-explorer--provenance-production-label cycle :producer)))
+      (should (string-match-p "↑ shown above"
+                              (clara-explorer--provenance-production-label seen :producer)))))
+  (test--group "a retract edge is marked"
+    (let ((node (test--prov :kind :production :name "ns/r" :ns "ns" :type "rule"
+                            :via :retract :vias [:retract] :children [])))
+      (should (string-match-p "(retract)"
+                              (clara-explorer--provenance-production-label node :producer))))))
+
+(ert-deftest provenance-toggle-is-keyed-by-full-path-test ()
+  (let* ((q-node (test--prov :kind :production :name "ns/q" :ns "ns" :type "rule"))
+         (ft-a (test--prov :kind :fact-type :type "A" :type-short "A"
+                           :children (vector q-node)))
+         (ft-b (test--prov :kind :fact-type :type "B" :type-short "B"
+                           :children (vector q-node)))
+         (p (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                        :children (vector ft-a ft-b)))
+         (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                           :children (vector p))))
+    (with-temp-buffer
+      (clara-explorer--provenance-load root :producer nil nil)
+      (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                 (lambda (&rest _)
+                   (test--prov :kind :production :name "ns/q" :ns "ns" :type "rule"
+                               :children (vector (test--prov :kind :fact-type
+                                                             :type "A2" :type-short "A2"
+                                                             :children []))))))
+        (should (clara-explorer--provenance-toggle-path
+                 (vector "T" "ns/p" "A" "ns/q")))
+        (let ((labels (test--prov-labels
+                       (clara-explorer--provenance-entries root :producer))))
+          (should (= 1 (length (cl-remove-if-not
+                                (lambda (l) (string-match-p "A2" l)) labels))))))
+      (test--group "the sibling path stays collapsed"
+        (should (= 7 (length (clara-explorer--provenance-entries root :producer))))))))
+
+(ert-deftest provenance-pre-expanded-depth-needs-no-fetch-test ()
+  (let* ((grandchild (test--prov :kind :production :name "ns/r" :ns "ns" :type "rule"
+                                 :children []))
+         (child-ft (test--prov :kind :fact-type :type "U" :type-short "U"
+                               :children (vector grandchild)))
+         (p (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                        :children (vector child-ft)))
+         (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                           :children (vector p))))
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                 (lambda (&rest _) (error "must not fetch"))))
+        (let ((ids (test--prov-ids (clara-explorer--provenance-load root :producer nil nil))))
+          (should (cl-find-if (lambda (id) (equal id (vector "T" "ns/p" "U" "ns/r")))
+                              ids)))))))
+
+(ert-deftest provenance-tab-request-shape-test ()
+  (test--group "the root layer has no ancestors"
+    (let* ((p1 (test--prov :kind :production :name "ns/p1" :ns "ns" :type "rule"))
+           (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                             :children (vector p1)))
+           captured)
+      (with-temp-buffer
+        (clara-explorer--provenance-load root :producer 'query nil)
+        (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                   (lambda (_q input)
+                     (setq captured input)
+                     (test--prov :kind :production :name "ns/p1" :ns "ns" :type "rule"
+                                 :children []))))
+          (should (clara-explorer--provenance-toggle-path (vector "T" "ns/p1"))))
+        (should (equal (plist-get captured :node)
+                       (list :kind :production :name "ns/p1")))
+        (should (equal (plist-get captured :depth) 0))
+        (should (eq (plist-get captured :direction) :producer))
+        (should (equal (plist-get captured :ancestors) [])))))
+  (test--group "a nested production sends the production names above it, minus self"
+    (let* ((p2 (test--prov :kind :production :name "ns/p2" :ns "ns" :type "rule"))
+           (u (test--prov :kind :fact-type :type "U" :type-short "U"
+                          :children (vector p2)))
+           (p1 (test--prov :kind :production :name "ns/p1" :ns "ns" :type "rule"
+                           :children (vector u)))
+           (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                             :children (vector p1)))
+           captured)
+      (with-temp-buffer
+        (clara-explorer--provenance-load root :producer 'query nil)
+        (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                   (lambda (_q input)
+                     (setq captured input)
+                     (test--prov :kind :production :name "ns/p2" :ns "ns" :type "rule"
+                                 :children []))))
+          (should (clara-explorer--provenance-toggle-path
+                   (vector "T" "ns/p1" "U" "ns/p2"))))
+        (should (equal (plist-get captured :ancestors) ["ns/p1"])))))
+  (test--group "cycle, leaf, outputs-unknown, and message rows do not fetch"
+    (let* ((leaf (test--prov :kind :production :name "ns/leaf" :ns "ns" :type "rule"
+                             :children []))
+           (cycle (test--prov :kind :production :name "ns/cycle" :ns "ns" :type "rule"
+                              :cycle? t))
+           (unknown (test--prov :kind :production :name "ns/unknown" :ns "ns" :type "rule"
+                                :outputs :unknown :children []))
+           (message (clara-explorer--provenance-message-node "boom"))
+           (ft (test--prov :kind :fact-type :type "A" :type-short "A"
+                           :children (vector leaf cycle unknown message)))
+           (p (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                          :children (vector ft)))
+           (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                             :children (vector p))))
+      (with-temp-buffer
+        (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                   (lambda (&rest _) (error "must not fetch")))
+                  ((symbol-function 'message) (lambda (&rest _) nil)))
+          (clara-explorer--provenance-load root :producer nil nil)
+          (dolist (path (list (vector "T" "ns/p" "A" "ns/leaf")
+                              (vector "T" "ns/p" "A" "ns/cycle")
+                              (vector "T" "ns/p" "A" "ns/unknown")
+                              (vector "T" "ns/p" "A" "boom")))
+            (should-not (clara-explorer--provenance-toggle-path path))))))))
+
+(ert-deftest provenance-request-turns-errors-into-message-nodes-test ()
+  (test--group "a backend error map"
+    (cl-letf (((symbol-function 'clara-explorer--op-result)
+               (lambda (&rest _) (test--prov :error "no fact type found"))))
+      (let ((node (clara-explorer--provenance-request nil nil)))
+        (should (eq (clara-explorer--edn-get :kind node) :message))
+        (should (equal (clara-explorer--edn-get :text node) "no fact type found")))))
+  (test--group "a transport failure (bb exit) becomes a message node"
+    (cl-letf (((symbol-function 'clara-explorer--op-result)
+               (lambda (&rest _) (user-error "editor-client.bb exited 1"))))
+      (let ((node (clara-explorer--provenance-request nil nil)))
+        (should (string-match-p "exited 1" (clara-explorer--edn-get :text node))))))
+  (test--group "a nil result and a message root render as one message row"
+    (cl-letf (((symbol-function 'clara-explorer--op-result) (lambda (&rest _) nil)))
+      (should (eq (clara-explorer--edn-get :kind (clara-explorer--provenance-request nil nil))
+                  :message)))
+    (with-temp-buffer
+      (should (equal (test--prov-labels
+                      (clara-explorer--provenance-load
+                       (clara-explorer--provenance-message-node "boom") :producer nil nil))
+                     '("boom"))))))

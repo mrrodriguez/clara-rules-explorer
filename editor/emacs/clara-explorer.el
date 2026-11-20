@@ -1097,5 +1097,368 @@ Has no effect on the nREPL transport."
         (message "clara-explorer: bb unit set"))
     (message "clara-explorer: warning — unit selection only affects the bb transport (currently nrepl)")))
 
+
+;; ---------------------------------------------------------------------------
+;; Fact type provenance view (built-in `tabulated-list-mode')
+;; ---------------------------------------------------------------------------
+
+(defcustom clara-explorer-provenance-depth 0
+  "Initial expansion depth for a provenance view.
+0 shows the root's immediate production layer; N inlines N further levels;
+`full' expands until a path cycle (`:cycle?') or an already-expanded
+production (`:seen?') stops it."
+  :type '(choice (integer :tag "Production levels")
+                 (const :tag "Full" full))
+  :group 'clara-explorer)
+
+(defcustom clara-explorer-provenance-window-params nil
+  "Alist for `display-buffer-in-side-window' when showing a provenance view.
+nil uses the side-window defaults."
+  :type '(alist :key-type symbol :value-type sexp)
+  :group 'clara-explorer)
+
+(defconst clara-explorer--provenance-buffer-name "*Clara Fact Type Provenance*"
+  "Buffer name of the provenance view.")
+
+(defvar-local clara-explorer--provenance-root nil
+  "The root node of the rendered tree.")
+
+(defvar-local clara-explorer--provenance-direction nil
+  "The traversal direction: `:producer' or `:consumer'.")
+
+(defvar-local clara-explorer--provenance-query nil
+  "The prepared query the view was opened from (for `g').")
+
+(defvar-local clara-explorer--provenance-input nil
+  "The root operation input the view was opened with (for `g').")
+
+(defvar-local clara-explorer--provenance-expanded nil
+  "Hash table (equal) of full tree path -> t for open production rows.")
+
+(defvar-local clara-explorer--provenance-children nil
+  "Hash table (equal) of full tree path -> children fetched after the root.")
+
+(defvar-local clara-explorer--provenance-nodes nil
+  "Hash table (equal) of full tree path -> node, rebuilt on every render.")
+
+(defun clara-explorer--provenance-message-node (text)
+  "A leaf node carrying TEXT, used for transport and backend errors."
+  (let ((node (make-hash-table :test 'equal)))
+    (puthash :kind :message node)
+    (puthash :text text node)
+    node))
+
+(defun clara-explorer--provenance-node-key (node)
+  "The full-path component for NODE: its fact-type name, production name, or
+message text.  Alternating fact-type and production names make the path unique
+per tree position, so the same production under two sibling fact types toggles
+independently."
+  (pcase (clara-explorer--edn-get :kind node)
+    (:fact-type (clara-explorer--edn-get :type node))
+    (:production (clara-explorer--edn-get :name node))
+    (_ (clara-explorer--edn-get :text node))))
+
+(defun clara-explorer--provenance-vias-label (node)
+  "The retract aside for an edge that is not insert-only, else nil."
+  (let ((vias (clara-explorer--edn-get :vias node))
+        (via (clara-explorer--edn-get :via node)))
+    (cond
+     ((and (vectorp vias) (> (length vias) 1))
+      (propertize " (insert+retract)" 'face 'warning))
+     ((or (equal vias [:retract]) (eq via :retract))
+      (propertize " (retract)" 'face 'warning)))))
+
+(defun clara-explorer--provenance-fact-type-label (node)
+  "NODE's label: the contract's short type, dimmed full type, and markers.
+The short name comes from `:type-short'; nothing is derived from `:type'."
+  (let ((short (clara-explorer--edn-get :type-short node))
+        (full (clara-explorer--edn-get :type node)))
+    (concat short
+            (unless (equal short full)
+              (concat " " (propertize full 'face 'shadow)))
+            (when (clara-explorer--edn-get :external? node)
+              (propertize " (external)" 'face 'shadow))
+            (clara-explorer--provenance-vias-label node))))
+
+(defun clara-explorer--provenance-matches-label (node)
+  "The `via <short types>' suffix for a production that reaches the parent
+through the hierarchy; nil when the edge is direct."
+  (let ((matches (clara-explorer--edn-get :matches node)))
+    (when (and (clara-explorer--edn-get :bridge? node)
+               matches
+               (not (equal matches [])))
+      (propertize
+       (format " via %s"
+               (mapconcat (lambda (match) (clara-explorer--edn-get :short match))
+                          (append matches nil)
+                          ", "))
+       'face 'shadow))))
+
+(defun clara-explorer--provenance-production-label (node direction)
+  "NODE's label: unqualified rule name, dim ns, unit, kind/leaf/edge markers."
+  (let* ((name (clara-explorer--edn-get :name node))
+         (ns (clara-explorer--edn-get :ns node))
+         (unit (clara-explorer--edn-get :unit node))
+         (type (clara-explorer--edn-get :type node))
+         (outputs (clara-explorer--edn-get :outputs node))
+         (leaf (equal (clara-explorer--edn-get :children node) [])))
+    (concat
+     (propertize (clara-explorer--unqualified-name name)
+                 'face 'font-lock-function-name-face)
+     (when ns (concat " " (propertize ns 'face 'shadow)))
+     (when (equal type "query") (propertize " (query)" 'face 'shadow))
+     (when unit (concat " " (propertize (format "@%s" unit) 'face 'shadow)))
+     (cond
+      (outputs (propertize " (outputs unknown)" 'face 'shadow))
+      ((and leaf (eq direction :consumer) (not (equal type "query")))
+       (propertize " (no outputs)" 'face 'shadow)))
+     (clara-explorer--provenance-matches-label node)
+     (clara-explorer--provenance-vias-label node)
+     (when (clara-explorer--edn-get :cycle? node)
+       (propertize " ↻ cycle" 'face 'shadow))
+     (when (clara-explorer--edn-get :seen? node)
+       (propertize " ↑ shown above" 'face 'shadow)))))
+
+(defun clara-explorer--provenance-row-label (node indent direction)
+  "One row's label: INDENT per path level, then the node's own label."
+  (concat (make-string (* 2 indent) ?\s)
+          (pcase (clara-explorer--edn-get :kind node)
+            (:fact-type (clara-explorer--provenance-fact-type-label node))
+            (:production (clara-explorer--provenance-production-label node direction))
+            (_ (propertize (format "%s" (clara-explorer--edn-get :text node))
+                           'face 'shadow)))))
+
+(defun clara-explorer--provenance-has-children-p (node)
+  "True when NODE carries a non-empty `:children' list."
+  (let ((children (clara-explorer--edn-get :children node)))
+    (and children (not (equal children [])))))
+
+(defun clara-explorer--provenance-seed (node path)
+  "Mark expanded — and cache — every production below NODE whose children
+came populated.  A `:depth N' / `:full' response therefore renders expanded
+without a fetch."
+  (dolist (child (append (clara-explorer--edn-get :children node) nil))
+    (let ((child-path (vconcat path
+                               (vector (clara-explorer--provenance-node-key child)))))
+      (when (and (eq (clara-explorer--edn-get :kind child) :production)
+                 (clara-explorer--provenance-has-children-p child))
+        (puthash child-path
+                 (append (clara-explorer--edn-get :children child) nil)
+                 clara-explorer--provenance-children)
+        (puthash child-path t clara-explorer--provenance-expanded))
+      (clara-explorer--provenance-seed child child-path))))
+
+(defun clara-explorer--provenance-visible-children (node path)
+  "The child nodes to render under NODE at PATH.  Fact types are
+transparent; a production's children show only while it is expanded, from the
+cache when the level was fetched later."
+  (pcase (clara-explorer--edn-get :kind node)
+    (:fact-type (append (clara-explorer--edn-get :children node) nil))
+    (:production
+     (when (gethash path clara-explorer--provenance-expanded)
+       (or (gethash path clara-explorer--provenance-children)
+           (append (clara-explorer--edn-get :children node) nil))))
+    (_ nil)))
+
+(defun clara-explorer--provenance-rows (node path direction)
+  "Rows for NODE at PATH, depth-first, plus the node table the commands read."
+  (puthash path node clara-explorer--provenance-nodes)
+  (cons (list path (vector (clara-explorer--provenance-row-label
+                            node (1- (length path)) direction)))
+        (mapcan (lambda (child)
+                  (clara-explorer--provenance-rows
+                   child
+                   (vconcat path (vector (clara-explorer--provenance-node-key child)))
+                   direction))
+                (clara-explorer--provenance-visible-children node path))))
+
+(defun clara-explorer--provenance-entries (root direction)
+  "The `tabulated-list-entries' for ROOT, rebuilding the path -> node table."
+  (setq clara-explorer--provenance-nodes (make-hash-table :test 'equal))
+  (clara-explorer--provenance-rows root
+                                   (vector (clara-explorer--provenance-node-key root))
+                                   direction))
+
+(defun clara-explorer--provenance-load (root direction query input)
+  "Reset the view state to ROOT and return its entries."
+  (setq clara-explorer--provenance-root root
+        clara-explorer--provenance-direction direction
+        clara-explorer--provenance-query query
+        clara-explorer--provenance-input input
+        clara-explorer--provenance-expanded (make-hash-table :test 'equal)
+        clara-explorer--provenance-children (make-hash-table :test 'equal))
+  (clara-explorer--provenance-seed root (vector (clara-explorer--provenance-node-key root)))
+  (clara-explorer--provenance-entries root direction))
+
+(defun clara-explorer--provenance-render ()
+  "Reprint the view in the current buffer."
+  (setq tabulated-list-entries
+        (clara-explorer--provenance-entries clara-explorer--provenance-root
+                                            clara-explorer--provenance-direction))
+  (tabulated-list-print t))
+
+(defun clara-explorer--provenance-request (query input)
+  "Post INPUT to the provenance op and return its `:node', or a message node.
+Both an `{:error …}' answer and a transport failure (a signalled bb exit or
+nREPL error) become message nodes, so a failed expansion keeps the buffer."
+  (condition-case err
+      (let ((result (clara-explorer--op-result query 'fact-type-provenance input)))
+        (cond
+         ((null result)
+          (clara-explorer--provenance-message-node "no result from fact-type-provenance"))
+         ((clara-explorer--edn-get :error result)
+          (clara-explorer--provenance-message-node (clara-explorer--edn-get :error result)))
+         (t (clara-explorer--edn-get :node result))))
+    (user-error
+     (clara-explorer--provenance-message-node (error-message-string err)))
+    (error
+     (clara-explorer--provenance-message-node
+      (format "error: %s" (error-message-string err))))))
+
+(defun clara-explorer--provenance-production-ancestors (path)
+  "Production names strictly above the production at PATH's last element.
+Paths alternate fact-type and production names, so the productions sit at
+the odd indices; the last element is the row being expanded and is
+excluded."
+  (let (names)
+    (cl-loop for i from 1 below (1- (length path)) by 2
+             do (push (aref path i) names))
+    (vconcat (nreverse names))))
+
+(defun clara-explorer--provenance-expandable-p (node)
+  "True when NODE can fetch another level: not a cycle, not outputs-unknown,
+not a leaf."
+  (and (not (clara-explorer--edn-get :cycle? node))
+       (not (clara-explorer--edn-get :outputs node))
+       (not (equal (clara-explorer--edn-get :children node) []))))
+
+(defun clara-explorer--provenance-toggle-path (path)
+  "Expand or collapse the production row at PATH; non-nil when the view changed.
+A `:seen?' row is fetched on demand at depth 0; cycle, message,
+outputs-unknown, and leaf rows do not toggle."
+  (let ((node (and path (gethash path clara-explorer--provenance-nodes))))
+    (when node
+      (pcase (clara-explorer--edn-get :kind node)
+        (:message (message "%s" (clara-explorer--edn-get :text node)))
+        (:fact-type (message "fact types stay expanded; expand a production"))
+        (:production
+         (cond
+          ((gethash path clara-explorer--provenance-expanded)
+           (remhash path clara-explorer--provenance-expanded)
+           t)
+          ((not (clara-explorer--provenance-expandable-p node))
+           (message "nothing to expand")
+           nil)
+          (t
+           (let ((fetched (clara-explorer--provenance-request
+                           clara-explorer--provenance-query
+                           (list :node (list :kind :production
+                                             :name (clara-explorer--edn-get :name node))
+                                 :direction clara-explorer--provenance-direction
+                                 :depth 0
+                                 :ancestors (clara-explorer--provenance-production-ancestors
+                                             path)))))
+             (if (eq (clara-explorer--edn-get :kind fetched) :message)
+                 (puthash path (list fetched) clara-explorer--provenance-children)
+               (puthash path (append (clara-explorer--edn-get :children fetched) nil)
+                        clara-explorer--provenance-children)
+               (clara-explorer--provenance-seed fetched path))
+             (puthash path t clara-explorer--provenance-expanded)
+             t))))))))
+
+(defun clara-explorer--provenance-row-node ()
+  "The node on the row at point, or nil."
+  (let ((path (tabulated-list-get-id)))
+    (and path (gethash path clara-explorer--provenance-nodes))))
+
+(defun clara-explorer-provenance-toggle ()
+  "Expand or collapse the production on the current row."
+  (interactive)
+  (when (clara-explorer--provenance-toggle-path (tabulated-list-get-id))
+    (clara-explorer--provenance-render)))
+
+(defun clara-explorer-provenance-visit ()
+  "Jump to the production on the current row."
+  (interactive)
+  (let ((node (clara-explorer--provenance-row-node)))
+    (if (and node (eq (clara-explorer--edn-get :kind node) :production))
+        (progn
+          (when-let* ((win (get-mru-window nil nil t)))
+            (select-window win))
+          (clara-explorer--goto node))
+      (message "not a production row"))))
+
+(defun clara-explorer-provenance-refresh ()
+  "Re-run the root call from the stored query."
+  (interactive)
+  (when clara-explorer--provenance-query
+    (let* ((input clara-explorer--provenance-input)
+           (direction (plist-get input :direction))
+           (node (clara-explorer--provenance-request clara-explorer--provenance-query input)))
+      (setq tabulated-list-entries
+            (clara-explorer--provenance-load node direction
+                                             clara-explorer--provenance-query input))
+      (tabulated-list-print t))))
+
+(defvar clara-explorer-provenance-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "TAB") #'clara-explorer-provenance-toggle)
+    (define-key map (kbd "RET") #'clara-explorer-provenance-visit)
+    (define-key map "g" #'clara-explorer-provenance-refresh)
+    (define-key map "q" #'quit-window)
+    map)
+  "Keymap for `clara-explorer-provenance-mode'.")
+
+(define-derived-mode clara-explorer-provenance-mode tabulated-list-mode "Provenance"
+  "Major mode for a fact type provenance tree.
+\\{clara-explorer-provenance-mode-map}"
+  (setq tabulated-list-format [("Provenance" 0 t)])
+  (setq tabulated-list-padding 0)
+  (setq tabulated-list-sort-key nil)
+  (tabulated-list-init-header))
+
+(defun clara-explorer--provenance-root-input (query direction)
+  "The provenance input for QUERY's fact type, walking DIRECTION at the
+configured depth."
+  (list :node (list :kind :cursor :input (plist-get query :input))
+        :direction direction
+        :depth (if (eq clara-explorer-provenance-depth 'full)
+                   :full
+                 clara-explorer-provenance-depth)
+        :ancestors []))
+
+(defun clara-explorer--provenance-display (query direction input)
+  "Open the provenance view for QUERY walking DIRECTION with INPUT, and show it.
+A root-call error renders as a message row rather than failing the command."
+  (let ((node (clara-explorer--provenance-request query input)))
+    (with-current-buffer (get-buffer-create clara-explorer--provenance-buffer-name)
+      (clara-explorer-provenance-mode)
+      (setq tabulated-list-entries
+            (clara-explorer--provenance-load node direction query input))
+      (tabulated-list-print t))
+    (select-window
+     (or (display-buffer-in-side-window
+          (get-buffer clara-explorer--provenance-buffer-name)
+          clara-explorer-provenance-window-params)
+         (selected-window)))))
+
+(defun clara-explorer--show-provenance (direction)
+  "Open a provenance view for the fact type at point, walking DIRECTION."
+  (when-let* ((query (clara-explorer--prepare-query)))
+    (clara-explorer--provenance-display
+     query direction (clara-explorer--provenance-root-input query direction))))
+
+;;;###autoload
+(defun clara-explorer-show-producer-provenance ()
+  "Show the producer (upstream) provenance of the fact type at point."
+  (interactive)
+  (clara-explorer--show-provenance :producer))
+
+;;;###autoload
+(defun clara-explorer-show-consumer-provenance ()
+  "Show the consumer (downstream) provenance of the fact type at point."
+  (interactive)
+  (clara-explorer--show-provenance :consumer))
+
 (provide 'clara-explorer)
 ;;; clara-explorer.el ends here
