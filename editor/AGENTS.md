@@ -1,8 +1,9 @@
 # Editor integrations
 
-Two editor clients speak the same EDN `navigate` contract to the explorer.
-Each has its own `Makefile`, which is the authoritative source for its quality
-commands.
+Two editor clients speak the same EDN contract to the explorer: `navigate`
+(jump to producer/consumer) and `fact-type-provenance` (an expandable
+upstream/downstream reference tree). Each has its own `Makefile`, which is the
+authoritative source for its quality commands.
 
 | Directory       | Editor        | Language   | Tests                                 |
 | --------------- | ------------- | ---------- | ------------------------------------- |
@@ -10,12 +11,29 @@ commands.
 | `neovim/`       | Neovim+Conjure | Lua       | `make test`                           |
 
 The shared Clojure-side contract lives in
-`explorer/src/clara/explorer/server/navigate.clj` (the pure body) and
+`explorer/src/clara/explorer/server/navigate.clj` (the pure bodies) and
 `explorer/src/clara/explorer/server/schema.clj` (the shapes). The editor
 resolve-form template is a single source of truth at
 `explorer/resources/clara/explorer/server/editor-resolve-form.clj`, symlinked beside
 each editor transport. Never hand-edit a symlinked copy; edit the resource and
 keep every copy byte-identical (a JVM sync test enforces this).
+
+## Fact type provenance
+
+Both operations share the same transports and the same thin-editor rule: the
+editor gathers structural context and renders contract fields; the backend
+computes closures, bridges, cycles, and short display names.
+
+| Transport | `navigate` | `fact-type-provenance` |
+| --- | --- | --- |
+| nREPL | `client/navigate` | `client/fact-type-provenance` |
+| babashka | unflagged `editor-client.bb '<sel>' '<input>'` | `editor-client.bb --provenance '<sel>' '<input>'` |
+
+Emacs ships the provenance view (`tabulated-list-mode`, `TAB`/`RET`, no extra
+package). Neovim has the contract available but no provenance command yet, so
+adding one is a renderer-only change. The contract, depth/cycle semantics,
+and the v1 no-polarity limitation are documented in
+`docs/explorer-editor-navigation.md`.
 
 ## Emacs (`emacs/`)
 
@@ -63,3 +81,12 @@ resource `clara/explorer/server/editor-resolve-form.clj`. The Emacs/Neovim copie
 are repo-relative symlinks into `explorer/resources/...`. A package/plugin build
 must materialize the symlinked file into the package-local directory before
 release.
+
+## Babashka sandbox note
+
+`make bb-smoke-test` (in `explorer/`) runs `bin/bootstrap.bb`, which may be
+unable to read `~/.clojure/.cpcache` in a restricted sandbox. That is an
+environment restriction, not a code defect: run `editor-client.bb` against an
+explicit classpath
+(`BABASHKA_CLASSPATH=explorer/src:explorer/resources …`) instead, and report
+the workaround rather than treating the smoke test as a failure.

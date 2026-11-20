@@ -84,8 +84,10 @@
         (comp cat
               (map (fn [[p-name production]]
                      [p-name {:consumed-types (set (:lhs-types production))
-                              :produced-types (set (concat (:insert-types production)
-                                                           (:retract-types production)))}])))
+                              :produced-types (into #{}
+                                                    cat
+                                                    [(:insert-types production)
+                                                     (:retract-types production)])}])))
         [rules queries]))
 
 (defn- ->consumers-by-type
@@ -129,12 +131,39 @@
 ;; slim block + entry point
 ;; ===========================================================================
 
+(defn- fact-type-ref->name
+  "The name of a production's fact-type reference: a slim analysis already collapsed it to a
+  string, a full one leaves a `TypeReference` map."
+  [ref]
+  (cond-> ref
+    (map? ref) (get :name)))
+
+(defn- ->direct-type-names
+  "The serialized fact-type names the composed productions directly reference through
+  `:lhs-types` / `:insert-types` / `:retract-types`."
+  [rules queries]
+  (into #{}
+        (comp cat
+              (mapcat (juxt :lhs-types :insert-types :retract-types))
+              cat
+              (map fact-type-ref->name))
+        [(vals rules) (vals queries)]))
+
 (defn- ->composed-slim
-  [analyses]
+  "The composed `:slim` block. `:unknown-fact-types` is the units' union minus every name a composed
+  production directly references: a type the composition itself resolves is not unknown just
+  because some unit only knew it as a hierarchy ghost (a cross-unit bridge type is the common
+  case, where one unit produces the record and another matches its keyword supertype)."
+  [analyses rules queries]
   {:written-by 'clara.explorer.artifacts.compose/->composed-analysis
-   :dropped (set/union #{:nodes}
-                       (apply set/union (map #(get-in % [:slim :dropped]) analyses)))
-   :unknown-fact-types (apply set/union (map #(get-in % [:slim :unknown-fact-types]) analyses))})
+   :dropped (into #{:nodes}
+                  (mapcat #(get-in % [:slim :dropped]))
+                  analyses)
+   :unknown-fact-types (set/difference
+                        (into #{}
+                              (mapcat #(get-in % [:slim :unknown-fact-types]))
+                              analyses)
+                        (->direct-type-names rules queries))})
 
 (defn ->composed-analysis-from-selection
   "The composed slim analysis for an already-computed `sel` — a
@@ -152,7 +181,7 @@
      :fact-types fact-types
      :dep-graph dep-graph
      :unresolved (vec (mapcat :unresolved analyses))
-     :slim (->composed-slim analyses)}))
+     :slim (->composed-slim analyses rules queries)}))
 
 (defn ->composed-analysis
   "One slim `clara.explorer.artifacts.schema/RulebaseAnalysis` over the selected units, which the caller asserts

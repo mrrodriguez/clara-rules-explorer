@@ -4,12 +4,18 @@
 ;; navigate query.
 ;;
 ;;   bb bin/editor-client.bb '<selection-edn>' '<navigate-input-edn>'
+;;   bb bin/editor-client.bb --provenance '<selection-edn>' '<provenance-input-edn>'
 ;;   bb bin/editor-client.bb --list-units '<registry-root>'
 ;;
 ;; `--list-units` prints `[{:key :entry} …]` for every unit under the root, sorted by key:
 ;; `:key` is the display unit-key (`repo`, or `repo@<variant path>` for a variant), `:entry` the
 ;; serialized `UnitRef` EDN ready to splice into a `:units` selection for either the bb client
 ;; or a running server's `:registry` config.
+;;
+;; `--provenance` answers `clara.explorer.server.navigate/fact-type-provenance` — a producer or
+;; consumer reference tree around one fact type or production, carrying the display short names
+;; (`:type-short`, `:matches` `:short`) and bridge flags the editors render, so no client derives
+;; them. <provenance-input-edn> is a `clara.explorer.server.schema/FactTypeProvenanceInput`.
 ;;
 ;; <selection-edn> is a registry selection `{:root "…" :units [{:repo "…"}]}` — the same shape the
 ;; server's `:registry` mode takes; the editor resolves the `CLARA_RULES_EXPLORER_REGISTRY` root
@@ -28,8 +34,7 @@
 ;; fq-in and does only pure normalization + callsite string matching. Source locations are always
 ;; `:var? false` — bb loads no rule namespaces.
 (require '[babashka.fs :as fs]
-         '[clojure.edn :as edn]
-         '[clojure.string :as str])
+         '[clojure.edn :as edn])
 
 (load-file (str (fs/file (fs/parent (fs/canonicalize *file*)) "bootstrap.bb")))
 
@@ -169,7 +174,12 @@
    :token->fq-sym bb-token->fq-sym
    :production-source (fn [_fq-name] {:var? false})})
 
-(defn- run [selection input]
+(defn- run
+  "Composes and rehydrates `selection`, then answers `input` by calling `op` with the
+  rehydrated analysis, `bb-runtime`, and `input`. `op` is any pure operation from
+  `clara.explorer.server.navigate`, so the script's dispatch decides which one; this fn
+  stays op-agnostic."
+  [op selection input]
   (let [{:keys [root units]} selection]
     (when-not (and root (seq units))
       (throw (ex-info "editor-client.bb needs :root and a non-empty :units selection"
@@ -178,32 +188,45 @@
                 :assert-compatible! #(assert-compatible! root %)}
           analysis (shared-compose/->composed-analysis caps units)
           rehydrated (shared-rehydrate/rehydrate-analysis analysis)]
-      (navigate/navigate rehydrated bb-runtime input))))
+      (op rehydrated bb-runtime input))))
 
-(let [[cmd arg1] *command-line-args*]
+(defn- read-args-and-run
+  "Reads the selection and input EDN strings and prints `op`'s answer."
+  [op selection-edn input-edn usage]
+  (when-not (and selection-edn input-edn)
+    (die usage))
+  (let [selection (try (edn/read-string selection-edn)
+                       (catch Throwable e
+                         (die "Could not read selection-edn:" (.getMessage e))))
+        input (try (edn/read-string input-edn)
+                   (catch Throwable e
+                     (die "Could not read input-edn:" (.getMessage e))))]
+    (try
+      (prn (run op selection input))
+      (catch Throwable e
+        (print-error e)))))
+
+(let [args *command-line-args*
+      flag (first args)]
   (cond
     ;; Registry discovery: the editors shell out here rather than walking the tree themselves.
-    (= cmd "--list-units")
-    (do
-      (when-not arg1
+    (= flag "--provenance")
+    (let [[_ selection-edn input-edn] args]
+      (read-args-and-run navigate/fact-type-provenance selection-edn input-edn
+                         "usage: bb editor-client.bb --provenance '<selection-edn>' '<provenance-input-edn>'"))
+
+    (= flag "--list-units")
+    (let [[_ root] args]
+      (when-not root
         (die "usage: bb editor-client.bb --list-units '<registry-root>'"))
       (try
-        (prn (list-unit-repos arg1))
+        (prn (list-unit-repos root))
         (catch Throwable e
           (print-error e))))
 
+    ;; Unflagged invocation: the first two positional arguments are the selection and the
+    ;; operation input, in that order.
     :else
-    (let [selection-edn cmd
-          input-edn arg1]
-      (when-not (and selection-edn input-edn)
-        (die "usage: bb editor-client.bb '<selection-edn>' '<navigate-input-edn>'"))
-      (let [selection (try (edn/read-string selection-edn)
-                           (catch Throwable e
-                             (die "Could not read selection-edn:" (.getMessage e))))
-            input (try (edn/read-string input-edn)
-                       (catch Throwable e
-                         (die "Could not read navigate-input-edn:" (.getMessage e))))]
-        (try
-          (prn (run selection input))
-          (catch Throwable e
-            (print-error e)))))))
+    (let [[selection-edn input-edn] args]
+      (read-args-and-run navigate/navigate selection-edn input-edn
+                         "usage: bb editor-client.bb '<selection-edn>' '<navigate-input-edn>'"))))
