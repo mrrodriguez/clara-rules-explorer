@@ -16,11 +16,17 @@
    [clara.explorer.artifacts.compose :as compose]
    [clara.explorer.artifacts.registry :as registry]
    [clara.explorer.artifacts.rehydrate :as rehydrate]
+   [clara.explorer.server.cache :as cache]
+   [clara.explorer.server.client :as client]
+   ;; Loaded only so fq record/class tokens resolve on the JVM side of the provenance parity
+   ;; checks; the composed analysis still comes from the persisted selection on disk.
+   [clara.explorer.test.rules.loan-app-rules]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
    [clojure.string :as str]
-   [clojure.test :refer [deftest is testing]]))
+   [clojure.test :refer [deftest is testing]]
+   [clojure.walk :as walk]))
 
 (set! *warn-on-reflection* true)
 
@@ -65,14 +71,28 @@
 (def ^:private keyword-outcome
   ":loan-app/application-outcome")
 
+(def ^:private outcome-record
+  "clara.explorer.test.rules.loan_app_rules.ApplicationOutcome")
+
+(def ^:private application-type
+  "clara.explorer.test.rules.loan_app_facts.Application")
+
+(def ^:private document-check-type
+  "clara.explorer.test.rules.loan_app_facts.DocumentCheck")
+
+(def ^:private app-denied
+  "clara.explorer.test.rules.loan-app-rules/app-outcome-denied?")
+
 (defn- jvm-composed
-  "The JVM composed + rehydrated analysis over the two checked-in source units —
-  the same value the server's `:registry` mode serves."
-  []
-  (let [reg (registry/->registry {:root (registry-root)
-                                  :units (:units selection)})]
-    (rehydrate/rehydrate-analysis
-     (compose/->composed-analysis reg (:units selection)))))
+  "The JVM composed + rehydrated analysis over `sel` (default: the two-unit
+  selection) — the same value the server's `:registry` mode serves."
+  ([]
+   (jvm-composed selection))
+  ([sel]
+   (let [reg (registry/->registry {:root (registry-root)
+                                   :units (:units sel)})]
+     (rehydrate/rehydrate-analysis
+      (compose/->composed-analysis reg (:units sel))))))
 
 (defn- bb-navigate
   "The script's EDN answer for one navigate input over `selection`."
@@ -81,6 +101,48 @@
         (shell/sh "bb" (str editor-client-script) (pr-str selection) (pr-str input))]
     (is (zero? exit) (str "editor-client.bb exited " exit ": " err))
     (edn/read-string out)))
+
+(defn- bb-provenance
+  "The script's `--provenance` EDN answer for one provenance input over `selection`."
+  [sel input]
+  (let [{:keys [exit out err]}
+        (shell/sh "bb" (str editor-client-script)
+                  "--provenance" (pr-str sel) (pr-str input))]
+    (is (zero? exit) (str "editor-client.bb --provenance exited " exit ": " err))
+    (edn/read-string out)))
+
+(defn- strip-sources
+  "`answer` with every production `:source` removed: bb always reports `{:var? false}`, and the
+  JVM sources depend on whether the rule namespaces happen to be loaded."
+  [answer]
+  (walk/postwalk (fn [x]
+                   (if (and (map? x) (contains? x :source)) (dissoc x :source) x))
+                 answer))
+
+(defn- jvm-provenance
+  "The JVM registry-mode answer over `sel` for one provenance input, sources stripped."
+  [sel input]
+  (client/register! {:state-atom (atom {:rulebase-analysis (jvm-composed sel)})
+                     :cache (cache/->cache)})
+  (try
+    (strip-sources (client/fact-type-provenance input))
+    (finally
+      (client/register! nil))))
+
+(defn- node-count
+  [node]
+  (inc (reduce + 0 (map node-count (:children node)))))
+
+(def ^:private caller-ns "clara.explorer.test.rules.loan-app-rules")
+
+(defn- provenance-input
+  "A cursor provenance input. `:caller-ns` is ignored by the bb runtime (tokens arrive fq) and
+  lets the JVM side `ns-resolve` a fq class token."
+  [token direction depth]
+  {:node {:kind :cursor :input {:token token :caller-ns caller-ns}}
+   :direction direction
+   :depth depth
+   :ancestors []})
 
 (defn- run-inspect
   "The `inspect-artifacts.bb` stdout for one subcommand over the composed unit."
@@ -104,6 +166,13 @@
         (let [{:keys [exit err]} (shell/sh "bb" (str editor-client-script) "--list-units")]
           (is (not (zero? exit)))
           (is (str/includes? err "usage: bb editor-client.bb --list-units '<registry-root>'")
+              err)))
+
+      (testing "--provenance without its input: its own usage, non-zero exit"
+        (let [{:keys [exit err]} (shell/sh "bb" (str editor-client-script)
+                                           "--provenance" (pr-str selection))]
+          (is (not (zero? exit)))
+          (is (str/includes? err "usage: bb editor-client.bb --provenance")
               err))))))
 
 (deftest editor-client-lists-unit-repos-test
@@ -195,3 +264,56 @@
           (is (not (contains? variant-answer :error)) variant-answer)
           (is (= (set (map :name (:targets mainline-answer)))
                  (set (map :name (:targets variant-answer))))))))))
+
+;; ---------------------------------------------------------------------------
+;; Fact type provenance parity (B1–B3)
+;; ---------------------------------------------------------------------------
+
+(deftest editor-client-provenance-matches-jvm-test
+  (if-not (runnable?)
+    (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")
+    (let [inputs [{:label "R1 producer on the keyword"
+                   :input (provenance-input keyword-outcome :producer 0)}
+                  {:label "R2 consumer on the record"
+                   :input (provenance-input outcome-record :consumer 0)}
+                  {:label "R3 external fact type"
+                   :input (provenance-input application-type :producer 0)}
+                  {:label "R4 retract-only production one level down"
+                   :input (provenance-input document-check-type :consumer 1)}
+                  {:label "R5 production root and its self-loop"
+                   :input {:node {:kind :production :name app-denied}
+                           :direction :producer
+                           :depth 0
+                           :ancestors []}}]]
+      (doseq [{:keys [label input]} inputs]
+        (testing label
+          (is (= (jvm-provenance selection input)
+                 (strip-sources (bb-provenance selection input)))))))))
+
+(deftest editor-client-provenance-variant-unit-matches-mainline-test
+  (if-not (runnable?)
+    (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")
+    (let [mainline {:root (registry-root)
+                    :units [{:repo "loan-disposition-ruleset"}]}
+          variant {:root (registry-root)
+                   :units [{:repo "loan-disposition-ruleset"
+                            :variant [[:ref "feature/new-tax"]]}]}
+          input (provenance-input keyword-outcome :consumer 0)
+          production-names (fn [sel]
+                             (->> (bb-provenance sel input)
+                                  (get-in [:node :children])
+                                  (map :name)
+                                  set))]
+      (testing "a variant unit is read from _variants/<repo>/<variant path> and answers like the mainline"
+        (is (= (production-names mainline) (production-names variant)))))))
+
+(deftest editor-client-provenance-full-depth-guard-test
+  (if-not (runnable?)
+    (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")
+    (let [input (provenance-input outcome-record :consumer :full)
+          bb-answer (strip-sources (bb-provenance selection input))
+          jvm-answer (jvm-provenance selection input)]
+      (testing "the full consumer tree terminates and matches the JVM node count"
+        (is (not (contains? bb-answer :error)) bb-answer)
+        (is (pos? (node-count (:node bb-answer))))
+        (is (= (node-count (:node jvm-answer)) (node-count (:node bb-answer))))))))

@@ -594,7 +594,10 @@ Checkpoints, not a diary. Update in place as work lands.
       shell as `navigate`; R1–R6 + the existing R7 regression in `registry_server_test.clj`
       (composed two-unit selection, class tokens resolved via loaded fixture namespaces), and
       L1–L5 in `client_test.clj`
-- [ ] 6 bb `--provenance` + parity test
+- [x] 6 bb `--provenance` + parity test — `--provenance '<selection>' '<input>'` answers
+      `navigate/fact-type-provenance`; B1 compares the five registry-mode trees to the JVM answer
+      (sources stripped), B2 compares a variant unit to its mainline, B3 pins the `:full` node
+      count against the JVM and the process finishing
 - [ ] 7 Emacs `:not` wrapper fallback + `--prepare-query` + op runner refactor
 - [ ] 8 Emacs provenance view, both commands, built-in tree
 - [ ] 9 Docs + bb header + `editor/AGENTS.md`

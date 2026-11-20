@@ -4,12 +4,18 @@
 ;; navigate query.
 ;;
 ;;   bb bin/editor-client.bb '<selection-edn>' '<navigate-input-edn>'
+;;   bb bin/editor-client.bb --provenance '<selection-edn>' '<provenance-input-edn>'
 ;;   bb bin/editor-client.bb --list-units '<registry-root>'
 ;;
 ;; `--list-units` prints `[{:key :entry} …]` for every unit under the root, sorted by key:
 ;; `:key` is the display unit-key (`repo`, or `repo@<variant path>` for a variant), `:entry` the
 ;; serialized `UnitRef` EDN ready to splice into a `:units` selection for either the bb client
 ;; or a running server's `:registry` config.
+;;
+;; `--provenance` answers `clara.explorer.server.navigate/fact-type-provenance` — a producer or
+;; consumer reference tree around one fact type or production, carrying the display short names
+;; (`:type-short`, `:matches` `:short`) and bridge flags the editors render, so no client derives
+;; them. <provenance-input-edn> is a `clara.explorer.server.schema/FactTypeProvenanceInput`.
 ;;
 ;; <selection-edn> is a registry selection `{:root "…" :units [{:repo "…"}]}` — the same shape the
 ;; server's `:registry` mode takes; the editor resolves the `CLARA_RULES_EXPLORER_REGISTRY` root
@@ -204,6 +210,11 @@
       flag (first args)]
   (cond
     ;; Registry discovery: the editors shell out here rather than walking the tree themselves.
+    (= flag "--provenance")
+    (let [[_ selection-edn input-edn] args]
+      (read-args-and-run navigate/fact-type-provenance selection-edn input-edn
+                         "usage: bb editor-client.bb --provenance '<selection-edn>' '<provenance-input-edn>'"))
+
     (= flag "--list-units")
     (let [[_ root] args]
       (when-not root
