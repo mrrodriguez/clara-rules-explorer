@@ -450,7 +450,13 @@ work stays in `editor/emacs/clara-explorer.el`. No new file, no
     rows so a failed expansion does not break the buffer — for the root call
     and for a `TAB` expansion alike;
   - `RET` on a production: existing `clara-explorer--goto` with the node's
-    target fields;
+    target fields. `--goto-fallback` now reports *why* it cannot jump instead
+    of silently doing nothing: a registry/bb tree names productions from the
+    persisted artifacts, and if the production's namespace is not on the
+    connected REPL's classpath `cider-find-ns` cannot open it. That case
+    messages the namespace plus the remedy (load it, or use the nREPL
+    transport with a live session); nREPL/`:var? true` targets keep the
+    `cider-find-var` jump;
   - labels: `:type-short` + dim `:type`, rule name + dim ns, `@unit`,
     `(retract)` on producer edges, an insert/retract aside for consumer
     children, `↻ cycle`, `↑ shown above` (for `:seen?`), `(external)` (for
@@ -622,7 +628,9 @@ Checkpoints, not a diary. Update in place as work lands.
       `clara-explorer-provenance-mode` (`tabulated-list-mode`), two autoloaded
       commands, full-path-keyed `expanded`/`children` tables, inline seeding at
       `:depth > 0`/`:full`, `TAB` fetch at `:depth 0`, `RET` → `--goto`, `g`
-      re-runs the stored root input, message rows for backend/transport errors
+      re-runs the stored root input, message rows for backend/transport errors;
+      `RET`/`<return>` jump, stale rows ask for `g`, and the ns fallback reports
+      a namespace that is not on the REPL's classpath
 - [ ] 9 Docs + bb header + `editor/AGENTS.md`
 - [ ] 10 Full verification
 

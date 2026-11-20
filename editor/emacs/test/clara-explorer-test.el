@@ -1551,3 +1551,75 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
                       (clara-explorer--provenance-load
                        (clara-explorer--provenance-message-node "boom") :producer nil nil))
                      '("boom"))))))
+
+(ert-deftest provenance-visit-reports-why-it-does-not-jump-test ()
+  (let* ((prod (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                           :source (test--prov :var? t)))
+         (ft (test--prov :kind :fact-type :type "T" :type-short "T"
+                         :children (vector prod)))
+         (messages '())
+         (goto-called nil))
+    (with-temp-buffer
+      (clara-explorer--provenance-load ft :producer nil nil)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
+                ((symbol-function 'clara-explorer--goto)
+                 (lambda (_target) (setq goto-called t)))
+                ((symbol-function 'get-mru-window) (lambda (&rest _) nil)))
+        (test--group "a fact-type row explains itself"
+          (cl-letf (((symbol-function 'tabulated-list-get-id)
+                     (lambda (&optional _) (vector "T"))))
+            (clara-explorer-provenance-visit))
+          (should (cl-find-if (lambda (m) (string-match-p "not a production row" m))
+                              messages)))
+        (test--group "an ID with no node asks for a refresh"
+          (cl-letf (((symbol-function 'tabulated-list-get-id)
+                     (lambda (&optional _) (vector "T" "gone"))))
+            (clara-explorer-provenance-visit))
+          (should (cl-find-if (lambda (m) (string-match-p "stale row" m)) messages)))
+        (test--group "a production row jumps"
+          (cl-letf (((symbol-function 'tabulated-list-get-id)
+                     (lambda (&optional _) (vector "T" "ns/p"))))
+            (clara-explorer-provenance-visit))
+          (should goto-called))))))
+
+(ert-deftest provenance-goto-fallback-reports-a-missing-namespace-test ()
+  (let ((messages '())
+        (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                          :type "rule" :source (test--prov :var? nil))))
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'cider-find-ns)
+                 (lambda (&rest _) nil))   ; CIDER cannot resolve the ns: buffer unchanged
+                ((symbol-function 'message)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
+                ((symbol-function 'clara-explorer--push-jump) (lambda () nil))
+                ((symbol-function 'clara-explorer--log) (lambda (&rest _) nil)))
+        (should-not (clara-explorer--goto node)))
+      (should (cl-find-if (lambda (m) (string-match-p "classpath" m)) messages))
+      (should (cl-find-if (lambda (m) (string-match-p "demo\\.ns" m)) messages)))))
+
+(defconst test--scratch-dir
+  (expand-file-name "target/tmp"
+                    (file-name-directory
+                     (or load-file-name buffer-file-name default-directory)))
+  "Repo-local scratch directory for tests that need a real file.")
+
+(ert-deftest provenance-goto-fallback-finds-the-form-test ()
+  (let* ((_ (make-directory test--scratch-dir t))
+         (file (expand-file-name "provenance-goto-fallback.clj" test--scratch-dir))
+         (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                           :type "rule" :source (test--prov :var? nil))))
+    (with-temp-file file
+      (insert "(ns demo.ns)\n\n(r/defrule rule-a [] => 1)\n"))
+    (unwind-protect
+        (with-temp-buffer
+          (cl-letf (((symbol-function 'cider-find-ns)
+                     (lambda (&rest _) (switch-to-buffer (find-file-noselect file))))
+                    ((symbol-function 'clara-explorer--push-jump) (lambda () nil))
+                    ((symbol-function 'clara-explorer--log) (lambda (&rest _) nil)))
+            (should (clara-explorer--goto node))
+            (should (equal (buffer-file-name) file))
+            ;; the fallback regexp consumes the symbol's boundary char, so search back
+            (should (save-excursion
+                      (re-search-backward "rule-a" (line-beginning-position) t)))))
+      (delete-file file))))

@@ -859,24 +859,45 @@ file (a symlink to the `clara.explorer.server.tokens` canonical text)."
           (clara-explorer--symbol-boundary-rx)))
 
 (defun clara-explorer--goto-fallback (target)
-  "Last resort: open the ns file and search for the defrule/defquery form."
+  "Last resort: open the ns file and search for the defrule/defquery form.
+Reports why it could not jump instead of returning nil silently: a registry/bb
+tree can name productions whose namespace is not on the connected REPL's
+classpath, and `cider-find-ns' then leaves the buffer unchanged."
   (let* ((name (clara-explorer--edn-get :name target))
          (ns (clara-explorer--edn-get :ns target))
          (rule-name (clara-explorer--unqualified-name name)))
     (clara-explorer--log "fallback: name=%S ns=%S rule-name=%S" name ns rule-name)
-    (when (and ns rule-name)
-      (clara-explorer--log "fallback: cider-find-ns %S" ns)
-      (cider-find-ns nil ns)
-      (goto-char (point-min))
-      (let ((found (or (re-search-forward
-                        (clara-explorer--fallback-regexp rule-name)
-                        nil t)
-                       ;; fallback for ^{:map} metadata or other forms
-                       (re-search-forward
-                        (clara-explorer--whole-symbol-regexp rule-name)
-                        nil t))))
-        (clara-explorer--log "fallback: search %S -> %s at %d" rule-name (if found "found" "NOT-FOUND") (point))
-        found))))
+    (cond
+     ((not (and ns rule-name))
+      (message "clara-explorer: cannot locate %s (no namespace in the target)" name)
+      nil)
+     (t
+      (let ((origin (current-buffer)))
+        (condition-case err
+            (cider-find-ns nil ns)
+          (error (message "clara-explorer: could not open %s: %s"
+                          ns (error-message-string err))))
+        (cond
+         ((and (eq (current-buffer) origin) (not (buffer-file-name origin)))
+          (message
+           (concat "clara-explorer: namespace %s is not on this REPL's classpath; "
+                   "load it (or use the nREPL transport with a live session) to jump to %s")
+           ns rule-name)
+          nil)
+         (t
+          (goto-char (point-min))
+          (let ((found (or (re-search-forward
+                            (clara-explorer--fallback-regexp rule-name)
+                            nil t)
+                           ;; fallback for ^{:map} metadata or other forms
+                           (re-search-forward
+                            (clara-explorer--whole-symbol-regexp rule-name)
+                            nil t))))
+            (clara-explorer--log "fallback: search %S -> %s at %d"
+                                 rule-name (if found "found" "NOT-FOUND") (point))
+            (unless found
+              (message "clara-explorer: %s not found in %s" rule-name ns))
+            found))))))))
 
 (defun clara-explorer--goto (target)
   "Jump to target.  Pushes evil/xref jumps for C-o."
@@ -1380,13 +1401,17 @@ outputs-unknown, and leaf rows do not toggle."
 (defun clara-explorer-provenance-visit ()
   "Jump to the production on the current row."
   (interactive)
-  (let ((node (clara-explorer--provenance-row-node)))
-    (if (and node (eq (clara-explorer--edn-get :kind node) :production))
-        (progn
-          (when-let* ((win (get-mru-window nil nil t)))
-            (select-window win))
-          (clara-explorer--goto node))
-      (message "not a production row"))))
+  (let* ((path (tabulated-list-get-id))
+         (node (clara-explorer--provenance-row-node)))
+    (cond
+     ((and path (null node))
+      (message "clara-explorer: stale row; press g to refresh the view"))
+     ((and node (eq (clara-explorer--edn-get :kind node) :production))
+      (when-let* ((win (get-mru-window nil nil t)))
+        (select-window win))
+      (clara-explorer--goto node))
+     (t
+      (message "not a production row (RET jumps from a production row)")))))
 
 (defun clara-explorer-provenance-refresh ()
   "Re-run the root call from the stored query."
@@ -1404,6 +1429,8 @@ outputs-unknown, and leaf rows do not toggle."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "TAB") #'clara-explorer-provenance-toggle)
     (define-key map (kbd "RET") #'clara-explorer-provenance-visit)
+    ;; GUI Return, and convenient when a global map shadows C-m.
+    (define-key map (kbd "<return>") #'clara-explorer-provenance-visit)
     (define-key map "g" #'clara-explorer-provenance-refresh)
     (define-key map "q" #'quit-window)
     map)
