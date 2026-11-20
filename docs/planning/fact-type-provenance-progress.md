@@ -464,6 +464,14 @@ work stays in `editor/emacs/clara-explorer.el`. No new file, no
     and `via <:matches :short>` when `:bridge?`;
   - depth defcustom with three choices: `0`, an integer, or `full` (passes
     `:depth :full`);
+  - keys follow the parent mode's seams instead of claiming them: `g` is
+    `revert-buffer` (from `special-mode`) and the mode sets
+    `revert-buffer-function` to `clara-explorer-provenance-refresh`, so any
+    binding of `revert-buffer` — or `M-x revert-buffer` — re-runs the root
+    call; `q` is `quit-window` from the same parent. Only `TAB`/`RET`/`<return>`
+    are bound in the mode map, which is the one customization point. No evil
+    (or any other) state is claimed, so a setup that shadows `g` (evil's `g`
+    prefix, for example) is configured by the user, not overridden here;
   - `g` re-runs the root from the stored query, `q` buries;
   - keep the side-window defcustom.
 
@@ -629,8 +637,9 @@ Checkpoints, not a diary. Update in place as work lands.
       commands, full-path-keyed `expanded`/`children` tables, inline seeding at
       `:depth > 0`/`:full`, `TAB` fetch at `:depth 0`, `RET` → `--goto`, `g`
       re-runs the stored root input, message rows for backend/transport errors;
-      `RET`/`<return>` jump, stale rows ask for `g`, and the ns fallback reports
-      a namespace that is not on the REPL's classpath
+      `RET`/`<return>` jump, stale rows ask for a refresh, the ns fallback
+      reports a namespace that is not on the REPL's classpath, and `g` re-runs
+      the root through `revert-buffer-function` rather than a private binding
 - [ ] 9 Docs + bb header + `editor/AGENTS.md`
 - [ ] 10 Full verification
 

@@ -1413,8 +1413,10 @@ outputs-unknown, and leaf rows do not toggle."
      (t
       (message "not a production row (RET jumps from a production row)")))))
 
-(defun clara-explorer-provenance-refresh ()
-  "Re-run the root call from the stored query."
+(defun clara-explorer-provenance-refresh (&optional _ignore-auto _noconfirm)
+  "Re-run the root call from the stored query.
+Also the buffer's `revert-buffer-function', hence the (ignored) arguments
+`revert-buffer' passes."
   (interactive)
   (when clara-explorer--provenance-query
     (let* ((input clara-explorer--provenance-input)
@@ -1431,17 +1433,24 @@ outputs-unknown, and leaf rows do not toggle."
     (define-key map (kbd "RET") #'clara-explorer-provenance-visit)
     ;; GUI Return, and convenient when a global map shadows C-m.
     (define-key map (kbd "<return>") #'clara-explorer-provenance-visit)
-    (define-key map "g" #'clara-explorer-provenance-refresh)
-    (define-key map "q" #'quit-window)
     map)
-  "Keymap for `clara-explorer-provenance-mode'.")
+  "Keymap for `clara-explorer-provenance-mode'.
+Only the keys `special-mode' does not already provide are bound here: `g'
+reverts (through `revert-buffer-function', see the mode) and `q' buries, both
+from the parent map.  Rebind here to customize; if your setup shadows `g' (e.g.
+evil's `g' prefix), bind `clara-explorer-provenance-refresh' yourself or call
+`revert-buffer'.")
 
 (define-derived-mode clara-explorer-provenance-mode tabulated-list-mode "Provenance"
   "Major mode for a fact type provenance tree.
-\\{clara-explorer-provenance-mode-map}"
+\\{clara-explorer-provenance-mode-map}
+`g' reverts through `revert-buffer-function', which re-runs the stored root call
+(`clara-explorer-provenance-refresh'); `q' buries; `TAB' expands or collapses a
+production; `RET' jumps to it.  The mode map is the customization point."
   (setq tabulated-list-format [("Provenance" 0 t)])
   (setq tabulated-list-padding 0)
   (setq tabulated-list-sort-key nil)
+  (setq-local revert-buffer-function #'clara-explorer-provenance-refresh)
   (tabulated-list-init-header))
 
 (defun clara-explorer--provenance-root-input (query direction)

@@ -1225,8 +1225,7 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
       (should (equal clara-explorer--bb-selection-cache "{unit}"))
       (should (string-match-p "bb unit set" msg)))))
 
-(provide 'clara-explorer-test)
-;;; clara-explorer-test.el ends here
+
 
 ;; ---------------------------------------------------------------------------
 ;; Wrapper heads — point on `:not`/`:and` (or the wrapper bracket)
@@ -1623,3 +1622,40 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
             (should (save-excursion
                       (re-search-backward "rule-a" (line-beginning-position) t)))))
       (delete-file file))))
+
+(ert-deftest provenance-mode-uses-the-standard-keys-test ()
+  (test--group "g and q come from the parent mode, not from us"
+    (with-temp-buffer
+      (clara-explorer-provenance-mode)
+      (should (eq revert-buffer-function #'clara-explorer-provenance-refresh))
+      (should (eq (lookup-key clara-explorer-provenance-mode-map (kbd "g"))
+                  #'revert-buffer))
+      (should (eq (lookup-key clara-explorer-provenance-mode-map (kbd "q"))
+                  #'quit-window))
+      (test--group "the view's own keys are bound in the mode map"
+        (should (eq (lookup-key clara-explorer-provenance-mode-map (kbd "TAB"))
+                    #'clara-explorer-provenance-toggle))
+        (should (eq (lookup-key clara-explorer-provenance-mode-map (kbd "RET"))
+                    #'clara-explorer-provenance-visit))))))
+
+(ert-deftest provenance-revert-reruns-the-root-call-test ()
+  (let* ((root (test--prov :kind :fact-type :type "T" :type-short "T" :children []))
+         (new-root (test--prov :kind :fact-type :type "T2" :type-short "T2"
+                               :children []))
+         (calls 0))
+    (with-temp-buffer
+      (clara-explorer-provenance-mode)
+      (setq tabulated-list-entries
+            (clara-explorer--provenance-load root :producer 'query
+                                             (list :direction :producer)))
+      (tabulated-list-print t)
+      (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                 (lambda (_q _input)
+                   (setq calls (1+ calls))
+                   new-root)))
+        (revert-buffer t t))
+      (should (= 1 calls))
+      (should (equal (test--prov-labels tabulated-list-entries) '("T2"))))))
+
+(provide 'clara-explorer-test)
+;;; clara-explorer-test.el ends here
