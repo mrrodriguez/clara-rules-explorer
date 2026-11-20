@@ -23,6 +23,13 @@
    :token->fq-sym     (fn [_caller-ns _token] nil)
    :production-source (fn [_p-name] {:var? false})})
 
+(def ^:private callsite-runtime
+  "A runtime whose token resolves to `caller-ns/token`, so a shared constructor reaches the
+  serialized callsite linkage."
+  {:resolve-token     (fn [_caller-ns token] token)
+   :token->fq-sym     (fn [caller-ns token] (symbol (str caller-ns "/" token)))
+   :production-source (fn [_p-name] {:var? false})})
+
 (defn- ->analysis
   "A hand-built slim analysis rehydrated through the real closure code.
 
@@ -49,7 +56,15 @@
                          (assoc :unlinked-rule {:downstream :unknown})
 
                          (:unit production)
-                         (assoc :unit (:unit production))))]
+                         (assoc :unit (:unit production))
+
+                         (:dynamic-insert-types-detected production)
+                         (assoc :dynamic-insert-types-detected
+                                (:dynamic-insert-types-detected production))
+
+                         (:dynamic-retract-types-detected production)
+                         (assoc :dynamic-retract-types-detected
+                                (:dynamic-retract-types-detected production))))]
     (shared-rehydrate/rehydrate-analysis
      {:rules (into (sorted-map) (map (fn [[p-name p]] [p-name (->production p-name p)])) rules)
       :queries (into (sorted-map) (map (fn [[p-name p]] [p-name (->production p-name p)])) queries)
@@ -253,6 +268,28 @@
           root (:node (provenance analysis (cursor-input "S" :consumer 0)))
           c (first (:children root))]
       (is (= ["S" "T"] (mapv :name (:matches c)))))))
+
+(deftest n13-scoped-rhs-callsites-beat-the-global-scan-test
+  (let [callsite (fn [type-name]
+                   {:callsites [{:constructor-sym "t/shared"
+                                 :resolved-types [{:name type-name}]}]})
+        analysis (->analysis {:fact-types {"S" #{} "X" #{} "Y" #{}}
+                              :rules {"t/a" {:lhs ["S"] :insert ["X"]
+                                             :dynamic-insert-types-detected (callsite "X")}
+                                      "t/b" {:lhs ["S"] :insert ["Y"]
+                                             :dynamic-insert-types-detected (callsite "Y")}}})
+        root-type (fn [input]
+                    (-> (navigate/fact-type-provenance analysis callsite-runtime
+                                                       {:node {:kind :cursor :input input}
+                                                        :direction :consumer
+                                                        :depth 0
+                                                        :ancestors []})
+                        :node :type))]
+    (is (= "X" (root-type {:caller-ns "t" :token "shared"}))
+        "globally the shared constructor resolves to both types, sorted first")
+    (is (= "Y" (root-type {:production "t/b" :side :rhs
+                           :caller-ns "t" :token "shared"}))
+        "scoped to t/b, its own callsite wins")))
 
 (deftest n12-error-contract-test
   (let [analysis (->analysis {:fact-types {"T" #{}}

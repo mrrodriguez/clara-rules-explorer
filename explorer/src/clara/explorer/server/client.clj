@@ -260,3 +260,32 @@
         {:error (str "internal error: "
                      (or (some-> e .getCause .getMessage)
                          (.getMessage e)))}))))
+
+(s/defn fact-type-provenance :- schema/FactTypeProvenanceResponse
+  "Answers a `schema/FactTypeProvenanceInput` over the registered system's analysis: a producer or
+   consumer reference tree around one fact type or production. Same system/cache/log shell as
+   `navigate`. See `nav/fact-type-provenance`."
+  [input]
+  (let [{:keys [node direction depth]} input
+        subject (or (:name node) (get-in node [:input :token]))]
+    (log/infof "fact-type-provenance: kind=%s subject=%s direction=%s depth=%s"
+               (:kind node) subject direction depth)
+    (try
+      (let [result
+            (if-let [sys (get-current-system)]
+              (let [{:keys [state-atom cache]} sys
+                    analysis (cache/get-rulebase-analysis cache @state-atom)]
+                (nav/fact-type-provenance analysis (jvm-runtime) input))
+              {:error "no explorer system registered"})]
+        (if-let [error (:error result)]
+          (log/warnf "fact-type-provenance: %s" error)
+          (log/infof "fact-type-provenance: root=%s children=%d"
+                     (get-in result [:node :kind])
+                     (count (get-in result [:node :children]))))
+        result)
+      (catch Exception e
+        (log/errorf e "fact-type-provenance failed: kind=%s subject=%s"
+                    (:kind node) subject)
+        {:error (str "internal error: "
+                     (or (some-> e .getCause .getMessage)
+                         (.getMessage e)))}))))

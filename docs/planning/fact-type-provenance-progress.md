@@ -320,7 +320,7 @@ both bridge types in `compose_test.clj`.
 | `explorer/src/clara/explorer/server/navigate.clj` | delete `lhs-producers`; add `fact-type-provenance`, `resolve-cursor-fact-type`, a `type-name->short-name` helper (class-like names only; keywords/strings/tuples/maps stay whole), and their direction-aware `->*` helpers; attach `:unit` in `dep->target` |
 | `explorer/src/clara/explorer/server/client.clj` | replace `lhs-producers` with `fact-type-provenance` (same system/cache/log shell as `navigate`) |
 | `explorer/bin/editor-client.bb` | replace `--lhs-producers` with `--provenance` |
-| `explorer/test/.../server/navigate_test.clj` | **new** — pure unit tests over hand-built rehydrated analyses (N1–N12) |
+| `explorer/test/.../server/navigate_test.clj` | **new** — pure unit tests over hand-built rehydrated analyses (N1–N13) |
 | `explorer/test/.../server/registry_server_test.clj` | registry-mode composed tests (R1–R7) over the existing `->registry-config` two-unit fixture |
 | `explorer/test/.../server/client_test.clj` | live-session tests (L1–L5); the POC's `test-lhs-producers` is replaced |
 | `explorer/test/.../artifacts/compose_test.clj` | pin `:known true` on the cross-unit bridge types |
@@ -468,8 +468,8 @@ its defcustoms, node builders, and all `hierarchy-*` tests.
 | --- | --- | --- | --- |
 | 1 | Rename/delete POC vocabulary; no behavior change | backend + editor + docs | `git grep` shows no provenance-as-hierarchy names |
 | 2 | Fix composed `:unknown-fact-types`; attach `:unit` on `ProductionDep` / `NavigateTarget` | `shared/compose.clj`, `shared/rehydrate.clj`, `api.clj`, `schema.clj`, `navigate.clj` | `compose_test` pins `:known true` on both bridge types; R7 green |
-| 3 | Direction-aware `fact-type-provenance` with `:cycle?`, `:seen?`, `:not` consumer support; delete `lhs-producers` | `navigate.clj`, `navigate_test.clj` | N1–N12 green |
-| 4 | Schemas for input/node/response | `schema.clj` | N1–N12 pass under `st/validate-schemas` |
+| 3 | Direction-aware `fact-type-provenance` with `:cycle?`, `:seen?`, `:not` consumer support; delete `lhs-producers` | `navigate.clj`, `navigate_test.clj` | N1–N13 green |
+| 4 | Schemas for input/node/response | `schema.clj` | N1–N13 pass under `st/validate-schemas` |
 | 5 | JVM wrapper + live & registry tests | `client.clj`, `client_test.clj`, `registry_server_test.clj` | R1–R7 and L1–L5 green |
 | 6 | bb `--provenance` + parity test | `editor-client.bb`, `editor_client_bb_test.clj` | B1–B3 green |
 | 7 | Emacs `:not` wrapper fallback, `--prepare-query` + generic op runner | `clara-explorer.el`, `clara-explorer-test.el` | E1, E7, E8 green (existing navigate tests untouched) |
@@ -504,6 +504,7 @@ vector of `{:name … :short …}` maps, and each fact-type node also carries
 | N10 | External vs retract-only producer | `T` with only a retracting producer | `:external? true` on the `T` node although it has one child |
 | N11 | Ordering | several producers/consumers, both directions | exact vectors match §2.2: name-sorted production children, declaration-order `:fact-type` children, name-sorted `:matches`, `:vias` order |
 | N12 | Errors | unknown production; empty token; `:depth -1`; `:ancestors ["nope/nope"]`; plus `:direction :sideways` / `:node :kind :fact-type` as shape cases | `{:error …}` from the operation for what the schema cannot express; `s/check` rejects the shape cases |
+| N13 | Scoped RHS callsites | two rules share a constructor token but resolve it to different types | global root = first name-sorted global type; scoped inside a rule = that rule's type |
 
 There is no `:polarity` test: v1 emits none (§2.3).
 
@@ -524,7 +525,7 @@ There is no `:polarity` test: v1 emits none (§2.3).
 | # | Case | Expected |
 | --- | --- | --- |
 | L1 | R1/R5 equivalents over `loan-app-session` | same names, **no `:unit` key** |
-| L2 | RHS callsite scoping | a cursor on an RHS helper/ctor token inside production `P` picks `P`'s callsite type, not the global `(first (sort matched))` |
+| L2 | Scoped RHS resolution (live) | a cursor on an RHS ctor token inside production `P` roots at `P`'s declared type, proving the scoped path works live; the divergent-callsite precedence itself is N13, because no fixture rule resolves one token to two types |
 | L3 | Cursor inside a `defquery` | consumer provenance works (no "queries have no RHS") |
 | L4 | `:source :var? true` | production nodes carry var metadata like `navigate` targets |
 | L5 | No system registered / internal exception | `{:error …}`, same as `client/navigate` |
@@ -589,7 +590,10 @@ Checkpoints, not a diary. Update in place as work lands.
       rehydrate closures)
 - [x] 4 Provenance schemas — `FactTypeProvenanceInput` / recursive node / result+response in
       `schema.clj`, N1–N12 run under `st/validate-schemas`
-- [ ] 5 JVM `client/fact-type-provenance` (live + registry tests)
+- [x] 5 JVM `client/fact-type-provenance` (live + registry tests) — same system/cache/log
+      shell as `navigate`; R1–R6 + the existing R7 regression in `registry_server_test.clj`
+      (composed two-unit selection, class tokens resolved via loaded fixture namespaces), and
+      L1–L5 in `client_test.clj`
 - [ ] 6 bb `--provenance` + parity test
 - [ ] 7 Emacs `:not` wrapper fallback + `--prepare-query` + op runner refactor
 - [ ] 8 Emacs provenance view, both commands, built-in tree

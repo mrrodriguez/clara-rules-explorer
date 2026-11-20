@@ -2,6 +2,7 @@
   (:require [clara.rules :as r]
             [clara.explorer.server.cache :as cache]
             [clara.explorer.server.client :as client]
+            [clara.explorer.server.navigate :as navigate]
             [clara.explorer.server.serve :as server]
             [clara.explorer.analyze :as analyze]
             [clara.explorer.annotation-fixtures :as fixtures]
@@ -360,3 +361,99 @@
                                    :side :rhs
                                    :token "DocumentCheck."}))
          "no production named"))))
+
+;; ---------------------------------------------------------------------------
+;; Fact type provenance (live session)
+;; ---------------------------------------------------------------------------
+
+(def ^:private outcome-record
+  "clara.explorer.test.rules.loan_app_rules.ApplicationOutcome")
+
+(def ^:private outcome-keyword ":loan-app/application-outcome")
+
+(defn- provenance-input
+  [input direction depth]
+  {:node {:kind :cursor :input input}
+   :direction direction
+   :depth depth
+   :ancestors []})
+
+(deftest test-fact-type-provenance-live-session
+  (register! loan-app-session loan-app-annotations)
+  (testing "a producer tree roots on the keyword and crosses to the record"
+    (let [root (:node (client/fact-type-provenance
+                       (provenance-input {:token outcome-keyword} :producer 0)))]
+      (is (= :fact-type (:kind root)))
+      (is (= [(str loan-app "/app-outcome-approved?")
+              (str loan-app "/app-outcome-denied?")
+              (str loan-app "/app-outcome-pending?")]
+             (mapv :name (:children root))))
+      (testing "a live session has no unit identity"
+        (is (every? #(not (contains? % :unit)) (:children root))))
+      (testing "each producer reaches the keyword through the record"
+        (doseq [p (:children root)]
+          (is (= [outcome-record] (mapv :name (:matches p))))
+          (is (true? (:bridge? p)))))))
+  (testing "a production root marks its own self-loop"
+    (let [root (:node (client/fact-type-provenance
+                       {:node {:kind :production :name (str loan-app "/app-outcome-denied?")}
+                        :direction :producer
+                        :depth 0
+                        :ancestors []}))
+          outcome-node (first (filter #(= outcome-record (:type %)) (:children root)))
+          by-name (into {} (map (juxt :name identity)) (:children outcome-node))]
+      (is (not (contains? root :matches)) "a root production has no parent type")
+      (is (true? (:cycle? (by-name (str loan-app "/app-outcome-denied?")))))
+      (is (not (contains? (by-name (str loan-app "/app-outcome-denied?")) :children)))
+      (is (not (contains? (by-name (str loan-app "/app-outcome-approved?")) :children))
+          "a non-cycle producer stays expandable at depth 0"))))
+
+(deftest test-fact-type-provenance-scoped-rhs-keeps-the-production-type
+  (register! loan-app-session loan-app-annotations)
+  (let [root (:node (client/fact-type-provenance
+                     (provenance-input {:production (str loan-app "/app-outcome-approved?")
+                                        :side :rhs
+                                        :caller-ns loan-app
+                                        :token "map->ApplicationOutcome"}
+                                       :consumer
+                                       0)))]
+    (is (= outcome-record (:type root))
+        "the production's own RHS resolution wins over a global scan")
+    (is (contains? (set (map :name (:children root))) (str loan-app "/find-app-outcome")))))
+
+(deftest test-fact-type-provenance-inside-a-defquery
+  (register! loan-app-session loan-app-annotations)
+  (let [root (:node (client/fact-type-provenance
+                     (provenance-input {:production (str loan-app "/find-app-outcome")
+                                        :side :lhs
+                                        :caller-ns loan-app
+                                        :token outcome-record}
+                                       :consumer
+                                       0)))
+        query (first (filter #(= (str loan-app "/find-app-outcome") (:name %))
+                             (:children root)))]
+    (is (= :fact-type (:kind root)) "a token inside a defquery still roots a tree")
+    (is (some? query))
+    (is (= "query" (:type query)))
+    (is (= [] (:children query)))))
+
+(deftest test-fact-type-provenance-carries-var-source
+  (register! loan-app-session loan-app-annotations)
+  (let [root (:node (client/fact-type-provenance
+                     (provenance-input {:token outcome-keyword} :producer 0)))
+        source (:source (first (:children root)))]
+    (is (true? (:var? source)))
+    (is (str/ends-with? (:file source) "loan_app_rules.clj"))))
+
+(deftest test-fact-type-provenance-errors
+  (let [input (provenance-input {:token outcome-keyword} :producer 0)]
+    (testing "no registered system"
+      (with-redefs [client/get-current-system (constantly nil)]
+        (is (= {:error "no explorer system registered"}
+               (client/fact-type-provenance input)))))
+    (testing "an internal exception becomes an error map"
+      (register! loan-app-session loan-app-annotations)
+      (with-redefs [navigate/fact-type-provenance
+                    (fn [& _] (throw (ex-info "boom" {})))]
+        (is (str/starts-with? (:error (client/fact-type-provenance input))
+                              "internal error:"))))))
