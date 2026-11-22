@@ -693,7 +693,10 @@ Accepted and fixed:
 - 1.7 cursor resolution — scoped RHS callsites fall back to the global
   resolution, and an omitted `:caller-ns` falls back to the production's ns.
 - 1.8 depth guard — anything that is neither `:full` nor a non-negative integer
-  is refused (pinned with fn validation off, which is the bb/JVM-shell posture).
+  is refused. Verified that `st/validate-schemas` really is on in
+  `navigate_test.clj` (a bad `:depth` throws `ExceptionInfo` there), so the test
+  pins `s/fn-validation?` first, switches validation off around the guard
+  (the bb/JVM-shell posture) and restores it afterwards.
 - §2 test gaps — shortening/bridge-short test, chained k-level diamond,
   ordering additions (LHS declaration order, rules/queries interleaved,
   insert+retract child), B3 full equality plus a tight node bound (25), E5

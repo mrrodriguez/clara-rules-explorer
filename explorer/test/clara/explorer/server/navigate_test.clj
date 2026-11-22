@@ -424,8 +424,11 @@
     (testing "a negative depth"
       (is (string? (:error (answer-provenance analysis (->cursor-input "T" :producer -1))))))
     (testing "a depth that is neither a non-negative integer nor :full is refused, not read as 0"
-      ;; The schema cannot express this check, and the operation is also called where the
-      ;; test fixture's fn validation is off (the production JVM shell, `editor-client.bb`).
+      ;; `st/validate-schemas` is on for this namespace, so a bad `:depth` normally becomes an
+      ;; `ExceptionInfo` from the schema rather than an `{:error …}` return. The guard matters
+      ;; where validation is off (the production JVM shell, `editor-client.bb`), so pin that
+      ;; posture explicitly instead of relying on it.
+      (is (s/fn-validation?) "the namespace fixture enables schema fn validation")
       (s/set-fn-validation! false)
       (try
         (doseq [bad-depth [:bogus "1" 1.5 nil]]
@@ -434,7 +437,8 @@
                                   analysis
                                   (->cursor-input "T" :producer bad-depth)))))))
         (finally
-          (s/set-fn-validation! true))))
+          (s/set-fn-validation! true)))
+      (is (s/fn-validation?) "validation is restored for the rest of the namespace"))
     (testing "shape violations are the schema's job, not the operation's"
       (is (some? (s/check schema/FactTypeProvenanceInput
                           {:node {:kind :fact-type}
