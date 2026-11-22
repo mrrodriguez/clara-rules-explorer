@@ -665,6 +665,22 @@ Checkpoints, not a diary. Update in place as work lands.
       types); the §1.9 sandbox note was rewritten around a verified
       `CLJ_CONFIG` workaround
 
+- [x] 12 `clara.explorer.server.navigate` naming audit — the provenance half was
+      already `->`/`get-` shaped, but the older `navigate` half was not:
+      `get-production-summary` (accessor), `->type-name-set`,
+      `->declared-lhs-type-names`, `->declared-rhs-type-names`,
+      `->global-producer-targets`, `->global-consumer-targets`,
+      `->scoped-producer-targets`, `->scoped-consumer-targets`,
+      `->global-callsite-resolved-types`, and `navigate-lhs` / `navigate-rhs` for
+      verb-first consistency with `navigate-scoped` / `navigate-global`. Also
+      converted the remaining `str` placeholder errors in that half to `format`
+      and named the `t` mapcat parameter `type-name`. Output-identical; all
+      suites, lint, formatting and the bb smoke test stay green. Left alone on
+      purpose: the 4–5 arity helpers keep positional `(runtime analysis …)`
+      arguments (they are private, called twice each, and a map-arg refactor
+      would add construction for no clarity gain over the existing `ctx` maps in
+      the provenance half).
+
 ### 7.1 Review 1 disposition
 
 Review: `docs/planning/fact-type-provenance-neom-review-1.md`.
@@ -720,25 +736,26 @@ Accepted and fixed:
   `--provenance`/`--list-units` invocations in `persisted-artifacts.md`; the
   Commentary/transport/ns/bb header summaries.
 
-Vetoed or corrected (the prescription is wrong, the diagnosis is not):
+Vetoed or corrected (handed back to the reviewer in
+`fact-type-provenance-neom-review-1.md`):
 
-- **1.9 / §5.2's proposed remedy is unusable.** The review is right that the old
-  note's `BABASHKA_CLASSPATH=explorer/src:explorer/resources` command cannot
-  work, but its own alternative is the same classpath override. The real cause
-  is `bin/bootstrap.bb` calling `deps/add-deps` unconditionally, so no classpath
-  value can bypass it. The note now documents `CLJ_CONFIG=<writable dir>`,
-  verified with a fresh cache dir (`make bb-smoke-test` green).
-- **1.2's prescription, applied literally, breaks termination.** "Compute the
-  leaf check before `seen?`/`expand?` (only after `cycle?`)" is right, but the
-  following rewrite must keep `(not cycle?)` in `expand?` as well: dropping it
-  let an on-path production expand forever (an immediate
-  `StackOverflowError` in `provenance-cross-type-cycle-terminates-test`). The
-  shipped `->production-node` keeps the cycle guard, and only `seen?`/depth are
-  gated on the leaf result.
-- **1.2's first claim overstates the loss.** A query or `:no-output-types` rule
-  already answered `:children []` through `->production-children`, so only
-  `:outputs :unknown` and the spurious `:seen?` tracking were actually lost.
-  Fixed all three cases anyway.
+- **1.4's "(even for rows seeded from `:depth 1` / `:depth :full`)" is wrong.**
+  `clara-explorer--provenance-seed` puts every populated production path into
+  both `children` and `expanded`, so the first `TAB` on a seeded row collapses it
+  and sends nothing; the wasted re-fetch only happens after a collapse. The fix
+  (cache check before fetching) covers all rows and is pinned by the new
+  collapse-then-re-expand test.
+- **1.2's prescription, applied literally, breaks termination.** Gating
+  `seen?`/depth on the leaf result is right, but `expand?` must keep
+  `(not cycle?)`: with the leaf short-circuit in place, dropping it let an
+  on-path production expand forever (an immediate `StackOverflowError` in
+  `provenance-cross-type-cycle-terminates-test`). Shipped form keeps the cycle
+  guard.
+- **1.2's "queries / `:no-output-types` rules are not gated by `->consumer-leaf`
+  either" has no observable effect.** Both already answered `:children []`
+  through `->production-children`, so the only real losses were `:unlinked-rule`'s
+  `:outputs :unknown` and the spurious `:seen?` on repeated leaves. All leaf
+  kinds are gated now anyway.
 - **§3.5's `hierarchy-bridge?` guard is defensive, not a bug fix.** No reachable
   case makes `:matches` empty (the closure that produced the edge is exactly
   what `->type-matches` intersects), so the guard changes no behaviour; kept as
@@ -746,6 +763,13 @@ Vetoed or corrected (the prescription is wrong, the diagnosis is not):
 - **§6's branch-scope note needs no code change.** Widening the diff of
   `8d52e00` (stripping old plan-section labels from unrelated tests and Neovim
   files) was intentional; the edits are clean and the PR stays as one branch.
+
+Also corrected in this doc's own bookkeeping: §3.3's four 2-arity `into` sites
+were all genuinely 2-arity, so that critique was accepted in full (an earlier
+note here wrongly called part of it a false positive). §1.9/§5.2 was likewise
+accepted: the review's "redirect cache/home" hint is what shipped
+(`CLJ_CONFIG=<writable dir>`), since `bin/bootstrap.bb`'s unconditional
+`deps/add-deps` runs before any classpath override could matter.
 
 Verification after review 1 (all green):
 

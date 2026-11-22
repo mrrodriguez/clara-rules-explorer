@@ -393,3 +393,103 @@ In addition to the bugs in §1 (items 1.3–1.6), a few targeted simplifications
   `analyze_test_rules.clj`, `edn.lua`, `token.lua`). Those edits are clean and
   desirable — just note that they widen the PR diff outside the provenance
   feature if you prefer keeping PRs strictly scoped.
+
+---
+
+## Response from implementation (pass 13)
+
+Everything in §1–§5 was checked against the branch and nearly all of it was
+acted on; the per-item disposition is recorded in
+`fact-type-provenance-progress.md` (§7 step 11 and §7.1). This section contains
+only what is *not* in that "accepted" set: the critiques that do not hold as
+written, and the places the prescription was right in principle but unsafe or
+unspecified as stated. Unless noted, the underlying defect was still fixed.
+
+### Vetoed — the critique does not hold as written
+
+1. **§1.4, "(even for rows seeded from `:depth 1` / `:depth :full`)".** Not
+   accurate. `clara-explorer--provenance-seed` puts every production path whose
+   children arrived populated into **both** `clara-explorer--provenance-children`
+   and `clara-explorer--provenance-expanded`, and
+   `clara-explorer--provenance-toggle-path` checks `expanded` first. So the first `TAB` on a seeded row *collapses* it and
+   sends nothing; the wasted round-trip only happens after the user collapses a
+   row and then re-expands it. The bug is real (re-expand ignored the cache), the
+   parenthetical is not, and the fix covers both cases. Pinned by
+   `provenance-collapse-then-expand-uses-the-cache-test`.
+
+2. **§1.2, "queries and `:no-output-types` rules are not gated by
+   `->consumer-leaf` there either".** No observable consequence: both already
+   answered `:children []` through `->production-children`
+   (`->consumer-child-types` is empty for them), so the pre-fix production root
+   emitted exactly what a leaf gate emits. The genuine losses in that bullet were
+   `:unlinked-rule`'s `:outputs :unknown` — at `:depth > 0`/`:full` and at a
+   `:production` root — and the spurious `:seen?` on a repeated leaf. All leaf
+   kinds are gated now regardless.
+
+3. **§3.5, "`hierarchy-bridge?` should guard `(and (seq matches) …)`" as a
+   correctness fix.** Not a bug: at that call site `:matches` is the intersection
+   of the production's referenced types with the same closure that produced the
+   edge, so it can never be empty. The guard was added anyway as belt-and-braces
+   and changes no reachable output. Worth knowing if you were tracking it as a
+   defect rather than hardening.
+
+### Altered — right diagnosis, prescription unsafe or under-specified
+
+4. **§1.2's fix instruction, applied literally, breaks termination.** "Compute
+   the leaf check before `seen?`/`expand?` (only after `cycle?`)" is the right
+   shape, but the rewritten predicate must also keep `(not cycle?)` inside
+   `expand?`. With the leaf short-circuit in place, an on-path production is
+   neither a leaf nor seen, so it expands forever — reproduced as an immediate
+   `StackOverflowError` in `provenance-cross-type-cycle-terminates-test`. Shipped
+   form gates only `seen?` and the depth decision on the leaf result and keeps
+   the cycle guard in `expand?`.
+
+5. **§2.4 (B3), "pin the expected node count (or a tight upper bound)".** Took
+   the bound option: `(= jvm-answer bb-answer)` for full structural equality plus
+   `(< 1 nodes 50)` against the measured 25. An exact 25 would fail for unrelated
+   reasons the next time the example registry is regenerated
+   (`make regen-artifacts`); a path-only-cycle regression that reintroduces
+   duplication blows past 50 immediately.
+
+6. **§1.8, "outside schema-validated tests".** The framing is correct, and the
+   test now makes the precondition explicit rather than implicit.
+   `navigate_test.clj` installs `st/validate-schemas`, so a bad `:depth` there
+   throws `ExceptionInfo` from the schema before the body runs (confirmed:
+   `s/fn-validation?` is `true` inside the fixture, `false` outside). The test
+   therefore asserts `(s/fn-validation?)` first, switches validation off only
+   around the guard assertions (the `editor-client.bb` / JVM-shell posture), and
+   restores it afterwards. Without that, the test would be asserting schema
+   behaviour and silently stop covering the guard.
+
+### Accepted in spirit, remedy replaced
+
+7. **§1.9 / §5.2 (the sandbox note).** Your §1.9 hint — "whether redirecting
+   cache/home or running outside the sandbox is required" — is exactly what
+   shipped: `CLJ_CONFIG=<writable dir>` redirects the tools.deps cache, so
+   `bin/bootstrap.bb`'s unconditional `deps/add-deps` has somewhere to write.
+   Verified with a fresh cache dir (`make bb-smoke-test` green). For the record,
+   §5.2's phrasing ("fix the non-working `BABASHKA_CLASSPATH` workaround") reads
+   as making that variable work; no classpath value can, because `add-deps` runs
+   before the classpath is consulted. The note now says so explicitly.
+
+### No action needed
+
+8. **§6's branch-scope note.** The widened `8d52e00` diff (stripping old
+   plan-section labels from unrelated tests and Neovim files) was intentional;
+   left as is.
+
+### Also for the record
+
+- **§3.3's four `into` sites were all genuinely 2-arity** at the reviewed
+  revision (`navigate.clj:363, 374, 376, 389`), so that critique was accepted in
+  full. An earlier note I wrote in the progress doc claimed part of that list was
+  already 3-arity; that was my error and has been corrected there.
+- **§5.4's test counts** landed slightly differently after the review fixes: the
+  Emacs table now reads `123 expected + 5 skipped` for Tier 1 (`make test-tier1`,
+  no Eldev) and documents the `make test-tier1` + `make test` split; Tier 2 via
+  Eldev is 128/128 with 0 skipped.
+- **Verification after the pass:** `explorer` — 559 tests / 3741 assertions,
+  `lint` 0/0, reflection clean, `format-check` clean, `bb-smoke-test` green (with
+  `CLJ_CONFIG`); `editor/emacs` — Tier 1 123 + 5 skipped, Tier 2 128/128,
+  byte-compile clean; `ui` — `svelte-check` clean over the
+  `ProductionReference.unit` addition.
