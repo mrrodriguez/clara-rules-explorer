@@ -495,7 +495,7 @@
       (mapv (fn [[type-name vias]] (->fact-type-node ctx type-name vias))
             (->consumer-child-types summary)))))
 
-(defn- ->insert-side?
+(defn- target-has-insert-edge?
   "True when a producer target carries an insert edge, whether or not it also retracts: `:via`
    is the deduped edge, so `:vias` is what tells an insert+retract production apart from a
    retract-only one."
@@ -515,7 +515,7 @@
              :type-short (type-name->short-name type-name)
              :children (mapv #(->production-node ctx %) targets)}
       (= :producer direction)
-      (assoc :external? (not-any? ->insert-side? targets))
+      (assoc :external? (not-any? target-has-insert-edge? targets))
       (seq vias) (assoc :vias vias))))
 
 (defn- ->production-root-node
