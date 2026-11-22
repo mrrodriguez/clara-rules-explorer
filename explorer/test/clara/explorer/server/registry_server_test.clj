@@ -161,7 +161,7 @@
 (def ^:private caller-ns "clara.explorer.test.rules.loan-app-rules")
 
 (defn- with-registry-client
-  "Runs F with the composed two-unit registry registered as the client's current system."
+  "Runs `f` with the composed two-unit registry registered as the client's current system."
   [f]
   (let [system (server/start-system! {:registry (->registry-config) :port 0})]
     (try
@@ -171,33 +171,34 @@
         (client/register! nil)
         (server/stop! system)))))
 
-(defn- provenance
+(defn- answer-provenance
   [input]
   (client/fact-type-provenance
    (merge {:direction :producer :depth 0 :ancestors []} input)))
 
-(defn- cursor-root
+(defn- ->cursor-root
   ([type-name direction depth]
-   (cursor-root type-name direction depth {}))
+   (->cursor-root type-name direction depth {}))
   ([type-name direction depth input]
-   (:node (provenance {:node {:kind :cursor
-                              :input (merge {:token type-name :caller-ns caller-ns} input)}
-                       :direction direction
-                       :depth depth}))))
+   (:node (answer-provenance {:node {:kind :cursor
+                                     :input (merge {:token type-name :caller-ns caller-ns} input)}
+                              :direction direction
+                              :depth depth}))))
 
-(defn- by-name
+(defn- index-by-name
   [nodes]
   (into {} (map (juxt :name identity)) nodes))
 
-(defn- production-nodes
+(defn- collect-production-nodes
+  "Every production node in the tree, depth-first, as a concrete vector."
   [node]
-  (concat (when (= :production (:kind node)) [node])
-          (mapcat production-nodes (:children node))))
+  (cond-> (if (= :production (:kind node)) [node] [])
+    (seq (:children node)) (into (mapcat collect-production-nodes) (:children node))))
 
 (deftest provenance-producer-root-crosses-the-keyword-test
   (with-registry-client
     (fn []
-      (let [root (cursor-root outcome-keyword :producer 0)]
+      (let [root (->cursor-root outcome-keyword :producer 0)]
         (is (= :fact-type (:kind root)))
         (is (= [app-approved app-denied app-pending] (mapv :name (:children root))))
         (testing "each producer reaches the keyword through the record"
@@ -210,8 +211,8 @@
 (deftest provenance-consumer-root-crosses-the-keyword-test
   (with-registry-client
     (fn []
-      (let [root (cursor-root outcome-record :consumer 0)
-            children (by-name (:children root))]
+      (let [root (->cursor-root outcome-record :consumer 0)
+            children (index-by-name (:children root))]
         (testing "the downstream unit's consumers reach the record through the keyword"
           (doseq [p-name [notice-approved notice-denied]]
             (is (contains? children p-name))
@@ -231,7 +232,7 @@
 (deftest provenance-producer-root-with-no-producer-is-external-test
   (with-registry-client
     (fn []
-      (let [root (cursor-root application-type :producer 0)]
+      (let [root (->cursor-root application-type :producer 0)]
         (is (= :fact-type (:kind root)))
         (is (true? (:external? root)))
         (is (= [] (:children root)))))))
@@ -239,8 +240,8 @@
 (deftest provenance-consumer-retract-only-production-is-not-a-leaf-test
   (with-registry-client
     (fn []
-      (let [root (cursor-root document-check-type :consumer 1)
-            rule (first (filter #(= retract-stale (:name %)) (production-nodes root)))
+      (let [root (->cursor-root document-check-type :consumer 1)
+            rule (first (filter #(= retract-stale (:name %)) (collect-production-nodes root)))
             stale (first (filter #(= stale-notice-type (:type %)) (:children rule)))]
         (is (some? rule))
         (is (contains? rule :children) "a retract-only production is not a leaf")
@@ -250,12 +251,12 @@
 (deftest provenance-production-root-marks-its-self-loop-test
   (with-registry-client
     (fn []
-      (let [root (:node (provenance {:node {:kind :production :name app-denied}
-                                     :direction :producer
-                                     :depth 0
-                                     :ancestors []}))
+      (let [root (:node (answer-provenance {:node {:kind :production :name app-denied}
+                                            :direction :producer
+                                            :depth 0
+                                            :ancestors []}))
             outcome-node (first (filter #(= outcome-record (:type %)) (:children root)))
-            children (by-name (:children outcome-node))]
+            children (index-by-name (:children outcome-node))]
         (is (= :production (:kind root)))
         (is (not (contains? root :matches)) "a root production has no parent type")
         (is (not (contains? root :via)))
@@ -268,9 +269,9 @@
 (deftest provenance-cursor-inside-a-production-is-not-hidden-test
   (with-registry-client
     (fn []
-      (let [root (cursor-root outcome-record :consumer 0
-                              {:production args-demo
-                               :side :lhs
-                               :caller-ns "clara.explorer.test.rules.loan-app-rules"})]
+      (let [root (->cursor-root outcome-record :consumer 0
+                                {:production args-demo
+                                 :side :lhs
+                                 :caller-ns "clara.explorer.test.rules.loan-app-rules"})]
         (is (contains? (set (map :name (:children root))) args-demo)
             "the production the cursor sits in is still a consumer")))))

@@ -145,9 +145,8 @@
 
     (testing "hierarchy-only ghosts stay unknown after the subtraction"
       (let [unknown (get-in composed [:slim :unknown-fact-types])
-            ghost (->> (-> composed :fact-types (get application-type) :ancestors)
-                       (filter #(= "java.lang.Object" (:name %)))
-                       first)]
+            ancestors (get-in composed [:fact-types application-type :ancestors])
+            ghost (first (filter #(= "java.lang.Object" (:name %)) ancestors))]
         (is (every? string? unknown)
             "a flat name set, not a set of per-unit sets")
         (is (contains? unknown "java.lang.Object"))

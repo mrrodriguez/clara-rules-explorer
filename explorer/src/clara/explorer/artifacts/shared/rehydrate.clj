@@ -62,7 +62,7 @@
   and `:queries`. `:unit` is carried through when the referred production has one (a composed
   selection tags every production; a live session does not)."
   [rules queries p-name]
-  (let [{:keys [unit] :as _production} (or (get rules p-name) (get queries p-name))]
+  (let [{:keys [unit]} (or (get rules p-name) (get queries p-name))]
     (cond-> {:name (str p-name)
              :id (route-id (str p-name))
              :ns (fq-ns p-name)

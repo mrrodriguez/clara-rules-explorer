@@ -2,11 +2,12 @@
   "Editor-facing query surface. Pure EDN in, EDN out. No HTTP.
 
    Both the Emacs (CIDER) and future neovim (Conjure) clients eval
-   `clara.explorer.server.client/navigate` over nREPL and read the printed EDN
+   `clara.explorer.server.client/navigate` or
+   `clara.explorer.server.client/fact-type-provenance` over nREPL and read the printed EDN
    result.  This namespace is the JVM shell: system registration, schema
    validation, live-namespace token resolution, and var-metadata source
-   locations. The navigation itself lives in `nav/navigate`,
-   which this namespace calls with the JVM runtime map.
+   locations. The navigation itself lives in `nav/navigate` and
+   `nav/fact-type-provenance`, which this namespace calls with the JVM runtime map.
 
    Resolution reuses the analyzer's own logic (`ctor/resolve-record-type`
    for record/Java constructors, the serialized
@@ -257,9 +258,9 @@
       (catch Exception e
         (log/errorf e "navigate failed: production=%s side=%s token=%s"
                     production side (pr-str token))
-        {:error (str "internal error: "
-                     (or (some-> e .getCause .getMessage)
-                         (.getMessage e)))}))))
+        {:error (format "internal error: %s"
+                        (or (some-> e .getCause .getMessage)
+                            (.getMessage e)))}))))
 
 (s/defn fact-type-provenance :- schema/FactTypeProvenanceResponse
   "Answers a `schema/FactTypeProvenanceInput` over the registered system's analysis: a producer or
@@ -286,6 +287,6 @@
       (catch Exception e
         (log/errorf e "fact-type-provenance failed: kind=%s subject=%s"
                     (:kind node) subject)
-        {:error (str "internal error: "
-                     (or (some-> e .getCause .getMessage)
-                         (.getMessage e)))}))))
+        {:error (format "internal error: %s"
+                        (or (some-> e .getCause .getMessage)
+                            (.getMessage e)))}))))

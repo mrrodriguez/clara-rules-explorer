@@ -12,15 +12,18 @@
 ;; Editor navigation over a live CIDER REPL running the Clara Rules Explorer
 ;; server.  Point at a fact type in a defrule/defquery and jump to its producer
 ;; (LHS) or consumer (RHS), using the dependency graph the server has already
-;; computed.
+;; computed; or open an expandable producer/consumer provenance tree around it.
 ;;
-;; All semantics live in `clara.explorer.server.client/navigate` (Clojure); this
-;; file is structural navigation + transport + UX glue.  No machine-specific
-;; paths, home directories, or ports are hard-coded anywhere.
+;; All semantics live in `clara.explorer.server.client/navigate` and
+;; `clara.explorer.server.client/fact-type-provenance` (Clojure); this file is
+;; structural navigation + transport + UX glue.  No machine-specific paths, home
+;; directories, or ports are hard-coded anywhere.
 ;;
 ;; Spike workflow: open this file, M-x eval-buffer, then:
 ;;   M-x clara-explorer-navigate-producer   (LHS type -> producer)
 ;;   M-x clara-explorer-navigate-consumer   (RHS type -> consumer)
+;;   M-x clara-explorer-show-producer-provenance  (upstream tree)
+;;   M-x clara-explorer-show-consumer-provenance  (downstream tree)
 ;;   M-x clara-explorer-refresh             (re-warm annotations/analysis)
 ;;   M-x clara-explorer-swap-session        (swap in a rebuilt session)
 
@@ -44,10 +47,11 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
   :group 'clara-explorer)
 
 (defcustom clara-explorer-transport 'auto
-  "Transport for navigation queries.
+  "Transport for navigation and provenance queries.
 `auto' uses nREPL when the CIDER session has a running explorer system,
 otherwise babashka (default);
-`nrepl' evals `client/navigate' over the CIDER session;
+`nrepl' evals `client/navigate' / `client/fact-type-provenance' over the CIDER
+session;
 `bb' shells out to `editor-client.bb' over the persisted artifacts."
   :type '(choice (const :tag "Auto (nREPL when the explorer server is running, else babashka)" auto)
                  (const :tag "nREPL (live session)" nrepl)
@@ -124,14 +128,15 @@ comment to end of line, repeatedly until point stops moving.  Uses
 
 (defun clara-explorer--edn-value (x)
   "Print an elisp value X as an EDN literal string.
-A keyword-keyed plist prints as a nested map, so an operation input that carries
-maps (`fact-type-provenance`'s `:node` / `:input`) serializes without a second
-printer."
+A keyword-keyed plist prints as a nested map, and a vector prints element-wise,
+so an operation input that carries maps and vectors (`fact-type-provenance`'s
+`:node` / `:input` / `:ancestors`) serializes without a second printer."
   (cond
    ((null x) "nil")
    ((eq x t) "true")
    ((stringp x) (prin1-to-string (substring-no-properties x)))
    ((symbolp x) (substring-no-properties (symbol-name x)))
+   ((vectorp x) (concat "[" (mapconcat #'clara-explorer--edn-value x " ") "]"))
    ((keywordp (car-safe x)) (clara-explorer--edn-map x))
    (t (prin1-to-string x))))
 
@@ -761,14 +766,18 @@ Used for RHS and global cases where LHS-structure is not applicable."
 ;; Remote navigation
 ;; ---------------------------------------------------------------------------
 
-(defun clara-explorer--op-code (op input)
-  "The Clojure form string that calls OP's `client/' fn with INPUT.
-   OP is `navigate' or `fact-type-provenance'.  Uses `requiring-resolve' so the
-   namespace is loaded at runtime rather than resolved at compile time (which
-   would fail if the namespace is not yet loaded in the REPL)."
+(defun clara-explorer--op-code (op input-edn)
+  "The Clojure form string that calls OP's `client/' fn with INPUT-EDN.
+   OP is `navigate' or `fact-type-provenance'; an unknown OP is an error rather
+   than a silent default.  Uses `requiring-resolve' so the namespace is loaded
+   at runtime rather than resolved at compile time (which would fail if the
+   namespace is not yet loaded in the REPL)."
   (format "((requiring-resolve 'clara.explorer.server.client/%s) %s)"
-          (if (eq op 'navigate) "navigate" "fact-type-provenance")
-          (clara-explorer--edn-map input)))
+          (pcase op
+            ('navigate "navigate")
+            ('fact-type-provenance "fact-type-provenance")
+            (_ (error "clara-explorer: unknown operation %S" op)))
+          input-edn))
 
 (defun clara-explorer--resolve-template-file ()
   "Absolute path of the canonical resolve-form template shipped beside this
@@ -858,6 +867,10 @@ file (a symlink to the `clara.explorer.server.tokens` canonical text)."
           (regexp-quote rule-name)
           (clara-explorer--symbol-boundary-rx)))
 
+(defun clara-explorer--buffer-visits-ns-p (ns)
+  "True when the current buffer's namespace is NS."
+  (equal ns (ignore-errors (substring-no-properties (cider-current-ns)))))
+
 (defun clara-explorer--goto-fallback (target)
   "Last resort: open the ns file and search for the defrule/defquery form.
 Reports why it could not jump instead of returning nil silently: a registry/bb
@@ -872,13 +885,18 @@ classpath, and `cider-find-ns' then leaves the buffer unchanged."
       (message "clara-explorer: cannot locate %s (no namespace in the target)" name)
       nil)
      (t
-      (let ((origin (current-buffer)))
-        (condition-case err
-            (cider-find-ns nil ns)
-          (error (message "clara-explorer: could not open %s: %s"
-                          ns (error-message-string err))))
+      (let ((origin (current-buffer))
+            (opened
+             (condition-case err
+                 (progn (cider-find-ns nil ns) t)
+               (error
+                (message "clara-explorer: could not open %s: %s"
+                         ns (error-message-string err))
+                nil))))
         (cond
-         ((and (eq (current-buffer) origin) (not (buffer-file-name origin)))
+         ((not opened) nil)
+         ((and (eq (current-buffer) origin)
+               (not (clara-explorer--buffer-visits-ns-p ns)))
           (message
            (concat "clara-explorer: namespace %s is not on this REPL's classpath; "
                    "load it (or use the nREPL transport with a live session) to jump to %s")
@@ -969,9 +987,7 @@ system, otherwise bb."
   "QUERY's prepared input with `:side' set to DIRECTION's navigate side
 \(`:lhs' for producer, `:rhs' for consumer).  `navigate' reads `:side' as the
 traversal direction; `fact-type-provenance' keeps the structural side instead."
-  (let ((input (copy-sequence (plist-get query :input))))
-    (plist-put input :side direction)
-    input))
+  (plist-put (copy-sequence (plist-get query :input)) :side direction))
 
 (defun clara-explorer--bb-provenance (selection-edn input-edn)
   "Run `bb editor-client.bb --provenance SEL INPUT' and parse the result."
@@ -988,10 +1004,15 @@ evals the matching call in `client`."
          (input (or input (plist-get query :input)))
          (input-edn (clara-explorer--edn-map input))
          (result (if (eq transport 'bb)
-                     (if (eq op 'navigate)
-                         (clara-explorer--bb-eval (clara-explorer--bb-selection) input-edn)
-                       (clara-explorer--bb-provenance (clara-explorer--bb-selection) input-edn))
-                   (clara-explorer--eval-edn (clara-explorer--op-code op input) conn))))
+                     (pcase op
+                       ('navigate
+                        (clara-explorer--bb-eval (clara-explorer--bb-selection) input-edn))
+                       ('fact-type-provenance
+                        (clara-explorer--bb-provenance (clara-explorer--bb-selection)
+                                                       input-edn))
+                       (_ (user-error "clara-explorer: unknown operation %S" op)))
+                   (clara-explorer--eval-edn
+                    (clara-explorer--op-code op input-edn) conn))))
     (if result
         result
       (message "clara-explorer: no result from %s" op)
@@ -1128,7 +1149,8 @@ Has no effect on the nREPL transport."
 0 shows the root's immediate production layer; N inlines N further levels;
 `full' expands until a path cycle (`:cycle?') or an already-expanded
 production (`:seen?') stops it."
-  :type '(choice (integer :tag "Production levels")
+  :type '(choice (const :tag "Immediate (0)" 0)
+                 (natnum :tag "Production levels")
                  (const :tag "Full" full))
   :group 'clara-explorer)
 
@@ -1215,8 +1237,9 @@ through the hierarchy; nil when the edge is direct."
                           ", "))
        'face 'shadow))))
 
-(defun clara-explorer--provenance-production-label (node direction)
-  "NODE's label: unqualified rule name, dim ns, unit, kind/leaf/edge markers."
+(defun clara-explorer--provenance-production-label (node direction &optional expanded?)
+  "NODE's label: unqualified rule name, dim ns, unit, kind/leaf/edge markers.
+EXPANDED? suppresses the `shown above' marker on a row that is open here."
   (let* ((name (clara-explorer--edn-get :name node))
          (ns (clara-explorer--edn-get :ns node))
          (unit (clara-explorer--edn-get :unit node))
@@ -1237,15 +1260,17 @@ through the hierarchy; nil when the edge is direct."
      (clara-explorer--provenance-vias-label node)
      (when (clara-explorer--edn-get :cycle? node)
        (propertize " ↻ cycle" 'face 'shadow))
-     (when (clara-explorer--edn-get :seen? node)
+     (when (and (clara-explorer--edn-get :seen? node) (not expanded?))
        (propertize " ↑ shown above" 'face 'shadow)))))
 
-(defun clara-explorer--provenance-row-label (node indent direction)
+(defun clara-explorer--provenance-row-label (node indent direction path)
   "One row's label: INDENT per path level, then the node's own label."
   (concat (make-string (* 2 indent) ?\s)
           (pcase (clara-explorer--edn-get :kind node)
             (:fact-type (clara-explorer--provenance-fact-type-label node))
-            (:production (clara-explorer--provenance-production-label node direction))
+            (:production (clara-explorer--provenance-production-label
+                          node direction
+                          (gethash path clara-explorer--provenance-expanded)))
             (_ (propertize (format "%s" (clara-explorer--edn-get :text node))
                            'face 'shadow)))))
 
@@ -1285,7 +1310,7 @@ cache when the level was fetched later."
   "Rows for NODE at PATH, depth-first, plus the node table the commands read."
   (puthash path node clara-explorer--provenance-nodes)
   (cons (list path (vector (clara-explorer--provenance-row-label
-                            node (1- (length path)) direction)))
+                            node (1- (length path)) direction path)))
         (mapcan (lambda (child)
                   (clara-explorer--provenance-rows
                    child
@@ -1300,6 +1325,16 @@ cache when the level was fetched later."
                                    (vector (clara-explorer--provenance-node-key root))
                                    direction))
 
+(defun clara-explorer--provenance-set-header (direction)
+  "Show the traversal DIRECTION in the column header, and forbid sorting.
+Sorting an indented tree would flatten it."
+  (setq tabulated-list-format
+        (vector (list (pcase direction
+                        (:producer "Producer Provenance")
+                        (_ "Consumer Provenance"))
+                      0 nil)))
+  (tabulated-list-init-header))
+
 (defun clara-explorer--provenance-load (root direction query input)
   "Reset the view state to ROOT and return its entries."
   (setq clara-explorer--provenance-root root
@@ -1308,6 +1343,7 @@ cache when the level was fetched later."
         clara-explorer--provenance-input input
         clara-explorer--provenance-expanded (make-hash-table :test 'equal)
         clara-explorer--provenance-children (make-hash-table :test 'equal))
+  (clara-explorer--provenance-set-header direction)
   (clara-explorer--provenance-seed root (vector (clara-explorer--provenance-node-key root)))
   (clara-explorer--provenance-entries root direction))
 
@@ -1336,15 +1372,21 @@ nREPL error) become message nodes, so a failed expansion keeps the buffer."
      (clara-explorer--provenance-message-node
       (format "error: %s" (error-message-string err))))))
 
+(defun clara-explorer--provenance-show (query direction input)
+  "Run INPUT for QUERY walking DIRECTION and reprint the current buffer.
+A root-call error renders as a message row rather than failing the command."
+  (let ((node (clara-explorer--provenance-request query input)))
+    (setq tabulated-list-entries
+          (clara-explorer--provenance-load node direction query input))
+    (tabulated-list-print t)))
+
 (defun clara-explorer--provenance-production-ancestors (path)
   "Production names strictly above the production at PATH's last element.
 Paths alternate fact-type and production names, so the productions sit at
 the odd indices; the last element is the row being expanded and is
 excluded."
-  (let (names)
-    (cl-loop for i from 1 below (1- (length path)) by 2
-             do (push (aref path i) names))
-    (vconcat (nreverse names))))
+  (vconcat (cl-loop for i from 1 below (1- (length path)) by 2
+                    collect (aref path i))))
 
 (defun clara-explorer--provenance-expandable-p (node)
   "True when NODE can fetch another level: not a cycle, not outputs-unknown,
@@ -1355,9 +1397,15 @@ not a leaf."
 
 (defun clara-explorer--provenance-toggle-path (path)
   "Expand or collapse the production row at PATH; non-nil when the view changed.
-A `:seen?' row is fetched on demand at depth 0; cycle, message,
-outputs-unknown, and leaf rows do not toggle."
-  (let ((node (and path (gethash path clara-explorer--provenance-nodes))))
+A collapsed row re-expands from `clara-explorer--provenance-children' without
+round-tripping; a cached message row retries.  A `:seen?' row is fetched on
+demand at depth 0; cycle, message, outputs-unknown, and leaf rows do not
+toggle."
+  (let* ((node (and path (gethash path clara-explorer--provenance-nodes)))
+         (cached (and path (gethash path clara-explorer--provenance-children :miss)))
+         (cached-error? (and (consp cached)
+                             (= 1 (length cached))
+                             (eq (clara-explorer--edn-get :kind (car cached)) :message))))
     (when node
       (pcase (clara-explorer--edn-get :kind node)
         (:message (message "%s" (clara-explorer--edn-get :text node)))
@@ -1370,6 +1418,9 @@ outputs-unknown, and leaf rows do not toggle."
           ((not (clara-explorer--provenance-expandable-p node))
            (message "nothing to expand")
            nil)
+          ((and (not (eq cached :miss)) (not cached-error?))
+           (puthash path t clara-explorer--provenance-expanded)
+           t)
           (t
            (let ((fetched (clara-explorer--provenance-request
                            clara-explorer--provenance-query
@@ -1419,17 +1470,15 @@ Also the buffer's `revert-buffer-function', hence the (ignored) arguments
 `revert-buffer' passes."
   (interactive)
   (when clara-explorer--provenance-query
-    (let* ((input clara-explorer--provenance-input)
-           (direction (plist-get input :direction))
-           (node (clara-explorer--provenance-request clara-explorer--provenance-query input)))
-      (setq tabulated-list-entries
-            (clara-explorer--provenance-load node direction
-                                             clara-explorer--provenance-query input))
-      (tabulated-list-print t))))
+    (clara-explorer--provenance-show
+     clara-explorer--provenance-query
+     (plist-get clara-explorer--provenance-input :direction)
+     clara-explorer--provenance-input)))
 
 (defvar clara-explorer-provenance-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "TAB") #'clara-explorer-provenance-toggle)
+    (define-key map (kbd "<tab>") #'clara-explorer-provenance-toggle)
     (define-key map (kbd "RET") #'clara-explorer-provenance-visit)
     ;; GUI Return, and convenient when a global map shadows C-m.
     (define-key map (kbd "<return>") #'clara-explorer-provenance-visit)
@@ -1447,7 +1496,7 @@ evil's `g' prefix), bind `clara-explorer-provenance-refresh' yourself or call
 `g' reverts through `revert-buffer-function', which re-runs the stored root call
 (`clara-explorer-provenance-refresh'); `q' buries; `TAB' expands or collapses a
 production; `RET' jumps to it.  The mode map is the customization point."
-  (setq tabulated-list-format [("Provenance" 0 t)])
+  (setq tabulated-list-format [("Provenance" 0 nil)])
   (setq tabulated-list-padding 0)
   (setq tabulated-list-sort-key nil)
   (setq-local revert-buffer-function #'clara-explorer-provenance-refresh)
@@ -1466,17 +1515,14 @@ configured depth."
 (defun clara-explorer--provenance-display (query direction input)
   "Open the provenance view for QUERY walking DIRECTION with INPUT, and show it.
 A root-call error renders as a message row rather than failing the command."
-  (let ((node (clara-explorer--provenance-request query input)))
-    (with-current-buffer (get-buffer-create clara-explorer--provenance-buffer-name)
-      (clara-explorer-provenance-mode)
-      (setq tabulated-list-entries
-            (clara-explorer--provenance-load node direction query input))
-      (tabulated-list-print t))
-    (select-window
-     (or (display-buffer-in-side-window
-          (get-buffer clara-explorer--provenance-buffer-name)
-          clara-explorer-provenance-window-params)
-         (selected-window)))))
+  (with-current-buffer (get-buffer-create clara-explorer--provenance-buffer-name)
+    (clara-explorer-provenance-mode)
+    (clara-explorer--provenance-show query direction input))
+  (select-window
+   (or (display-buffer-in-side-window
+        (get-buffer clara-explorer--provenance-buffer-name)
+        clara-explorer-provenance-window-params)
+       (selected-window))))
 
 (defun clara-explorer--show-provenance (direction)
   "Open a provenance view for the fact type at point, walking DIRECTION."

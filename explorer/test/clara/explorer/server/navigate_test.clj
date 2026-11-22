@@ -1,8 +1,8 @@
 (ns clara.explorer.server.navigate-test
-  "Pure tests for `clara.explorer.server.navigate/fact-type-provenance`.
+  "Pure tests for `navigate/fact-type-provenance`.
 
   `navigate` has no live-session dependency: the analyses here are tiny slim maps pushed through
-  `clara.explorer.artifacts.shared.rehydrate/rehydrate-analysis`, which is the real closure code
+  `shared-rehydrate/rehydrate-analysis`, which is the real closure code
   (usage inverses, `:descendants`, dep-graph inverses), so the cases that the fixture rulebase
   cannot express — diamonds, cross-type cycles, insert-and-retract of one type, unlinked outputs —
   are cheap, deterministic, and schema-checked."
@@ -27,7 +27,7 @@
   "A runtime whose token resolves to `caller-ns/token`, so a shared constructor reaches the
   serialized callsite linkage."
   {:resolve-token     (fn [_caller-ns token] token)
-   :token->fq-sym     (fn [caller-ns token] (symbol (str caller-ns "/" token)))
+   :token->fq-sym     (fn [caller-ns token] (symbol (str caller-ns) token))
    :production-source (fn [_p-name] {:var? false})})
 
 (defn- ->analysis
@@ -72,26 +72,26 @@
       :dep-graph {}
       :slim {:dropped #{} :unknown-fact-types #{}}})))
 
-(defn- provenance
+(defn- answer-provenance
   [analysis input]
   (navigate/fact-type-provenance analysis runtime input))
 
-(defn- cursor-input
+(defn- ->cursor-input
   [token direction depth & [input]]
   {:node {:kind :cursor :input (merge {:token token} input)}
    :direction direction
    :depth depth
    :ancestors []})
 
-(defn- child-names
+(defn- collect-child-names
   [node]
   (mapv :name (:children node)))
 
-(defn- production-nodes
-  "Every production node in the tree, depth-first."
+(defn- collect-production-nodes
+  "Every production node in the tree, depth-first, as a concrete vector."
   [node]
-  (concat (when (= :production (:kind node)) [node])
-          (mapcat production-nodes (:children node))))
+  (cond-> (if (= :production (:kind node)) [node] [])
+    (seq (:children node)) (into (mapcat collect-production-nodes) (:children node))))
 
 ;; ---------------------------------------------------------------------------
 ;; Direct edges and hierarchy bridges
@@ -100,13 +100,13 @@
 (deftest provenance-direct-producer-test
   (let [analysis (->analysis {:fact-types {"T" #{} "S" #{}}
                               :rules {"t/p" {:lhs ["S"] :insert ["T"]}}})
-        root (:node (provenance analysis (cursor-input "T" :producer 0)))]
+        root (:node (answer-provenance analysis (->cursor-input "T" :producer 0)))]
     (is (= :fact-type (:kind root)))
     (is (= "T" (:type root)))
     (is (= "T" (:type-short root)))
     (is (false? (:external? root)))
     (is (not (contains? root :vias)))
-    (is (= ["t/p"] (child-names root)))
+    (is (= ["t/p"] (collect-child-names root)))
     (let [p (first (:children root))]
       (is (= :production (:kind p)))
       (is (= :insert (:via p)))
@@ -120,21 +120,48 @@
 (deftest provenance-subtype-bridge-producer-test
   (let [analysis (->analysis {:fact-types {"T" #{} "S" ["T"] "V" #{}}
                               :rules {"t/p" {:lhs ["V"] :insert ["S"]}}})
-        root (:node (provenance analysis (cursor-input "T" :producer 0)))
+        root (:node (answer-provenance analysis (->cursor-input "T" :producer 0)))
         p (first (:children root))]
-    (is (= ["t/p"] (child-names root)))
+    (is (= ["t/p"] (collect-child-names root)))
     (is (= [{:name "S" :short "S"}] (:matches p)))
     (is (true? (:bridge? p)))))
 
 (deftest provenance-supertype-bridge-consumer-test
   (let [analysis (->analysis {:fact-types {"T" #{} "S" ["T"] "V" #{}}
                               :rules {"t/c" {:lhs ["T"] :insert ["V"]}}})
-        root (:node (provenance analysis (cursor-input "S" :consumer 0)))
+        root (:node (answer-provenance analysis (->cursor-input "S" :consumer 0)))
         c (first (:children root))]
-    (is (= ["t/c"] (child-names root)))
+    (is (= ["t/c"] (collect-child-names root)))
     (is (= :consume (:via c)))
     (is (= [{:name "T" :short "T"}] (:matches c)))
     (is (true? (:bridge? c)))))
+
+(deftest provenance-display-short-names-test
+  (testing "only class-like names shorten; keywords, strings, tuples, and maps stay whole"
+    (let [analysis (->analysis {:fact-types {"com.example.DocumentCheck" #{}
+                                             ":loan/status" #{}
+                                             "\"a.b\"" #{}
+                                             "[:loan/status \"a.b\"]" #{}
+                                             "{:k :a.b}" #{}}})
+          short-of (fn [type-name]
+                     (-> (answer-provenance analysis (->cursor-input type-name :producer 0))
+                         :node :type-short))]
+      (is (= "DocumentCheck" (short-of "com.example.DocumentCheck")))
+      (is (= ":loan/status" (short-of ":loan/status")))
+      (is (= "\"a.b\"" (short-of "\"a.b\"")))
+      (is (= "[:loan/status \"a.b\"]" (short-of "[:loan/status \"a.b\"]")))
+      (is (= "{:k :a.b}" (short-of "{:k :a.b}")))))
+  (testing "a bridge match carries the short form of the bridged type"
+    (let [analysis (->analysis {:fact-types {"com.example.Parent" #{}
+                                             "com.example.Child" ["com.example.Parent"]
+                                             "com.example.Other" #{}}
+                                :rules {"t/p" {:lhs ["com.example.Other"]
+                                               :insert ["com.example.Child"]}}})
+          p (first (:children (:node (answer-provenance
+                                      analysis
+                                      (->cursor-input "com.example.Parent" :producer 0)))))]
+      (is (= [{:name "com.example.Child" :short "Child"}] (:matches p)))
+      (is (true? (:bridge? p))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Dedupe, cycles, and bounded depth
@@ -143,8 +170,8 @@
 (deftest provenance-insert-and-retract-one-type-test
   (let [analysis (->analysis {:fact-types {"T" #{} "S" ["T"] "S2" ["T"]}
                               :rules {"t/both" {:lhs ["T"] :insert ["S"] :retract ["S2"]}}})
-        root (:node (provenance analysis (cursor-input "T" :producer 0)))]
-    (is (= ["t/both"] (child-names root)) "one node, not one per via")
+        root (:node (answer-provenance analysis (->cursor-input "T" :producer 0)))]
+    (is (= ["t/both"] (collect-child-names root)) "one node, not one per via")
     (is (false? (:external? root)) "an insert+retract producer still inserts T")
     (let [p (first (:children root))]
       (is (= :retract (:via p)))
@@ -155,7 +182,7 @@
 (deftest provenance-self-loop-cycle-test
   (let [analysis (->analysis {:fact-types {"T" #{}}
                               :rules {"t/p" {:lhs ["T"] :insert ["T"]}}})
-        root (:node (provenance analysis (cursor-input "T" :producer 1)))
+        root (:node (answer-provenance analysis (->cursor-input "T" :producer 1)))
         p (first (:children root))
         back-type (first (:children p))
         back (:children back-type)]
@@ -169,10 +196,10 @@
   (testing "a production root that is already on the path reports a cycle"
     (let [analysis (->analysis {:fact-types {"T" #{}}
                                 :rules {"t/p" {:lhs ["T"] :insert ["T"]}}})
-          node (:node (provenance analysis {:node {:kind :production :name "t/p"}
-                                            :direction :producer
-                                            :depth 0
-                                            :ancestors ["t/p"]}))]
+          node (:node (answer-provenance analysis {:node {:kind :production :name "t/p"}
+                                                   :direction :producer
+                                                   :depth 0
+                                                   :ancestors ["t/p"]}))]
       (is (= :production (:kind node)))
       (is (true? (:cycle? node)))
       (is (false? (:seen? node)))
@@ -182,24 +209,55 @@
   (let [analysis (->analysis {:fact-types {"T" #{} "U" #{}}
                               :rules {"t/a" {:lhs ["T"] :insert ["U"]}
                                       "t/b" {:lhs ["U"] :insert ["T"]}}})
-        root (:node (provenance analysis (cursor-input "T" :producer :full)))
-        b-nodes (filter #(= "t/b" (:name %)) (production-nodes root))]
+        root (:node (answer-provenance analysis (->cursor-input "T" :producer :full)))
+        b-nodes (filter #(= "t/b" (:name %)) (collect-production-nodes root))]
     (is (= 2 (count b-nodes)) "the cycle closes on the second t/b")
     (is (false? (:cycle? (first b-nodes))))
     (is (true? (:cycle? (second b-nodes))))))
+
+(defn- ->chained-diamond-analysis
+  "`k` levels of `T<i-1> → {t/p<i>, t/q<i>} → T<i>`: two productions per level insert the same type
+  from the same predecessor, so the tree reconverges at every level."
+  [k]
+  (->analysis
+   {:fact-types (into {"T0" #{}}
+                      (map (fn [i] [(str "T" i) #{}]))
+                      (range 1 (inc k)))
+    :rules (into {}
+                 (mapcat (fn [i]
+                           [[(str "t/p" i) {:lhs [(str "T" (dec i))]
+                                            :insert [(str "T" i)]}]
+                            [(str "t/q" i) {:lhs [(str "T" (dec i))]
+                                            :insert [(str "T" i)]}]]))
+                 (range 1 (inc k)))}))
 
 (deftest provenance-diamond-stays-linear-test
   (let [analysis (->analysis {:fact-types {"R" #{} "T" #{} "S" #{}}
                               :rules {"t/a" {:lhs ["S"] :insert ["T"]}
                                       "t/b" {:lhs ["T"] :insert ["R"]}
                                       "t/c" {:lhs ["T"] :insert ["R"]}}})
-        root (:node (provenance analysis (cursor-input "R" :producer :full)))
-        a-nodes (filter #(= "t/a" (:name %)) (production-nodes root))]
+        root (:node (answer-provenance analysis (->cursor-input "R" :producer :full)))
+        a-nodes (filter #(= "t/a" (:name %)) (collect-production-nodes root))]
     (is (= 2 (count a-nodes)) "t/a is reached through both parents but expanded once")
     (is (false? (:seen? (first a-nodes))))
     (is (true? (:seen? (second a-nodes))))
     (is (not (contains? (second a-nodes) :children)))
-    (is (not-any? :cycle? (production-nodes root)))))
+    (is (not-any? :cycle? (collect-production-nodes root)))))
+
+(deftest provenance-chained-diamond-stays-linear-test
+  (let [root (fn [k]
+               (:node (answer-provenance (->chained-diamond-analysis k)
+                                         (->cursor-input (str "T" k) :producer :full))))
+        counts (mapv #(count (collect-production-nodes (root %))) [2 3 4 5 6])]
+    (is (apply = (map - (rest counts) counts))
+        "each extra diamond level adds a fixed number of production nodes, not a doubling")
+    (is (< (last counts) 40) "the six-level tree stays small")
+    (let [prods (collect-production-nodes (root 6))]
+      (is (= 12 (count (filter #(seq (:children %)) prods)))
+          "each production expands at most once in one response")
+      (is (every? #(or (seq (:children %)) (:seen? %)) prods)
+          "a node that does not expand is a :seen? repeat")
+      (is (not-any? :cycle? prods) "a DAG reconvergence is not a path cycle"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Depth, leaf kinds, and external types
@@ -214,22 +272,22 @@
 (deftest provenance-depth-semantics-test
   (testing "a :cursor root: n + 1 production levels below the fact type"
     (is (= ["t/p3"]
-           (child-names (:node (provenance chain-analysis (cursor-input "D" :producer 0))))))
+           (collect-child-names (:node (answer-provenance chain-analysis (->cursor-input "D" :producer 0))))))
     (is (= ["t/p3" "t/p2"]
-           (mapv :name (production-nodes (:node (provenance chain-analysis
-                                                            (cursor-input "D" :producer 1)))))))
+           (mapv :name (collect-production-nodes (:node (answer-provenance chain-analysis
+                                                                           (->cursor-input "D" :producer 1)))))))
     (is (= ["t/p3" "t/p2" "t/p1"]
-           (mapv :name (production-nodes (:node (provenance chain-analysis
-                                                            (cursor-input "D" :producer :full))))))))
+           (mapv :name (collect-production-nodes (:node (answer-provenance chain-analysis
+                                                                           (->cursor-input "D" :producer :full))))))))
   (testing "a :production root: depth 0 is the root plus one level below it"
     (let [root (fn [depth]
-                 (:node (provenance chain-analysis {:node {:kind :production :name "t/p3"}
-                                                    :direction :producer
-                                                    :depth depth
-                                                    :ancestors []})))]
-      (is (= ["t/p3" "t/p2"] (mapv :name (production-nodes (root 0)))))
-      (is (= ["t/p3" "t/p2" "t/p1"] (mapv :name (production-nodes (root 1)))))
-      (is (= ["t/p3" "t/p2" "t/p1"] (mapv :name (production-nodes (root :full))))
+                 (:node (answer-provenance chain-analysis {:node {:kind :production :name "t/p3"}
+                                                           :direction :producer
+                                                           :depth depth
+                                                           :ancestors []})))]
+      (is (= ["t/p3" "t/p2"] (mapv :name (collect-production-nodes (root 0)))))
+      (is (= ["t/p3" "t/p2" "t/p1"] (mapv :name (collect-production-nodes (root 1)))))
+      (is (= ["t/p3" "t/p2" "t/p1"] (mapv :name (collect-production-nodes (root :full))))
           "the chain ends at an external leaf"))))
 
 (deftest provenance-leaf-kinds-test
@@ -238,7 +296,7 @@
                               :rules {"t/noout" {:lhs ["T"] :no-output-types true}
                                       "t/unlinked" {:lhs ["T"] :unlinked-rule true}
                                       "t/z" {:lhs [] :insert ["X"]}}})
-        consumer-root (:node (provenance analysis (cursor-input "T" :consumer 0)))
+        consumer-root (:node (answer-provenance analysis (->cursor-input "T" :consumer 0)))
         by-name (into {} (map (juxt :name identity)) (:children consumer-root))]
     (is (= [] (:children (by-name "t/q"))))
     (is (= "query" (:type (by-name "t/q"))))
@@ -246,17 +304,53 @@
     (is (not (contains? (by-name "t/noout") :outputs)))
     (is (= [] (:children (by-name "t/unlinked"))))
     (is (= :unknown (:outputs (by-name "t/unlinked"))))
-    (let [producer-root (:node (provenance analysis (cursor-input "X" :producer 0)))
+    (let [producer-root (:node (answer-provenance analysis (->cursor-input "X" :producer 0)))
           z (first (filter #(= "t/z" (:name %)) (:children producer-root)))]
       (is (= [] (:children z)) "a zero-LHS rule is a producer leaf"))))
+
+(deftest provenance-leaves-survive-depth-expansion-test
+  (testing "an unlinked consumer leaf keeps :outputs :unknown at every depth"
+    (let [analysis (->analysis {:fact-types {"T" #{}}
+                                :rules {"t/unlinked" {:lhs ["T"] :unlinked-rule true}}})
+          leaf (fn [depth]
+                 (first (:children (:node (answer-provenance
+                                           analysis
+                                           (->cursor-input "T" :consumer depth))))))]
+      (doseq [depth [0 1 :full]]
+        (testing (str "depth " depth)
+          (is (= :unknown (:outputs (leaf depth))))
+          (is (= [] (:children (leaf depth))))
+          (is (false? (:seen? (leaf depth))))))))
+  (testing "a repeated leaf is never marked :seen?"
+    (let [analysis (->analysis {:fact-types {"X" #{} "A" #{} "B" #{}}
+                                :rules {"t/x" {:lhs ["A" "B"] :insert ["X"]}
+                                        "t/z" {:lhs [] :insert ["A" "B"]}}})
+          root (:node (answer-provenance analysis (->cursor-input "X" :producer :full)))
+          z-nodes (filter #(= "t/z" (:name %)) (collect-production-nodes root))]
+      (is (= 2 (count z-nodes)) "once under A and once under B")
+      (is (every? #(= [] (:children %)) z-nodes))
+      (is (not-any? :seen? z-nodes))))
+  (testing "a leaf production root answers terminally"
+    (let [analysis (->analysis {:fact-types {"T" #{}}
+                                :queries {"t/q" {:lhs ["T"]}}
+                                :rules {"t/unlinked" {:lhs ["T"] :unlinked-rule true}}})
+          root (fn [p-name direction]
+                 (:node (answer-provenance analysis {:node {:kind :production :name p-name}
+                                                     :direction direction
+                                                     :depth 0
+                                                     :ancestors []})))]
+      (is (= [] (:children (root "t/unlinked" :consumer))))
+      (is (= :unknown (:outputs (root "t/unlinked" :consumer))))
+      (is (= [] (:children (root "t/q" :consumer))))
+      (is (= "query" (:type (root "t/q" :consumer)))))))
 
 (deftest provenance-external-retract-only-test
   (let [analysis (->analysis {:fact-types {"T" #{} "S" #{}}
                               :rules {"t/ret" {:lhs ["S"] :retract ["T"]}}})
-        root (:node (provenance analysis (cursor-input "T" :producer 0)))
+        root (:node (answer-provenance analysis (->cursor-input "T" :producer 0)))
         p (first (:children root))]
     (is (true? (:external? root)) "nothing inserts T, even though a rule retracts it")
-    (is (= ["t/ret"] (child-names root)))
+    (is (= ["t/ret"] (collect-child-names root)))
     (is (= :retract (:via p)))))
 
 ;; ---------------------------------------------------------------------------
@@ -264,24 +358,33 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest provenance-ordering-test
-  (testing "production children are name-sorted; consumer types are declaration-ordered"
-    (let [analysis (->analysis {:fact-types {"T" #{} "V" #{} "Z" #{} "A" #{} "M" #{}}
-                                :rules {"t/p" {:lhs ["T"] :insert ["Z" "A"] :retract ["M"]}
-                                        "t/zz" {:lhs ["V"] :insert ["T"]}
-                                        "t/aa" {:lhs ["V"] :insert ["T"]}}})
-          producer-root (:node (provenance analysis (cursor-input "T" :producer 0)))
-          consumer-root (:node (provenance analysis (cursor-input "T" :consumer :full)))
-          p (first (:children consumer-root))]
-      (is (= ["t/aa" "t/zz"] (child-names producer-root)))
-      (is (= ["Z" "A" "M"] (mapv :type (:children p)))
-          "insert-types in declaration order, then the remaining retract-types")
-      (is (= [[:insert] [:insert] [:retract]] (mapv :vias (:children p))))))
-  (testing ":matches is name-sorted"
-    (let [analysis (->analysis {:fact-types {"T" #{} "S" ["T"] "U" #{}}
-                                :rules {"t/c" {:lhs ["T" "S"] :insert ["U"]}}})
-          root (:node (provenance analysis (cursor-input "S" :consumer 0)))
-          c (first (:children root))]
-      (is (= ["S" "T"] (mapv :name (:matches c)))))))
+  (let [analysis (->analysis {:fact-types {"T" #{} "V" #{} "W" #{} "Z" #{} "A" #{} "M" #{}}
+                              :queries {"t/ab" {:lhs ["T"]}}
+                              :rules {"t/p" {:lhs ["T"] :insert ["Z" "A"] :retract ["M" "A"]}
+                                      "t/lhs" {:lhs ["Z" "A"] :insert ["W"]}
+                                      "t/zz" {:lhs ["V"] :insert ["T"]}
+                                      "t/aa" {:lhs ["V"] :insert ["T"]}}})
+        producer-root (:node (answer-provenance analysis (->cursor-input "T" :producer 0)))
+        consumer-root (:node (answer-provenance analysis (->cursor-input "T" :consumer 1)))
+        p (first (filter #(= "t/p" (:name %)) (:children consumer-root)))
+        lhs-producer (first (:children (:node (answer-provenance
+                                               analysis
+                                               (->cursor-input "W" :producer 1)))))]
+    (testing "production children of a fact type are name-sorted, rules and queries interleaved"
+      (is (= ["t/aa" "t/zz"] (collect-child-names producer-root)))
+      (is (= ["t/ab" "t/p"] (collect-child-names consumer-root))))
+    (testing "a producer's fact-type children keep LHS declaration order"
+      (is (= ["Z" "A"] (mapv :type (:children lhs-producer)))))
+    (testing "consumer children are inserts in declaration order, then remaining retracts"
+      (is (= ["Z" "A" "M"] (mapv :type (:children p))))
+      (is (= [[:insert] [:insert :retract] [:retract]] (mapv :vias (:children p)))
+          "a type both inserted and retracted appears once, in insert order"))
+    (testing ":matches is name-sorted"
+      (let [bridge-analysis (->analysis {:fact-types {"T" #{} "S" ["T"] "U" #{}}
+                                         :rules {"t/c" {:lhs ["T" "S"] :insert ["U"]}}})
+            root (:node (answer-provenance bridge-analysis (->cursor-input "S" :consumer 0)))
+            c (first (:children root))]
+        (is (= ["S" "T"] (mapv :name (:matches c))))))))
 
 (deftest provenance-scoped-rhs-callsites-beat-the-global-scan-test
   (let [callsite (fn [type-name]
@@ -310,16 +413,28 @@
                               :rules {"t/p" {:lhs ["T"] :insert ["T"]}}})]
     (testing "an unknown production root"
       (is (= {:error "no production named t/nope"}
-             (provenance analysis {:node {:kind :production :name "t/nope"}
-                                   :direction :producer :depth 0 :ancestors []}))))
+             (answer-provenance analysis {:node {:kind :production :name "t/nope"}
+                                          :direction :producer :depth 0 :ancestors []}))))
     (testing "an ancestor naming no production"
       (is (= {:error "no production named t/nope"}
-             (provenance analysis (assoc-in (cursor-input "T" :producer 0)
-                                            [:ancestors] ["t/nope"])))))
+             (answer-provenance analysis (assoc-in (->cursor-input "T" :producer 0)
+                                                   [:ancestors] ["t/nope"])))))
     (testing "a token that resolves to nothing"
-      (is (string? (:error (provenance analysis (cursor-input "" :producer 0))))))
+      (is (string? (:error (answer-provenance analysis (->cursor-input "" :producer 0))))))
     (testing "a negative depth"
-      (is (string? (:error (provenance analysis (cursor-input "T" :producer -1))))))
+      (is (string? (:error (answer-provenance analysis (->cursor-input "T" :producer -1))))))
+    (testing "a depth that is neither a non-negative integer nor :full is refused, not read as 0"
+      ;; The schema cannot express this check, and the operation is also called where the
+      ;; test fixture's fn validation is off (the production JVM shell, `editor-client.bb`).
+      (s/set-fn-validation! false)
+      (try
+        (doseq [bad-depth [:bogus "1" 1.5 nil]]
+          (testing (pr-str bad-depth)
+            (is (string? (:error (answer-provenance
+                                  analysis
+                                  (->cursor-input "T" :producer bad-depth)))))))
+        (finally
+          (s/set-fn-validation! true))))
     (testing "shape violations are the schema's job, not the operation's"
       (is (some? (s/check schema/FactTypeProvenanceInput
                           {:node {:kind :fact-type}

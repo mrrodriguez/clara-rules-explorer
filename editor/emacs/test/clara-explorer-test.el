@@ -59,6 +59,13 @@ Tier-1 stub path fast."
 (ert-deftest edn-value-symbol-strips-properties ()
   (should (equal (clara-explorer--edn-value :lhs) ":lhs")))
 
+(ert-deftest edn-value-prints-vectors-element-wise ()
+  (should (equal (clara-explorer--edn-value ["a" "b"]) "[\"a\" \"b\"]"))
+  (should (equal (clara-explorer--edn-value [:a :b]) "[:a :b]"))
+  (should (equal (clara-explorer--edn-value []) "[]"))
+  (should (equal (clara-explorer--edn-value (vector (propertize "a" 'face 'bold)))
+                 "[\"a\"]")))
+
 (ert-deftest edn-map-propertized-strings-are-clean ()
   (let ((m (clara-explorer--edn-map (list :production (propertize "ns/rule" 'face 'bold) :side :lhs :caller-ns (propertize "ns" 'fontified t) :token "Tok"))))
     (should-not (string-match-p "fontified" m))
@@ -1416,12 +1423,32 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
       (should (string-match-p "↻ cycle"
                               (clara-explorer--provenance-production-label cycle :producer)))
       (should (string-match-p "↑ shown above"
-                              (clara-explorer--provenance-production-label seen :producer)))))
-  (test--group "a retract edge is marked"
-    (let ((node (test--prov :kind :production :name "ns/r" :ns "ns" :type "rule"
-                            :via :retract :vias [:retract] :children [])))
+                              (clara-explorer--provenance-production-label seen :producer)))
+      (test--group "an expanded seen row drops the marker"
+        (should-not (string-match-p
+                     "↑ shown above"
+                     (clara-explorer--provenance-production-label seen :producer t))))))
+  (test--group "a retract edge is marked in each shape the backend emits"
+    (let ((producer-retract (test--prov :kind :production :name "ns/r" :ns "ns"
+                                        :type "rule" :via :retract :children []))
+          (producer-both (test--prov :kind :production :name "ns/r" :ns "ns" :type "rule"
+                                     :via :retract :vias [:insert :retract] :children []))
+          (consumer-retract (test--prov :kind :fact-type :type "T" :type-short "T"
+                                        :vias [:retract] :children []))
+          (consumer-both (test--prov :kind :fact-type :type "T" :type-short "T"
+                                     :vias [:insert :retract] :children [])))
       (should (string-match-p "(retract)"
-                              (clara-explorer--provenance-production-label node :producer))))))
+                              (clara-explorer--provenance-production-label
+                               producer-retract :producer)))
+      (should (string-match-p (regexp-quote "(insert+retract)")
+                              (clara-explorer--provenance-production-label
+                               producer-both :producer)))
+      (should (string-match-p "(retract)"
+                              (clara-explorer--provenance-fact-type-label
+                               consumer-retract)))
+      (should (string-match-p (regexp-quote "(insert+retract)")
+                              (clara-explorer--provenance-fact-type-label
+                               consumer-both))))))
 
 (ert-deftest provenance-toggle-is-keyed-by-full-path-test ()
   (let* ((q-node (test--prov :kind :production :name "ns/q" :ns "ns" :type "rule"))
@@ -1504,6 +1531,24 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
           (should (clara-explorer--provenance-toggle-path
                    (vector "T" "ns/p1" "U" "ns/p2"))))
         (should (equal (plist-get captured :ancestors) ["ns/p1"])))))
+  (test--group "a :seen? row is fetched on demand at depth 0"
+    (let* ((seen (test--prov :kind :production :name "ns/seen" :ns "ns" :type "rule"
+                             :seen? t))
+           (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                             :children (vector seen)))
+           captured)
+      (with-temp-buffer
+        (clara-explorer--provenance-load root :producer 'query nil)
+        (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                   (lambda (_q input)
+                     (setq captured input)
+                     (test--prov :kind :production :name "ns/seen" :ns "ns" :type "rule"
+                                 :children []))))
+          (should (clara-explorer--provenance-toggle-path (vector "T" "ns/seen"))))
+        (should (equal (plist-get captured :node)
+                       (list :kind :production :name "ns/seen")))
+        (should (equal (plist-get captured :depth) 0))
+        (should (equal (plist-get captured :ancestors) [])))))
   (test--group "cycle, leaf, outputs-unknown, and message rows do not fetch"
     (let* ((leaf (test--prov :kind :production :name "ns/leaf" :ns "ns" :type "rule"
                              :children []))
@@ -1582,6 +1627,35 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
             (clara-explorer-provenance-visit))
           (should goto-called))))))
 
+(ert-deftest provenance-collapse-then-expand-uses-the-cache-test ()
+  (let* ((child (test--prov :kind :fact-type :type "U" :type-short "U" :children []))
+         (p (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"))
+         (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                           :children (vector p)))
+         (fetches 0))
+    (with-temp-buffer
+      (clara-explorer--provenance-load root :producer 'query nil)
+      (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                 (lambda (&rest _)
+                   (setq fetches (1+ fetches))
+                   (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                               :children (vector child)))))
+        (should (clara-explorer--provenance-toggle-path (vector "T" "ns/p")))
+        (should (clara-explorer--provenance-toggle-path (vector "T" "ns/p")))
+        (should (clara-explorer--provenance-toggle-path (vector "T" "ns/p")))
+        (should (= 1 fetches))   ; re-expanding reads the cached children
+        (should (= 3 (length (clara-explorer--provenance-entries root :producer))))))))
+
+(ert-deftest provenance-header-shows-the-direction-test ()
+  (with-temp-buffer
+    (clara-explorer-provenance-mode)
+    (clara-explorer--provenance-load
+     (test--prov :kind :fact-type :type "T" :type-short "T" :children [])
+     :consumer nil nil)
+    (should (equal (car (aref tabulated-list-format 0)) "Consumer Provenance"))
+    (should-not (nth 2 (aref tabulated-list-format 0)))
+    (should-error (tabulated-list-sort 0))))
+
 (ert-deftest provenance-goto-fallback-reports-a-missing-namespace-test ()
   (let ((messages '())
         (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
@@ -1597,6 +1671,55 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
       (should (cl-find-if (lambda (m) (string-match-p "classpath" m)) messages))
       (should (cl-find-if (lambda (m) (string-match-p "demo\\.ns" m)) messages)))))
 
+(ert-deftest provenance-goto-fallback-reports-from-a-file-buffer-visiting-another-ns-test ()
+  (let* ((_ (make-directory test--scratch-dir t))
+         (file (expand-file-name "provenance-goto-other-ns.clj" test--scratch-dir))
+         (messages '())
+         (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                           :type "rule" :source (test--prov :var? nil)))
+         (buffer nil))
+    (with-temp-file file
+      (insert "(ns other.ns)\n\n(r/defrule other-rule [] => 1)\n"))
+    (unwind-protect
+        (with-current-buffer (find-file-noselect file)
+          (setq buffer (current-buffer))
+          (goto-char (point-max))
+          (let ((point-before (point)))
+            (cl-letf (((symbol-function 'cider-find-ns)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'cider-current-ns)
+                       (lambda () "other.ns"))
+                      ((symbol-function 'message)
+                       (lambda (fmt &rest args)
+                         (push (apply #'format fmt args) messages)))
+                      ((symbol-function 'clara-explorer--push-jump)
+                       (lambda () nil))
+                      ((symbol-function 'clara-explorer--log)
+                       (lambda (&rest _) nil)))
+              (should-not (clara-explorer--goto node)))
+            ;; point is not clobbered in the wrong buffer
+            (should (= point-before (point)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (delete-file file))))
+
+(ert-deftest provenance-goto-fallback-returns-nil-when-cider-signals-test ()
+  (let ((messages '())
+        (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                          :type "rule" :source (test--prov :var? nil))))
+    (with-temp-buffer
+      (goto-char (point-max))
+      (let ((point-before (point)))
+        (cl-letf (((symbol-function 'cider-find-ns)
+                   (lambda (&rest _) (error "no such namespace")))
+                  ((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
+                  ((symbol-function 'clara-explorer--push-jump) (lambda () nil))
+                  ((symbol-function 'clara-explorer--log) (lambda (&rest _) nil)))
+          (should-not (clara-explorer--goto node)))
+        (should (= point-before (point))))   ; point is not moved after the error
+      (should (cl-find-if (lambda (m) (string-match-p "could not open" m)) messages))
+      (should-not (cl-find-if (lambda (m) (string-match-p "not found in" m)) messages)))))
+
 (defconst test--scratch-dir
   (expand-file-name "target/tmp"
                     (file-name-directory
@@ -1607,13 +1730,16 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
   (let* ((_ (make-directory test--scratch-dir t))
          (file (expand-file-name "provenance-goto-fallback.clj" test--scratch-dir))
          (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
-                           :type "rule" :source (test--prov :var? nil))))
+                           :type "rule" :source (test--prov :var? nil)))
+         (visited nil))
     (with-temp-file file
       (insert "(ns demo.ns)\n\n(r/defrule rule-a [] => 1)\n"))
     (unwind-protect
         (with-temp-buffer
           (cl-letf (((symbol-function 'cider-find-ns)
-                     (lambda (&rest _) (switch-to-buffer (find-file-noselect file))))
+                     (lambda (&rest _)
+                       (setq visited (find-file-noselect file))
+                       (switch-to-buffer visited)))
                     ((symbol-function 'clara-explorer--push-jump) (lambda () nil))
                     ((symbol-function 'clara-explorer--log) (lambda (&rest _) nil)))
             (should (clara-explorer--goto node))
@@ -1621,6 +1747,7 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
             ;; the fallback regexp consumes the symbol's boundary char, so search back
             (should (save-excursion
                       (re-search-backward "rule-a" (line-beginning-position) t)))))
+      (when (buffer-live-p visited) (kill-buffer visited))
       (delete-file file))))
 
 (ert-deftest provenance-mode-uses-the-standard-keys-test ()

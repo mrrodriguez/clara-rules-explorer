@@ -371,7 +371,7 @@
 
 (def ^:private outcome-keyword ":loan-app/application-outcome")
 
-(defn- provenance-input
+(defn- ->provenance-input
   [input direction depth]
   {:node {:kind :cursor :input input}
    :direction direction
@@ -382,7 +382,7 @@
   (register! loan-app-session loan-app-annotations)
   (testing "a producer tree roots on the keyword and crosses to the record"
     (let [root (:node (client/fact-type-provenance
-                       (provenance-input {:token outcome-keyword} :producer 0)))]
+                       (->provenance-input {:token outcome-keyword} :producer 0)))]
       (is (= :fact-type (:kind root)))
       (is (= [(str loan-app "/app-outcome-approved?")
               (str loan-app "/app-outcome-denied?")
@@ -411,12 +411,12 @@
 (deftest test-fact-type-provenance-scoped-rhs-keeps-the-production-type
   (register! loan-app-session loan-app-annotations)
   (let [root (:node (client/fact-type-provenance
-                     (provenance-input {:production (str loan-app "/app-outcome-approved?")
-                                        :side :rhs
-                                        :caller-ns loan-app
-                                        :token "map->ApplicationOutcome"}
-                                       :consumer
-                                       0)))]
+                     (->provenance-input {:production (str loan-app "/app-outcome-approved?")
+                                          :side :rhs
+                                          :caller-ns loan-app
+                                          :token "map->ApplicationOutcome"}
+                                         :consumer
+                                         0)))]
     (is (= outcome-record (:type root))
         "the production's own RHS resolution wins over a global scan")
     (is (contains? (set (map :name (:children root))) (str loan-app "/find-app-outcome")))))
@@ -424,12 +424,12 @@
 (deftest test-fact-type-provenance-inside-a-defquery
   (register! loan-app-session loan-app-annotations)
   (let [root (:node (client/fact-type-provenance
-                     (provenance-input {:production (str loan-app "/find-app-outcome")
-                                        :side :lhs
-                                        :caller-ns loan-app
-                                        :token outcome-record}
-                                       :consumer
-                                       0)))
+                     (->provenance-input {:production (str loan-app "/find-app-outcome")
+                                          :side :lhs
+                                          :caller-ns loan-app
+                                          :token outcome-record}
+                                         :consumer
+                                         0)))
         query (first (filter #(= (str loan-app "/find-app-outcome") (:name %))
                              (:children root)))]
     (is (= :fact-type (:kind root)) "a token inside a defquery still roots a tree")
@@ -440,13 +440,13 @@
 (deftest test-fact-type-provenance-carries-var-source
   (register! loan-app-session loan-app-annotations)
   (let [root (:node (client/fact-type-provenance
-                     (provenance-input {:token outcome-keyword} :producer 0)))
+                     (->provenance-input {:token outcome-keyword} :producer 0)))
         source (:source (first (:children root)))]
     (is (true? (:var? source)))
     (is (str/ends-with? (:file source) "loan_app_rules.clj"))))
 
 (deftest test-fact-type-provenance-errors
-  (let [input (provenance-input {:token outcome-keyword} :producer 0)]
+  (let [input (->provenance-input {:token outcome-keyword} :producer 0)]
     (testing "no registered system"
       (with-redefs [client/get-current-system (constantly nil)]
         (is (= {:error "no explorer system registered"}

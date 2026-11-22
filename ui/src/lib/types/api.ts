@@ -35,6 +35,7 @@ export interface ProductionReference {
 	id: string;
 	ns: string;
 	type: 'rule' | 'query';
+	unit?: string;
 	match?: TypeBridgeMatch[];
 }
 

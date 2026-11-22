@@ -24,10 +24,12 @@ The same feature ships as two clients over one shared contract:
 | Emacs  | CIDER  | [Editor Navigation — Emacs](./explorer-editor-navigation-emacs.md)   |
 | Neovim | Conjure | [Editor Navigation — Neovim](./explorer-editor-navigation-neovim.md) |
 
-All semantics live in `clara.explorer.server.client/navigate` (Clojure) — pure
-EDN in, EDN out, no HTTP, no transport-specific types. Each editor is thin
-structural navigation + transport + UX glue. No absolute paths or ports are
-hard-coded anywhere in the shipped files.
+All semantics live in `clara.explorer.server.client/navigate` and
+`clara.explorer.server.client/fact-type-provenance` (Clojure, thin JVM shells
+over the pure bodies in `clara.explorer.server.navigate`) — pure EDN in, EDN
+out, no HTTP, no transport-specific types. Each editor is thin structural
+navigation + transport + UX glue. No absolute paths or ports are hard-coded
+anywhere in the shipped files.
 
 ## REPL bootstrap (shared)
 
@@ -142,11 +144,12 @@ Three node kinds, all plain EDN:
 
 | Kind | Fields |
 | --- | --- |
-| `:fact-type` | `:type`, `:type-short`, `:children`; `:external?` on producer edges; `:vias` on a consumer production's child |
+| `:fact-type` | `:type`, `:type-short`, `:children`; `:external?` on producer-direction `:fact-type` nodes; `:vias` on a consumer production's child |
 | `:production` | `:name`, `:ns`, `:type`, `:unit` (composed selections only), `:via`, `:vias`, `:matches` (`[{:name :short}]`), `:bridge?`, `:outputs :unknown`, `:source`, `:cycle?`, `:seen?`, `:children` |
 | `:message` | `:text` — a renderer-built error row |
 
-- `:children` **absent** means expandable; `[]` means a known leaf (query,
+- `:children` **absent** means expandable, and is also absent when the node was
+  stopped by `:cycle? true` or `:seen? true`; `[]` means a known leaf (query,
   `:no-output-types` rule, `:unlinked-rule` with `:outputs :unknown`, or a
   zero-LHS production).
 - Display names are contract data, not editor logic: `:type-short` on a

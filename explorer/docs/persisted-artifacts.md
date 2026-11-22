@@ -308,14 +308,22 @@ detached copy of the file alone.
 
 ## Navigating offline: `editor-client.bb`
 
-`bin/editor-client.bb` is the babashka twin of the editor navigation query
-(`clara.explorer.server.client/navigate`): EDN-in, EDN-out over a registry
-selection, no JVM, no session, no Jetty.
+`bin/editor-client.bb` is the babashka twin of the editor navigation queries —
+`clara.explorer.server.client/navigate` and
+`clara.explorer.server.client/fact-type-provenance`: EDN-in, EDN-out over a
+registry selection, no JVM, no session, no Jetty.
 
 ```bash
 S="$CLARA_RULES_EXPLORER_HOME/explorer/bin/editor-client.bb"
+# navigate: one flat target list
 bb "$S" '{:root "…" :units [{:repo "…"} {:repo "…"}]}' \
         '{:production nil :side :lhs :token ":loan/applicant"}'
+# fact type provenance: an expandable producer/consumer tree
+bb "$S" --provenance '{:root "…" :units [{:repo "…"}]}' \
+        '{:node {:kind :production :name "ns/a-rule"}
+          :direction :producer :depth 0 :ancestors []}'
+# registry discovery: the units (and variants) under a root
+bb "$S" --list-units "…"
 ```
 
 It composes the selected units on the fly with the same shared composition and

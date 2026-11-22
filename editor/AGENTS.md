@@ -84,9 +84,26 @@ release.
 
 ## Babashka sandbox note
 
-`make bb-smoke-test` (in `explorer/`) runs `bin/bootstrap.bb`, which may be
-unable to read `~/.clojure/.cpcache` in a restricted sandbox. That is an
-environment restriction, not a code defect: run `editor-client.bb` against an
-explicit classpath
-(`BABASHKA_CLASSPATH=explorer/src:explorer/resources …`) instead, and report
-the workaround rather than treating the smoke test as a failure.
+Every bb entry point (`bin/editor-client.bb`, `bin/bb-shared-smoke-test.bb`) loads
+`bin/bootstrap.bb`, which calls `babashka.deps/add-deps` to put the
+`prismatic/schema` version from `explorer/deps.edn` on the classpath and records
+the resolved basis under the tools.deps cache (`~/.clojure/.cpcache`). In a
+sandbox that denies writes there, `make bb-smoke-test` and the editor's `bb`
+transport fail with `java.io.IOException: Operation not permitted` from
+`add-deps`. That is an environment restriction, not a code defect.
+
+A `BABASHKA_CLASSPATH` override does **not** help: `bootstrap.bb` calls
+`add-deps` unconditionally, so the classpath never gets a chance to matter.
+Point the tools.deps cache at a writable directory instead and rerun the same
+command:
+
+```bash
+cd explorer
+mkdir -p target/cljconf
+CLJ_CONFIG="$PWD/target/cljconf" make bb-smoke-test
+```
+
+`CLJ_CONFIG` is what `add-deps` honours, so resolution needs no write access
+under `$HOME` (the maven artifacts still come from the local `~/.m2`, or the
+network on a cold cache). Report the workaround rather than treating the smoke
+test as a failure.

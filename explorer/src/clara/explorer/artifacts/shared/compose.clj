@@ -133,7 +133,7 @@
 
 (defn- fact-type-ref->name
   "The name of a production's fact-type reference: a slim analysis already collapsed it to a
-  string, a full one leaves a `TypeReference` map."
+  string, a full one leaves a `clara.explorer.server.api/TypeReference` map."
   [ref]
   (cond-> ref
     (map? ref) (get :name)))

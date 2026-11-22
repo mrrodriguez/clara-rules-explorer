@@ -70,10 +70,11 @@
    :name s/Str})
 
 (s/defschema FactTypeProvenanceInput
-  "Input for `fact-type-provenance`. `:depth` is extra production levels to inline (`0` is the
-   root's immediate production layer) or `:full`; `:ancestors` names the productions strictly
-   above the root. Shape violations are the schema's job — the operation answers `{:error …}`
-   only for what the schema cannot express (unknown names, a negative depth)."
+  "Input for `clara.explorer.server.navigate/fact-type-provenance`. `:depth` is extra production
+   levels to inline (`0` is the root's immediate production layer) or `:full`; `:ancestors` names
+   the productions strictly above the root. Shape violations are the schema's job — the operation
+   answers `{:error …}` only for what the schema cannot express (unknown names, a depth that is
+   neither a non-negative integer nor `:full`)."
   {:node (s/conditional
           #(= :cursor (:kind %)) FactTypeProvenanceCursor
           #(= :production (:kind %)) FactTypeProvenanceProductionRoot)
@@ -100,7 +101,7 @@
                               :type-short s/Str
                               (s/optional-key :external?) s/Bool
                               (s/optional-key :vias) [(s/enum :insert :retract)]
-                              (s/optional-key :children) [(s/recursive #'FactTypeProvenanceNode)]}
+                              :children [(s/recursive #'FactTypeProvenanceNode)]}
 
    :else {:kind (s/eq :production)
           :name s/Str
@@ -121,6 +122,7 @@
   {:node FactTypeProvenanceNode})
 
 (s/defschema FactTypeProvenanceResponse
-  "A `fact-type-provenance` result: either a `FactTypeProvenanceResult` or an error map."
+  "A `clara.explorer.server.navigate/fact-type-provenance` result: either a
+   `FactTypeProvenanceResult` or an error map."
   (s/conditional #(contains? % :error) NavigateError
                  #(contains? % :node) FactTypeProvenanceResult))

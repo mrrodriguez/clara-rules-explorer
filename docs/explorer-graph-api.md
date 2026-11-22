@@ -130,7 +130,7 @@ construction); it distinguishes ghosts only in `:ancestors` and callsite
 Production references are always objects, never bare names:
 
 ```json
-{ "name": "my.ns/consume-marker", "id": "my.ns.consume-marker-a1b2c3d4", "ns": "my.ns", "type": "rule" }
+{ "name": "my.ns/consume-marker", "id": "my.ns.consume-marker-a1b2c3d4", "ns": "my.ns", "type": "rule", "unit": "my-ruleset" }
 ```
 
 | Key | Type | Description |
@@ -139,6 +139,7 @@ Production references are always objects, never bare names:
 | `id` | string | Deterministic route id (linkage) |
 | `ns` | string | Production namespace |
 | `type` | string | `"rule"` or `"query"` |
+| `unit` | string? | Persistence unit the production came from; present on composed/registry selections, absent for a live single session |
 | `match` | TypeBridgeMatch[]? | Present on rule/query upstream/downstream entries when the pair links via at least one type pair |
 
 ### `TypeBridgeMatch` — the type pair behind a dep edge

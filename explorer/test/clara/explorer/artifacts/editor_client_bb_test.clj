@@ -103,7 +103,7 @@
     (edn/read-string out)))
 
 (defn- bb-provenance
-  "The script's `--provenance` EDN answer for one provenance input over `selection`."
+  "The script's `--provenance` EDN answer for one provenance input over `sel`."
   [sel input]
   (let [{:keys [exit out err]}
         (shell/sh "bb" (str editor-client-script)
@@ -129,13 +129,13 @@
     (finally
       (client/register! nil))))
 
-(defn- node-count
+(defn- count-nodes
   [node]
-  (inc (reduce + 0 (map node-count (:children node)))))
+  (inc (reduce + 0 (map count-nodes (:children node)))))
 
 (def ^:private caller-ns "clara.explorer.test.rules.loan-app-rules")
 
-(defn- provenance-input
+(defn- ->provenance-input
   "A cursor provenance input. `:caller-ns` is ignored by the bb runtime (tokens arrive fq) and
   lets the JVM side `ns-resolve` a fq class token."
   [token direction depth]
@@ -273,13 +273,13 @@
   (if-not (runnable?)
     (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")
     (let [inputs [{:label "producer on the keyword"
-                   :input (provenance-input keyword-outcome :producer 0)}
+                   :input (->provenance-input keyword-outcome :producer 0)}
                   {:label "consumer on the record"
-                   :input (provenance-input outcome-record :consumer 0)}
+                   :input (->provenance-input outcome-record :consumer 0)}
                   {:label "external fact type"
-                   :input (provenance-input application-type :producer 0)}
+                   :input (->provenance-input application-type :producer 0)}
                   {:label "retract-only production one level down"
-                   :input (provenance-input document-check-type :consumer 1)}
+                   :input (->provenance-input document-check-type :consumer 1)}
                   {:label "production root and its self-loop"
                    :input {:node {:kind :production :name app-denied}
                            :direction :producer
@@ -298,22 +298,25 @@
           variant {:root (registry-root)
                    :units [{:repo "loan-disposition-ruleset"
                             :variant [[:ref "feature/new-tax"]]}]}
-          input (provenance-input keyword-outcome :consumer 0)
-          production-names (fn [sel]
-                             (->> (bb-provenance sel input)
-                                  (get-in [:node :children])
-                                  (map :name)
-                                  set))]
+          input (->provenance-input keyword-outcome :consumer 0)
+          mainline-answer (bb-provenance mainline input)
+          variant-answer (bb-provenance variant input)
+          production-names (fn [answer]
+                             (into #{} (map :name) (get-in answer [:node :children])))]
+      (is (not (contains? mainline-answer :error)) mainline-answer)
+      (is (not (contains? variant-answer :error)) variant-answer)
+      (is (seq (production-names mainline-answer)) "the root layer is not empty")
       (testing "a variant unit is read from _variants/<repo>/<variant path> and answers like the mainline"
-        (is (= (production-names mainline) (production-names variant)))))))
+        (is (= (production-names mainline-answer) (production-names variant-answer)))))))
 
 (deftest editor-client-provenance-full-depth-guard-test
   (if-not (runnable?)
     (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")
-    (let [input (provenance-input outcome-record :consumer :full)
+    (let [input (->provenance-input outcome-record :consumer :full)
           bb-answer (strip-sources (bb-provenance selection input))
-          jvm-answer (jvm-provenance selection input)]
-      (testing "the full consumer tree terminates and matches the JVM node count"
+          jvm-answer (jvm-provenance selection input)
+          nodes (count-nodes (:node bb-answer))]
+      (testing "the full consumer tree terminates and matches the JVM answer exactly"
         (is (not (contains? bb-answer :error)) bb-answer)
-        (is (pos? (node-count (:node bb-answer))))
-        (is (= (node-count (:node jvm-answer)) (node-count (:node bb-answer))))))))
+        (is (< 1 nodes 50) (str "the checked-in selection answers " nodes " nodes"))
+        (is (= jvm-answer bb-answer))))))

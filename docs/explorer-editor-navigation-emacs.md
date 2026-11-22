@@ -181,13 +181,14 @@ first:
 
 | Tier                      | Command                                               | Deps                                                                                                        | What it proves                                                                                                                                                                                                                                                                                                                    |
 | ------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 — stubbed unit          | `make test-unit` (no Eldev)                           | stubbed `cider`/`parseedn`/`clojure-mode` via `test/test-helper.el` + `with-clara-buffer` minimal syntax    | structural nav, EDN `substring-no-properties` stripping, vector-target coercion — `35+ passed, 0 unexpected` in `<1s`, no network/JVM                                                                                                                                                                                            |
+| 1 — stubbed unit          | `make test-tier1` (no Eldev)                          | stubbed `cider`/`parseedn`/`clojure-mode` via `test/test-helper.el` + `with-clara-buffer` minimal syntax    | structural nav (Tier 1 and the provenance render/request seams), EDN `substring-no-properties` stripping and vector serialization, vector-target coercion — `123 expected + 5 skipped, 0 unexpected` in `<1s`, no network/JVM                                                                                                      |
 | 2 — real-deps unit        | `eldev test` (or `make test-unit` with Eldev on PATH) | real `cider "1.12"` / `parseedn "1.2"` / `clojure-mode "5.18"` from `Eldev`; `test-helper.el` becomes no-op | Tier 1 + round-trip `clara-explorer--edn-map` → `parseedn-read-str` hash-table, `clara-explorer--eval-edn`+`nrepl-dict` wiring against real `parseedn`, `cider-symbol-at-point` keyword handling and real `clojure-mode` `syntax-ppss` — extra `skip-unless` tests run only here |
 | 3 — live nREPL (deferred) | `make test-integration` (future)                      | running `clara.explorer.server.main` JVM + `cider-connect-clj`                                                      | full `client/navigate` payload against `loan-app-rules`/`analyze-test-rules` (ctor, `:via :retract`, global `{:production nil}`) — deferred |
 
 ```bash
-cd editor/emacs && make test-unit   # Tier 1 (stubbed) or Tier 2 if eldev present
-cd editor/emacs && eldev test         # Tier 2 explicitly
+cd editor/emacs && make test-tier1   # Tier 1 only (stubbed, no Eldev required)
+cd editor/emacs && make test         # Tier 1 via test-unit, or Tier 2 when Eldev is present
+cd editor/emacs && eldev test        # Tier 2 explicitly
 ```
 
 `test-helper.el` provides `(provide 'cider)` etc. and autoloads `cider-*`/

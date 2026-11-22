@@ -1,7 +1,8 @@
 #!/usr/bin/env bb
-;; The babashka analogue of `clara.explorer.server.client/navigate`: read a registry selection of
-;; persisted artifact units, compose them into one slim analysis, rehydrate it, and answer an EDN
-;; navigate query.
+;; The babashka analogue of `clara.explorer.server.client/navigate` and
+;; `clara.explorer.server.client/fact-type-provenance`: read a registry selection of persisted
+;; artifact units, compose them into one slim analysis, rehydrate it, and answer an EDN
+;; navigation query.
 ;;
 ;;   bb bin/editor-client.bb '<selection-edn>' '<navigate-input-edn>'
 ;;   bb bin/editor-client.bb --provenance '<selection-edn>' '<provenance-input-edn>'
@@ -27,8 +28,8 @@
 ;; `clara.explorer.artifacts.shared.selection/->selection` →
 ;; `clara.explorer.artifacts.shared.compose/->composed-analysis` →
 ;; `clara.explorer.artifacts.shared.rehydrate/rehydrate-analysis` →
-;; `clara.explorer.server.navigate/navigate`. This mirrors the server's `:registry` mode, so the
-;; bb answer and the nREPL answer over the same selection agree.
+;; `clara.explorer.server.navigate/navigate` (or `.../fact-type-provenance`). This mirrors the
+;; server's `:registry` mode, so the bb answer and the nREPL answer over the same selection agree.
 ;;
 ;; The editor resolves aliased/:: tokens to fq over its repl before calling, so this script assumes
 ;; fq-in and does only pure normalization + callsite string matching. Source locations are always
@@ -209,12 +210,12 @@
 (let [args *command-line-args*
       flag (first args)]
   (cond
-    ;; Registry discovery: the editors shell out here rather than walking the tree themselves.
     (= flag "--provenance")
     (let [[_ selection-edn input-edn] args]
       (read-args-and-run navigate/fact-type-provenance selection-edn input-edn
                          "usage: bb editor-client.bb --provenance '<selection-edn>' '<provenance-input-edn>'"))
 
+    ;; Registry discovery: the editors shell out here rather than walking the tree themselves.
     (= flag "--list-units")
     (let [[_ root] args]
       (when-not root

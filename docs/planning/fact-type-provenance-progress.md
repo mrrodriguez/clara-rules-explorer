@@ -1,8 +1,9 @@
 # Plan: fact type provenance (producer + consumer)
 
-Status: **proposed (consolidated, ready to implement)**. This doc is the single
-source of truth for the work: both plan-review rounds are folded in, including
-the concrete test matrix in §6.1. Nothing else needs reading to start.
+Status: **implemented; review 1 folded in**. Steps 1–10 in §7 are done and the
+full verification in §8 is green. This doc is the single source of truth for the
+work: both plan-review rounds and the post-implementation review are folded in,
+including the concrete test matrix in §6.1. Nothing else needs reading to start.
 
 Replaces the POC on `clara-explorer-producer-hierarchy`. The POC's
 `lhs-producers`, elisp tree builder, and `lsp-treemacs` view are throwaway. The
@@ -617,10 +618,10 @@ Checkpoints, not a diary. Update in place as work lands.
       dep `:unit`; registry-mode `navigate` carries `:unit`, live mode omits it
 - [x] 3 Shared `fact-type-provenance` (both directions, bridge, `:cycle?`, `:seen?`, depth) —
       `resolve-cursor-fact-type` + `type-name->short-name` + direction-aware builders in
-      `navigate.clj`; `navigate_test.clj` pins N1–N12 (hand-built analyses through the real
+      `navigate.clj`; `navigate_test.clj` pins N1–N13 (hand-built analyses through the real
       rehydrate closures)
 - [x] 4 Provenance schemas — `FactTypeProvenanceInput` / recursive node / result+response in
-      `schema.clj`, N1–N12 run under `st/validate-schemas`
+      `schema.clj`, N1–N13 run under `st/validate-schemas`
 - [x] 5 JVM `client/fact-type-provenance` (live + registry tests) — same system/cache/log
       shell as `navigate`; R1–R6 + the existing R7 regression in `registry_server_test.clj`
       (composed two-unit selection, class tokens resolved via loaded fixture namespaces), and
@@ -656,6 +657,112 @@ Checkpoints, not a diary. Update in place as work lands.
       (Tier 2), `make test-tier1`, `make check-elisp` all green; the §8
       production-root and `:depth :full` consumer smokes match the expected
       shapes
+- [x] 11 Review 1 folded in (`fact-type-provenance-neom-review-1.md`) — see §7.1
+      for the per-item disposition. Correctness bugs 1.1–1.8 fixed on both
+      backends plus the Emacs view; the test-matrix gaps in §2 closed; the
+      `clojure-engineering` and Elisp cleanups in §3–§4 applied; the docs in §5
+      resynced (including `ProductionDep :unit` in the graph API and the UI
+      types); the §1.9 sandbox note was rewritten around a verified
+      `CLJ_CONFIG` workaround
+
+### 7.1 Review 1 disposition
+
+Review: `docs/planning/fact-type-provenance-neom-review-1.md`.
+
+Accepted and fixed:
+
+- 1.1 bb variant test — `->>` put `get-in`'s map last, so both sides were
+  `#{}`. Now reads `[:node :children]` off each answer, asserts neither answer
+  is an error, and asserts the mainline layer is non-empty.
+- 1.2 leaf handling — a leaf is now decided before `:seen?`/depth
+  (`->production-leaf`), so `:outputs :unknown` survives `:depth > 0` / `:full`
+  and repeated leaves never gain `:seen?`; `->production-root-node` applies the
+  same leaf rule. Pinned at `:depth 0/1/:full`, with a repeated zero-LHS
+  producer leaf, and with leaf `:production` roots.
+- 1.3 `--goto-fallback` — the `condition-case` error handler now returns early,
+  and a still-current origin buffer is only searched when it actually visits the
+  target namespace (`--buffer-visits-ns-p`). Pinned with a file buffer visiting
+  another ns (point unmoved, classpath message) and with a signalling
+  `cider-find-ns`.
+- 1.4 `TAB` re-expand — `--provenance-toggle-path` re-expands from
+  `clara-explorer--provenance-children` (cached message rows still retry).
+- 1.5 `--edn-value` — vectors print element-wise (before plist handling, so a
+  vector of keywords is not mistaken for a plist).
+- 1.6 tree buffer — the column cannot sort (`SORT` is `nil`) and the header
+  names the direction (`Producer`/`Consumer Provenance`).
+- 1.7 cursor resolution — scoped RHS callsites fall back to the global
+  resolution, and an omitted `:caller-ns` falls back to the production's ns.
+- 1.8 depth guard — anything that is neither `:full` nor a non-negative integer
+  is refused (pinned with fn validation off, which is the bb/JVM-shell posture).
+- §2 test gaps — shortening/bridge-short test, chained k-level diamond,
+  ordering additions (LHS declaration order, rules/queries interleaved,
+  insert+retract child), B3 full equality plus a tight node bound (25), E5
+  `:seen?` fetch, realistic `:vias` label shapes, and the leaked visited buffer
+  is killed.
+- §3 `clojure-engineering` — docstring qualifiers/accuracy, `format` over `str`
+  in the provenance errors and the client's internal-error maps, transducer
+  `into`, fully-threaded `->producer-targets`, `p-name` instead of shadowing
+  `name`, concrete vectors and `get-`/`->`/collect- helper names in tests, the
+  misplaced bb comment, the unused `_production` binding, `empty?` on both
+  type vectors, the empty-`matches` guard, and required `:children` on
+  `:fact-type`.
+- §4 Elisp — `plist-put` return value, `cl-loop collect` for ancestors, one
+  serialization per call (`--op-code` takes the EDN), `pcase` on the op,
+  `natnum`/`0` Custom types, one `--provenance-show` for refresh and display,
+  no `shown above` marker while a seen row is expanded, and `<tab>` beside
+  `TAB`.
+- §5 docs — `ProductionDep :unit` in `docs/explorer-graph-api.md` and
+  `ProductionReference.unit` in `ui/src/lib/types/api.ts`; editor-navigation
+  header/`:external?`/`:children` notes; Emacs testing table; the
+  `--provenance`/`--list-units` invocations in `persisted-artifacts.md`; the
+  Commentary/transport/ns/bb header summaries.
+
+Vetoed or corrected (the prescription is wrong, the diagnosis is not):
+
+- **1.9 / §5.2's proposed remedy is unusable.** The review is right that the old
+  note's `BABASHKA_CLASSPATH=explorer/src:explorer/resources` command cannot
+  work, but its own alternative is the same classpath override. The real cause
+  is `bin/bootstrap.bb` calling `deps/add-deps` unconditionally, so no classpath
+  value can bypass it. The note now documents `CLJ_CONFIG=<writable dir>`,
+  verified with a fresh cache dir (`make bb-smoke-test` green).
+- **1.2's prescription, applied literally, breaks termination.** "Compute the
+  leaf check before `seen?`/`expand?` (only after `cycle?`)" is right, but the
+  following rewrite must keep `(not cycle?)` in `expand?` as well: dropping it
+  let an on-path production expand forever (an immediate
+  `StackOverflowError` in `provenance-cross-type-cycle-terminates-test`). The
+  shipped `->production-node` keeps the cycle guard, and only `seen?`/depth are
+  gated on the leaf result.
+- **1.2's first claim overstates the loss.** A query or `:no-output-types` rule
+  already answered `:children []` through `->production-children`, so only
+  `:outputs :unknown` and the spurious `:seen?` tracking were actually lost.
+  Fixed all three cases anyway.
+- **§3.5's `hierarchy-bridge?` guard is defensive, not a bug fix.** No reachable
+  case makes `:matches` empty (the closure that produced the edge is exactly
+  what `->type-matches` intersects), so the guard changes no behaviour; kept as
+  belt-and-braces.
+- **§6's branch-scope note needs no code change.** Widening the diff of
+  `8d52e00` (stripping old plan-section labels from unrelated tests and Neovim
+  files) was intentional; the edits are clean and the PR stays as one branch.
+
+Verification after review 1 (all green):
+
+- `explorer`: `make test` 559 tests / 3739 assertions, 0 failures; `make lint`
+  0 warnings; `make reflection-check` clean; `make format-check` clean;
+  `make bb-smoke-test` green with `CLJ_CONFIG=explorer/target/cljconf`.
+- `editor/emacs`: `make test-tier1` 123 expected + 5 skipped; `make test`
+  (Tier 2 via eldev) 128/128, 0 skipped; `make check-elisp` clean.
+- `ui`: `svelte-check` 0 errors / 0 warnings over the
+  `ProductionReference.unit` addition. (`ui/Makefile`'s `pnpm` invocation fails
+  in this environment with a `mise`/pnpm `ENOENT: lstat /private/tmp/claude`
+  error before it reaches the project — an environment fault, so the local
+  `node_modules/.bin` binaries were used instead.)
+- Smokes from §8: the `app-outcome-denied?` producer root carries
+  `:unit "loan-app-ruleset"`, no `:matches`/`:via`, and `:cycle? true` on its own
+  `ApplicationOutcome` child; the consumer `:full` tree is 25 nodes with five
+  `:seen?` markers, `notice-approved-app`/`notice-denied-app` carrying
+  `:matches [:loan-app/application-outcome]` + `:bridge? true` +
+  `:unit "loan-disposition-ruleset"`, and both `find-*-outcome` queries as `[]`
+  leaves.
 
 ## 8. Verification
 
