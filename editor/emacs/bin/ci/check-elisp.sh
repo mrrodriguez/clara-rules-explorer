@@ -25,7 +25,7 @@ emacs -Q --batch \
   --eval "(progn (require 'cl-lib) (provide 'cider) (provide 'parseedn) (provide 'clojure-mode))" \
   --eval "(progn
             (mapc (lambda (s) (autoload s \"cider\"))
-                  '(cider-connected-p cider-current-repl cider-current-ns
+                  '(cider-connected-p cider-current-repl cider-current-ns cider-get-ns-name
                     cider-symbol-at-point cider-find-var cider-find-ns
                     cider-nrepl-sync-request:eval))
             (autoload 'parseedn-read-str \"parseedn\")

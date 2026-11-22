@@ -4,7 +4,7 @@ The Emacs client for the shared editor-navigation feature. See
 [Editor Navigation (shared)](./explorer-editor-navigation.md) for the contract,
 REPL bootstrap, fact-type resolution, jump semantics, and refresh/swap
 workflow — those are identical across editors. This page is the Emacs-specific
-surface: install, jump history, debugging, and testing.
+surface: install, the provenance view, jump history, debugging, and testing.
 
 The client is a single file, `editor/emacs/clara-explorer.el`.
 
@@ -89,17 +89,18 @@ package:
 
 | Key | Action |
 | --- | ------ |
-| `TAB` | expand/collapse the production on the row (fetches `:depth 0` for that production, using the path's productions as `:ancestors` minus the row itself) |
+| `TAB` | expand/collapse the production on the row |
 | `RET` / `<return>` | jump to the production (the same target machinery as navigate) |
-| `g` | re-run the root call (through `revert-buffer-function`) |
+| `g` | re-run the root call (refresh) |
 | `q` | bury the view |
 
 Only `TAB`, `RET`, and `<return>` are bound in the mode map; `g`/`q` come from
 `special-mode`, so a setup that shadows `g` (evil's `g` prefix, for example)
-can bind `clara-explorer-provenance-refresh` itself. Rows are keyed by their
-full tree path, so the same production under two sibling fact types toggles
-independently. A response that already carries `:children` (from a configured
-depth) renders expanded without another request.
+can bind `clara-explorer-provenance-refresh` itself. The same production under
+two sibling fact types toggles independently.
+
+`RET` opens the production in the window that already shows its source file, if
+one does; otherwise in the most recent other window.
 
 Two defcustoms control the view:
 
@@ -114,36 +115,15 @@ exit) render as `:message` rows for both the root call and a `TAB` expansion,
 so a failed request never breaks the buffer. `RET` reports why it cannot jump
 when a registry/offline tree names a namespace that is not on the connected
 REPL's classpath; load that namespace, or use the nREPL transport with a live
-session.
-
-## Emacs implementation notes
-
-Two details are Emacs-specific (the shared semantics live in the common doc):
-
-- **EDN transport strips text properties.** `substring-no-properties` before
-  `prin1-to-string`; otherwise Emacs prints `#("ns/rule" 0 4 (face ...))`
-  which is invalid EDN for `client/navigate`.
-- **Targets are `vector`s from `parseedn`.** `choose-target`/`choose-or-jump`
-  coerce `(append vec nil)` so `length`/`mapcar`/`nth` never signal
-  `wrong-type-argument listp`.
+session. A source buffer that is already open is used even then, and a jump that
+fails leaves point and the window selection alone.
 
 ## Jump history (evil, xref)
 
-Every navigation pushes the _origin_ onto both jump lists **before** the jump,
-so `C-o` (`evil-jump-backward`) / `C-i` and `M-.` / `M-*` (`xref-pop-marker-stack`)
-work regardless of path:
-
-- `var? t` — `cider-find-var` (which itself pushes `xref`) + explicit
-  `evil-set-jump`/`xref-push-marker-stack`
-- `var? nil` — fallback `cider-find-ns` + `re-search-forward` for
-  `(defrule|defquery name)` — previously had **no** push, now also goes
-  through `clara-explorer--push-jump`
-
-```elisp
-;; clara-explorer--push-jump
-(when (fboundp 'evil-set-jump) (evil-set-jump))
-(xref-push-marker-stack)
-```
+Every navigation pushes the origin onto the evil and xref jump lists before it
+jumps, so `C-o` (`evil-jump-backward`) / `C-i` and `M-.` / `M-*`
+(`xref-pop-marker-stack`) return to where you were — for a provenance `RET` that
+is the tree on screen.
 
 ## Debugging
 
@@ -179,11 +159,11 @@ Other useful checks:
 Tests live in `editor/emacs/test/clara-explorer-test.el`. Three tiers, fastest
 first:
 
-| Tier                      | Command                                               | Deps                                                                                                        | What it proves                                                                                                                                                                                                                                                                                                                    |
-| ------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 — stubbed unit          | `make test-tier1` (no Eldev)                          | stubbed `cider`/`parseedn`/`clojure-mode` via `test/test-helper.el` + `with-clara-buffer` minimal syntax    | structural nav (Tier 1 and the provenance render/request seams), EDN `substring-no-properties` stripping and vector serialization, vector-target coercion — `123 expected + 5 skipped, 0 unexpected` in `<1s`, no network/JVM                                                                                                      |
-| 2 — real-deps unit        | `eldev test` (or `make test-unit` with Eldev on PATH) | real `cider "1.12"` / `parseedn "1.2"` / `clojure-mode "5.18"` from `Eldev`; `test-helper.el` becomes no-op | Tier 1 + round-trip `clara-explorer--edn-map` → `parseedn-read-str` hash-table, `clara-explorer--eval-edn`+`nrepl-dict` wiring against real `parseedn`, `cider-symbol-at-point` keyword handling and real `clojure-mode` `syntax-ppss` — extra `skip-unless` tests run only here |
-| 3 — live nREPL (deferred) | `make test-integration` (future)                      | running `clara.explorer.server.main` JVM + `cider-connect-clj`                                                      | full `client/navigate` payload against `loan-app-rules`/`analyze-test-rules` (ctor, `:via :retract`, global `{:production nil}`) — deferred |
+| Tier                      | Command                                               | Deps                                                                    |
+| ------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------- |
+| 1 — stubbed unit          | `make test-tier1`                                     | stubbed `cider`/`parseedn`/`clojure-mode` (`test/test-helper.el`)       |
+| 2 — real-deps unit        | `eldev test` (or `make test-unit` with Eldev on PATH) | real `cider`/`parseedn`/`clojure-mode` from `Eldev`                     |
+| 3 — live nREPL (deferred) | `make test-integration` (future)                      | running `clara.explorer.server.main` JVM + `cider-connect-clj`          |
 
 ```bash
 cd editor/emacs && make test-tier1   # Tier 1 only (stubbed, no Eldev required)
@@ -191,10 +171,7 @@ cd editor/emacs && make test         # Tier 1 via test-unit, or Tier 2 when Elde
 cd editor/emacs && eldev test        # Tier 2 explicitly
 ```
 
-`test-helper.el` provides `(provide 'cider)` etc. and autoloads `cider-*`/
-`parseedn-read-str` plus a tiny `nrepl-dict-get`/`parseedn-read-str` stub so
-`M-x eval-buffer` and `make -C editor/emacs check-elisp` byte-compile pass
-without a live REPL. Under Eldev the real packages win (guards are
-`unless (featurep ...)` / `unless (fboundp ...)` and `autoloadp` checks), and
-`test-helper--parseedn-real-p` / `test-helper--real-deps-p` gate the Tier-2
-tests via `skip-unless`.
+Tier 1 is the CI path and needs no network or JVM (currently 127 expected + 5
+skipped); Tier 2 runs the same suite plus the `skip-unless` tests that only work
+with the real libraries (132/132). The stub mechanics and the guards that gate
+the Tier-2 tests are documented in `test/test-helper.el`.

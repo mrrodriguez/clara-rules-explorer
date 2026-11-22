@@ -58,19 +58,16 @@ Start the server in your REPL and register it:
 - **String** — `[?x <- "my-string"]` or `(r/insert! "my-string")` → `"my-string"` (quoted)
 - **Vector tuple** — `[:loan/status "verified"]`, `[:my-thing]`, `[:my-thing :qual]` → `pr-str`'d vector
 - **Props `{:clara-rules/insert-types [T] :clara-rules/retract-types [T]}`** — the optional rule map (second form after the name) is parsed; point inside its `[T]` vector is treated as an **RHS** producer fact type (the same `insert-types`/`retract-types` the server advertises), so consumer navigation finds its consumers.
-- **Accumulator `:from`** — the LHS extractor is `case :fact → :type / :accumulator → :from / :and/:or/:not/:exists → :children` (`conditions.clj`). The editor walks the condition vector:
+- **Accumulator `:from`** — the LHS condition vector is walked to its fact type:
   - `[?acc <- (acc/all) :from [:my-thing ...]]` → `:my-thing`
   - `[?acc <- (acc/all) :from [[:my-thing]]]` → `[:my-thing]`
   - `[?acc <- (acc/all) :from [[:my-thing] [this] (= ?x ...)]]` → `[:my-thing]`
   - `[?acc <- (acc/all) :from [[:my-thing :qual]]]` → `[:my-thing :qual]`
   - any point inside the condition (including `[this]` or a constraint) returns its fact type
 
-The two editors converge on the same structural heuristics but implement them
-differently under the hood: Emacs uses a `syntax-ppss`/`forward-sexp` sexp
-walker; Neovim uses tree-sitter for the enclosing-form skeleton plus a
-byte-based sexp-walker port of the same heuristics. Both send the raw token
-text; the server resolves it against the production's declared types and the
-serialized dynamic-insert/retract callsite linkage.
+Both editors send the raw token text; the server resolves it against the
+production's declared types and the serialized dynamic-insert/retract callsite
+linkage.
 
 ## Jump semantics (shared)
 
@@ -86,7 +83,8 @@ Targets are productions. Jump to a target means opening the file at the
    searching for `(defrule|defquery NAME`.
 
 Both editors push the jump list (evil/xref in Emacs, tag stack in Neovim)
-before jumping so `C-o` returns.
+before jumping so `C-o` returns. A jump that cannot find its target leaves point
+where it was.
 
 ## Fact type provenance (shared)
 

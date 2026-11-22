@@ -130,7 +130,9 @@ comment to end of line, repeatedly until point stops moving.  Uses
   "Print an elisp value X as an EDN literal string.
 A keyword-keyed plist prints as a nested map, and a vector prints element-wise,
 so an operation input that carries maps and vectors (`fact-type-provenance`'s
-`:node` / `:input` / `:ancestors`) serializes without a second printer."
+`:node` / `:input` / `:ancestors`) serializes without a second printer.  Strings
+are printed without their text properties: `prin1-to-string' would emit
+`#(\"…\" 0 N (face …))', which is not EDN."
   (cond
    ((null x) "nil")
    ((eq x t) "true")
@@ -867,15 +869,76 @@ file (a symlink to the `clara.explorer.server.tokens` canonical text)."
           (regexp-quote rule-name)
           (clara-explorer--symbol-boundary-rx)))
 
-(defun clara-explorer--buffer-visits-ns-p (ns)
-  "True when the current buffer's namespace is NS."
-  (equal ns (ignore-errors (substring-no-properties (cider-current-ns)))))
+(defun clara-explorer--buffer-visits-ns-p (ns &optional buffer)
+  "True when BUFFER (default: the current buffer) is the source buffer of NS.
+BUFFER must visit a Clojure source file whose own `ns' form names NS.
+`cider-current-ns' is deliberately not consulted: it falls back to the
+connection's namespace, so while the REPL sits in NS every other buffer — the
+REPL itself, `*scratch*', a log — answers NS too, and a jump would then search
+and move point in a buffer that has nothing to do with the target."
+  (with-current-buffer (or buffer (current-buffer))
+    (and buffer-file-name
+         (or (derived-mode-p 'clojure-mode 'clojure-ts-mode)
+             (string-match-p "\\.clj[sc]?\\'" buffer-file-name))
+         (equal ns (ignore-errors
+                     (substring-no-properties (or (cider-get-ns-name) "")))))))
+
+(defun clara-explorer--ns-source-buffer (ns)
+  "The buffer visiting NS's source file, or nil.
+The buffer's own `ns' form decides, so the file need not follow the
+source-path convention; the Clojure-file test in
+`clara-explorer--buffer-visits-ns-p' keeps a doc buffer that merely quotes
+`(ns NS)' from being taken for the source."
+  (cl-find-if (lambda (buf) (clara-explorer--buffer-visits-ns-p ns buf))
+              (buffer-list)))
+
+(defun clara-explorer--navigation-window (node)
+  "Window to run NODE's jump in, or nil to keep the selected one.
+The window already showing NODE's source buffer wins: the provenance view is a
+side window, so jumping from there would open the source beside it, and the
+most-recently-used window often shows something unrelated to NODE — a buffer
+the jump has no business selecting or searching."
+  (or (when-let* ((buf (clara-explorer--ns-source-buffer
+                        (clara-explorer--edn-get :ns node))))
+        (get-buffer-window buf t))
+      (get-mru-window nil nil t)))
+
+(defun clara-explorer--try-open-ns (ns)
+  "Ask CIDER to visit NS's source file; the error text when it cannot.
+A nil return only means CIDER did not signal — it does not prove the buffer
+changed, so callers verify the buffer instead of trusting the return value."
+  (condition-case err
+      (progn (cider-find-ns nil ns) nil)
+    (error (error-message-string err))))
+
+(defun clara-explorer--search-production-form (ns rule-name)
+  "Search the current buffer — NS's source — for RULE-NAME and go to it.
+Returns non-nil when found; on a miss point goes back to where it was, so a
+failed jump leaves the buffer as it found it."
+  (let ((start (point)))
+    (goto-char (point-min))
+    (let ((found (or (re-search-forward
+                      (clara-explorer--fallback-regexp rule-name)
+                      nil t)
+                     ;; fallback for ^{:map} metadata or other forms
+                     (re-search-forward
+                      (clara-explorer--whole-symbol-regexp rule-name)
+                      nil t))))
+      (clara-explorer--log "fallback: search %S in %s -> %s at %d"
+                           rule-name ns (if found "found" "NOT-FOUND") (point))
+      (if found
+          t
+        (goto-char start)
+        (message "clara-explorer: %s not found in %s" rule-name ns)
+        nil))))
 
 (defun clara-explorer--goto-fallback (target)
-  "Last resort: open the ns file and search for the defrule/defquery form.
-Reports why it could not jump instead of returning nil silently: a registry/bb
-tree can name productions whose namespace is not on the connected REPL's
-classpath, and `cider-find-ns' then leaves the buffer unchanged."
+  "Last resort: open NS and search it for the target's defrule/defquery form.
+Only a buffer that really is NS's source is searched, and point in any other
+buffer is left alone: a registry/bb tree can name productions whose namespace
+is not on the connected REPL's classpath, and `cider-find-ns' then leaves
+whatever buffer was current selected — searching that one moved point to an
+unrelated line."
   (let* ((name (clara-explorer--edn-get :name target))
          (ns (clara-explorer--edn-get :ns target))
          (rule-name (clara-explorer--unqualified-name name)))
@@ -885,49 +948,34 @@ classpath, and `cider-find-ns' then leaves the buffer unchanged."
       (message "clara-explorer: cannot locate %s (no namespace in the target)" name)
       nil)
      (t
-      (let ((origin (current-buffer))
-            (opened
-             (condition-case err
-                 (progn (cider-find-ns nil ns) t)
-               (error
-                (message "clara-explorer: could not open %s: %s"
-                         ns (error-message-string err))
-                nil))))
-        (cond
-         ((not opened) nil)
-         ((and (eq (current-buffer) origin)
-               (not (clara-explorer--buffer-visits-ns-p ns)))
+      (let ((open-error (clara-explorer--try-open-ns ns)))
+        (if (clara-explorer--buffer-visits-ns-p ns)
+            (clara-explorer--search-production-form ns rule-name)
+          (when open-error
+            (message "clara-explorer: could not open %s: %s" ns open-error))
           (message
            (concat "clara-explorer: namespace %s is not on this REPL's classpath; "
                    "load it (or use the nREPL transport with a live session) to jump to %s")
            ns rule-name)
-          nil)
-         (t
-          (goto-char (point-min))
-          (let ((found (or (re-search-forward
-                            (clara-explorer--fallback-regexp rule-name)
-                            nil t)
-                           ;; fallback for ^{:map} metadata or other forms
-                           (re-search-forward
-                            (clara-explorer--whole-symbol-regexp rule-name)
-                            nil t))))
-            (clara-explorer--log "fallback: search %S -> %s at %d"
-                                 rule-name (if found "found" "NOT-FOUND") (point))
-            (unless found
-              (message "clara-explorer: %s not found in %s" rule-name ns))
-            found))))))))
+          nil))))))
 
-(defun clara-explorer--goto (target)
-  "Jump to target.  Pushes evil/xref jumps for C-o."
+(defun clara-explorer--goto (target &optional no-push)
+  "Jump to TARGET, pushing evil/xref jumps for C-o unless NO-PUSH.
+NO-PUSH is for callers that already pushed from the buffer they are leaving,
+as `clara-explorer--goto-production' does when it re-selects a window first.
+Returns non-nil when the jump happened, so such a caller can put the selection
+back after a failed jump."
   (let* ((name (clara-explorer--edn-get :name target))
          (source (clara-explorer--edn-get :source target))
          (var? (clara-explorer--edn-get :var? source)))
     (clara-explorer--log "goto: name=%S var?=%S source=%S" name var? source)
-    (clara-explorer--push-jump)
+    (unless no-push
+      (clara-explorer--push-jump))
     (if var?
         (progn
           (clara-explorer--log "goto: cider-find-var %S" name)
-          (cider-find-var nil name))
+          (cider-find-var nil name)
+          t)
       (clara-explorer--log "goto: fallback path")
       (clara-explorer--goto-fallback target))))
 
@@ -1449,8 +1497,26 @@ toggle."
   (when (clara-explorer--provenance-toggle-path (tabulated-list-get-id))
     (clara-explorer--provenance-render)))
 
+(defun clara-explorer--goto-production (node)
+  "Jump to production NODE, from a window that belongs to its source if one does.
+The jump is pushed before the window changes, so `C-o' returns to the provenance
+view rather than to the source window the jump happened to be made from.  A
+failed jump restores the selection, so pressing RET on a production the REPL
+cannot open leaves the user in the provenance view with the reason, rather than
+in whatever buffer was most recently used."
+  (let ((start (selected-window))
+        (jumped nil))
+    (clara-explorer--push-jump)
+    (when-let* ((window (clara-explorer--navigation-window node)))
+      (select-window window))
+    (unwind-protect
+        (setq jumped (clara-explorer--goto node t))
+      (unless jumped (select-window start)))))
+
 (defun clara-explorer-provenance-visit ()
-  "Jump to the production on the current row."
+  "Jump to the production on the current row.
+The jump runs in the window that already shows the production's source file, if
+there is one, and a failed jump leaves the view and the selection as they were."
   (interactive)
   (let* ((path (tabulated-list-get-id))
          (node (clara-explorer--provenance-row-node)))
@@ -1458,9 +1524,7 @@ toggle."
      ((and path (null node))
       (message "clara-explorer: stale row; press g to refresh the view"))
      ((and node (eq (clara-explorer--edn-get :kind node) :production))
-      (when-let* ((win (get-mru-window nil nil t)))
-        (select-window win))
-      (clara-explorer--goto node))
+      (clara-explorer--goto-production node))
      (t
       (message "not a production row (RET jumps from a production row)")))))
 

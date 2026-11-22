@@ -79,7 +79,7 @@ Tier-1 stub path fast."
     ;; should not signal wrong-type-argument listp
     (should (equal (length (if (vectorp vec) (append vec nil) vec)) 2))
     ;; choose-or-jump single vector and multi vector (mock completing-read for multi)
-    (cl-letf (((symbol-function 'clara-explorer--goto) (lambda (_t) nil))
+    (cl-letf (((symbol-function 'clara-explorer--goto) (lambda (_t &optional _no-push) nil))
               ((symbol-function 'completing-read) (lambda (_prompt coll &rest _r) (car coll))))
       (should (progn (clara-explorer--choose-or-jump :consumer "X" vec) t))
       (should (progn (clara-explorer--choose-or-jump :consumer "X" (vector t1)) t)))))
@@ -1608,7 +1608,7 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
       (cl-letf (((symbol-function 'message)
                  (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
                 ((symbol-function 'clara-explorer--goto)
-                 (lambda (_target) (setq goto-called t)))
+                 (lambda (_target &optional _no-push) (setq goto-called t)))
                 ((symbol-function 'get-mru-window) (lambda (&rest _) nil)))
         (test--group "a fact-type row explains itself"
           (cl-letf (((symbol-function 'tabulated-list-get-id)
@@ -1687,8 +1687,8 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
           (let ((point-before (point)))
             (cl-letf (((symbol-function 'cider-find-ns)
                        (lambda (&rest _) nil))
-                      ((symbol-function 'cider-current-ns)
-                       (lambda () "other.ns"))
+                      ((symbol-function 'cider-get-ns-name)
+                       (lambda (&rest _) "other.ns"))
                       ((symbol-function 'message)
                        (lambda (fmt &rest args)
                          (push (apply #'format fmt args) messages)))
@@ -1705,6 +1705,35 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
             (should-not (cl-find-if (lambda (m) (string-match-p "not found in" m)) messages))))
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (delete-file file))))
+
+(ert-deftest provenance-goto-fallback-ignores-the-connections-namespace-test ()
+  "A buffer that merely shares the REPL's ns is never searched.
+`cider-current-ns' answers with the connection's namespace for non-Clojure
+buffers, so with the REPL sitting in the target ns an unrelated buffer (the
+REPL itself, `*scratch*', a log) used to pass the guard: point moved to the top
+of that buffer and the rule search ran there."
+  (let ((messages '())
+        (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                          :type "rule" :source (test--prov :var? nil))))
+    (with-temp-buffer
+      (insert "unrelated notes\n\nthe rule-a line is a red herring\n")
+      (goto-char (point-max))
+      (let ((point-before (point)))
+        (cl-letf (((symbol-function 'cider-find-ns)
+                   ;; no signal, as when CIDER cannot turn the ns into a file
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'cider-current-ns)
+                   (lambda (&rest _) "demo.ns"))   ; the connection's ns
+                  ((symbol-function 'cider-get-ns-name)
+                   (lambda (&rest _) nil))          ; this buffer has no ns form
+                  ((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
+                  ((symbol-function 'clara-explorer--push-jump) (lambda () nil))
+                  ((symbol-function 'clara-explorer--log) (lambda (&rest _) nil)))
+          (should-not (clara-explorer--goto node)))
+        (should (= point-before (point)))
+        (should (cl-find-if (lambda (m) (string-match-p "classpath" m)) messages))
+        (should-not (cl-find-if (lambda (m) (string-match-p "not found in" m)) messages))))))
 
 (ert-deftest provenance-goto-fallback-returns-nil-when-cider-signals-test ()
   (let ((messages '())
@@ -1730,6 +1759,85 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
                      (or load-file-name buffer-file-name default-directory)))
   "Repo-local scratch directory for tests that need a real file.")
 
+(ert-deftest provenance-visit-jumps-from-the-sources-own-window-test ()
+  "RET picks the window showing the production's source, not the MRU window.
+Two windows are open — the rules file and an unrelated buffer — and the caller
+is in the provenance view.  The source's window must win, so the jump neither
+clobbers nor searches the unrelated one."
+  (let* ((_ (make-directory test--scratch-dir t))
+         (file (expand-file-name "provenance-nav-window.clj" test--scratch-dir))
+         (src nil)
+         (other nil)
+         (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                           :type "rule" :source (test--prov :var? nil))))
+    (with-temp-file file
+      (insert "(ns demo.ns)\n\n(r/defrule rule-a [] => 1)\n"))
+    (unwind-protect
+        (progn
+          (setq src (find-file-noselect file))
+          (setq other (get-buffer-create " *clara-unrelated*"))
+          (delete-other-windows)
+          (let ((src-win (selected-window))
+                (other-win (split-window)))
+            (set-window-buffer src-win src)
+            (set-window-buffer other-win other)
+            (cl-letf (((symbol-function 'cider-get-ns-name)
+                       (lambda (&rest _)
+                         (and (equal (buffer-file-name) file) "demo.ns")))
+                      ((symbol-function 'get-mru-window)
+                       (lambda (&rest _) other-win)))
+              (select-window other-win)
+              (should (eq (clara-explorer--ns-source-buffer "demo.ns") src))
+              (should (eq (clara-explorer--navigation-window node) src-win)))))
+      (when (buffer-live-p src) (kill-buffer src))
+      (when (buffer-live-p other) (kill-buffer other))
+      (delete-other-windows)
+      (delete-file file))))
+
+(ert-deftest provenance-visit-restores-the-selection-when-the-jump-fails-test ()
+  "A failed RET leaves the user in the provenance view, not in some other window."
+  (let* ((prod (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                           :source (test--prov :var? nil)))
+         (ft (test--prov :kind :fact-type :type "T" :type-short "T"
+                         :children (vector prod)))
+         (selected '())
+         (start nil))
+    (with-temp-buffer
+      (clara-explorer--provenance-load ft :producer nil nil)
+      (setq start (selected-window))
+      (cl-letf (((symbol-function 'tabulated-list-get-id)
+                 (lambda (&optional _) (vector "T" "ns/p")))
+                ((symbol-function 'clara-explorer--navigation-window)
+                 (lambda (_node) 'navigation-window))
+                ((symbol-function 'clara-explorer--goto) (lambda (_target &optional _no-push) nil))
+                ((symbol-function 'select-window)
+                 (lambda (window &rest _) (push window selected) window)))
+        (clara-explorer-provenance-visit))
+      (should (equal selected (list start 'navigation-window))))))
+
+(ert-deftest provenance-visit-pushes-the-jump-before-changing-windows-test ()
+  "C-o returns to the provenance view, not to the window the jump ran in."
+  (let* ((prod (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                           :source (test--prov :var? nil)))
+         (ft (test--prov :kind :fact-type :type "T" :type-short "T"
+                         :children (vector prod)))
+         (events '()))
+    (with-temp-buffer
+      (clara-explorer--provenance-load ft :producer nil nil)
+      (cl-letf (((symbol-function 'tabulated-list-get-id)
+                 (lambda (&optional _) (vector "T" "ns/p")))
+                ((symbol-function 'clara-explorer--navigation-window)
+                 (lambda (_node) 'navigation-window))
+                ((symbol-function 'clara-explorer--push-jump)
+                 (lambda () (push 'push-jump events)))
+                ((symbol-function 'select-window)
+                 (lambda (window &rest _) (push (list 'select window) events) window))
+                ((symbol-function 'clara-explorer--goto)
+                 (lambda (_target &optional no-push) (push (list 'goto no-push) events) t)))
+        (clara-explorer-provenance-visit))
+      (should (equal (reverse events)
+                     '(push-jump (select navigation-window) (goto t)))))))
+
 (ert-deftest provenance-goto-fallback-finds-the-form-test ()
   (let* ((_ (make-directory test--scratch-dir t))
          (file (expand-file-name "provenance-goto-fallback.clj" test--scratch-dir))
@@ -1744,6 +1852,8 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
                      (lambda (&rest _)
                        (setq visited (find-file-noselect file))
                        (switch-to-buffer visited)))
+                    ((symbol-function 'cider-get-ns-name)
+                     (lambda (&rest _) "demo.ns"))
                     ((symbol-function 'clara-explorer--push-jump) (lambda () nil))
                     ((symbol-function 'clara-explorer--log) (lambda (&rest _) nil)))
             (should (clara-explorer--goto node))

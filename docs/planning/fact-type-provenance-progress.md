@@ -694,6 +694,10 @@ Checkpoints, not a diary. Update in place as work lands.
       `editor-client-bb-test` 8/52; `editor/emacs` Tier 1 123 + 5 skipped, Tier 2
       128/128.
 
+- [x] 14 Reported bug: provenance `RET` could search and move point in an
+      unrelated buffer — see §7.2. `editor/emacs` Tier 1 127 + 5 skipped, Tier 2
+      132/132, byte-compile clean.
+
 ### 7.1 Review 1 disposition
 
 Review: `docs/planning/fact-type-provenance-neom-review-1.md`.
@@ -803,6 +807,56 @@ Verification after review 1 (all green):
   `:matches [:loan-app/application-outcome]` + `:bridge? true` +
   `:unit "loan-disposition-ruleset"`, and both `find-*-outcome` queries as `[]`
   leaves.
+
+### 7.2 Post-review bug: provenance `RET` picked the wrong buffer
+
+**Reported:** with two windows open (the rules and something unrelated), `RET`
+from the provenance view jumped correctly only while the rules window had been
+visited last. After focusing the unrelated buffer and returning to the view,
+`RET` moved point in the unrelated buffer, to a line that was not the rule.
+
+**Root cause.** The `var? nil` fallback decided whether it may search the
+current buffer with `clara-explorer--buffer-visits-ns-p`, which read
+`cider-current-ns`. That function is connection-aware: for any buffer without
+its own `ns` form it falls back to the connection's `cider-buffer-ns`, so while
+the REPL sits in the target namespace **every** buffer answers the target ns.
+`provenance-visit` had also re-selected the most recently used window before
+jumping, so with the unrelated window most recent, the fallback searched *that*
+buffer: `goto-char (point-min)` plus a whole-symbol search for the rule name,
+landing on point-min or on a stray mention of the name. Reproduced end-to-end in
+a scratch harness with a silently-failing `cider-find-ns`: the pre-fix build left
+the selected window on `*unrelated*` with point moved onto the line
+`rule-b appears here too`; the fixed build jumps to `(r/defrule rule-b …)` in the
+rules file and leaves the unrelated buffer's point alone.
+
+**Fix (all in `editor/emacs/clara-explorer.el`):**
+
+- `clara-explorer--buffer-visits-ns-p` now takes an optional buffer and uses only
+  buffer-local evidence: a Clojure file buffer whose own `ns` form names NS
+  (`cider-get-ns-name`), never `cider-current-ns`. A doc buffer quoting
+  `(ns NS)` is excluded by the Clojure-file test.
+- `clara-explorer--goto-fallback` dropped its `origin` buffer: after asking
+  CIDER to open the ns, it searches only when the now-current buffer really is
+  NS's source, and reports the classpath hint (plus CIDER's own error, when it
+  signalled) without touching point otherwise. It also no longer refuses to
+  search when `cider-find-ns` signals but the buffer already is the source.
+- `clara-explorer--navigation-window` (new) prefers the window already showing
+  NS's source (found by `clara-explorer--ns-source-buffer`), else the MRU
+  window; `clara-explorer--goto-production` (new) re-selects it, pushes the jump
+  *before* the selection moves, and restores the selection when the jump fails,
+  so a production the REPL cannot open leaves the user in the provenance view.
+- `clara-explorer--goto` returns whether the jump happened and takes a `NO-PUSH`
+  argument; `clara-explorer--search-production-form` (new) restores point when
+  the form is not found.
+
+**Tests:** `provenance-goto-fallback-ignores-the-connections-namespace-test`
+(fails on the pre-fix guard),
+`provenance-visit-jumps-from-the-sources-own-window-test` (two real windows; the
+MRU window is explicitly the unrelated one),
+`provenance-visit-restores-the-selection-when-the-jump-fails-test`, and
+`provenance-visit-pushes-the-jump-before-changing-windows-test`; the two
+existing file-buffer fallback tests now stub `cider-get-ns-name`. Reverting the
+guard and the window choice fails three of them.
 
 ## 8. Verification
 
