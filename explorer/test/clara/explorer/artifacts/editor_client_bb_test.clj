@@ -266,21 +266,21 @@
                  (set (map :name (:targets variant-answer))))))))))
 
 ;; ---------------------------------------------------------------------------
-;; Fact type provenance parity (B1–B3)
+;; Fact type provenance parity
 ;; ---------------------------------------------------------------------------
 
 (deftest editor-client-provenance-matches-jvm-test
   (if-not (runnable?)
     (println "SKIPPING editor-client-bb-test — babashka is not on PATH, or a script moved")
-    (let [inputs [{:label "R1 producer on the keyword"
+    (let [inputs [{:label "producer on the keyword"
                    :input (provenance-input keyword-outcome :producer 0)}
-                  {:label "R2 consumer on the record"
+                  {:label "consumer on the record"
                    :input (provenance-input outcome-record :consumer 0)}
-                  {:label "R3 external fact type"
+                  {:label "external fact type"
                    :input (provenance-input application-type :producer 0)}
-                  {:label "R4 retract-only production one level down"
+                  {:label "retract-only production one level down"
                    :input (provenance-input document-check-type :consumer 1)}
-                  {:label "R5 production root and its self-loop"
+                  {:label "production root and its self-loop"
                    :input {:node {:kind :production :name app-denied}
                            :direction :producer
                            :depth 0

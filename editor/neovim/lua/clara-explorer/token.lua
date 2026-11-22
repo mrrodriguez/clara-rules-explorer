@@ -539,7 +539,7 @@ function M.side_at_point(src, form_start, cursor)
   return "lhs"
 end
 
---- The fact-type token at point (the §4.4 routing order).
+--- The fact-type token at point (the routing order).
 function M.token_at_point(src, form_start, side, cursor)
   if form_start then
     local doc = M.docstring_token_at_point(src, form_start, cursor)

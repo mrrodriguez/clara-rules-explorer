@@ -982,7 +982,7 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
       (should (string-match-p (regexp-quote ":token \"Doc\"") captured)))))
 
 ;; ---------------------------------------------------------------------------
-;; babashka transport (Phase 4)
+;; babashka transport
 ;; ---------------------------------------------------------------------------
 
 (ert-deftest registry-root-reads-env-var ()

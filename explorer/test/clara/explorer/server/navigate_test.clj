@@ -1,5 +1,5 @@
 (ns clara.explorer.server.navigate-test
-  "Pure tests for `clara.explorer.server.navigate/fact-type-provenance` (the N matrix).
+  "Pure tests for `clara.explorer.server.navigate/fact-type-provenance`.
 
   `navigate` has no live-session dependency: the analyses here are tiny slim maps pushed through
   `clara.explorer.artifacts.shared.rehydrate/rehydrate-analysis`, which is the real closure code
@@ -94,10 +94,10 @@
           (mapcat production-nodes (:children node))))
 
 ;; ---------------------------------------------------------------------------
-;; N1–N3: direct edges and hierarchy bridges
+;; Direct edges and hierarchy bridges
 ;; ---------------------------------------------------------------------------
 
-(deftest n1-direct-producer-test
+(deftest provenance-direct-producer-test
   (let [analysis (->analysis {:fact-types {"T" #{} "S" #{}}
                               :rules {"t/p" {:lhs ["S"] :insert ["T"]}}})
         root (:node (provenance analysis (cursor-input "T" :producer 0)))]
@@ -117,7 +117,7 @@
       (is (false? (:seen? p)))
       (is (not (contains? p :children)) "depth 0 leaves it expandable"))))
 
-(deftest n2-subtype-bridge-producer-test
+(deftest provenance-subtype-bridge-producer-test
   (let [analysis (->analysis {:fact-types {"T" #{} "S" ["T"] "V" #{}}
                               :rules {"t/p" {:lhs ["V"] :insert ["S"]}}})
         root (:node (provenance analysis (cursor-input "T" :producer 0)))
@@ -126,7 +126,7 @@
     (is (= [{:name "S" :short "S"}] (:matches p)))
     (is (true? (:bridge? p)))))
 
-(deftest n3-supertype-bridge-consumer-test
+(deftest provenance-supertype-bridge-consumer-test
   (let [analysis (->analysis {:fact-types {"T" #{} "S" ["T"] "V" #{}}
                               :rules {"t/c" {:lhs ["T"] :insert ["V"]}}})
         root (:node (provenance analysis (cursor-input "S" :consumer 0)))
@@ -137,10 +137,10 @@
     (is (true? (:bridge? c)))))
 
 ;; ---------------------------------------------------------------------------
-;; N4–N7: dedupe, cycles, and bounded `:full`
+;; Dedupe, cycles, and bounded depth
 ;; ---------------------------------------------------------------------------
 
-(deftest n4-insert-and-retract-one-type-test
+(deftest provenance-insert-and-retract-one-type-test
   (let [analysis (->analysis {:fact-types {"T" #{} "S" ["T"] "S2" ["T"]}
                               :rules {"t/both" {:lhs ["T"] :insert ["S"] :retract ["S2"]}}})
         root (:node (provenance analysis (cursor-input "T" :producer 0)))]
@@ -152,7 +152,7 @@
       (is (= ["S" "S2"] (mapv :name (:matches p)))
           "matches unions the insert and retract sides"))))
 
-(deftest n5-self-loop-cycle-test
+(deftest provenance-self-loop-cycle-test
   (let [analysis (->analysis {:fact-types {"T" #{}}
                               :rules {"t/p" {:lhs ["T"] :insert ["T"]}}})
         root (:node (provenance analysis (cursor-input "T" :producer 1)))
@@ -165,7 +165,7 @@
     (is (true? (:cycle? (first back))))
     (is (not (contains? (first back) :children)))))
 
-(deftest n5b-production-root-in-ancestors-is-a-cycle-test
+(deftest provenance-production-root-in-ancestors-is-a-cycle-test
   (testing "a production root that is already on the path reports a cycle"
     (let [analysis (->analysis {:fact-types {"T" #{}}
                                 :rules {"t/p" {:lhs ["T"] :insert ["T"]}}})
@@ -178,7 +178,7 @@
       (is (false? (:seen? node)))
       (is (not (contains? node :children))))))
 
-(deftest n6-cross-type-cycle-terminates-test
+(deftest provenance-cross-type-cycle-terminates-test
   (let [analysis (->analysis {:fact-types {"T" #{} "U" #{}}
                               :rules {"t/a" {:lhs ["T"] :insert ["U"]}
                                       "t/b" {:lhs ["U"] :insert ["T"]}}})
@@ -188,7 +188,7 @@
     (is (false? (:cycle? (first b-nodes))))
     (is (true? (:cycle? (second b-nodes))))))
 
-(deftest n7-diamond-stays-linear-test
+(deftest provenance-diamond-stays-linear-test
   (let [analysis (->analysis {:fact-types {"R" #{} "T" #{} "S" #{}}
                               :rules {"t/a" {:lhs ["S"] :insert ["T"]}
                                       "t/b" {:lhs ["T"] :insert ["R"]}
@@ -202,7 +202,7 @@
     (is (not-any? :cycle? (production-nodes root)))))
 
 ;; ---------------------------------------------------------------------------
-;; N8–N10: depth, leaf kinds, external
+;; Depth, leaf kinds, and external types
 ;; ---------------------------------------------------------------------------
 
 (def ^:private chain-analysis
@@ -211,7 +211,7 @@
                        "t/p2" {:lhs ["B"] :insert ["C"]}
                        "t/p3" {:lhs ["C"] :insert ["D"]}}}))
 
-(deftest n8-depth-semantics-test
+(deftest provenance-depth-semantics-test
   (testing "a :cursor root: n + 1 production levels below the fact type"
     (is (= ["t/p3"]
            (child-names (:node (provenance chain-analysis (cursor-input "D" :producer 0))))))
@@ -232,7 +232,7 @@
       (is (= ["t/p3" "t/p2" "t/p1"] (mapv :name (production-nodes (root :full))))
           "the chain ends at an external leaf"))))
 
-(deftest n9-leaf-kinds-test
+(deftest provenance-leaf-kinds-test
   (let [analysis (->analysis {:fact-types {"T" #{} "X" #{}}
                               :queries {"t/q" {:lhs ["T"]}}
                               :rules {"t/noout" {:lhs ["T"] :no-output-types true}
@@ -250,7 +250,7 @@
           z (first (filter #(= "t/z" (:name %)) (:children producer-root)))]
       (is (= [] (:children z)) "a zero-LHS rule is a producer leaf"))))
 
-(deftest n10-external-retract-only-test
+(deftest provenance-external-retract-only-test
   (let [analysis (->analysis {:fact-types {"T" #{} "S" #{}}
                               :rules {"t/ret" {:lhs ["S"] :retract ["T"]}}})
         root (:node (provenance analysis (cursor-input "T" :producer 0)))
@@ -260,10 +260,10 @@
     (is (= :retract (:via p)))))
 
 ;; ---------------------------------------------------------------------------
-;; N11–N12: ordering and the error contract
+;; Ordering and the error contract
 ;; ---------------------------------------------------------------------------
 
-(deftest n11-ordering-test
+(deftest provenance-ordering-test
   (testing "production children are name-sorted; consumer types are declaration-ordered"
     (let [analysis (->analysis {:fact-types {"T" #{} "V" #{} "Z" #{} "A" #{} "M" #{}}
                                 :rules {"t/p" {:lhs ["T"] :insert ["Z" "A"] :retract ["M"]}
@@ -283,7 +283,7 @@
           c (first (:children root))]
       (is (= ["S" "T"] (mapv :name (:matches c)))))))
 
-(deftest n13-scoped-rhs-callsites-beat-the-global-scan-test
+(deftest provenance-scoped-rhs-callsites-beat-the-global-scan-test
   (let [callsite (fn [type-name]
                    {:callsites [{:constructor-sym "t/shared"
                                  :resolved-types [{:name type-name}]}]})
@@ -305,7 +305,7 @@
                            :caller-ns "t" :token "shared"}))
         "scoped to t/b, its own callsite wins")))
 
-(deftest n12-error-contract-test
+(deftest provenance-error-contract-test
   (let [analysis (->analysis {:fact-types {"T" #{}}
                               :rules {"t/p" {:lhs ["T"] :insert ["T"]}}})]
     (testing "an unknown production root"

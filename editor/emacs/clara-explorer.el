@@ -110,7 +110,7 @@ comment to end of line, repeatedly until point stops moving.  Uses
 
 
 ;; ---------------------------------------------------------------------------
-;; EDN transport (§9.3, §9.8)
+;; EDN transport
 ;; ---------------------------------------------------------------------------
 
 ;; parseedn contract (parseedn 20231203): EDN maps -> elisp hash-tables
@@ -181,7 +181,7 @@ printer."
      (t nil))))
 
 ;; ---------------------------------------------------------------------------
-;; babashka transport (§Phase 4)
+;; babashka transport
 ;; ---------------------------------------------------------------------------
 
 (defconst clara-explorer--server-probe-code
@@ -294,7 +294,7 @@ out and returns the result."
   (clara-explorer--bb-run (list selection-edn input-edn)))
 
 ;; ---------------------------------------------------------------------------
-;; Structural navigation (§9.2)
+;; Structural navigation
 ;; ---------------------------------------------------------------------------
 
 (defun clara-explorer--symbol-name (sym)
@@ -758,7 +758,7 @@ Used for RHS and global cases where LHS-structure is not applicable."
           :caller-ns caller-ns :token token)))
 
 ;; ---------------------------------------------------------------------------
-;; Remote navigation (§9.3, §9.4)
+;; Remote navigation
 ;; ---------------------------------------------------------------------------
 
 (defun clara-explorer--op-code (op input)
@@ -1011,7 +1011,7 @@ token."
         (clara-explorer--handle-result result)))))
 
 ;; ---------------------------------------------------------------------------
-;; Public commands (§9.6, §9.9)
+;; Public commands
 ;; ---------------------------------------------------------------------------
 
 ;;;###autoload

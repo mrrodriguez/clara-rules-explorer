@@ -561,7 +561,7 @@
             "WM enrichment present after reload")))))
 
 ;; ---------------------------------------------------------------------------
-;; 12. :reuse reload regression — ensures the B1 fix is pinned
+;; 12. :reuse reload regression
 ;; ---------------------------------------------------------------------------
 
 (deftest test-reload-reuse-preserves-annotations
