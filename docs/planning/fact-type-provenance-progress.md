@@ -1,9 +1,10 @@
 # Plan: fact type provenance (producer + consumer)
 
-Status: **implemented; review 1 folded in**. Steps 1–10 in §7 are done and the
-full verification in §8 is green. This doc is the single source of truth for the
-work: both plan-review rounds and the post-implementation review are folded in,
-including the concrete test matrix in §6.1. Nothing else needs reading to start.
+Status: **implemented; reviews 1 and 2 folded in — ready to merge**. Steps 1–13
+in §7 are done and the full verification in §8 is green. This doc is the single
+source of truth for the work: both plan-review rounds and the
+post-implementation reviews are folded in, including the concrete test matrix in
+§6.1. Nothing else needs reading to start.
 
 Replaces the POC on `clara-explorer-producer-hierarchy`. The POC's
 `lhs-producers`, elisp tree builder, and `lsp-treemacs` view are throwaway. The
@@ -680,6 +681,18 @@ Checkpoints, not a diary. Update in place as work lands.
       arguments (they are private, called twice each, and a map-arg refactor
       would add construction for no clarity gain over the existing `ctx` maps in
       the provenance half).
+
+- [x] 13 Review 2 remaining findings closed
+      (`fact-type-provenance-neom-review-1.md`) — the two test gaps (assertions
+      on the file-buffer fallback's messages; the §1.7 scoped-RHS global
+      fallback and the omitted-`:caller-ns` namespace fallback) plus the three
+      micro-nits (`error` on both transports for an unknown `op`,
+      `->scoped-rhs-candidates` taking `resolve-ns`, `format` in the bb node
+      message). Each new assertion was confirmed to fail with the fix reverted.
+      `explorer` 559 tests / 3743 assertions, lint 0/0, reflection clean,
+      `format-check` clean, `bb-smoke-test` green (with `CLJ_CONFIG`),
+      `editor-client-bb-test` 8/52; `editor/emacs` Tier 1 123 + 5 skipped, Tier 2
+      128/128.
 
 ### 7.1 Review 1 disposition
 

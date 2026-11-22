@@ -394,7 +394,9 @@
                               :rules {"t/a" {:lhs ["S"] :insert ["X"]
                                              :dynamic-insert-types-detected (callsite "X")}
                                       "t/b" {:lhs ["S"] :insert ["Y"]
-                                             :dynamic-insert-types-detected (callsite "Y")}}})
+                                             :dynamic-insert-types-detected (callsite "Y")}
+                                      ;; no callsite of its own: scoped RHS resolution finds nothing
+                                      "t/c" {:lhs ["S"] :insert ["X"]}}})
         root-type (fn [input]
                     (-> (navigate/fact-type-provenance analysis callsite-runtime
                                                        {:node {:kind :cursor :input input}
@@ -406,7 +408,12 @@
         "globally the shared constructor resolves to both types, sorted first")
     (is (= "Y" (root-type {:production "t/b" :side :rhs
                            :caller-ns "t" :token "shared"}))
-        "scoped to t/b, its own callsite wins")))
+        "scoped to t/b, its own callsite wins")
+    (is (= "X" (root-type {:production "t/c" :side :rhs
+                           :caller-ns "t" :token "shared"}))
+        "scoped to t/c, which has no callsite, so the global scan is consulted")
+    (is (= "X" (root-type {:production "t/a" :side :lhs :token "shared"}))
+        "an omitted :caller-ns falls back to the enclosing production's namespace")))
 
 (deftest provenance-error-contract-test
   (let [analysis (->analysis {:fact-types {"T" #{}}

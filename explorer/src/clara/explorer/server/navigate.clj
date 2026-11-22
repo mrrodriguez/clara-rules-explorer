@@ -576,10 +576,10 @@
 
 (defn- ->scoped-rhs-candidates
   "Known fact types the token resolves to inside `production`'s RHS: its own callsites and the
-   declared RHS types win over the global scan, so a shared helper stays rule-local."
-  [runtime analysis production caller-ns-sym token]
+   declared RHS types win over the global scan, so a shared helper stays rule-local. Resolves in
+   `resolve-ns`, the caller's namespace or the production's own."
+  [runtime analysis production resolve-ns token]
   (let [summary (get-production-summary analysis production)
-        resolve-ns (or caller-ns-sym (some-> production symbol namespace symbol))
         candidates (resolve-rhs-types runtime summary resolve-ns token)
         declared (->declared-rhs-type-names summary)
         known (set (keys (:fact-types analysis)))]
@@ -599,7 +599,7 @@
         scoped? (and production (= :rhs side) (get-production-summary analysis production))
         candidates (if scoped?
                      (or (not-empty (->scoped-rhs-candidates
-                                     runtime analysis production caller-ns-sym token))
+                                     runtime analysis production resolve-ns token))
                          (->global-candidates runtime analysis resolve-ns token))
                      (->global-candidates runtime analysis resolve-ns token))]
     (first (sort candidates))))

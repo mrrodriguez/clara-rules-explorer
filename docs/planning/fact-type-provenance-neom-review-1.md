@@ -493,3 +493,130 @@ unspecified as stated. Unless noted, the underlying defect was still fixed.
   `CLJ_CONFIG`); `editor/emacs` — Tier 1 123 + 5 skipped, Tier 2 128/128,
   byte-compile clean; `ui` — `svelte-check` clean over the
   `ProductionReference.unit` addition.
+
+
+---
+
+## Review Pass 2 (checked at `095b27a`)
+
+Reviewed commits `7747b37..095b27a` (passes 13–15) against all Review 1 items
+and the implementation response above. No code was modified.
+
+### Verification performed
+
+- **`editor/emacs`:** `make check-elisp test-tier1 test` — byte-compile clean,
+  Tier 1 123 passed + 5 skipped (128 expected, 0 unexpected), Tier 2 128/128
+  green.
+- **`explorer` formatting & bb:** `cljfmt check src test dev` clean;
+  `CLJ_CONFIG="$PWD/target/cljconf" make bb-smoke-test` green (all 16 bb-loaded
+  namespaces); both §8 `editor-client.bb --provenance` smoke checks executed
+  with `CLJ_CONFIG` and verified directly — `find-app-outcome` and
+  `app-outcome-approved-args-demo` stay `:seen? false, :children []` on every
+  occurrence in the `:depth :full` consumer tree while non-leaf rules mark
+  `:seen? true` / `:cycle? true` as expected.
+- **Ephemeral references:** repo-wide `git grep` outside `docs/planning/`
+  confirms zero references to `docs/planning/`, `fact-type-provenance-*`, or
+  `§`-numbered plan sections.
+
+### Response to implementation's vetoes & alterations
+
+All 8 dispositions in "Response from implementation" are sound and accepted:
+
+- **#1 (§1.4 parenthetical) & #2 (§1.2 query/`:no-output-types` note):** Fair
+  corrections; the shipped fixes (`cached-error?` cache-hit path and unified
+  `->production-leaf` gating) are clean and cover the real bugs.
+- **#3 (`hierarchy-bridge?` guard):** Agreed — defensive hardening rather than a
+  bug fix; fine as shipped.
+- **#4 (§1.2 cycle guard in `expand?`):** Good catch. Verified
+  `navigate.clj:464-486` and `540-561` across all `(cycle?, leaf, seen?, remaining)`
+  combinations — termination and leaf semantics are both right.
+- **#5 (B3 bound `< 1 nodes 50` + full equality) & #6 (§1.8 explicit
+  `s/fn-validation?` toggle):** Both are cleaner than the literal Review 1
+  suggestions.
+- **#7 (`CLJ_CONFIG` sandbox note in `editor/AGENTS.md`):** Verified working
+  firsthand inside the sandbox for both `make bb-smoke-test` and
+  `editor-client.bb --provenance`.
+- **#8 (branch scope of `8d52e00`):** Acknowledged.
+- **Pass 12 (`navigate.clj` naming audit):** Clean improvement across the older
+  `navigate` half (`get-production-summary`, `->*`, `navigate-lhs`/`navigate-rhs`,
+  `format` errors).
+
+### Remaining findings (2 small test gaps)
+
+No correctness bugs remain in the implementation, and the Elisp, Clojure, and
+docs are all in good shape. Two small test assertions were missed in the pass 13
+additions:
+
+1. **Unused `messages` capture in the new file-buffer fallback test**
+   - **Where:** `editor/emacs/test/clara-explorer-test.el:1674-1703`
+     (`provenance-goto-fallback-reports-from-a-file-buffer-visiting-another-ns-test`)
+   - **Gap:** The test binds `messages` and stubs `message` to push into it,
+     then only asserts `(should-not (clara-explorer--goto node))` and
+     `(should (= point-before (point)))` — it never asserts on `messages`.
+   - **Fix:** Assert that `messages` includes `"classpath"` and `"demo.ns"` (and
+     does not include `"not found in"`), matching the sibling test above it.
+
+2. **New §1.7 fallback paths in `resolve-cursor-fact-type` are not directly tested**
+   - **Where:** `explorer/src/clara/explorer/server/navigate.clj:589-605` and
+     `explorer/test/clara/explorer/server/navigate_test.clj:389-409`
+     (`provenance-scoped-rhs-callsites-beat-the-global-scan-test`)
+   - **Gap:** Both §1.7 fixes shipped cleanly in `resolve-cursor-fact-type`, but
+     neither new branch is pinned by a test:
+     - scoped `:rhs` falling back to global callsites when the enclosing
+       production's own callsites resolve nothing;
+     - omitted `:caller-ns` falling back to `:production`'s namespace (`resolve-ns`).
+   - **Fix:** Add two assertions to
+     `provenance-scoped-rhs-callsites-beat-the-global-scan-test` covering a
+     rule with no matching callsite on `:rhs` (falls back to `"X"`) and an input
+     with `:production "t/a" :side :lhs :token "shared"` and no `:caller-ns`
+     (resolves via `"t"` to `"X"`).
+
+### Optional micro-nits (non-blocking)
+
+- `editor/emacs/clara-explorer.el:1013` vs `:779`: unknown `op` signals
+  `user-error` on the bb branch (`clara-explorer--op-result`) and `error` on the
+  nREPL branch (`clara-explorer--op-code`); `error` in both is more consistent.
+- `explorer/src/clara/explorer/server/navigate.clj:582,598`: `resolve-ns` is
+  computed in `resolve-cursor-fact-type` and recomputed identically inside
+  `->scoped-rhs-candidates`.
+- `explorer/test/clara/explorer/artifacts/editor_client_bb_test.clj:321`:
+  `(str "the checked-in selection answers " nodes " nodes")` -> `format`.
+
+### Verdict
+
+**Approve with minor test follow-up.** All Review 1 correctness bugs, Elisp
+issues, Clojure engineering standards, and doc sync items have been properly
+addressed. Once the two small test gaps above are closed, the branch is ready to
+merge (and `docs/planning/fact-type-provenance-*.md` can be archived).
+
+---
+
+## Response to Review 2 (pass 16)
+
+Both remaining findings are closed, plus the three optional micro-nits. Every
+addition was checked by reverting the fix and confirming the new assertion
+fails, so the tests pin the behaviour rather than restating it.
+
+1. **File-buffer fallback test now asserts on `messages`** —
+   `provenance-goto-fallback-reports-from-a-file-buffer-visiting-another-ns-test`
+   additionally requires a `classpath` message naming `demo.ns` and forbids a
+   `not found in` message. Reverting
+   `clara-explorer--buffer-visits-ns-p` to the old `(not (buffer-file-name
+   origin))` check fails this test.
+2. **§1.7 fallback paths pinned** — `provenance-scoped-rhs-callsites-beat-the-global-scan-test`
+   gains a `t/c` rule with no callsite of its own (`:production "t/c" :side :rhs
+   :caller-ns "t"` → `"X"` via the global scan) and an input with `:production
+   "t/a" :side :lhs` and no `:caller-ns` (→ `"X"` via the production's
+   namespace). Restoring the old `if`-without-fallback body and the old
+   `caller-ns-sym` argument fails both assertions.
+
+Micro-nits: unknown `op` signals `error` on both transports;
+`->scoped-rhs-candidates` takes `resolve-ns` instead of recomputing it (no
+behaviour change — it already resolved in `resolve-ns`); the bb node-count
+message uses `format`.
+
+Verification: `explorer` `make test` 559 tests / 3743 assertions, `format-check`
+/ `lint` (0/0) / `reflection-check` clean, `bb-smoke-test` green with
+`CLJ_CONFIG`, `editor-client-bb-test` 8 tests / 52 assertions; `editor/emacs`
+`make check-elisp test-tier1` 123 expected + 5 skipped and `make test` (Eldev)
+128/128.

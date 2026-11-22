@@ -1698,7 +1698,11 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
                        (lambda (&rest _) nil)))
               (should-not (clara-explorer--goto node)))
             ;; point is not clobbered in the wrong buffer
-            (should (= point-before (point)))))
+            (should (= point-before (point)))
+            ;; the classpath diagnostic fires instead of a bogus search of other.ns
+            (should (cl-find-if (lambda (m) (string-match-p "classpath" m)) messages))
+            (should (cl-find-if (lambda (m) (string-match-p "demo\\.ns" m)) messages))
+            (should-not (cl-find-if (lambda (m) (string-match-p "not found in" m)) messages))))
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (delete-file file))))
 

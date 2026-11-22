@@ -318,5 +318,5 @@
           nodes (count-nodes (:node bb-answer))]
       (testing "the full consumer tree terminates and matches the JVM answer exactly"
         (is (not (contains? bb-answer :error)) bb-answer)
-        (is (< 1 nodes 50) (str "the checked-in selection answers " nodes " nodes"))
+        (is (< 1 nodes 50) (format "the checked-in selection answers %s nodes" nodes))
         (is (= jvm-answer bb-answer))))))

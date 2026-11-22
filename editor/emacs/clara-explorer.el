@@ -1010,7 +1010,7 @@ evals the matching call in `client`."
                        ('fact-type-provenance
                         (clara-explorer--bb-provenance (clara-explorer--bb-selection)
                                                        input-edn))
-                       (_ (user-error "clara-explorer: unknown operation %S" op)))
+                       (_ (error "clara-explorer: unknown operation %S" op)))
                    (clara-explorer--eval-edn
                     (clara-explorer--op-code op input-edn) conn))))
     (if result
