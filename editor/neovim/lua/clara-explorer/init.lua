@@ -159,6 +159,9 @@ function M.refresh()
     vim.notify("Not connected to a Conjure Clojure REPL", vim.log.levels.WARN)
     return
   end
+  -- A refresh means the REPL state changed, so cached answers about it (the REPL's
+  -- project directory, used as the default source root) are dropped.
+  jump.clear_caches()
   conjure.with_transport(function(transport)
     if transport == "bb" then
       vim.notify(
@@ -264,6 +267,11 @@ function M.transport_status()
     conjure.show_scratch("clara-explorer://transport-status", lines, "clojure")
   end)
 end
+
+--- `:ClaraExplorerShowProducerProvenance` / `:ClaraExplorerShowConsumerProvenance`
+-- — open the fact type provenance view for the type at the cursor, walking
+-- DIRECTION (`"producer"` upstream, `"consumer"` downstream).
+function M.show_provenance(direction) require("clara-explorer.provenance").open(direction) end
 
 --- `:ClaraExplorerSelectUnit` — re-prompt for the bb transport's registry unit.
 function M.select_unit()

@@ -724,8 +724,9 @@ Checkpoints, not a diary. Update in place as work lands.
       0.6s warm across 131 sibling checkouts, paid once per namespace (the open
       buffer answers afterwards). An earlier fixed two-level glob (0.05s) was
       dropped because rulesets nest deeper than `<checkout>/<source dir>`. The
-      jump search's head regexp is built with `rx-to-string`. The Neovim port of items 14–17 plus the provenance view is
-      planned in `fact-type-provenance-nvim-plan.md`.
+      jump search's head regexp is built with `rx-to-string`. The Neovim port of
+      items 14–17 plus the provenance view landed separately on the same branch;
+      see `fact-type-provenance-nvim-progress.md`.
 
 ### 7.1 Review 1 disposition
 
@@ -1025,7 +1026,9 @@ the CLI against an explicit classpath instead; record the workaround in
 
 ## 10. Deferred
 
-- **Neovim renderer** — the contract is ready; add it as a renderer only.
+- **Neovim renderer** — done; see
+  [`fact-type-provenance-nvim-progress.md`](./fact-type-provenance-nvim-progress.md).
+  It is a renderer only: no Clojure change was required.
 - **LSP integration** — explicitly out of scope for this work.
 - **REPL-free bb token resolution** — the enabling change for running without
   CIDER/Conjure at all. Not needed for this feature; it remains a separate

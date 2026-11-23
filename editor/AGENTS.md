@@ -30,10 +30,14 @@ computes closures, bridges, cycles, and short display names.
 | babashka | unflagged `editor-client.bb '<sel>' '<input>'` | `editor-client.bb --provenance '<sel>' '<input>'` |
 
 Emacs ships the provenance view (`tabulated-list-mode`, `TAB`/`RET`, no extra
-package). Neovim has the contract available but no provenance command yet, so
-adding one is a renderer-only change. The contract, depth/cycle semantics,
-and the v1 no-polarity limitation are documented in
-`docs/explorer-editor-navigation.md`.
+package). Neovim ships it too: `:ClaraExplorerShowProducerProvenance` /
+`:ClaraExplorerShowConsumerProvenance` open a split where `<Tab>` expands and
+`<CR>` jumps (`<Plug>` targets for every key, `g:clara_explorer_provenance_depth`
+for the initial depth). Both render the same contract and never compute a
+closure, bridge, cycle, or short fact-type name. The contract, depth/cycle
+semantics, and the v1 no-polarity limitation are documented in
+`docs/explorer-editor-navigation.md`; the per-editor surface is in
+`docs/explorer-editor-navigation-emacs.md` / `-neovim.md`.
 
 ## Emacs (`emacs/`)
 

@@ -80,15 +80,21 @@ Targets are productions. Jump to a target means opening the file at the
 2. **Non-var targets** (`:var? false`) — resolve the classpath-relative
    `:source.file` via `(clojure.java.io/resource …)` and open it; if that is
    `nil` (e.g. `jar:` source), fall back to opening the namespace file and
-   searching for `(defrule|defquery NAME` (in Emacs the macro names are
-   `clara-explorer-production-macros`). Emacs asks the connected REPL for the
-   loaded var's location first, so a namespace loaded from outside the
-   classpath (e.g. a sesman-linked repo) still resolves. An empty namespace
-   path is never opened.
+   searching for `(defrule|defquery NAME` (the macro names are configurable in
+   both editors). The editor asks the connected REPL for the loaded var's
+   location (`:file` plus `:line`) first, so a namespace loaded from outside
+   the classpath (e.g. a linked repo, a sibling checkout) still resolves. An
+   empty namespace path is never opened. Neovim generalizes this into
+   *locate → show*: the REPL's var metadata, then an open buffer whose `ns`
+   form names the namespace, then the configured source roots — all before any
+   window changes. It applies to every non-var navigate target and to every
+   jump from the provenance view; navigate's var-backed targets keep Conjure's
+   `def-str`.
 
 Both editors push the jump list (evil/xref in Emacs, tag stack in Neovim)
-before jumping so `C-o` returns. A jump that cannot find its target leaves point
-where it was.
+before jumping so `C-o` returns, and choose a window that keeps a provenance
+split in place. A jump that cannot find its target leaves point where it was,
+changes no window, pushes nothing, and reports the remedy.
 
 ## Fact type provenance (shared)
 

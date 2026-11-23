@@ -442,3 +442,128 @@ describe("init.navigate resolves before sending", function()
     assert.is_true(passive)
   end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Fact type provenance transport
+
+local function decoded_input(input)
+  local value, err = require("clara-explorer.edn").decode(input)
+  assert.is_nil(err)
+  return value
+end
+
+describe("conjure.provenance_input", function()
+  it("T1 encodes a cursor root as nested EDN maps", function()
+    local input = conjure.provenance_input({
+      node = {
+        kind = "cursor",
+        input = { production = "ns/rule", side = "lhs", caller_ns = "ns", token = "Doc" },
+      },
+      direction = "producer",
+      depth = 0,
+      ancestors = {},
+    })
+    assert.are.same({
+      node = {
+        kind = "cursor",
+        -- Keyword keys decode to their literal names, so `:caller-ns` is "caller-ns".
+        input = { production = "ns/rule", side = "lhs", ["caller-ns"] = "ns", token = "Doc" },
+      },
+      direction = "producer",
+      depth = 0,
+      ancestors = {},
+    }, decoded_input(input))
+  end)
+
+  it("T1 encodes a production root with ancestors and :full depth", function()
+    local input = conjure.provenance_input({
+      node = { kind = "production", name = "ns/rule" },
+      direction = "consumer",
+      depth = "full",
+      ancestors = { "ns/a", "ns/b" },
+    })
+    local value = decoded_input(input)
+    assert.are.same({ kind = "production", name = "ns/rule" }, value.node)
+    assert.are.same("consumer", value.direction)
+    assert.are.same("full", value.depth)
+    assert.are.same({ "ns/a", "ns/b" }, value.ancestors)
+  end)
+
+  it("T4 keeps the structural side separate from the direction", function()
+    local input = conjure.provenance_input({
+      node = { kind = "cursor", input = { side = "lhs", caller_ns = "ns", token = "Doc" } },
+      direction = "consumer",
+      depth = 2,
+      ancestors = {},
+    })
+    local value = decoded_input(input)
+    assert.are.same("lhs", value.node.input.side)
+    assert.are.same("consumer", value.direction)
+    assert.are.same(2, value.depth)
+  end)
+
+  it("omits the optional cursor keys entirely", function()
+    local input = conjure.provenance_input({
+      node = { kind = "cursor", input = { caller_ns = "ns", token = "Doc" } },
+      direction = "producer",
+      depth = 0,
+      ancestors = {},
+    })
+    local value = decoded_input(input)
+    assert.is_nil(value.node.input.production)
+    assert.is_nil(value.node.input.side)
+  end)
+
+  it("escapes string values", function()
+    local input = conjure.provenance_input({
+      node = { kind = "cursor", input = { caller_ns = "ns", token = 'a"b' } },
+      direction = "producer",
+      depth = 0,
+      ancestors = {},
+    })
+    assert.truthy(input:match('\\"'))
+    assert.are.same('a"b', decoded_input(input).node.input.token)
+  end)
+end)
+
+describe("conjure.provenance_code", function()
+  it("T3 calls client/fact-type-provenance with the encoded input", function()
+    local payload = {
+      node = { kind = "production", name = "ns/rule" },
+      direction = "producer",
+      depth = 0,
+      ancestors = {},
+    }
+    local code = conjure.provenance_code(payload)
+    assert.truthy(code:find("(clara.explorer.server.client/fact-type-provenance {", 1, true))
+    assert.truthy(code:find(conjure.provenance_input(payload), 1, true))
+  end)
+end)
+
+describe("conjure.eval_edn origin routing", function()
+  it("R1 runs the eval with the origin buffer current", function()
+    local origin = vim.api.nvim_create_buf(false, true)
+    local view = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(view)
+    local seen
+    stub_eval(function(opts)
+      seen = vim.api.nvim_get_current_buf()
+      opts["on-result"]("1")
+    end)
+    conjure.eval_edn({ code = "x", bufnr = view, origin_bufnr = origin, on_value = function() end })
+    assert.are.same(origin, seen)
+    assert.are.same(view, vim.api.nvim_get_current_buf())
+  end)
+
+  it("leaves the current buffer alone when no origin is given", function()
+    local view = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(view)
+    local seen
+    stub_eval(function(opts)
+      seen = vim.api.nvim_get_current_buf()
+      opts["on-result"]("1")
+    end)
+    conjure.eval_edn({ code = "x", bufnr = view, on_value = function() end })
+    assert.are.same(view, seen)
+  end)
+end)

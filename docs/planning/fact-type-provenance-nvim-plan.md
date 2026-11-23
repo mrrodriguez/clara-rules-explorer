@@ -1,12 +1,13 @@
 # Plan: fact type provenance in Neovim
 
-Status: **planned, not started.** The backend contract and the Emacs client are
-done on the `fact-type-provenance` branch
+Status: **implemented — see
+[`fact-type-provenance-nvim-progress.md`](./fact-type-provenance-nvim-progress.md)**
+for what landed, the deviations, and the verification runs. The backend contract
+and the Emacs client are on the `fact-type-provenance` branch
 ([`fact-type-provenance-progress.md`](./fact-type-provenance-progress.md), the
-source of truth for semantics). This plan ports what Emacs settled to
-`editor/neovim/`, so the two editors behave the same. Nothing here should need a
-Clojure change: if one turns up, it is a contract gap, and it belongs in
-`navigate.clj` with tests on both transports, not in Lua.
+source of truth for semantics). This plan ported what Emacs settled to
+`editor/neovim/`, so the two editors behave the same. No Clojure change was
+needed.
 
 ## 1. Scope
 

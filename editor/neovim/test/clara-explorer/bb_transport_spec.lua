@@ -479,6 +479,32 @@ describe("conjure.bb_eval", function()
     end)
   end)
 
+  it("T2 passes an operation flag before the selection and input", function()
+    local captured
+    with_restore(conjure, "bb_script", function() return "/p/editor-client.bb" end, function()
+      with_restore(vim.fn, "filereadable", function() return 1 end, function()
+        with_restore(vim, "system", function(cmd, opts, on_exit)
+          captured = { cmd = cmd, opts = opts }
+          on_exit({ code = 0, stdout = '{:node {:kind :message :text "hi"}}', stderr = "" })
+          return true
+        end, function()
+          local result
+          local done = false
+          conjure.bb_eval("{sel}", '{:node {:kind :production :name "a/b"}}', function(r)
+            result = r
+            done = true
+          end, { flag = "--provenance" })
+          vim.wait(1000, function() return done end, 10)
+          assert.are.same(
+            { "bb", "/p/editor-client.bb", "--provenance", "{sel}", '{:node {:kind :production :name "a/b"}}' },
+            captured.cmd
+          )
+          assert.are.same("hi", result.node.text)
+        end)
+      end)
+    end)
+  end)
+
   it("surfaces a missing script", function()
     with_restore(conjure, "bb_script", function() return "/p/editor-client.bb" end, function()
       with_restore(vim.fn, "filereadable", function() return 0 end, function()

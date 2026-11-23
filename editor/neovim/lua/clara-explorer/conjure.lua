@@ -71,6 +71,86 @@ function M.navigate_code(payload) return NAVIGATE_FORM:format(navigate_entries(p
 -- `navigate_code`, but a plain EDN map (the bb transport reads EDN, not a form).
 function M.navigate_input(payload) return NAVIGATE_INPUT_TEMPLATE:format(navigate_entries(payload)) end
 
+-- ---------------------------------------------------------------------------
+-- Fact type provenance transport
+
+--- One EDN map entry, omitted entirely when VALUE is nil (EDN has no null value
+-- to send, and the contract's optional keys are absent rather than nil).
+local function kv(key, value)
+  if value == nil then return nil end
+  return (":%s %s"):format(key, value)
+end
+
+--- Space-joined non-nil EDN entries.  Varargs, not a table: a table literal
+-- with a nil in it stops `ipairs` at the first gap, silently dropping every
+-- entry after an omitted key.
+local function join_entries(...)
+  local kept = {}
+  for i = 1, select("#", ...) do
+    local part = select(i, ...)
+    if part then kept[#kept + 1] = part end
+  end
+  return table.concat(kept, " ")
+end
+
+--- EDN vector of production names, for `:ancestors`.
+local function ancestors_entry(ancestors)
+  local items = {}
+  for i, name in ipairs(ancestors or {}) do
+    items[i] = M.edn_string(name)
+  end
+  return "[" .. table.concat(items, " ") .. "]"
+end
+
+--- `:depth` is a non-negative integer or the keyword `:full`.
+local function depth_entry(depth)
+  if depth == "full" then return ":full" end
+  return tostring(math.max(math.floor(depth or 0), 0))
+end
+
+--- The `NavigateInput` map nested in a cursor node, with the structural side.
+local function cursor_input_entry(input)
+  return "{"
+    .. join_entries(
+      kv("production", input.production and M.edn_string(input.production)),
+      kv("side", input.side and (":" .. input.side)),
+      kv("caller-ns", input.caller_ns and M.edn_string(input.caller_ns)),
+      kv("token", input.token and M.edn_string(input.token))
+    )
+    .. "}"
+end
+
+--- The `:node` map of a provenance input: a cursor (root call) or a production
+-- (a `<Tab>` expansion).
+local function provenance_node_entry(node)
+  if node.kind == "production" then
+    return "{" .. join_entries(kv("kind", ":production"), kv("name", M.edn_string(node.name))) .. "}"
+  end
+  return "{" .. join_entries(kv("kind", ":cursor"), kv("input", cursor_input_entry(node.input or {}))) .. "}"
+end
+
+--- Build the EDN `FactTypeProvenanceInput` map for a payload
+-- `{node, direction, depth, ancestors}`.  `graph_input.side` is the *structural*
+-- side the cursor sits on, never the traversal direction — that is
+-- `payload.direction` and nothing else.  `depth` is an integer or "full".
+function M.provenance_input(payload)
+  return "{"
+    .. join_entries(
+      kv("node", provenance_node_entry(payload.node)),
+      kv("direction", ":" .. payload.direction),
+      kv("depth", depth_entry(payload.depth)),
+      kv("ancestors", ancestors_entry(payload.ancestors))
+    )
+    .. "}"
+end
+
+--- Clojure `client/fact-type-provenance` form: one `%s` slot for the EDN input.
+local PROVENANCE_FORM = [[(do (require 'clara.explorer.server.client)
+     (clara.explorer.server.client/fact-type-provenance %s))]]
+
+--- Build the nREPL form for a provenance input payload.
+function M.provenance_code(payload) return PROVENANCE_FORM:format(M.provenance_input(payload)) end
+
 --- Directory of this module file, for locating the resolve template.
 local this_dir = (debug.getinfo(1, "S").source:sub(2):match("^(.*/)") or "./")
 
@@ -262,6 +342,12 @@ end
 -- on an nREPL error call `opts.on_error(summary, bufnr, win)`.  `bufnr`/`win`
 -- are captured at call time (the eval is async).
 --
+-- `opts.origin_bufnr` is the buffer whose REPL should answer.  Conjure resolves
+-- its client from the current buffer, so an eval issued from a `nofile` view
+-- (the provenance tree) may find no client at all; the eval therefore runs with
+-- the origin buffer current, the Lua counterpart of Emacs's
+-- `clara-explorer--call-with-repl`.
+--
 -- `opts.passive` forwards Conjure's `passive?` flag: the eval still delivers
 -- its value through `on-result`/`cb`, but Conjure skips the request preview, so
 -- it never pops the log HUD. Every clara-explorer eval is passive — the result
@@ -282,37 +368,46 @@ function M.eval_edn(opts)
     fn(...)
   end
 
-  eval["eval-str"]({
-    code = opts.code,
-    origin = "clara-explorer",
-    ["passive?"] = opts.passive,
-    ["on-result"] = function(value)
-      finish(opts.on_value or function() end, value, bufnr, win)
-    end,
-    cb = function(resp)
-      if settled then return end
-      local err = resp.err
-      local ex = resp.ex or resp["root-ex"]
-      local eval_error = resp.status and resp.status["eval-error"]
-      -- nREPL delivers stderr/stdout as separate messages (e.g. the INFO logs
-      -- from `client/navigate`). Only a real exception (`ex` / `root-ex` / the
-      -- `eval-error` status) is a navigation failure; plain `err` without an
-      -- exception is just logging and must not swallow the value that follows.
-      local failed = (ex and ex ~= "") or eval_error
-      if not failed then return end
-      local summary = M.err_summary(err)
-      M.record_error({ code = opts.code, err = err or "", ex = ex or "eval failed", summary = summary })
-      finish(
-        opts.on_error or function() end,
-        "clara-explorer: "
-          .. (ex or "eval failed")
-          .. (summary ~= "" and (" — " .. summary) or "")
-          .. " (see :ClaraExplorerLastError)",
-        bufnr,
-        win
-      )
-    end,
-  })
+  local function run()
+    eval["eval-str"]({
+      code = opts.code,
+      origin = "clara-explorer",
+      ["passive?"] = opts.passive,
+      ["on-result"] = function(value)
+        finish(opts.on_value or function() end, value, bufnr, win)
+      end,
+      cb = function(resp)
+        if settled then return end
+        local err = resp.err
+        local ex = resp.ex or resp["root-ex"]
+        local eval_error = resp.status and resp.status["eval-error"]
+        -- nREPL delivers stderr/stdout as separate messages (e.g. the INFO logs
+        -- from `client/navigate`). Only a real exception (`ex` / `root-ex` / the
+        -- `eval-error` status) is a navigation failure; plain `err` without an
+        -- exception is just logging and must not swallow the value that follows.
+        local failed = (ex and ex ~= "") or eval_error
+        if not failed then return end
+        local summary = M.err_summary(err)
+        M.record_error({ code = opts.code, err = err or "", ex = ex or "eval failed", summary = summary })
+        finish(
+          opts.on_error or function() end,
+          "clara-explorer: "
+            .. (ex or "eval failed")
+            .. (summary ~= "" and (" — " .. summary) or "")
+            .. " (see :ClaraExplorerLastError)",
+          bufnr,
+          win
+        )
+      end,
+    })
+  end
+
+  local origin = opts.origin_bufnr
+  if origin and origin ~= bufnr and vim.api.nvim_buf_is_valid(origin) then
+    vim.api.nvim_buf_call(origin, run)
+  else
+    run()
+  end
 end
 
 --- babashka transport — shell out to `bb editor-client.bb` over the
@@ -488,10 +583,11 @@ function M.bb_select_unit(cb)
   M.bb_selection(cb)
 end
 
---- Run `bb editor-client.bb SELECTION INPUT` and call `cb(result, err)` with
--- the decoded EDN result (or `cb(nil, err)` on transport/EDN failure). Mirrors
--- `editor/emacs/clara-explorer.el`'s `clara-explorer--bb-eval`.
-function M.bb_eval(selection_edn, input_edn, cb)
+--- Run `bb editor-client.bb [FLAG] SELECTION INPUT` and call `cb(result, err)`
+-- with the decoded EDN result (or `cb(nil, err)` on transport/EDN failure).
+-- `opts.flag` selects the operation (`--provenance`); navigate passes nothing.
+-- Mirrors `editor/emacs/clara-explorer.el`'s `clara-explorer--bb-eval`.
+function M.bb_eval(selection_edn, input_edn, cb, opts)
   local script = M.bb_script()
   M.debug_log("bb-eval script=" .. script)
   M.debug_log("bb-eval selection=" .. selection_edn)
@@ -530,7 +626,11 @@ function M.bb_eval(selection_edn, input_edn, cb)
       cb(result, nil)
     end)
   end
-  local ok, spawn_err = pcall(vim.system, { "bb", script, selection_edn, input_edn }, { text = true }, on_exit)
+  local argv = { "bb", script }
+  if opts and opts.flag then argv[#argv + 1] = opts.flag end
+  argv[#argv + 1] = selection_edn
+  argv[#argv + 1] = input_edn
+  local ok, spawn_err = pcall(vim.system, argv, { text = true }, on_exit)
   if not ok then cb(nil, "clara-explorer: bb not found (" .. tostring(spawn_err) .. ")") end
 end
 
