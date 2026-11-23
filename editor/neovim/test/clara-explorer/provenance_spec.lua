@@ -14,6 +14,13 @@ local function with_restore(tbl, key, stub, fn)
   assert(ok, err)
 end
 
+--- Run FN with a Conjure session reported as connected.  `provenance.request`
+-- refuses to send otherwise (Conjure's `eval-str` never calls back without one),
+-- and no test here has a live session.
+local function connected(fn)
+  with_restore(conjure, "connected", function() return true end, fn)
+end
+
 local function fact_type(type_name, short, children, extra)
   local node = {
     kind = "fact-type",
@@ -65,7 +72,9 @@ local function any_row_contains(needle)
 end
 
 --- Open the view with a stubbed root answer; returns the buffer number.
-local function open_with(node, input)
+-- ORIGIN is the buffer whose REPL answers later requests (default 0, i.e. the
+-- current buffer, which is enough for the stubbed-root tests).
+local function open_with(node, input, origin)
   input = input
     or {
       node = { kind = "cursor", input = { caller_ns = "ns", token = "Doc" } },
@@ -73,7 +82,12 @@ local function open_with(node, input)
       depth = 0,
       ancestors = {},
     }
-  with_restore(provenance, "request", function(_, _, cb) cb(node) end, function() provenance.open_root(input, 0) end)
+  with_restore(
+    provenance,
+    "request",
+    function(_, _, cb) cb(node) end,
+    function() provenance.open_root(input, origin or 0) end
+  )
   return buffer()
 end
 
@@ -112,10 +126,21 @@ describe("provenance.request", function()
     with_restore(conjure, "with_transport", function(cb) cb("nrepl") end, function()
       with_restore(conjure, "eval_edn", function(opts) opts.on_value('{:error "no fact type found"}') end, function()
         local node
-        provenance.request(input, 0, function(n) node = n end)
+        connected(function()
+          provenance.request(input, 0, function(n) node = n end)
+        end)
         assert.are.same("message", node.kind)
         assert.are.same("no fact type found", node.text)
       end)
+    end)
+  end)
+
+  it("P5 renders a message row instead of hanging when the REPL is gone", function()
+    with_restore(conjure, "connected", function() return false end, function()
+      local node
+      provenance.request(input, 0, function(n) node = n end)
+      assert.are.same("message", node.kind)
+      assert.truthy(node.text:find("not connected", 1, true))
     end)
   end)
 
@@ -128,7 +153,9 @@ describe("provenance.request", function()
           function(_, _, cb) cb(nil, "clara-explorer: bb transport failed (exit 3)") end,
           function()
             local node
-            provenance.request(input, 0, function(n) node = n end)
+            connected(function()
+              provenance.request(input, 0, function(n) node = n end)
+            end)
             assert.are.same("message", node.kind)
             assert.truthy(node.text:find("exit 3", 1, true))
           end
@@ -145,7 +172,9 @@ describe("provenance.request", function()
           seen = { encoded = encoded, flag = opts and opts.flag }
           cb({ node = message("ok") }, nil)
         end, function()
-          provenance.request(input, 0, function() end)
+          connected(function()
+            provenance.request(input, 0, function() end)
+          end)
         end)
       end)
     end)
@@ -160,7 +189,9 @@ describe("provenance.request", function()
         code = opts.code
         opts.on_value('{:node {:kind :message :text "ok"}}')
       end, function()
-        provenance.request(input, 0, function() end)
+        connected(function()
+          provenance.request(input, 0, function() end)
+        end)
       end)
     end)
     assert.truthy(code:find("client/fact-type-provenance", 1, true))
@@ -330,6 +361,46 @@ describe("provenance view", function()
     end)
     assert.are.same(0, calls)
     assert.are.same(3, #notified)
+  end)
+
+  it("R1 a <Tab> request from the view reaches the client through the origin buffer", function()
+    -- The regression: `toggle` runs in the provenance buffer, whose file type has
+    -- no Conjure client.  Conjure's `eval-str` throws synchronously in that case,
+    -- and the "auto" transport probe evals before it can pick a transport, so
+    -- both the probe and the operation must run with the origin buffer current.
+    local origin = vim.api.nvim_create_buf(false, true)
+    open_with(fact_type("T", "T", { production("x/alpha") }), nil, origin)
+    local seen = {}
+    local answer = '{:node {:kind :production :name "x/alpha" :ns "x" :type "rule"'
+      .. " :cycle? false :seen? false"
+      .. ' :children [{:kind :fact-type :type "U" :type-short "U" :children []}]}}'
+    with_restore(vim.g, "clara_explorer_transport", nil, function()
+      with_restore(conjure, "server_available_cache", nil, function()
+        with_restore(conjure, "bb_selection", function(cb) cb(nil) end, function()
+          with_restore(package.loaded, "conjure.eval", {
+            ["eval-str"] = function(opts)
+              local current = vim.api.nvim_get_current_buf()
+              seen[#seen + 1] = current
+              if current ~= origin then
+                error("conjure/eval.lua:157: No Conjure client configured for the current file type.")
+              end
+              if opts.code:find("get-current-system", 1, true) then
+                opts["on-result"]("true")
+              else
+                opts["on-result"](answer)
+              end
+            end,
+          }, function()
+            cursor_on("alpha x")
+            connected(function() provenance.toggle(buffer()) end)
+          end)
+        end)
+      end)
+    end)
+    -- One eval for the availability probe, one for the operation.
+    assert.are.same(2, #seen)
+    assert.are.same({ origin, origin }, seen)
+    assert.truthy(any_row_contains("U"))
   end)
 
   it("P4 a :seen? row expands on demand", function()

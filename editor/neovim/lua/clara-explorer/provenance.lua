@@ -217,7 +217,19 @@ end
 --- Post INPUT to the provenance operation and call `cb(node)`.  Both an
 --- `{:error …}` answer and a transport failure become `:message` nodes, so a
 --- failed root call or expansion never breaks the view.
+---
+--- `origin_bufnr` is threaded into the transport probe as well as the eval: the
+--- "<Tab>" and "R" requests are issued from the view buffer, which has no
+--- Conjure client of its own, and the `"auto"` probe evals before it can choose
+--- a transport.
 function M.request(input, origin_bufnr, cb)
+  -- Conjure's `eval-str` only logs `; No connection` and never calls back when
+  -- there is no session, so a request would hang instead of rendering.  The view
+  -- can be open when the connection drops, so this is checked per request.
+  if not conjure.connected() then
+    cb(message_node("clara-explorer: not connected to a Conjure REPL"))
+    return
+  end
   conjure.with_transport(function(transport)
     conjure.debug_log("provenance transport=" .. tostring(transport))
     if transport == "bb" then
@@ -249,7 +261,7 @@ function M.request(input, origin_bufnr, cb)
       end,
       on_error = function(msg) cb(message_node(msg)) end,
     })
-  end)
+  end, { origin_bufnr = origin_bufnr })
 end
 
 --- The configured initial depth: `0` (default), a non-negative integer, or

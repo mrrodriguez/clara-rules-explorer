@@ -122,6 +122,33 @@ describe("conjure.eval_edn", function()
     conjure.eval_edn({ code = "x", passive = true })
     assert.is_true(seen_opts["passive?"])
   end)
+
+  it("routes a synchronous eval-str throw to on_error instead of escaping", function()
+    -- Conjure throws (rather than calling `cb`) when the current buffer's file
+    -- type has no client, which is what an uncoupled eval from the provenance
+    -- view used to hit as an E5108.
+    stub_eval(function() error("/x/conjure/eval.lua:157: No Conjure client configured for the current file type.") end)
+    local err
+    conjure.eval_edn({
+      code = "x",
+      on_value = function() error("must not produce a value") end,
+      on_error = function(msg) err = msg end,
+    })
+    assert.truthy(err:find("No Conjure client configured", 1, true))
+  end)
+
+  it("routes a throw to on_error even when an origin buffer is given", function()
+    local origin = vim.api.nvim_create_buf(false, true)
+    stub_eval(function() error("boom") end)
+    local err
+    conjure.eval_edn({
+      code = "x",
+      origin_bufnr = origin,
+      on_value = function() error("must not produce a value") end,
+      on_error = function(msg) err = msg end,
+    })
+    assert.truthy(err:find("boom", 1, true))
+  end)
 end)
 
 describe("init.handle_result dispatch", function()

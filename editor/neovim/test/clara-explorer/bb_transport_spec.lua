@@ -113,6 +113,21 @@ describe("conjure.with_transport", function()
       end)
     end)
   end)
+
+  it("forwards the origin buffer to the availability probe", function()
+    local seen
+    with_restore(vim.g, "clara_explorer_transport", nil, function()
+      with_restore(conjure, "eval_edn", function(opts)
+        seen = opts.origin_bufnr
+        opts.on_value("true")
+      end, function()
+        local got
+        conjure.with_transport(function(t) got = t end, { origin_bufnr = 7 })
+        assert.are.same("nrepl", got)
+      end)
+    end)
+    assert.are.same(7, seen)
+  end)
 end)
 
 describe("conjure.record_error", function()

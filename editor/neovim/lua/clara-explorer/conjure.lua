@@ -343,10 +343,11 @@ end
 -- are captured at call time (the eval is async).
 --
 -- `opts.origin_bufnr` is the buffer whose REPL should answer.  Conjure resolves
--- its client from the current buffer, so an eval issued from a `nofile` view
--- (the provenance tree) may find no client at all; the eval therefore runs with
--- the origin buffer current, the Lua counterpart of Emacs's
--- `clara-explorer--call-with-repl`.
+-- its client from the current buffer and *throws* when that buffer's file type
+-- has no client — a `nofile` view like the provenance tree has none — so the
+-- eval runs with the origin buffer current, the Lua counterpart of Emacs's
+-- `clara-explorer--call-with-repl`.  A synchronous throw (no client, a
+-- malformed form) is routed to `on_error` rather than escaping as an `E5108`.
 --
 -- `opts.passive` forwards Conjure's `passive?` flag: the eval still delivers
 -- its value through `on-result`/`cb`, but Conjure skips the request preview, so
@@ -403,10 +404,23 @@ function M.eval_edn(opts)
   end
 
   local origin = opts.origin_bufnr
-  if origin and origin ~= bufnr and vim.api.nvim_buf_is_valid(origin) then
-    vim.api.nvim_buf_call(origin, run)
-  else
-    run()
+  local current = vim.api.nvim_get_current_buf()
+  local ok, thrown = pcall(function()
+    if origin and origin ~= current and vim.api.nvim_buf_is_valid(origin) then
+      vim.api.nvim_buf_call(origin, run)
+    else
+      run()
+    end
+  end)
+  if not ok then
+    M.debug_log("eval-edn threw: " .. tostring(thrown))
+    M.record_error({
+      code = opts.code,
+      err = tostring(thrown),
+      ex = "eval could not run",
+      summary = tostring(thrown),
+    })
+    finish(opts.on_error or function() end, "clara-explorer: " .. tostring(thrown), bufnr, win)
   end
 end
 
@@ -423,11 +437,15 @@ M.server_available_cache = nil
 
 --- Probe the connected session for a running explorer system. Calls
 -- `cb(true)` / `cb(false)`; a missing explorer classpath (or any probe error)
--- resolves to false. Updates `server_available_cache`.
-function M.server_available(cb)
+-- resolves to false. Updates `server_available_cache`.  `opts.origin_bufnr` is
+-- the buffer whose REPL answers (see `eval_edn`) — required whenever the probe
+-- is issued from a buffer that has no Conjure client of its own, such as the
+-- provenance view.
+function M.server_available(cb, opts)
   M.debug_log("server-available probe")
   M.eval_edn({
     code = "(try (some? ((requiring-resolve 'clara.explorer.server.client/get-current-system))) (catch Throwable _ false))",
+    origin_bufnr = opts and opts.origin_bufnr,
     passive = true,
     on_value = function(value)
       local ok, decoded = pcall(edn.decode, value)
@@ -445,14 +463,15 @@ function M.server_available(cb)
 end
 
 --- Resolve the effective transport for this call and invoke `cb(transport)`.
--- Explicit modes resolve synchronously; `"auto"` probes the connected session.
-function M.with_transport(cb)
+-- Explicit modes resolve synchronously; `"auto"` probes the connected session,
+-- passing `opts.origin_bufnr` on so the probe can run from any buffer.
+function M.with_transport(cb, opts)
   local t = M.transport()
   if t ~= "auto" then
     cb(t)
     return
   end
-  M.server_available(function(available) cb(available and "nrepl" or "bb") end)
+  M.server_available(function(available) cb(available and "nrepl" or "bb") end, opts)
 end
 
 --- Synchronous best-effort effective transport: explicit modes, or the last

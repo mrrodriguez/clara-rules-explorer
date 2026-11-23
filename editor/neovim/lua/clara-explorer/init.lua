@@ -98,6 +98,9 @@ function M.navigate(side)
     on_resolved = function(fq)
       local resolved_token = fq or ctx.token
       conjure.debug_log("navigate resolved-token=" .. tostring(resolved_token) .. " (fq=" .. tostring(fq) .. ")")
+      -- `origin_bufnr` routes the transport probe through the source buffer, so
+      -- the probe still finds a client when navigate is invoked from a command
+      -- line or a picker.
       conjure.with_transport(function(transport)
         conjure.debug_log("navigate transport=" .. tostring(transport))
         if transport == "bb" then
@@ -136,6 +139,7 @@ function M.navigate(side)
           code = code,
           bufnr = bufnr,
           win = win,
+          origin_bufnr = bufnr,
           passive = true,
           on_value = function(value, _, cb_win)
             if vim.api.nvim_win_is_valid(cb_win) then vim.api.nvim_set_current_win(cb_win) end
@@ -148,7 +152,7 @@ function M.navigate(side)
           end,
           on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
         })
-      end)
+      end, { origin_bufnr = bufnr })
     end,
   })
 end

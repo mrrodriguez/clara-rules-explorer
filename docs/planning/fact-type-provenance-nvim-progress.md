@@ -122,6 +122,52 @@ unsaved buffer), the no-connection fall-through, J4 ordering and empty skip
 list, J6 naming the REPL error, and a whole-symbol line check. All seven fail
 against the pre-fix `jump.lua` and pass with it.
 
+### 3.2 Field bug: `<Tab>` from the view raised Conjure's `E5108`
+
+**Reported.** In the provenance tree, every expandable production raised
+`E5108: Lua: … conjure/eval.lua:157: No Conjure client configured for the current
+file type.`; non-expandable rows were fine (they only notify), and it happened
+for every tree, not one unit.
+
+**Root cause.** `provenance.request` asked `conjure.with_transport` for the
+effective transport. In `"auto"` mode that runs `server_available`, which evals
+`get-current-system` — and that eval carried no `origin_bufnr`, so it ran in the
+current buffer, which for `<Tab>`/`R` is the provenance view. The view is a
+`nofile` buffer with filetype `clara-provenance`, Conjure finds no client for it,
+and `eval-str` **throws synchronously** rather than calling `cb`. The root call
+escaped because it is issued from the rule's source buffer; only expansions come
+from the view. An explicitly set `bb`/`nrepl` transport hides the bug entirely,
+because explicit transports skip the probe — which is why both the specs and the
+headless smoke (each pinning a transport) missed it. Step 4's `nvim_buf_call`
+routing covered `eval_edn` for the operation itself, but not the probe that
+precedes it.
+
+**Fix.**
+
+- `conjure.with_transport(cb, opts)` and `conjure.server_available(cb, opts)`
+  take and forward `origin_bufnr`, so the availability probe runs with the
+  origin buffer current. `provenance.request` passes its origin, and
+  `init.navigate` passes the source buffer (a window switch during token
+  resolution must not change which client answers).
+- `conjure.eval_edn` wraps the `eval-str` call in `pcall` and routes a
+  synchronous throw to `on_error`, recording it for
+  `:ClaraExplorerLastError`, so a missing client can never escape as `E5108`
+  from any call site.
+- `provenance.request` refuses to send when `conjure.connected()` is false and
+  renders `clara-explorer: not connected to a Conjure REPL` as a message row.
+  Conjure only logs `; No connection` and never calls back, so the expansion
+  would otherwise hang silently — the trap `jump.lua`'s `repl_eval` already
+  guards, and a view can outlive its connection.
+
+**Tests.** `provenance view R1 a <Tab> request from the view reaches the client
+through the origin buffer` stubs `conjure.eval` with one that throws unless the
+origin buffer is current — exactly Conjure's behaviour — and asserts that both
+evals (probe, then operation) run there; with the `with_transport` origin
+removed it fails with one eval and a fallback to bb, which is how the bug was
+confirmed. Unit specs pin the halves: a thrown `eval-str` reaching `on_error`
+(with and without an origin), the probe receiving `origin_bufnr`, and the
+disconnected request rendering a message row.
+
 ## 4. Verification
 
 Baseline before any edit: 170 tests across 6 spec files, `format-check` clean,
@@ -135,9 +181,9 @@ mise exec -- make check    # format-check + lint + test
 
 - `format-check`: clean (stylua 2.5.2).
 - `lint`: 0 errors / 0 warnings / 0 parse errors (selene 0.31.0).
-- `test`: **226 tests, 0 failures, 0 errors** — `edn_spec` 21, `structural_spec`
-  11, `token_spec` 52, `transport_spec` 44, `bb_transport_spec` 42,
-  `provenance_spec` 20, `jump_spec` 36 (31 before the review fixes).
+- `test`: **231 tests, 0 failures, 0 errors** — `edn_spec` 21, `structural_spec`
+  11, `token_spec` 52, `transport_spec` 46, `bb_transport_spec` 43,
+  `provenance_spec` 22, `jump_spec` 36 (31 before the review fixes).
 
 `stylua`/`selene` are installed through `mise` but are not on the default
 `PATH` here, so the Makefile is invoked as `mise exec -- make …`. No install
@@ -158,6 +204,12 @@ Real-backend smoke (babashka needs a writable tools.deps cache in this sandbox �
    rendering as documented.
 3. `<CR>` through locate + source roots (no REPL) opened the production's source
    file and searched to the `defrule` form.
+4. The reported `E5108` scenario, replayed after the fix: `"auto"` transport
+   (so the probe runs), a fake `conjure.eval` that throws unless the current
+   buffer's filetype is `clojure`, the composed unit, and a `<Tab>` issued from
+   the view buffer itself. The probe and the operation both reach the fake
+   client through the origin buffer and `notice-approved-app` expands into
+   `ApprovalNotice` + `find-approval-notices` (7 → 9 rows).
 
 Live nREPL checks (a scratch session in `explorer/`, registered with
 `client/register!` over the demo rules, no Jetty):
@@ -182,9 +234,10 @@ Live nREPL checks (a scratch session in `explorer/`, registered with
   name, and none disagreed with its munged path — the metadata/docstring forms
   the parser has to skip are the shapes the repo actually writes.
 
-Not covered by an automated test: the `def-str` navigate path and the
-`nvim_buf_call` routing against a real Conjure client (tier 3), and the
-interactive `<Tab>`/`<CR>` feel in a real UI session.
+Not covered by an automated test: the `def-str` navigate path against a real
+Conjure client (tier 3) and the interactive feel in a real UI session. The
+`nvim_buf_call` routing is now covered by §3.2's regression spec, whose stub
+throws exactly as Conjure does for a buffer with no client.
 
 ## 5. Commands and settings (as shipped)
 
