@@ -698,6 +698,10 @@ Checkpoints, not a diary. Update in place as work lands.
       unrelated buffer — see §7.2. `editor/emacs` Tier 1 127 + 5 skipped, Tier 2
       132/132, byte-compile clean.
 
+- [x] 15 Reported bug: provenance `RET` into a namespace loaded from a
+      sesman-linked repo opened a dired buffer, and later jumps failed with "No
+      linked CIDER sessions" — see §7.3.
+
 ### 7.1 Review 1 disposition
 
 Review: `docs/planning/fact-type-provenance-neom-review-1.md`.
@@ -857,6 +861,58 @@ MRU window is explicitly the unrelated one),
 `provenance-visit-pushes-the-jump-before-changing-windows-test`; the two
 existing file-buffer fallback tests now stub `cider-get-ns-name`. Reverting the
 guard and the window choice fails three of them.
+
+### 7.3 Post-review bug: `RET` into a sesman-linked repo
+
+**Reported:** in a composed registry tree, `RET` on a production whose namespace
+came from another repo opened a dired buffer of the right source directory,
+even though that namespace was loaded into the session (`cider-load-buffer` from
+the linked repo). Afterwards, jumps into the main repo sometimes failed with
+`could not open …: No linked CIDER sessions`, until the user revisited a buffer
+from the main repo.
+
+**Root cause** (confirmed against the live REPL):
+
+- The namespace was loaded from a checkout that is not on the REPL's classpath.
+  `io/resource` and orchard's `canonical-source` are empty for it, so
+  `cider/ns-path` answers `""`. `cider-find-ns` passes that to
+  `cider-find-file`, which expands it to `default-directory` and visits the
+  directory in dired. The loaded var's metadata does carry the absolute
+  `:file` and `:line`.
+- `--goto-production` selected the MRU window *before* calling CIDER, so
+  `cider-find-ns` resolved its session from that window's buffer. After one bad
+  jump that buffer was the dired buffer, which has no linked session, hence the
+  intermittent "No linked CIDER sessions". Restoring the selected window did not
+  undo the buffer switch, so the dired buffer stayed in the window.
+
+**Fix (`editor/emacs/clara-explorer.el`):**
+
+- The source is located before anything is displayed
+  (`--locate-production`). The order is: the loaded var's `info` (`cider-var-info`,
+  for any node, not only `:var? true`); then `cider/ns-path`, with empty paths,
+  REPL buffer names, and missing files refused before `cider-find-file`; then an
+  already-open buffer whose `ns` form names the namespace.
+- REPL requests run with the view's stored REPL (`:conn` on the query) current
+  (`--call-with-repl`), never the target window's buffer.
+- Only a found source pushes the jump, selects the window, and displays the
+  buffer (`--jump-to-production`). A reported line is trusted only when the rule
+  name is on it; otherwise the buffer is searched. The opened buffer is pinned to
+  the REPL via `cider--pin-repl-if-out-of-project` when that exists, as
+  `cider-jump-to` does.
+- `cider-find-ns` is no longer used. `--navigation-window` takes the found buffer
+  instead of the node.
+
+**Tests:** `provenance-visit-jumps-to-a-loaded-var-off-the-classpath-test` (the
+reported case: ns-path `""`, var info names the file, an unlinked buffer in the
+MRU window, every request made in the stored REPL, the buffer pinned),
+`provenance-visit-changes-nothing-when-the-production-is-not-found-test`
+(replaces `…-restores-the-selection-…`),
+`provenance-goto-searches-when-the-reported-line-drifted-test`,
+`provenance-goto-uses-an-open-source-buffer-when-the-repl-fails-test`, and
+`provenance-navigation-window-prefers-the-sources-own-window-test` (renamed from
+`provenance-visit-jumps-from-…`). The `cider-find-ns` stubs in the existing
+fallback tests became `cider-var-info`/`cider/ns-path` stubs, and the
+missing-namespace test asserts that `""` never reaches `cider-find-file`.
 
 ## 8. Verification
 

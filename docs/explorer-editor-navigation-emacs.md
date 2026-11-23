@@ -102,6 +102,20 @@ two sibling fact types toggles independently.
 `RET` opens the production in the window that already shows its source file, if
 one does; otherwise in the most recent other window.
 
+`RET` asks the REPL the view was opened from, never the session of whatever
+buffer the target window shows. It locates the production in this order:
+
+1. The loaded var's `info` (file and line), whether or not the node says
+   `:var? true`. This reaches a namespace loaded from a checkout outside the
+   classpath, such as another repo linked to the session with sesman, where
+   `cider/ns-path` has no answer.
+2. The namespace's classpath resource, searched for the `defrule`/`defquery`
+   form.
+3. An already-open buffer whose `ns` form names the namespace.
+
+Like a CIDER jump, the opened file is pinned to that REPL when it lies outside
+the REPL's project.
+
 Two defcustoms control the view:
 
 - `clara-explorer-provenance-depth` — `0` (the root's immediate production
@@ -113,10 +127,10 @@ Two defcustoms control the view:
 Backend and transport failures (an `{:error …}` answer or a non-zero babashka
 exit) render as `:message` rows for both the root call and a `TAB` expansion,
 so a failed request never breaks the buffer. `RET` reports why it cannot jump
-when a registry/offline tree names a namespace that is not on the connected
-REPL's classpath; load that namespace, or use the nREPL transport with a live
-session. A source buffer that is already open is used even then, and a jump that
-fails leaves point and the window selection alone.
+when a registry/offline tree names a namespace that is neither loaded in the
+connected REPL nor on its classpath; load that namespace (`cider-load-buffer` in
+its source is enough), or open its file. A jump that fails displays nothing,
+selects no window, and pushes no jump.
 
 ## Jump history (evil, xref)
 

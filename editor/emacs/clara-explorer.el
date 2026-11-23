@@ -892,24 +892,73 @@ source-path convention; the Clojure-file test in
   (cl-find-if (lambda (buf) (clara-explorer--buffer-visits-ns-p ns buf))
               (buffer-list)))
 
-(defun clara-explorer--navigation-window (node)
-  "Window to run NODE's jump in, or nil to keep the selected one.
-The window already showing NODE's source buffer wins: the provenance view is a
-side window, so jumping from there would open the source beside it, and the
-most-recently-used window often shows something unrelated to NODE — a buffer
-the jump has no business selecting or searching."
-  (or (when-let* ((buf (clara-explorer--ns-source-buffer
-                        (clara-explorer--edn-get :ns node))))
-        (get-buffer-window buf t))
+(defun clara-explorer--navigation-window (buffer)
+  "Window to show BUFFER in when jumping from the provenance view.
+A window already showing BUFFER wins; otherwise the most recently used one.
+The provenance view is a side window, so jumping from the view itself would
+open the source beside it."
+  (or (get-buffer-window buffer t)
       (get-mru-window nil nil t)))
 
-(defun clara-explorer--try-open-ns (ns)
-  "Ask CIDER to visit NS's source file; the error text when it cannot.
-A nil return only means CIDER did not signal — it does not prove the buffer
-changed, so callers verify the buffer instead of trusting the return value."
-  (condition-case err
-      (progn (cider-find-ns nil ns) nil)
-    (error (error-message-string err))))
+(defun clara-explorer--call-with-repl (repl fn)
+  "Call FN with REPL's buffer current, so CIDER requests go to REPL's session.
+CIDER resolves the session from the current buffer.  From the provenance view
+that is whatever buffer happens to be current — a file in a project no session
+is linked to, a dired buffer — so requests made there can fail with \"No linked
+CIDER sessions\" even though the view was opened from a linked buffer.  A nil or
+dead REPL calls FN in the current buffer."
+  (if (buffer-live-p repl)
+      (with-current-buffer repl (funcall fn))
+    (funcall fn)))
+
+(defun clara-explorer--source-file-buffer (file ns)
+  "A buffer visiting FILE when FILE is NS's source, else nil.
+FILE is a path or URL as the REPL reports it.  An empty FILE — what
+`cider/ns-path' answers for a namespace loaded from outside the classpath — is
+refused before it reaches `cider-find-file', which would expand it to
+`default-directory' and visit that directory in dired.  A REPL buffer name and
+a missing absolute path are refused too, so no empty buffer is created."
+  (when-let* ((file (and (stringp file) (not (string-empty-p file)) file))
+              ((not (string-prefix-p "*" file)))
+              ((not (and (file-name-absolute-p file) (not (file-exists-p file)))))
+              (buffer (cider-find-file file)))
+    (and (clara-explorer--buffer-visits-ns-p ns buffer) buffer)))
+
+(defun clara-explorer--repl-production-location (name ns)
+  "Where the current REPL places production NAME of NS, as a location, or nil.
+The loaded var's metadata comes first: it carries the absolute file and line
+even when NS was loaded from a checkout that is not on the classpath (another
+repo linked to the session, say), where `cider/ns-path' has no answer.  NS's
+classpath resource is the fallback, for a namespace that is not loaded."
+  (or (when-let* ((info (cider-var-info name))
+                  (buffer (clara-explorer--source-file-buffer
+                           (nrepl-dict-get info "file") ns)))
+        (list :buffer buffer :line (nrepl-dict-get info "line")))
+      (when-let* ((buffer (clara-explorer--source-file-buffer
+                           (cider-sync-request:ns-path ns t) ns)))
+        (list :buffer buffer))))
+
+(defun clara-explorer--locate-production (name ns repl)
+  "Find production NAME of NS without displaying or selecting anything.
+REPL is the CIDER REPL buffer to ask (see `clara-explorer--call-with-repl').
+Returns (:buffer B :line N), (:buffer B) when B must be searched, (:error
+MESSAGE) when the REPL failed and no open buffer visits NS, or nil.  An open
+buffer visiting NS answers when the REPL cannot, so a source file the user has
+open is reachable without the namespace being loaded."
+  (let* ((repl-error nil)
+         (location (condition-case err
+                       (clara-explorer--call-with-repl
+                        repl
+                        (lambda () (clara-explorer--repl-production-location name ns)))
+                     (error
+                      (setq repl-error (error-message-string err))
+                      nil))))
+    (clara-explorer--log "locate: %S in %s -> %S (repl error %S)"
+                         name ns location repl-error)
+    (or location
+        (when-let* ((buffer (clara-explorer--ns-source-buffer ns)))
+          (list :buffer buffer))
+        (and repl-error (list :error repl-error)))))
 
 (defun clara-explorer--search-production-form (ns rule-name)
   "Search the current buffer — NS's source — for RULE-NAME and go to it.
@@ -932,52 +981,88 @@ failed jump leaves the buffer as it found it."
         (message "clara-explorer: %s not found in %s" rule-name ns)
         nil))))
 
-(defun clara-explorer--goto-fallback (target)
-  "Last resort: open NS and search it for the target's defrule/defquery form.
-Only a buffer that really is NS's source is searched, and point in any other
-buffer is left alone: a registry/bb tree can name productions whose namespace
-is not on the connected REPL's classpath, and `cider-find-ns' then leaves
-whatever buffer was current selected — searching that one moved point to an
-unrelated line."
+(defun clara-explorer--goto-reported-line (line rule-name)
+  "Go to LINE when RULE-NAME is on it; non-nil on success.
+On a miss point is unmoved: an edited buffer drifts from the line the loaded
+var reported, and the caller then searches for the form instead."
+  (let ((start (point)))
+    (goto-char (point-min))
+    (forward-line (1- line))
+    (if (re-search-forward (clara-explorer--whole-symbol-regexp rule-name)
+                           (line-end-position) t)
+        (progn (back-to-indentation) t)
+      (goto-char start)
+      nil)))
+
+(defun clara-explorer--show-production (location ns rule-name repl)
+  "Show LOCATION's buffer and put point on RULE-NAME's form; non-nil when found.
+The buffer is displayed the way `cider-jump-to' displays one (honoring
+`cider-jump-to-pop-to-buffer-actions'), and, like it, a buffer outside REPL's
+project is pinned to REPL so CIDER commands there keep using that session."
+  (let ((buffer (plist-get location :buffer))
+        (line (plist-get location :line)))
+    (pop-to-buffer buffer (or (bound-and-true-p cider-jump-to-pop-to-buffer-actions)
+                              '((display-buffer-reuse-window display-buffer-same-window))))
+    (when (and (buffer-live-p repl) (fboundp 'cider--pin-repl-if-out-of-project))
+      (cider--pin-repl-if-out-of-project repl))
+    (or (and (natnump line)
+             (clara-explorer--goto-reported-line line rule-name))
+        (clara-explorer--search-production-form ns rule-name))))
+
+(defun clara-explorer--report-unlocated (ns rule-name repl-error)
+  "Explain why RULE-NAME of NS cannot be shown, including REPL-ERROR if any."
+  (message
+   (concat "clara-explorer: could not open %s%s: it is neither loaded in this REPL "
+           "nor on its classpath; load it (or open its source file) to jump to %s")
+   ns
+   (if repl-error (format " (%s)" repl-error) "")
+   rule-name))
+
+(defun clara-explorer--jump-to-production (target repl before-show)
+  "Locate TARGET through REPL, call BEFORE-SHOW with its buffer, then show it.
+Returns non-nil when the jump happened.  Nothing is displayed, selected, or
+pushed until the source is found, so a production the REPL cannot locate leaves
+every window as it was.  BEFORE-SHOW is where a caller pushes the jump and picks
+the window."
   (let* ((name (clara-explorer--edn-get :name target))
          (ns (clara-explorer--edn-get :ns target))
-         (rule-name (clara-explorer--unqualified-name name)))
+         (rule-name (and name (clara-explorer--unqualified-name name))))
     (clara-explorer--log "fallback: name=%S ns=%S rule-name=%S" name ns rule-name)
-    (cond
-     ((not (and ns rule-name))
-      (message "clara-explorer: cannot locate %s (no namespace in the target)" name)
-      nil)
-     (t
-      (let ((open-error (clara-explorer--try-open-ns ns)))
-        (if (clara-explorer--buffer-visits-ns-p ns)
-            (clara-explorer--search-production-form ns rule-name)
-          (when open-error
-            (message "clara-explorer: could not open %s: %s" ns open-error))
-          (message
-           (concat "clara-explorer: namespace %s is not on this REPL's classpath; "
-                   "load it (or use the nREPL transport with a live session) to jump to %s")
-           ns rule-name)
-          nil))))))
+    (if (not (and ns rule-name))
+        (progn
+          (message "clara-explorer: cannot locate %s (no namespace in the target)" name)
+          nil)
+      (let* ((location (clara-explorer--locate-production name ns repl))
+             (buffer (plist-get location :buffer)))
+        (if (not buffer)
+            (progn
+              (clara-explorer--report-unlocated ns rule-name (plist-get location :error))
+              nil)
+          (funcall before-show buffer)
+          (clara-explorer--show-production location ns rule-name repl))))))
+
+(defun clara-explorer--goto-fallback (target &optional no-push)
+  "Jump to TARGET, which carries no var metadata, through the current session.
+Pushes the jump first unless NO-PUSH."
+  (clara-explorer--jump-to-production
+   target nil (lambda (_buffer) (unless no-push (clara-explorer--push-jump)))))
 
 (defun clara-explorer--goto (target &optional no-push)
   "Jump to TARGET, pushing evil/xref jumps for C-o unless NO-PUSH.
-NO-PUSH is for callers that already pushed from the buffer they are leaving,
-as `clara-explorer--goto-production' does when it re-selects a window first.
-Returns non-nil when the jump happened, so such a caller can put the selection
-back after a failed jump."
+Returns non-nil when the jump happened.  A target without var metadata is only
+pushed once its source is found, so a failed jump leaves no jump entry."
   (let* ((name (clara-explorer--edn-get :name target))
          (source (clara-explorer--edn-get :source target))
          (var? (clara-explorer--edn-get :var? source)))
     (clara-explorer--log "goto: name=%S var?=%S source=%S" name var? source)
-    (unless no-push
-      (clara-explorer--push-jump))
     (if var?
         (progn
+          (unless no-push (clara-explorer--push-jump))
           (clara-explorer--log "goto: cider-find-var %S" name)
           (cider-find-var nil name)
           t)
       (clara-explorer--log "goto: fallback path")
-      (clara-explorer--goto-fallback target))))
+      (clara-explorer--goto-fallback target no-push))))
 
 (defun clara-explorer--choose-target (direction targets)
   "completing-read popover over fq target names, then jump to the choice."
@@ -1498,20 +1583,21 @@ toggle."
     (clara-explorer--provenance-render)))
 
 (defun clara-explorer--goto-production (node)
-  "Jump to production NODE, from a window that belongs to its source if one does.
-The jump is pushed before the window changes, so `C-o' returns to the provenance
-view rather than to the source window the jump happened to be made from.  A
-failed jump restores the selection, so pressing RET on a production the REPL
-cannot open leaves the user in the provenance view with the reason, rather than
-in whatever buffer was most recently used."
-  (let ((start (selected-window))
-        (jumped nil))
-    (clara-explorer--push-jump)
-    (when-let* ((window (clara-explorer--navigation-window node)))
-      (select-window window))
-    (unwind-protect
-        (setq jumped (clara-explorer--goto node t))
-      (unless jumped (select-window start)))))
+  "Jump to production NODE, asking the REPL the view was opened from.
+The REPL is the one stored with the view's query, never the session of
+whichever buffer the target window happens to show (see
+`clara-explorer--call-with-repl').  That REPL's var metadata locates a
+production whether or not NODE carries `:var? true', so registry/bb trees jump
+to any loaded namespace too.  The jump is pushed from the view before the
+window changes, so `C-o' returns here; a production that cannot be located
+changes no window and pushes nothing."
+  (clara-explorer--jump-to-production
+   node
+   (plist-get clara-explorer--provenance-query :conn)
+   (lambda (buffer)
+     (clara-explorer--push-jump)
+     (when-let* ((window (clara-explorer--navigation-window buffer)))
+       (select-window window)))))
 
 (defun clara-explorer-provenance-visit ()
   "Jump to the production on the current row.
