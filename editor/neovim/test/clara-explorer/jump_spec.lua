@@ -162,13 +162,32 @@ describe("jump.locate", function()
     assert.are.same({ path = "file:" .. file, line = 2 }, location)
   end)
 
-  it("J2 drops a reported line the rule is not on, and searches instead", function()
+  it("J2 passes the reported line through; show decides whether to trust it", function()
     local dir = scratch("j2")
     local file = write_file(dir .. "/src/my/ns.clj", { "(ns my.ns)", "(r/defrule my-rule [A] => 1)" })
     local location = locate(
       { name = "my.ns/my-rule", ns = "my.ns" },
       function(opts) opts.on_value(loc_answer(file, 9)) end
     )
+    assert.are.same({ path = file, line = 9 }, location)
+  end)
+
+  it("skips the REPL without a Conjure connection instead of waiting on it", function()
+    local root = scratch("no-conn/roots")
+    local file = write_file(root .. "/repo/src/my/ns.clj", { "(ns my.ns)" })
+    local evaluated = false
+    local location, reason
+    with_restore(conjure, "connected", function() return false end, function()
+      with_restore(conjure, "eval_edn", function() evaluated = true end, function()
+        with_restore(vim.g, "clara_explorer_source_roots", { root }, function()
+          jump.locate({ name = "my.ns/my-rule", ns = "my.ns" }, {}, function(loc, why)
+            location, reason = loc, why
+          end)
+        end)
+      end)
+    end)
+    assert.is_false(evaluated)
+    assert.is_nil(reason)
     assert.are.same({ path = file }, location)
   end)
 
@@ -219,6 +238,32 @@ describe("jump.locate", function()
     end)
   end)
 
+  it("J4 orders candidates by root, then depth, then path", function()
+    local first = scratch("j4-order/first")
+    local second = scratch("j4-order/second")
+    local deep = write_file(first .. "/repo/modules/src/my/ns.clj", { "(ns my.ns)" })
+    local shallow_b = write_file(first .. "/b-repo/src/my/ns.clj", { "(ns my.ns)" })
+    local shallow_a = write_file(first .. "/a-repo/src/my/ns.cljc", { "(ns my.ns)" })
+    local shallower_in_second = write_file(second .. "/src/my/ns.clj", { "(ns my.ns)" })
+    assert.are.same(
+      { shallow_a, shallow_b, deep, shallower_in_second },
+      jump.source_root_candidates("my.ns", { first, second })
+    )
+  end)
+
+  it("J4 an empty skip list skips nothing but dot-directories", function()
+    local root = scratch("j4-skip")
+    local built = write_file(root .. "/repo/target/my/ns.clj", { "(ns my.ns)" })
+    write_file(root .. "/repo/.cpcache/my/ns.clj", { "(ns my.ns)" })
+    with_restore(
+      vim.g,
+      "clara_explorer_source_roots_skip_directories",
+      {},
+      function() assert.are.same({ built }, jump.source_root_candidates("my.ns", { root })) end
+    )
+    assert.are.same({}, jump.source_root_candidates("my.ns", { root }))
+  end)
+
   it("J6 reports the remedy and finds nothing", function()
     with_restore(vim.g, "clara_explorer_source_roots", { scratch("j6/empty") }, function()
       local location, reason = locate(
@@ -227,6 +272,7 @@ describe("jump.locate", function()
       )
       assert.is_nil(location)
       assert.truthy(reason:find("g:clara_explorer_source_roots", 1, true))
+      assert.truthy(reason:find("(no repl)", 1, true))
     end)
   end)
 
@@ -346,6 +392,51 @@ describe("jump.show", function()
     assert.are.same(origin, pushed_win)
     assert.are.same(win_a, vim.api.nvim_get_current_win())
     vim.cmd("only")
+  end)
+
+  it("J2 checks the reported line in the shown buffer, unsaved edits included", function()
+    local a, win_a = two_windows("j2-show")
+    local buf = vim.api.nvim_win_get_buf(win_a)
+    -- Unsaved: the rule moved from line 2 (on disk) to line 3 (in the buffer).
+    vim.api.nvim_buf_set_lines(buf, 1, 1, false, { "" })
+    assert.is_true(vim.bo[buf].modified)
+    local target = { name = "a/rule-a", ns = "a" }
+    with_restore(vim, "notify", function() end, function() jump.show({ path = a, line = 3 }, target) end)
+    assert.are.same(win_a, vim.api.nvim_get_current_win())
+    assert.are.same(buf, vim.api.nvim_get_current_buf())
+    assert.are.same({ 3, 0 }, vim.api.nvim_win_get_cursor(0))
+
+    -- The disk line no longer holds the rule in the buffer, so the form is searched.
+    local searched = {}
+    with_restore(vim.fn, "search", function(pattern)
+      searched[#searched + 1] = pattern
+      return 3
+    end, function()
+      with_restore(vim.cmd, "normal", function() end, function() jump.show({ path = a, line = 2 }, target) end)
+    end)
+    assert.are.same(jump.fallback_regex("rule-a"), searched[1])
+    vim.api.nvim_buf_set_option(buf, "modified", false)
+    vim.cmd("only")
+  end)
+
+  it("trusts a line only when the whole symbol is on it", function()
+    local dir = scratch("j-symbol")
+    local file =
+      write_file(dir .. "/a.clj", { "(ns a)", "(r/defrule rule-a-longer [A] => 1)", "(r/defrule rule-a [A] => 1)" })
+    vim.cmd("only")
+    local searched = {}
+    with_restore(vim.fn, "search", function(pattern)
+      searched[#searched + 1] = pattern
+      return 3
+    end, function()
+      with_restore(
+        vim.cmd,
+        "normal",
+        function() end,
+        function() jump.show({ path = file, line = 2 }, { name = "a/rule-a", ns = "a" }) end
+      )
+    end)
+    assert.are.same(jump.fallback_regex("rule-a"), searched[1])
   end)
 
   it("searches for the form when no line was trusted", function()

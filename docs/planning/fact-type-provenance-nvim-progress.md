@@ -11,7 +11,8 @@ Branch: `fact-type-provenance`. Scope: `editor/neovim/` plus docs. No Clojure
 change was needed — the contract was already complete, so every edge case
 resolved in Lua.
 
-**Status: steps 1–9 done; `make check` green (221 tests), real bb smoke green.**
+**Status: steps 1–9 done, review fixes in (§3.1); `make check` green (226
+tests), real bb smoke green.**
 
 ## 1. Step-1 decisions (plan §6)
 
@@ -53,11 +54,13 @@ Test matrix coverage (plan §5), by file:
   root. `provenance.production_ancestors` walks the path prefixes and keeps the
   components whose node is a `:production`, so it is correct for any root
   shape (the backend's `:production` roots included).
-- **Hand-rolled source-root walk.** `vim.fs.dir(root, {depth = math.huge, skip = …})`
-  does not recurse as documented on 0.12 in this sandbox, so the walk is a small
-  recursion over non-recursive `vim.fs.dir`. It never follows symlinked
-  directories (matching Emacs's `directory-files-recursively`) and skips
-  dot-directories plus `g:clara_explorer_source_roots_skip_directories`.
+- **Source-root walk uses `vim.fs.dir`.** An earlier note here said
+  `vim.fs.dir(root, {depth = math.huge, skip = …})` does not recurse on 0.12.
+  That was wrong: on Neovim 0.12.4 it recurses fully, and `skip` prunes a
+  directory only when it returns exactly `false`. The hand-rolled recursion was
+  replaced with it in the review fixes (§3.1). It follows no symlinked directory
+  unless `follow` is set (matching Emacs's `directory-files-recursively`), and an
+  unreadable directory is skipped because `fs_scandir` returns nil for it.
 - **`join_entries` takes varargs.** The first draft joined a table, and a
   table literal whose first entry is an omitted key (`:production` nil) made
   `ipairs` stop at the gap — silently dropping `:side`, `:caller-ns`, and
@@ -83,6 +86,42 @@ Test matrix coverage (plan §5), by file:
   `explorer/test/.../loan_app_rules.clj`, kept the provenance split (2 windows),
   and landed on `(r/defrule app-outcome-denied?`.
 
+### 3.1 Review fixes
+
+A review against the Emacs semantics (`fact-type-provenance-progress.md` §7.3
+and items 16–17) found these, all fixed in `jump.lua`:
+
+- **`<CR>` hung without a Conjure connection.** `locate` waited for the REPL
+  eval before trying open buffers and source roots. With Conjure loaded but not
+  connected, `eval-str` only logs `; No connection` and never calls back (read
+  from the installed Conjure's `with-conn-or-warn`), so nothing happened. The
+  default REPL eval (`repl_eval`) now fails fast when `conjure.connected()` is
+  false, and `locate` falls through. The no-REPL smoke in §4 missed this
+  because Conjure was not loaded at all, which errors out instead.
+- **Candidate order was nondeterministic.** All roots were sorted together by
+  depth with the unstable `table.sort`, over filesystem listing order. Now the
+  order is root, then depth, then path, matching the function's docstring and
+  Emacs.
+- **The line check read the file on disk.** With unsaved edits the cursor could
+  land on the wrong line, and a var evaluated from an unsaved buffer reports the
+  buffer's line. `locate` now passes the REPL's line through, and `show` checks
+  it in the displayed buffer as a whole symbol (Emacs used a whole-symbol check;
+  this used a substring).
+- **`:edit` of a modified buffer's own file raised E37.** Found while testing
+  the line fix: `<CR>` errored when the target window already showed that file
+  with unsaved changes. `open_source` now shows an existing loaded buffer instead
+  of re-editing it.
+- **An empty skip list fell back to the defaults.** `{}` now skips nothing
+  besides dot-directories, as an empty list does in Emacs and as an empty macro
+  table already did in Lua.
+- **The REPL error was dropped from the final reason.** It is now appended, as
+  Emacs does.
+
+New or changed specs: J2 (`locate` passes the line through; `show` checks the
+unsaved buffer), the no-connection fall-through, J4 ordering and empty skip
+list, J6 naming the REPL error, and a whole-symbol line check. All seven fail
+against the pre-fix `jump.lua` and pass with it.
+
 ## 4. Verification
 
 Baseline before any edit: 170 tests across 6 spec files, `format-check` clean,
@@ -96,9 +135,9 @@ mise exec -- make check    # format-check + lint + test
 
 - `format-check`: clean (stylua 2.5.2).
 - `lint`: 0 errors / 0 warnings / 0 parse errors (selene 0.31.0).
-- `test`: **221 tests, 0 failures, 0 errors** — `edn_spec` 21, `structural_spec`
+- `test`: **226 tests, 0 failures, 0 errors** — `edn_spec` 21, `structural_spec`
   11, `token_spec` 52, `transport_spec` 44, `bb_transport_spec` 42,
-  `provenance_spec` 20, `jump_spec` 31.
+  `provenance_spec` 20, `jump_spec` 36 (31 before the review fixes).
 
 `stylua`/`selene` are installed through `mise` but are not on the default
 `PATH` here, so the Makefile is invoked as `mise exec -- make …`. No install

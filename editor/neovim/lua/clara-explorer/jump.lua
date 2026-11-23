@@ -112,9 +112,18 @@ local function read_head(path, count)
 end
 
 --- Open a located source in the current window: an absolute path, a `file:`
--- URL, or a `jar:` URL (through Neovim's zipfile support).
+-- URL, or a `jar:` URL (through Neovim's zipfile support).  A file that already
+-- has a loaded buffer is shown as that buffer rather than re-edited: `:edit` of
+-- a modified buffer's own file fails with E37, and its unsaved text is what the
+-- line check reads.
 local function open_source(path)
   if not path or path == "" or path == "nil" then return false end
+  local file = file_path(path)
+  local existing = file and vim.fn.bufnr(file) or -1
+  if existing ~= -1 and vim.api.nvim_buf_is_loaded(existing) then
+    vim.api.nvim_win_set_buf(0, existing)
+    return true
+  end
   if path:match("^file:") then
     vim.cmd.edit((path:gsub("^file:", "")))
     return true
@@ -235,34 +244,50 @@ local function is_clojure_source(name) return name:match("%.clj[cs]?$") ~= nil e
 local DEFAULT_SKIP_DIRECTORIES = { "node_modules", "target", "out" }
 
 --- Directory names the source-root walk never enters.  A configured list
--- replaces the defaults, so a project can add its own build directory.
+-- replaces the defaults, so a project can add its own build directory; an empty
+-- list skips nothing (dot-directories aside), as in Emacs.
 local function skip_directories()
   local configured = vim.g.clara_explorer_source_roots_skip_directories
-  if type(configured) == "table" and #configured > 0 then return configured end
+  if type(configured) == "table" then return configured end
   return DEFAULT_SKIP_DIRECTORIES
 end
 
 --- True when STR ends in SUFFIX.
 local function ends_with(str, suffix) return #str >= #suffix and str:sub(-#suffix) == suffix end
 
---- Walk ROOT at any depth, collecting files whose path ends in
--- `/<relative>.clj` or `/<relative>.cljc`.  Dot-directories and the skip list
--- are not entered; a compiled `.cljc` copy shares its source's `ns` form, so
--- the `ns` check alone cannot reject it.  Symlinked directories are not
--- followed, matching Emacs's `directory-files-recursively`.
-local function walk_source_root(root, relative, out, skipped)
-  local ok, iter = pcall(vim.fs.dir, root)
-  if not ok or type(iter) ~= "function" then return end
+--- Number of `/` separators in PATH: its depth, for shallowest-first order.
+local function path_depth(path) return select(2, path:gsub("/", "")) end
+
+--- Files at any depth under ROOT whose path ends in `/<relative>.clj` or
+-- `/<relative>.cljc`, shallowest first, then by path, so the order never depends
+-- on the filesystem's listing order.  Dot-directories and the SKIPPED names are
+-- not entered: a compiled `.cljc` copy shares its source's `ns` form, so the
+-- `ns` check alone cannot reject it.  `vim.fs.dir` follows no symlinked
+-- directory (matching Emacs's `directory-files-recursively`) and skips an
+-- unreadable one.
+local function root_candidates(root, relative, skipped)
   local clj = "/" .. relative .. ".clj"
   local cljc = "/" .. relative .. ".cljc"
+  local found = {}
+  local iter = vim.fs.dir(root, {
+    depth = math.huge,
+    skip = function(dir)
+      local name = vim.fs.basename(dir)
+      return name:sub(1, 1) ~= "." and not skipped[name]
+    end,
+  })
   for name, kind in iter do
-    local path = root .. "/" .. name
-    if kind == "file" and (ends_with(path, clj) or ends_with(path, cljc)) then
-      out[#out + 1] = path
-    elseif kind == "directory" and name:sub(1, 1) ~= "." and not skipped[name] then
-      walk_source_root(path, relative, out, skipped)
+    if kind == "file" then
+      local path = root .. "/" .. name
+      if ends_with(path, clj) or ends_with(path, cljc) then found[#found + 1] = path end
     end
   end
+  table.sort(found, function(a, b)
+    local depth_a, depth_b = path_depth(a), path_depth(b)
+    if depth_a ~= depth_b then return depth_a < depth_b end
+    return a < b
+  end)
+  return found
 end
 
 --- Files under ROOTS that could hold NS: roots in order, shallowest first in
@@ -277,10 +302,9 @@ function M.source_root_candidates(ns, roots)
   end
   local out = {}
   for _, root in ipairs(roots or {}) do
-    local normalized = vim.fs.normalize(root)
-    if vim.fn.isdirectory(normalized) == 1 then walk_source_root(normalized:gsub("/+$", ""), relative, out, skipped) end
+    local normalized = vim.fs.normalize(root):gsub("/+$", "")
+    if vim.fn.isdirectory(normalized) == 1 then vim.list_extend(out, root_candidates(normalized, relative, skipped)) end
   end
-  table.sort(out, function(a, b) return select(2, a:gsub("/", "")) < select(2, b:gsub("/", "")) end)
   return out
 end
 
@@ -371,16 +395,27 @@ function M.source_loc_code(ns, name) return SOURCE_LOC_FORM:format(conjure.edn_s
 --- The unqualified part of a fully-qualified production NAME.
 local function unqualified_name(name) return (name or ""):match("/([^/]+)$") or name end
 
---- True when the reported line of PATH really holds NAME.
--- A reported line is trusted only when the rule name is on it: an edited buffer
--- drifts from the loaded var's line, and jumping to a stale line is worse than
--- searching.
-local function line_holds_name(path, line, name)
-  local file = file_path(path)
-  if not file or not name or not line then return false end
-  local lines = read_head(file, math.max(line, 1))
-  local text = lines and lines[line]
-  return text ~= nil and text:find(name, 1, true) ~= nil
+--- True when LINE of the current buffer holds NAME as a whole symbol.
+-- A reported line is trusted only when the rule name is on it, and it is checked
+-- in the buffer being shown, not the file on disk: unsaved edits shift lines,
+-- and a var evaluated from an unsaved buffer reports the buffer's line.  A stale
+-- line is worse than searching.
+local function current_line_holds_name(line, name)
+  if type(line) ~= "number" or line < 1 or not name then return false end
+  local text = vim.api.nvim_buf_get_lines(0, line - 1, line, false)[1]
+  return text ~= nil and vim.fn.match(text, M.symbol_token_regex(name)) >= 0
+end
+
+--- The REPL eval `locate` and `project_dir` use unless a test injects one.
+-- Conjure's `eval-str` never calls back without a connection (it only logs
+-- `; No connection`), so asking it then would leave the jump waiting forever
+-- instead of falling through to open buffers and the source roots.
+local function repl_eval(opts)
+  if not conjure.connected() then
+    opts.on_error("clara-explorer: not connected to a Conjure REPL")
+    return
+  end
+  conjure.eval_edn(opts)
 end
 
 --- The open buffer whose own `ns` form names NS, as a path, or nil.
@@ -412,10 +447,13 @@ end
 --
 -- Order: the REPL's var metadata and resource (step 1), an already-open buffer
 -- whose `ns` form names the namespace (step 2), then the source roots (step 3).
--- Only a line that really holds the production is kept.
+-- The REPL's line is passed through as is; `show` trusts it only when the
+-- production's name is on that line of the displayed buffer.  Without a Conjure
+-- connection the REPL step is skipped (see `repl_eval`), and a REPL error is
+-- named in the final reason.
 function M.locate(target, opts, cb)
   opts = opts or {}
-  local eval_edn = opts.eval_edn or function(o) conjure.eval_edn(o) end
+  local eval_edn = opts.eval_edn or repl_eval
   local ns = target and target.ns
   local name = target and target.name
   cb = cb or function() end
@@ -423,9 +461,7 @@ function M.locate(target, opts, cb)
     cb(nil, "clara-explorer: cannot resolve source for target")
     return
   end
-  local unqualified = unqualified_name(name)
-
-  local function fall_through()
+  local function fall_through(repl_error)
     local open = open_buffer_for_ns(ns)
     if open then
       cb({ path = open })
@@ -439,8 +475,9 @@ function M.locate(target, opts, cb)
       end
       cb(
         nil,
-        ("clara-explorer: cannot locate %s — load it, open its source, or set g:clara_explorer_source_roots"):format(
-          ns
+        ("clara-explorer: cannot locate %s%s — load it, open its source, or set g:clara_explorer_source_roots"):format(
+          ns,
+          type(repl_error) == "string" and (" (" .. repl_error .. ")") or ""
         )
       )
     end)
@@ -456,12 +493,10 @@ function M.locate(target, opts, cb)
         fall_through()
         return
       end
-      local location = { path = file }
-      local line = decoded.line
-      if line and line_holds_name(file, line, unqualified) then location.line = line end
-      cb(location)
+      -- The line is checked by `show`, against the buffer it displays.
+      cb({ path = file, line = type(decoded.line) == "number" and decoded.line or nil })
     end,
-    on_error = fall_through,
+    on_error = function(message) fall_through(message) end,
   })
 end
 
@@ -476,7 +511,7 @@ function M.show(location, target)
     return
   end
   local unqualified = unqualified_name(target and target.name)
-  if location.line and line_holds_name(location.path, location.line, unqualified) then
+  if current_line_holds_name(location.line, unqualified) then
     pcall(vim.api.nvim_win_set_cursor, 0, { location.line, 0 })
     return
   end

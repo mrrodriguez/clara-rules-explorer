@@ -77,7 +77,9 @@ breaking the buffer.
   `.cljc` copy is rejected.
 - **`g:clara_explorer_source_roots_skip_directories`** — directory names the
   source-root walk never enters; default `{ "node_modules", "target", "out" }`
-  (dot-directories are always skipped). A list replaces the defaults.
+  (dot-directories are always skipped). A list replaces the defaults; an empty
+  list skips nothing else. Candidates come in root order, then shallowest
+  first, then by path.
 
 The `:depth` setting, the macros, and the source roots are read per call, so a
 change applies without reloading the plugin. `:ClaraExplorerRefresh` drops the
@@ -87,8 +89,11 @@ cached REPL project directory.
 same order as Emacs: the loaded var's `:file`/`:line` from the REPL (which
 reaches a namespace loaded from a checkout that is not on the classpath), then
 an open buffer whose own `ns` form names the namespace, then the source roots.
-Only a reported line that really holds the production is trusted; otherwise the
-file is searched. The window already showing the file wins, else the previous
+A reported line is trusted only when the production's name is on it as a whole
+symbol, checked in the buffer being shown (unsaved edits included); otherwise
+the file is searched. A file that already has a buffer is shown as that buffer,
+not re-edited, so unsaved changes are kept. Without a Conjure connection the
+REPL step is skipped rather than waited on. The window already showing the file wins, else the previous
 window, so the provenance split stays in place. A failed jump changes no window
 and pushes no jump-list entry, and it names the remedy (load it, open it, or add
 a source root). Every REPL request made from the view runs with the origin
