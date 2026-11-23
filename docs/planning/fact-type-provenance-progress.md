@@ -702,6 +702,31 @@ Checkpoints, not a diary. Update in place as work lands.
       sesman-linked repo opened a dired buffer, and later jumps failed with "No
       linked CIDER sessions" — see §7.3.
 
+- [x] 16 Emacs `clara-explorer-production-macros` (alist macro name → `rule` |
+      `query`, default `defrule`/`defquery`) replaces the hardcoded heads in
+      cursor context (`--production-kind`, `--def-head-p`) and in the jump
+      search (`--fallback-head-regexp`). The jump head is now an optional alias
+      plus an exact listed name, so a customized list replaces the defaults
+      instead of matching any head that ends in a listed name. The anywhere-in-file
+      whole-symbol fallback is unchanged and stays last. Neovim still hardcodes
+      `defrule`/`defquery`.
+
+- [x] 17 Emacs `clara-explorer-source-roots` — the last step of
+      `--locate-production`, after the REPL and open buffers: the namespace is
+      munged to `<ns path>.clj[c]` and searched at any depth under each root
+      (`directory-files-recursively`, shallowest first). Dot-directories and
+      `clara-explorer-source-roots-skip-directories` (default `node_modules`,
+      `target`, `out`) are not entered, since compiled `.cljc` copies share the
+      source's `ns` form. A candidate is used only when its `ns` form names the
+      namespace (rejected candidates' buffers are killed). `nil` (default) means
+      the parent of the REPL's `nrepl-project-dir`; a list replaces it. Nothing is
+      evaluated, and the registry artifacts stay free of file locations. About
+      0.6s warm across 131 sibling checkouts, paid once per namespace (the open
+      buffer answers afterwards). An earlier fixed two-level glob (0.05s) was
+      dropped because rulesets nest deeper than `<checkout>/<source dir>`. The
+      jump search's head regexp is built with `rx-to-string`. The Neovim port of items 14–17 plus the provenance view is
+      planned in `fact-type-provenance-nvim-plan.md`.
+
 ### 7.1 Review 1 disposition
 
 Review: `docs/planning/fact-type-provenance-neom-review-1.md`.

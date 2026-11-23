@@ -36,7 +36,10 @@ transport); see
 There is **no Neovim command for it in this version**. A future
 `:ClaraExplorerShowProvenance` only has to gather the same cursor input, call
 the same operation, and render the returned `:fact-type` / `:production` /
-`:message` nodes — no Clojure or contract change should be needed.
+`:message` nodes — no Clojure or contract change should be needed. The port,
+along with the jump, production-macro, and source-root behavior Emacs already
+has, is planned in
+[`planning/fact-type-provenance-nvim-plan.md`](./planning/fact-type-provenance-nvim-plan.md).
 
 ## Requirements
 

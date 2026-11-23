@@ -80,7 +80,8 @@ Targets are productions. Jump to a target means opening the file at the
 2. **Non-var targets** (`:var? false`) — resolve the classpath-relative
    `:source.file` via `(clojure.java.io/resource …)` and open it; if that is
    `nil` (e.g. `jar:` source), fall back to opening the namespace file and
-   searching for `(defrule|defquery NAME`. Emacs asks the connected REPL for the
+   searching for `(defrule|defquery NAME` (in Emacs the macro names are
+   `clara-explorer-production-macros`). Emacs asks the connected REPL for the
    loaded var's location first, so a namespace loaded from outside the
    classpath (e.g. a sesman-linked repo) still resolves. An empty namespace
    path is never opened.

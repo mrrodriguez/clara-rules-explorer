@@ -72,6 +72,52 @@ When nil, it is resolved beside `clara-explorer.el' (a symlink in the repo)."
                  (file))
   :group 'clara-explorer)
 
+(defcustom clara-explorer-production-macros
+  '(("defrule" . rule)
+    ("defquery" . query))
+  "Macros that define a production, each mapped to its kind, `rule' or `query'.
+Names are unqualified: any alias prefix matches, so \"defrule\" covers
+`defrule', `r/defrule', and `clara.rules/defrule'.  Add an entry for a macro
+that wraps or renames these (`:refer [defrule] :rename {defrule rule}', or a
+project macro that expands to one); it must take the production name as its
+first argument, after any metadata.
+
+The list decides two things: which enclosing form is the production at point
+(the kind matters because a query has no RHS to navigate from), and which form
+a jump searches for when the REPL cannot say where a production is defined."
+  :type '(alist :key-type (string :tag "Macro name (unqualified)")
+                :value-type (choice (const :tag "Rule" rule)
+                                    (const :tag "Query" query)))
+  :group 'clara-explorer)
+
+(defcustom clara-explorer-source-roots nil
+  "Directories holding repo checkouts, searched for a production's source file.
+This is the last place a jump looks, after the REPL and any open buffer, for a
+namespace the REPL has neither loaded nor on its classpath — for example a
+production from another repo in a composed registry tree.  The file is found
+from the namespace name alone: any file at any depth under a root whose path
+ends in PATH.clj (or .cljc), where PATH is the namespace munged as Clojure does
+(dots to `/', dashes to `_').  It is used only when its own `ns' form names the
+namespace.  `clara-explorer-source-roots-skip-directories' keeps build output
+and dependencies out of the walk.
+
+nil uses the parent directory of the connected REPL's project, which holds the
+REPL's own checkout and, in a side-by-side layout, its sibling repos.  A list
+replaces that default, so include the parent too if you still want it."
+  :type '(choice (const :tag "Parent of the REPL's project directory" nil)
+                 (repeat directory))
+  :group 'clara-explorer)
+
+(defcustom clara-explorer-source-roots-skip-directories
+  '("node_modules" "target" "out")
+  "Directory names the `clara-explorer-source-roots' search never enters.
+A directory whose name starts with a dot (`.git', `.cpcache', `.shadow-cljs',
+…) is always skipped as well.  Build output matters most: a compiled copy of a
+`.cljc' file carries the same `ns' form as its source, so the `ns' check alone
+cannot reject it."
+  :type '(repeat (string :tag "Directory name"))
+  :group 'clara-explorer)
+
 (defconst clara-explorer--directory
   (file-name-directory (or load-file-name buffer-file-name))
   "Directory containing `clara-explorer.el', captured when it was loaded or eval'd.
@@ -310,18 +356,17 @@ out and returns the result."
       (match-string 1 sym)
     sym))
 
-(defun clara-explorer--def-head-p (head)
-  "Non-nil when HEAD names a defrule/defquery form (alias-prefix agnostic)."
-  (and head
-       (let ((n (clara-explorer--symbol-name head)))
-         (or (string= n "defrule")
-             (string= n "defquery")))))
-
 (defun clara-explorer--production-kind (head)
-  "Return `rule' or `query' for a defrule/defquery head string."
-  (if (string= (clara-explorer--symbol-name head) "defrule")
-      'rule
-    'query))
+  "`rule' or `query' when HEAD names a production macro, else nil.
+HEAD is a symbol string; its alias prefix is ignored.  The macros and their
+kinds come from `clara-explorer-production-macros'."
+  (and head
+       (cdr (assoc (clara-explorer--symbol-name head)
+                   clara-explorer-production-macros))))
+
+(defun clara-explorer--def-head-p (head)
+  "Non-nil when HEAD names a production macro (alias-prefix agnostic)."
+  (and (clara-explorer--production-kind head) t))
 
 (defun clara-explorer--list-head (start)
   "Return the head symbol (as a string) of the list starting at START, or nil."
@@ -843,9 +888,19 @@ file (a symlink to the `clara.explorer.server.tokens` canonical text)."
       (match-string 1 fq-name)
     fq-name))
 
-(defconst clara-explorer--fallback-head-rx
-  (rx "(" (* (not (any " \t\n()"))) "def" (or "rule" "query"))
-  "Rx for \"(alias/defrule\" prefix up to head, without rule name.")
+(defun clara-explorer--fallback-head-regexp ()
+  "Regexp for \"(alias/defrule\" up to the head, without the production name.
+The heads are the names in `clara-explorer-production-macros', read on each
+call so a customization applies without reloading.  The head must be one of
+those names exactly, after an optional alias (`r/', `clara.rules/'), so the
+list replaces the defaults rather than matching any head that ends in a listed
+name, and it agrees with `clara-explorer--production-kind'.  A form nested in a
+`let' or `do' matches too: the search is not limited to top-level forms."
+  (rx-to-string
+   `(seq "("
+         (? (* (not (any " \t\n()/"))) "/")
+         (or ,@(mapcar #'car clara-explorer-production-macros)))
+   t))
 
 (defconst clara-explorer--symbol-chars
   "A-Za-z0-9._:/!?*+<>-"
@@ -856,8 +911,9 @@ file (a symlink to the `clara.explorer.server.tokens` canonical text)."
   (concat "\\(?:[^" clara-explorer--symbol-chars "]\\|$\\)"))
 
 (defun clara-explorer--fallback-regexp (rule-name)
-  "Fallback search: (defrule/defquery … RULE-NAME, whole-symbol-bounded."
-  (concat clara-explorer--fallback-head-rx
+  "Fallback search: (<production macro> … RULE-NAME, whole-symbol-bounded.
+The macros come from `clara-explorer-production-macros'."
+  (concat (clara-explorer--fallback-head-regexp)
           (rx (* (seq (+ (any " \t\n")) "^" (+ (not (any " \t\n")))))
               (+ (any " \t\n")))
           (regexp-quote rule-name)
@@ -938,13 +994,75 @@ classpath resource is the fallback, for a namespace that is not loaded."
                            (cider-sync-request:ns-path ns t) ns)))
         (list :buffer buffer))))
 
+(defun clara-explorer--ns->relative-path (ns)
+  "NS's source path relative to a source directory, without an extension.
+Dots become directory separators and dashes underscores, as Clojure munges a
+namespace into a resource name."
+  (string-replace "-" "_" (string-replace "." "/" ns)))
+
+(defun clara-explorer--source-root-dirs (repl)
+  "The directories `clara-explorer-source-roots' names, resolving its default.
+The default is the parent of REPL's project directory; with no live REPL, the
+current buffer's session supplies the REPL."
+  (or clara-explorer-source-roots
+      (when-let* ((repl (if (buffer-live-p repl) repl (ignore-errors (cider-current-repl))))
+                  (project-dir (ignore-errors (buffer-local-value 'nrepl-project-dir repl))))
+        (list (file-name-directory (directory-file-name project-dir))))))
+
+(defun clara-explorer--source-root-descend-p (dir)
+  "Non-nil when the source-roots search should walk into DIR.
+Dot-directories, names in `clara-explorer-source-roots-skip-directories', and
+unreadable directories are skipped."
+  (let ((name (file-name-nondirectory (directory-file-name dir))))
+    (and (not (string-prefix-p "." name))
+         (not (member name clara-explorer-source-roots-skip-directories))
+         (file-accessible-directory-p dir))))
+
+(defun clara-explorer--source-root-files (root rel)
+  "Files at any depth under ROOT whose path ends in REL.clj or REL.cljc.
+Shallower files come first, so a checkout's source sorts ahead of a deeper copy
+of it; ties keep the walk's order."
+  (let ((name-regexp (rx-to-string
+                      `(seq bos ,(file-name-nondirectory rel) ".clj" (? "c") eos)
+                      t))
+        (suffix-regexp (rx-to-string `(seq "/" ,rel ".clj" (? "c") eos) t)))
+    (when (file-accessible-directory-p root)
+      (sort (seq-filter (lambda (file) (string-match-p suffix-regexp file))
+                        (directory-files-recursively
+                         root name-regexp nil #'clara-explorer--source-root-descend-p))
+            (lambda (a b) (< (cl-count ?/ a) (cl-count ?/ b)))))))
+
+(defun clara-explorer--source-root-candidates (ns roots)
+  "Files under ROOTS that could hold NS: ROOTS in order, shallowest first in each.
+The walk has no depth limit, so a root can be one checkout or a directory of
+them, and a ruleset nested a few directories into a repo is still found."
+  (let ((rel (clara-explorer--ns->relative-path ns)))
+    (cl-loop for root in roots
+             append (clara-explorer--source-root-files (expand-file-name root) rel))))
+
+(defun clara-explorer--source-root-buffer (ns repl)
+  "A buffer visiting NS's source file under the source roots, or nil.
+REPL resolves the default root (see `clara-explorer-source-roots').  A candidate
+is accepted only when its `ns' form names NS; one opened just to be rejected is
+killed again, so a miss leaves no stray buffers."
+  (let* ((roots (clara-explorer--source-root-dirs repl))
+         (candidates (clara-explorer--source-root-candidates ns roots)))
+    (clara-explorer--log "source roots: %S -> %S" roots candidates)
+    (cl-loop for file in candidates
+             for existing = (find-buffer-visiting file)
+             for buffer = (or existing (find-file-noselect file))
+             if (clara-explorer--buffer-visits-ns-p ns buffer)
+             return buffer
+             else do (unless existing (kill-buffer buffer)))))
+
 (defun clara-explorer--locate-production (name ns repl)
   "Find production NAME of NS without displaying or selecting anything.
 REPL is the CIDER REPL buffer to ask (see `clara-explorer--call-with-repl').
 Returns (:buffer B :line N), (:buffer B) when B must be searched, (:error
-MESSAGE) when the REPL failed and no open buffer visits NS, or nil.  An open
-buffer visiting NS answers when the REPL cannot, so a source file the user has
-open is reachable without the namespace being loaded."
+MESSAGE) when the REPL failed and nothing else found NS, or nil.  When the REPL
+cannot answer, an open buffer visiting NS is used, and then NS's file under
+`clara-explorer-source-roots', so a namespace from another repo is reachable
+without loading it."
   (let* ((repl-error nil)
          (location (condition-case err
                        (clara-explorer--call-with-repl
@@ -957,6 +1075,8 @@ open is reachable without the namespace being loaded."
                          name ns location repl-error)
     (or location
         (when-let* ((buffer (clara-explorer--ns-source-buffer ns)))
+          (list :buffer buffer))
+        (when-let* ((buffer (clara-explorer--source-root-buffer ns repl)))
           (list :buffer buffer))
         (and repl-error (list :error repl-error)))))
 
@@ -1012,8 +1132,10 @@ project is pinned to REPL so CIDER commands there keep using that session."
 (defun clara-explorer--report-unlocated (ns rule-name repl-error)
   "Explain why RULE-NAME of NS cannot be shown, including REPL-ERROR if any."
   (message
-   (concat "clara-explorer: could not open %s%s: it is neither loaded in this REPL "
-           "nor on its classpath; load it (or open its source file) to jump to %s")
+   (concat "clara-explorer: could not open %s%s: it is not loaded in this REPL, "
+           "not on its classpath, and not under `clara-explorer-source-roots'; "
+           "load it, open its source file, or add its checkout's parent directory "
+           "to `clara-explorer-source-roots' to jump to %s")
    ns
    (if repl-error (format " (%s)" repl-error) "")
    rule-name))

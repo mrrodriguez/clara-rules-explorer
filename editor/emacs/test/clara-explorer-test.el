@@ -786,6 +786,37 @@ Tier-1 stub path fast."
     (should-not (string-match-p (clara-explorer--whole-symbol-regexp "app-outcome-approved?")
                                 "app-outcome-approved-args-demo"))))
 
+(ert-deftest fallback-regexp-follows-the-production-macros-test ()
+  "The jump search finds a production made by any configured macro, nested too."
+  (cl-labels ((matches-p (s rule) (string-match-p (clara-explorer--fallback-regexp rule) s)))
+    (progn ; the defaults find nested forms but not unknown macros
+      (should (matches-p "(let [x 1] (r/defrule my-rule [A] => x))" "my-rule"))
+      (should (matches-p "(do (defquery my-query [] [A]))" "my-query"))
+      (should-not (matches-p "(g/defdata my-rule [A] => 1)" "my-rule")))
+    (progn ; a customized list replaces the defaults
+      (let ((clara-explorer-production-macros '(("defdata" . rule) ("rule" . rule))))
+        (should (matches-p "(g/defdata my-rule [A] => 1)" "my-rule"))
+        (should (matches-p "(do (rule ^:m my-rule [A] => 1))" "my-rule"))
+        (should-not (matches-p "(r/defrule my-rule [A] => 1)" "my-rule"))))
+    (progn ; an empty list matches nothing, leaving the whole-symbol fallback
+      (let ((clara-explorer-production-macros '()))
+        (should-not (matches-p "(r/defrule my-rule [A] => 1)" "my-rule"))))))
+
+(ert-deftest enclosing-production-follows-the-production-macros-test ()
+  "Cursor context recognizes configured macros and takes their kind from the list."
+  (let ((clara-explorer-production-macros '(("defdata" . rule) ("defview" . query))))
+    (with-clara-buffer "(let [x 1] (g/defdata my-rule [A] => (r/insert! B)))"
+      (search-forward "[A")
+      (let ((enc (clara-explorer--enclosing-production)))
+        (should (equal (nth 0 enc) "my-rule"))
+        (should (eq (nth 1 enc) 'rule))))
+    (with-clara-buffer "(g/defview my-view [] [A])"
+      (search-forward "[A")
+      (should (eq (nth 1 (clara-explorer--enclosing-production)) 'query)))
+    (with-clara-buffer "(r/defrule not-configured [A] => 1)"
+      (search-forward "[A")
+      (should-not (clara-explorer--enclosing-production)))))
+
 
 ;; ---------------------------------------------------------------------------
 ;; Whitespace and comment skipping (clara-explorer--skip-ws)
@@ -1964,6 +1995,105 @@ linked session — and the opened file is pinned to that REPL like a CIDER jump.
                 (should (= 3 (line-number-at-pos)))))))
       (when (buffer-live-p src) (kill-buffer src))
       (delete-file file))))
+
+(defun test--ns-form-name-stub (&rest _)
+  "A `cider-get-ns-name' stub that reads the current buffer's own ns form."
+  (save-excursion
+    (goto-char (point-min))
+    (and (re-search-forward "(ns \\([^ )\n]+\\)" nil t)
+         (match-string-no-properties 1))))
+
+(defmacro test--with-source-root (bindings files &rest body)
+  "Run BODY with a fresh scratch root bound to the first of BINDINGS.
+FILES is a list of (RELATIVE-PATH . CONTENT) written under the root first.  The
+root and any buffers visiting its files are removed afterwards."
+  (declare (indent 2))
+  (let ((root (car bindings)))
+    `(let ((,root (file-name-as-directory
+                   (make-temp-file (expand-file-name "roots-" test--scratch-dir) t))))
+       (unwind-protect
+           (progn
+             (dolist (file ,files)
+               (let ((path (expand-file-name (car file) ,root)))
+                 (make-directory (file-name-directory path) t)
+                 (with-temp-file path (insert (cdr file)))))
+             ,@body)
+         (dolist (buffer (buffer-list))
+           (when (and (buffer-file-name buffer)
+                      (string-prefix-p ,root (buffer-file-name buffer)))
+             (kill-buffer buffer)))
+         (delete-directory ,root t)))))
+
+(ert-deftest source-roots-munge-the-namespace-test ()
+  (should (equal (clara-explorer--ns->relative-path "gateless-resource-ruleset.reports.memory.core")
+                 "gateless_resource_ruleset/reports/memory/core"))
+  (should (equal (clara-explorer--ns->relative-path "single") "single")))
+
+(ert-deftest source-roots-find-candidates-at-any-depth-test ()
+  "Any depth is searched, build output and dot-directories are not, and shallower
+files come first, so a checkout's source sorts ahead of a nested copy."
+  (make-directory test--scratch-dir t)
+  (test--with-source-root (root)
+      '(("repo-a/modules/rules/src/main/clojure/demo_ns/core.clj" . "(ns demo-ns.core)")
+        ("repo-b/src/demo_ns/core.cljc" . "(ns demo-ns.core)")
+        ("repo-c/src/demo_ns/other.clj" . "(ns demo-ns.other)")
+        ("repo-c/src/not_demo_ns/core.clj" . "(ns not-demo-ns.core)")
+        ("repo-d/target/classes/demo_ns/core.clj" . "(ns demo-ns.core)")
+        ("repo-d/resources/public/js/out/demo_ns/core.cljc" . "(ns demo-ns.core)")
+        ("repo-d/.cpcache/demo_ns/core.clj" . "(ns demo-ns.core)"))
+    (should (equal (clara-explorer--source-root-candidates "demo-ns.core" (list root))
+                   (list (expand-file-name "repo-b/src/demo_ns/core.cljc" root)
+                         (expand-file-name
+                          "repo-a/modules/rules/src/main/clojure/demo_ns/core.clj" root))))
+    (let ((clara-explorer-source-roots-skip-directories '()))
+      (should (member (expand-file-name "repo-d/target/classes/demo_ns/core.clj" root)
+                      (clara-explorer--source-root-candidates "demo-ns.core" (list root)))))
+    (should (equal (clara-explorer--source-root-candidates
+                    "demo-ns.core" (list (expand-file-name "repo-b" root)))
+                   (list (expand-file-name "repo-b/src/demo_ns/core.cljc" root))))))
+
+(ert-deftest source-roots-default-to-the-repls-parent-directory-test ()
+  (let ((repl (get-buffer-create " *clara-roots-repl*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer repl
+            (setq-local nrepl-project-dir "/checkouts/main-repo/"))
+          (let ((clara-explorer-source-roots nil))
+            (should (equal (clara-explorer--source-root-dirs repl) '("/checkouts/"))))
+          (let ((clara-explorer-source-roots '("/elsewhere/")))
+            (should (equal (clara-explorer--source-root-dirs repl) '("/elsewhere/")))))
+      (kill-buffer repl))))
+
+(ert-deftest source-roots-accept-only-a-file-whose-ns-form-matches-test ()
+  "A file at the right path with another ns form is rejected and not left open."
+  (make-directory test--scratch-dir t)
+  (test--with-source-root (root)
+      '(("repo-a/src/demo_ns/core.clj" . "(ns not-demo.core)")
+        ("repo-b/src/demo_ns/core.clj" . "(ns demo-ns.core)\n\n(r/defrule rule-a [] => 1)\n"))
+    (let ((clara-explorer-source-roots (list root))
+          (rejected (expand-file-name "repo-a/src/demo_ns/core.clj" root)))
+      (cl-letf (((symbol-function 'cider-get-ns-name) #'test--ns-form-name-stub))
+        (should (equal (buffer-file-name (clara-explorer--source-root-buffer "demo-ns.core" nil))
+                       (expand-file-name "repo-b/src/demo_ns/core.clj" root)))
+        (should-not (find-buffer-visiting rejected))))))
+
+(ert-deftest provenance-goto-finds-an-unloaded-namespace-under-the-source-roots-test ()
+  "No REPL answer and no open buffer: the file is found from the ns name alone."
+  (make-directory test--scratch-dir t)
+  (test--with-source-root (root)
+      '(("other-repo/src/demo_ns/core.clj"
+         . "(ns demo-ns.core)\n\n(let [x 1]\n  (r/defrule rule-a [] => x))\n"))
+    (let ((messages '())
+          (clara-explorer-source-roots (list root))
+          (node (test--prov :kind :production :name "demo-ns.core/rule-a" :ns "demo-ns.core"
+                            :type "rule" :source (test--prov :var? nil))))
+      (with-temp-buffer
+        (test--with-repl-lookup (lambda (&rest _) nil) (lambda (&rest _) "")
+          (cl-letf (((symbol-function 'cider-get-ns-name) #'test--ns-form-name-stub))
+            (should (clara-explorer--goto node))
+            (should (equal (buffer-file-name)
+                           (expand-file-name "other-repo/src/demo_ns/core.clj" root)))
+            (should (= 4 (line-number-at-pos)))))))))
 
 (ert-deftest provenance-mode-uses-the-standard-keys-test ()
   (test--group "g and q come from the parent mode, not from us"

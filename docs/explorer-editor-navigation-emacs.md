@@ -112,9 +112,32 @@ buffer the target window shows. It locates the production in this order:
 2. The namespace's classpath resource, searched for the `defrule`/`defquery`
    form.
 3. An already-open buffer whose `ns` form names the namespace.
+4. The namespace's file under `clara-explorer-source-roots`, found from the
+   name alone: any file at any depth whose path ends in `<ns path>.clj` (or
+   `.cljc`). The ns path is the name munged as Clojure does (dots to `/`, dashes
+   to `_`), and the file is used only when its own `ns` form names the
+   namespace. Shallower matches are tried first. The walk skips dot-directories
+   and the names in `clara-explorer-source-roots-skip-directories` (default
+   `node_modules`, `target`, `out`), because a compiled copy of a `.cljc` file
+   carries the same `ns` form as its source.
+
+Steps 2–4 search the file for the production's defining form (see _Production
+macros_ below), since only the REPL knows the line.
+
+`clara-explorer-source-roots` defaults to `nil`, which means the parent
+directory of the connected REPL's project. With checkouts kept side by side,
+that finds a composed tree's other repos with no configuration. Set it to a list
+of directories to search those instead; the list replaces the default. A root
+can be a single checkout or a directory of them:
+
+```elisp
+(setq clara-explorer-source-roots
+      '("~/src/team-a/" "~/src/team-b/"))
+```
 
 Like a CIDER jump, the opened file is pinned to that REPL when it lies outside
-the REPL's project.
+the REPL's project, so `cider-eval-buffer` there uses the same session without
+linking it in sesman first.
 
 Two defcustoms control the view:
 
@@ -127,10 +150,36 @@ Two defcustoms control the view:
 Backend and transport failures (an `{:error …}` answer or a non-zero babashka
 exit) render as `:message` rows for both the root call and a `TAB` expansion,
 so a failed request never breaks the buffer. `RET` reports why it cannot jump
-when a registry/offline tree names a namespace that is neither loaded in the
-connected REPL nor on its classpath; load that namespace (`cider-load-buffer` in
-its source is enough), or open its file. A jump that fails displays nothing,
-selects no window, and pushes no jump.
+when a registry/offline tree names a namespace that is not loaded in the
+connected REPL, not on its classpath, and not under the source roots; load that
+namespace, open its file, or add its checkout's parent directory to
+`clara-explorer-source-roots`. A jump that fails displays nothing, selects no
+window, and pushes no jump.
+
+## Production macros
+
+`clara-explorer-production-macros` lists the macros that define a production,
+each mapped to its kind. The default is `(("defrule" . rule) ("defquery" .
+query))`. Names are unqualified, and any alias prefix matches (`r/defrule`,
+`clara.rules/defrule`). Setting the list replaces the defaults, so keep them if
+you still use them:
+
+```elisp
+(setq clara-explorer-production-macros
+      '(("defrule" . rule)
+        ("defquery" . query)
+        ("rule" . rule)))   ; e.g. :refer [defrule] :rename {defrule rule}
+```
+
+A listed macro must take the production name as its first argument, after any
+metadata. The list is used in two places:
+
+- **Cursor context**: which enclosing form is the production at point. A query
+  has no RHS, so the kind matters.
+- **Jump search**: which form is searched for when the REPL cannot say where a
+  production is defined. Forms nested in a `let` or `do` are found too. A file
+  with no listed head for the name falls back to the name's first whole-symbol
+  occurrence, at the lowest precedence.
 
 ## Jump history (evil, xref)
 
