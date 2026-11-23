@@ -66,11 +66,17 @@ Test matrix coverage (plan §5), by file:
   the path-keyed tables without scraping indentation.
 - **Window choice** is `winnr("#")` (the previous window), the Neovim analogue of
   Emacs's MRU window, with the window already showing the file taking priority.
-- **No live-nREPL reproduction of the R1 failure.** The spec pins that the eval
-  runs with the origin buffer current; the original Conjure "no client from a
-  `nofile` buffer" symptom was not reproduced against a live nREPL in this
-  sandbox (no REPL available). The bb transport has no such distinction, so the
+- **The R1 routing is pinned, not reproduced.** The spec asserts that the eval
+  runs with the origin buffer current. The original Conjure "no client from a
+  `nofile` buffer" symptom needs a real Conjure client in a real UI session and
+  was not reproduced here; the bb transport has no such distinction, so the
   routing matters only for nREPL sessions.
+- **Locate asks the REPL even when the node already carries `:source`.** A live
+  `:production` node's `:source` is `{:var? true :file "/abs/…" :line N
+  :column 1}`, so `<CR>` could read it instead of evaluating the source-location
+  form. Emacs asks the REPL for every node (the plan's decision) because a
+  registry/bb node's `:source` is `{:var? false}` with no location, and one
+  locate path beats two; the extra eval is one round trip.
 - **`:CR` smoke without a REPL.** The visit path was exercised end to end with
   `g:clara_explorer_source_roots` set and no Conjure connection: locate fell
   through the failing REPL step to the source roots, found
@@ -114,9 +120,32 @@ Real-backend smoke (babashka needs a writable tools.deps cache in this sandbox �
 3. `<CR>` through locate + source roots (no REPL) opened the production's source
    file and searched to the `defrule` form.
 
-Not covered by an automated test: a live nREPL session (tier 3), and therefore
-the `def-str` navigate path and `nvim_buf_call` routing against a real Conjure
-client.
+Live nREPL checks (a scratch session in `explorer/`, registered with
+`client/register!` over the demo rules, no Jetty):
+
+- The **exact Clojure form** `jump.lua` embeds (`SOURCE_LOC_FORM`) answers what
+  locate needs: a loaded var gives `{:file "file:/abs/…/client.clj" :line 237}`
+  (var metadata first, classpath-relative `:file` resolved through `resource`),
+  an unloaded var gives `nil`, and `munge` + dots-to-slashes yields
+  `clara/explorer/test/rules/loan_app_rules`.
+- `client/fact-type-provenance` live: a `:production` root comes back with
+  `:source {:var? true :file "/abs/…/loan_app_rules.clj" :line 34 :column 1}` and
+  **no** `:unit` (live mode), and its `ApplicationOutcome` child lists
+  `app-outcome-denied?` with `:cycle? true` beside the expandable
+  `approved?` / `pending?` siblings.
+- A `:cursor` root from inside the `find-app-outcome` query (direction
+  `:consumer`) answers the `:not`-as-consumer rules (`denied?`, `pending?`) and
+  the query itself as a `:children []` leaf, all with `:via :consume` and
+  `:matches` naming the record.
+
+- `jump.ns_name_of_file` was run over **131 real files** in
+  `explorer/src`, `explorer/test`, and `editor/emacs`: every one yielded an `ns`
+  name, and none disagreed with its munged path — the metadata/docstring forms
+  the parser has to skip are the shapes the repo actually writes.
+
+Not covered by an automated test: the `def-str` navigate path and the
+`nvim_buf_call` routing against a real Conjure client (tier 3), and the
+interactive `<Tab>`/`<CR>` feel in a real UI session.
 
 ## 5. Commands and settings (as shipped)
 
