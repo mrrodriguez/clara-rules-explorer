@@ -5,10 +5,10 @@ Two editor clients speak the same EDN contract to the explorer: `navigate`
 upstream/downstream reference tree). Each has its own `Makefile`, which is the
 authoritative source for its quality commands.
 
-| Directory       | Editor        | Language   | Tests                                 |
-| --------------- | ------------- | ---------- | ------------------------------------- |
-| `emacs/`        | Emacs + CIDER | Emacs Lisp | `make test` (see the tier split below) |
-| `neovim/`       | Neovim+Conjure | Lua       | `make test`                           |
+| Directory | Editor         | Language   | Tests                                  |
+| --------- | -------------- | ---------- | -------------------------------------- |
+| `emacs/`  | Emacs + CIDER  | Emacs Lisp | `make test` (see the tier split below) |
+| `neovim/` | Neovim+Conjure | Lua        | `make test`                            |
 
 The shared Clojure-side contract lives in
 `explorer/src/clara/explorer/server/navigate.clj` (the pure bodies) and
@@ -17,27 +17,6 @@ resolve-form template is a single source of truth at
 `explorer/resources/clara/explorer/server/editor-resolve-form.clj`, symlinked beside
 each editor transport. Never hand-edit a symlinked copy; edit the resource and
 keep every copy byte-identical (a JVM sync test enforces this).
-
-## Fact type provenance
-
-Both operations share the same transports and the same thin-editor rule: the
-editor gathers structural context and renders contract fields; the backend
-computes closures, bridges, cycles, and short display names.
-
-| Transport | `navigate` | `fact-type-provenance` |
-| --- | --- | --- |
-| nREPL | `client/navigate` | `client/fact-type-provenance` |
-| babashka | unflagged `editor-client.bb '<sel>' '<input>'` | `editor-client.bb --provenance '<sel>' '<input>'` |
-
-Emacs ships the provenance view (`tabulated-list-mode`, `TAB`/`RET`, no extra
-package). Neovim ships it too: `:ClaraExplorerShowProducerProvenance` /
-`:ClaraExplorerShowConsumerProvenance` open a split where `<Tab>` expands and
-`<CR>` jumps (`<Plug>` targets for every key, `g:clara_explorer_provenance_depth`
-for the initial depth). Both render the same contract and never compute a
-closure, bridge, cycle, or short fact-type name. The contract, depth/cycle
-semantics, and the v1 no-polarity limitation are documented in
-`docs/explorer-editor-navigation.md`; the per-editor surface is in
-`docs/explorer-editor-navigation-emacs.md` / `-neovim.md`.
 
 ## Emacs (`emacs/`)
 
