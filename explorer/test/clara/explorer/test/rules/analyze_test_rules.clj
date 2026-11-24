@@ -58,88 +58,88 @@
 ;;
 
 (r/defrule rule-record-constructor
-  "Rule A: Standard Clojure record constructor"
+  "Standard Clojure record constructor"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (map->LocalDummyRecord {:id ?app-id :value "standard"})))
 
 (r/defrule rule-java-constructor-dot
-  "Rule B: Java constructor style 1 (Class. args)"
+  "Java constructor style 1 (Class. args)"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (DocumentCheck. ?app-id :pass "dot-style" nil nil)))
 
 (r/defrule rule-java-constructor-new
-  "Rule C: Java constructor style 2 (new Class args)"
+  "Java constructor style 2 (new Class args)"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (new clara.explorer.test.rules.loan_app_facts.DocumentCheck ?app-id :pass "new-style" nil nil)))
 
 (r/defrule rule-nested-helper-call
-  "Rule D: Tracing through helper function"
+  "Tracing through helper function"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (make-document-check-nested ?app-id)))
 
 (r/defrule rule-metadata-map-fact
-  "Rule E: Map facts with metadata (highly dynamic, manual annotations only)"
+  "Map facts with metadata (highly dynamic, manual annotations only)"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (with-meta {:app-id ?app-id :status :pass} {:type :custom-map-type})))
 
 (r/defrule rule-java-constructor-fq-dot
-  "Rule B2: Fully-qualified Class. constructor"
+  "Fully-qualified Class. constructor"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (clara.explorer.test.rules.loan_app_facts.DocumentCheck. ?app-id :pass "fq-dot-style" nil nil)))
 
 (r/defrule rule-java-constructor-short-new
-  "Rule C2: Short name new Class constructor"
+  "Short name new Class constructor"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (new DocumentCheck ?app-id :pass "short-new-style" nil nil)))
 
 (r/defrule rule-java-constructor-short-modern
-  "Rule F1: Modern constructor syntax (Class/new) via short name"
+  "Modern constructor syntax (Class/new) via short name"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (DocumentCheck/new ?app-id :pass "short-modern" nil nil)))
 
 (r/defrule rule-java-constructor-fq-modern
-  "Rule F2: Modern constructor syntax (Class/new) via fully-qualified name"
+  "Modern constructor syntax (Class/new) via fully-qualified name"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (clara.explorer.test.rules.loan_app_facts.DocumentCheck/new ?app-id :pass "fq-modern" nil nil)))
 
 (r/defrule rule-nested-java-helper-call
-  "Rule G: Tracing through helper function for Java constructor"
+  "Tracing through helper function for Java constructor"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (make-java-document-check-nested ?app-id)))
 
 (r/defrule rule-insert-all-collection
-  "Rule H1: insert-all! with a collection of constructed records"
+  "insert-all! with a collection of constructed records"
   [Application (= ?app-id app-id)]
   =>
   (r/insert-all! [(map->LocalDummyRecord {:id ?app-id :value "all-1"})
                   (map->LocalDummyRecord {:id ?app-id :value "all-2"})]))
 
 (r/defrule rule-insert-varargs
-  "Rule H2: insert! with varargs"
+  "insert! with varargs"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (map->LocalDummyRecord {:id ?app-id :value "var-1"})
              (map->LocalDummyRecord {:id ?app-id :value "var-2"})))
 
 (r/defrule rule-retract-varargs
-  "Rule H3: retract! with varargs"
+  "retract! with varargs"
   [Application (= ?app-id app-id)]
   =>
   (r/retract! (map->LocalDummyRecord {:id ?app-id :value "ret-1"})
               (map->LocalDummyRecord {:id ?app-id :value "ret-2"})))
 
 (r/defrule rule-complex-rhs-nested
-  "Rule H4: RHS with complex nested doseq loop"
+  "RHS with complex nested doseq loop"
   [Application (= ?app-id app-id)]
   =>
   (let [items [{:id ?app-id :value "doseq-1"}]]
@@ -147,43 +147,43 @@
       (r/insert! (map->LocalDummyRecord item)))))
 
 (r/defrule rule-helper-does-insert
-  "Rule H5: RHS calls helper function which does the insert"
+  "RHS calls helper function which does the insert"
   [Application (= ?app-id app-id)]
   =>
   (insert-document-check-helper ?app-id))
 
 (r/defrule rule-side-effect-only
-  "Rule H6: Side-effect only rule (no insert/retract)"
+  "Side-effect only rule (no insert/retract)"
   [Application (= ?app-id app-id)]
   =>
   (swap! side-effect-counter inc))
 
 (r/defrule rule-insert-all-helper
-  "Rule H7: insert-all! with collection constructed by helper function"
+  "insert-all! with collection constructed by helper function"
   [Application (= ?app-id app-id)]
   =>
   (r/insert-all! (make-facts ?app-id)))
 
 (r/defrule rule-insert-all-heterogeneous
-  "Rule H8: insert-all! with a heterogeneous collection constructed by helper function"
+  "insert-all! with a heterogeneous collection constructed by helper function"
   [Application (= ?app-id app-id)]
   =>
   (r/insert-all! (make-heterogeneous-facts ?app-id)))
 
 (r/defrule rule-insert-unconditional
-  "Rule H9: insert-unconditional! usage"
+  "insert-unconditional! usage"
   [Application (= ?app-id app-id)]
   =>
   (r/insert-unconditional! (map->LocalDummyRecord {:id ?app-id :value "unconditional"})))
 
 (r/defrule rule-insert-all-unconditional
-  "Rule H10: insert-all-unconditional! usage"
+  "insert-all-unconditional! usage"
   [Application (= ?app-id app-id)]
   =>
   (r/insert-all-unconditional! [(map->LocalDummyRecord {:id ?app-id :value "all-unconditional"})]))
 
 (r/defrule rule-fact-builder-call
-  "Rule E2: Insert using a custom function that has a constructor-like name but is not a record"
+  "Insert using a custom function that has a constructor-like name but is not a record"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (->fact :custom-fact-type {:app-id ?app-id :status :pass})))
@@ -197,31 +197,31 @@
   (r/retract! (clara.explorer.test.rules.loan_app_facts.DocumentCheck/new app-id :pass "helper-retract" nil nil)))
 
 (r/defrule rule-retract-java-dot
-  "Rule I1: retract! with Java constructor (Class.)"
+  "retract! with Java constructor (Class.)"
   [Application (= ?app-id app-id)]
   =>
   (r/retract! (DocumentCheck. ?app-id :pass "dot-retract" nil nil)))
 
 (r/defrule rule-retract-java-new
-  "Rule I2: retract! with Java constructor (new Class)"
+  "retract! with Java constructor (new Class)"
   [Application (= ?app-id app-id)]
   =>
   (r/retract! (new clara.explorer.test.rules.loan_app_facts.DocumentCheck ?app-id :pass "new-retract" nil nil)))
 
 (r/defrule rule-retract-java-modern
-  "Rule I3: retract! with modern Java constructor (Class/new)"
+  "retract! with modern Java constructor (Class/new)"
   [Application (= ?app-id app-id)]
   =>
   (r/retract! (clara.explorer.test.rules.loan_app_facts.DocumentCheck/new ?app-id :pass "modern-retract" nil nil)))
 
 (r/defrule rule-retract-metadata-map
-  "Rule I4: retract! with metadata map fact (highly dynamic)"
+  "retract! with metadata map fact (highly dynamic)"
   [Application (= ?app-id app-id)]
   =>
   (r/retract! (with-meta {:app-id ?app-id :status :pass} {:type :custom-retract-type})))
 
 (r/defrule rule-retract-helper-call
-  "Rule I5: retract! via helper function performing Java constructor + retract"
+  "retract! via helper function performing Java constructor + retract"
   [Application (= ?app-id app-id)]
   =>
   (retract-document-check-helper ?app-id))
@@ -230,7 +230,7 @@
 ;; Constructor resolution chain rules
 
 (r/defrule rule-let-bound-ctor
-  "Rule J1: RHS let-binds a Java constructor result, then inserts the local —
+  "RHS let-binds a Java constructor result, then inserts the local —
    resolved by tracing the local to its init form"
   [Application (= ?app-id app-id)]
   =>
@@ -238,7 +238,7 @@
     (r/insert! dc)))
 
 (r/defrule rule-local-multi-hop-ctor
-  "Rule J3: RHS let-binds a Java constructor result, rebinds it through two
+  "RHS let-binds a Java constructor result, rebinds it through two
    intermediate locals, then inserts the outermost — the boundary chain traces
    the whole local chain back to the constructor init form."
   [Application (= ?app-id app-id)]
@@ -249,7 +249,7 @@
     (r/insert! outer)))
 
 (r/defrule rule-insert-mixed-varargs
-  "Rule J2: varargs insert where only some args are automatically resolvable —
+  "varargs insert where only some args are automatically resolvable —
    yields a :partial aggregate resolution"
   [Application (= ?app-id app-id)]
   =>
@@ -270,14 +270,14 @@
   (r/insert! (->fact :widget-output {:app-id app-id})))
 
 (r/defrule rule-insert-widget-transform
-  "Rule K1: inserts the widget-transform var itself as a fact
+  "inserts the widget-transform var itself as a fact
    (the producing side of the var-as-fact pattern)"
   [Application (= ?app-id app-id)]
   =>
   (r/insert! (var widget-transform)))
 
 (r/defrule rule-consume-widget-transform
-  "Rule K2: binds the widget-transform var-fact and invokes it in the RHS
+  "binds the widget-transform var-fact and invokes it in the RHS
    (the consuming side of the var-as-fact pattern)"
   [?t <- :widget-transform]
   [Application (= ?app-id app-id)]
@@ -295,7 +295,7 @@
   (mapv (fn [id] (->fact :demo/tagged {:id id})) ids))
 
 (r/defrule rule-ctor-of-interest-via-helper
-  "Rule L: inserts via a helper that internally calls the ->fact constructor.
+  "inserts via a helper that internally calls the ->fact constructor.
    Without :fact-constructors the ->fact callsite inside
    make-tagged-facts is invisible; with it, the type :demo/tagged is resolved."
   [Application (= ?app-id app-id)]
@@ -309,7 +309,7 @@
   (->fact :demo/middle {:id id}))
 
 (r/defrule rule-ctor-via-middle-fn
-  "Rule L3: `(insert! (make-middle-fact …))`. The constructor call is NOT written
+  "`(insert! (make-middle-fact …))`. The constructor call is NOT written
    inside the insert! call, so coverage cannot come from lexical nesting — it has
    to come from the call chain (`make-middle-fact` is a link on the path from this
    rule to `->fact`)."
@@ -321,7 +321,7 @@
 (defn deep-outer-fact [id] (deep-inner-fact id))
 
 (r/defrule rule-ctor-via-two-hop-chain
-  "Rule L4: two hops between the insert! and the constructor — the argument names
+  "two hops between the insert! and the constructor — the argument names
    `deep-outer-fact`, which is a link on the chain, while the constructor lives in
    `deep-inner-fact`."
   [Application (= ?app-id app-id)]
@@ -329,7 +329,7 @@
   (r/insert! (deep-outer-fact ?app-id)))
 
 (r/defrule rule-ctor-bound-to-local
-  "Rule L5: the constructor call is bound to a local *outside* the insert! call,
+  "the constructor call is bound to a local *outside* the insert! call,
    so the insert!'s argument is a bare local naming no link in the call chain.
    The constructor is still discovered — it is a var-usage in the rule's own body
    — but nothing marks the boundary call as covered."
@@ -345,7 +345,7 @@
   (with-meta {:id id} {:type :demo/opaque-2}))
 
 (r/defrule rule-ctor-local-plus-multiple-inserts
-  "Rule L6: a let-bound constructor alongside several inserts — one inline
+  "a let-bound constructor alongside several inserts — one inline
    constructor, one opaque, one inserting the local."
   [Application (= ?app-id app-id)]
   =>
@@ -355,7 +355,7 @@
     (r/insert! f)))
 
 (r/defrule rule-ctor-local-never-inserted
-  "Rule L7: a constructor is called and bound, but the local is never inserted.
+  "a constructor is called and bound, but the local is never inserted.
    Nothing about this rule actually emits :demo/never-inserted."
   [Application (= ?app-id app-id)]
   =>
@@ -363,7 +363,7 @@
     (r/insert! (opaque-fact ?app-id))))
 
 (r/defrule rule-ctor-and-opaque-inserts
-  "Rule L2: two inserts in one rule — one built by the ->fact constructor of
+  "two inserts in one rule — one built by the ->fact constructor of
    interest, one by an opaque form only a `:callsite-resolver-fn` can read.
 
    Exercises the precedence rule: the constructor path owns the first insert
@@ -376,7 +376,7 @@
   (r/insert! (with-meta {:id ?app-id} {:type :demo/opaque})))
 
 (r/defrule rule-ctor-identical-forms
-  "Rule L8: two textually-identical constructor forms in one rule — one
+  "two textually-identical constructor forms in one rule — one
    let-bound, one written inline in a second insert!.  Position identity must
    keep them straight: the inline constructor owns the second insert, the
    let-bound constructor owns the first (via its binding), and neither
@@ -586,7 +586,7 @@
   [(->fact :demo/looked-up-2 {:id y})])
 
 (r/defrule rule-ctor-locals-via-helpers
-  "Rule L9: two let-bound locals, each inserted by its own insert-all!, each
+  "two let-bound locals, each inserted by its own insert-all!, each
    bound to a helper call that transitively reaches the ->fact constructor.
    The intermediate calls live in the binding inits (outside both boundary
    spans), so only span-set expansion attributes them — one callsite per
@@ -599,7 +599,7 @@
     (r/insert-all! facts-2)))
 
 (r/defrule rule-ctor-locals-concat-for
-  "Rule L10: one insert-all! over a local bound to (concat a b), where a and
+  "one insert-all! over a local bound to (concat a b), where a and
    b are locals bound to `for` bodies holding ->fact calls. Expansion walks
    the local closure (concat init, then both for bodies); both constructor
    usages land in-region and both types promote from the single insert."
@@ -611,7 +611,7 @@
     (r/insert-all! fact-seq-all)))
 
 (r/defrule rule-ctor-locals-unreached-stays-dropped
-  "Rule L11: a ->fact call bound to a local that never flows into the insert
+  "a ->fact call bound to a local that never flows into the insert
    must stay dropped even though expansion runs — regions only grow through
    kondo usage→binding linkage from the boundary arg."
   [Application (= ?app-id app-id)]
@@ -621,7 +621,7 @@
     (r/insert-all! used)))
 
 (r/defrule rule-ctor-locals-shadowed-local
-  "Rule L12: two same-named locals — the outer one flows into insert-all!; a
+  "two same-named locals — the outer one flows into insert-all!; a
    shadowed inner one (same symbol, different kondo :id) holds a ->fact that
    never flows. Expansion follows kondo usage→binding linkage, so the
    non-flowing constructor must stay dropped despite the name collision."
@@ -633,7 +633,7 @@
       (count f))))
 
 (r/defrule rule-ctor-doseq-source
-  "Rule L13: the ->fact constructor is reached only through the `doseq`
+  "the ->fact constructor is reached only through the `doseq`
    binding's *source* — `(look-up-facts-2 …)` — not its body. Ownership
    expansion must follow the seq binding's source span to attribute it."
   [Application (= ?app-id app-id)]
@@ -642,7 +642,7 @@
     (r/insert! f)))
 
 (r/defrule rule-ctor-for-source
-  "Rule L14: the ->fact constructor is reached only through the `for` binding's
+  "the ->fact constructor is reached only through the `for` binding's
    *source*, with the bound local inserted via `insert-all!` over the whole
    `for` form."
   [Application (= ?app-id app-id)]
@@ -650,7 +650,7 @@
   (r/insert-all! (for [f (look-up-facts-1 ?app-id)] f)))
 
 (r/defrule rule-ctor-loop-source
-  "Rule L15: the ->fact constructor is reached only through the `loop` binding's
+  "the ->fact constructor is reached only through the `loop` binding's
    *initial value* — `(look-up-facts-1 …)` — not its body."
   [Application (= ?app-id app-id)]
   =>

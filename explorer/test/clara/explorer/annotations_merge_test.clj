@@ -54,11 +54,11 @@
          {:note "closed map tier->type; both values enumerated"}}]}}}}))
 
 ;; ---------------------------------------------------------------------------
-;; F1 — sparse layers: omission means "no opinion"
+;; Sparse layers: omission means "no opinion"
 ;; ---------------------------------------------------------------------------
 
 (deftest sparse-layer-preserves-detection-map
-  (testing "an overlay that mentions a rule but omits its detection map leaves it intact (F1)"
+  (testing "an overlay that mentions a rule but omits its detection map leaves it intact"
     (let [overlay (ann/->layer {:id :overlay
                                 :annotations
                                 {"acme.pricing/discount-rule"
@@ -71,7 +71,7 @@
                            :clara-rules/notes))))))
 
 ;; ---------------------------------------------------------------------------
-;; F2 — unknown keys are preserved
+;; Unknown keys are preserved
 ;; ---------------------------------------------------------------------------
 
 (deftest unknown-keys-survive
@@ -94,7 +94,7 @@
       (is (= {:acme/new-key 42} (get rules "rule/c"))))))
 
 ;; ---------------------------------------------------------------------------
-;; §5.4 — tombstones and the short-circuit shape
+;; Tombstones and the short-circuit shape
 ;; ---------------------------------------------------------------------------
 
 (deftest tombstones
@@ -140,7 +140,7 @@
           rule (get (ann/annotations (ann/merge-layers [base erase readd])) "rule/a")]
       (is (= [:z] (:clara-rules/insert-types rule)))))
 
-  (testing "short-circuit curation: types with no callsites and no resolution (§5.4)"
+  (testing "short-circuit curation: types with no callsites and no resolution"
     (let [short-circuit (ann/->layer {:id :curated
                                       :annotations
                                       {"acme.pricing/discount-rule"
@@ -157,7 +157,7 @@
       (is (not (contains? rule :clara-rules/merge-props))))))
 
 ;; ---------------------------------------------------------------------------
-;; §5.3 — deep callsite merge
+;; Deep callsite merge
 ;; ---------------------------------------------------------------------------
 
 (deftest callsite-deep-merge
@@ -205,11 +205,11 @@
       (is (= :none (:resolution dm))))))
 
 ;; ---------------------------------------------------------------------------
-;; F4 / §4.3 — resolution is derived, never authored
+;; Resolution is derived, never authored
 ;; ---------------------------------------------------------------------------
 
 (deftest resolution-is-recomputed
-  (testing "a contradictory authored :resolution is ignored (F4)"
+  (testing "a contradictory authored :resolution is ignored"
     (let [lying (ann/->layer {:id :lying
                               :annotations
                               {"rule/a" {:clara-rules/dynamic-insert-types-detected
@@ -242,7 +242,7 @@
     (is (= :partial (dm-for :partial :partial)))))
 
 ;; ---------------------------------------------------------------------------
-;; §5.1 — merge-props precedence
+;; Merge-props precedence
 ;; ---------------------------------------------------------------------------
 
 (deftest merge-props-precedence
@@ -306,7 +306,7 @@
     (is (= "first\nsecond" (:clara-rules/notes rule)))))
 
 ;; ---------------------------------------------------------------------------
-;; §5 — precedence, associativity, duplicate ids
+;; Precedence, associativity, duplicate ids
 ;; ---------------------------------------------------------------------------
 
 (deftest three-layer-precedence
@@ -349,7 +349,7 @@
     (is (thrown? clojure.lang.ExceptionInfo (ann/merge-layers [l1 l2])))))
 
 ;; ---------------------------------------------------------------------------
-;; §6 / F7 — layer IO round-trip
+;; Layer IO round-trip
 ;; ---------------------------------------------------------------------------
 
 (deftest write-read-round-trip
@@ -370,7 +370,7 @@
             _ (ann/write-layer! path layer)
             written (slurp path)
             reread (ann/->layer path)]
-        (testing "no reader metadata is emitted (F7)"
+        (testing "no reader metadata is emitted"
           (is (not (re-find #"\^\{" written)))
           (is (not (re-find #":row" written))))
         (testing ":source defaults to the path"
@@ -412,7 +412,7 @@
             (io/delete-file path :silently)))))))
 
 ;; ---------------------------------------------------------------------------
-;; §4.4 — callsite identity (phase 3)
+;; Callsite identity
 ;; ---------------------------------------------------------------------------
 
 (deftest callsite-id-format-and-stability
@@ -508,7 +508,7 @@
           "in-memory id and read-back id share the canonical source-str basis"))))
 
 ;; ---------------------------------------------------------------------------
-;; §5.6 — dangling references (phase 3)
+;; Dangling references
 ;; ---------------------------------------------------------------------------
 
 (def ^:private dangling-curated-layer
@@ -575,7 +575,7 @@
       (is (= :partial (:resolution dm))))))
 
 ;; ---------------------------------------------------------------------------
-;; §7.1 — unresolved-report (phase 4)
+;; Unresolved report
 ;; ---------------------------------------------------------------------------
 
 (deftest unresolved-report-shape-and-counts
@@ -626,7 +626,7 @@
              (:dangling report))))))
 
 ;; ---------------------------------------------------------------------------
-;; §7.2 — validate-layers (phase 4)
+;; Validate layers
 ;; ---------------------------------------------------------------------------
 
 (defn- ^:private findings-by-type [findings]
@@ -759,7 +759,7 @@
     (is (= [] (ann.report/validate-layers [generated-layer curated-layer])))))
 
 ;; ---------------------------------------------------------------------------
-;; §5.7 — type derivation (phase 5)
+;; Type derivation
 ;; ---------------------------------------------------------------------------
 
 (def ^:private props-layer-fixture
@@ -771,7 +771,7 @@
                                :notes "tier pricing"}}}))
 
 (deftest worked-example-end-to-end
-  (testing "the §8 stack: curated evidence promotes graph edges with provenance"
+  (testing "curated evidence promotes graph edges with provenance"
     (let [merged (ann/merge-layers [props-layer-fixture generated-layer curated-layer]
                                    {:type-derivation :from-callsites})
           rule (get (ann/annotations merged) "acme.pricing/discount-rule")
@@ -815,7 +815,7 @@
             "authored type with no callsite backing is dropped")
         (is (not (contains? (get rules "rule/c") :clara-rules/insert-types))
             "a :none callsite supports nothing — authored type is dropped")))
-    (testing "props-survival clause: no detection map → authored types stand (§5.5)"
+    (testing "props-survival clause: no detection map → authored types stand"
       (let [rules (ann/annotations (ann/merge-layers [layer] {:type-derivation :from-callsites}))]
         (is (= [:authored/only] (:clara-rules/insert-types (get rules "rule/b"))))))
     (testing ":additive deduplicates when authored and derived are the same logical type"
@@ -926,7 +926,7 @@
                     (ann.report/validate-layers [props generated]))))))))
 
 ;; ---------------------------------------------------------------------------
-;; phase 7 — rebase-layer
+;; Rebase layer
 ;; ---------------------------------------------------------------------------
 
 (deftest rebase-layer-test

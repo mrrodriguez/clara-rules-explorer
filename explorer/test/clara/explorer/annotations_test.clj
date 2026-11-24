@@ -180,7 +180,7 @@
                      [:annotations
                       "clara.explorer.test.rules.loan-app-rules/app-outcome-approved?"
                       :clara-rules/insert-types]))))
-    (testing "composes at any position in the fold, carrying props through (§5.5)"
+    (testing "composes at any position in the fold, carrying props through"
       (let [merged (ann.merge/merge-layers [layer])
             rule (get (ann.merge/annotations merged)
                       "clara.explorer.test.rules.loan-app-rules/app-outcome-approved?")]

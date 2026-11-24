@@ -1,16 +1,17 @@
 # Editor integrations
 
-Two editor clients speak the same EDN `navigate` contract to the explorer.
-Each has its own `Makefile`, which is the authoritative source for its quality
-commands.
+Two editor clients speak the same EDN contract to the explorer: `navigate`
+(jump to producer/consumer) and `fact-type-provenance` (an expandable
+upstream/downstream reference tree). Each has its own `Makefile`, which is the
+authoritative source for its quality commands.
 
-| Directory       | Editor        | Language   | Tests                                 |
-| --------------- | ------------- | ---------- | ------------------------------------- |
-| `emacs/`        | Emacs + CIDER | Emacs Lisp | `make test` (see the tier split below) |
-| `neovim/`       | Neovim+Conjure | Lua       | `make test`                           |
+| Directory | Editor         | Language   | Tests                                  |
+| --------- | -------------- | ---------- | -------------------------------------- |
+| `emacs/`  | Emacs + CIDER  | Emacs Lisp | `make test` (see the tier split below) |
+| `neovim/` | Neovim+Conjure | Lua        | `make test`                            |
 
 The shared Clojure-side contract lives in
-`explorer/src/clara/explorer/server/navigate.clj` (the pure body) and
+`explorer/src/clara/explorer/server/navigate.clj` (the pure bodies) and
 `explorer/src/clara/explorer/server/schema.clj` (the shapes). The editor
 resolve-form template is a single source of truth at
 `explorer/resources/clara/explorer/server/editor-resolve-form.clj`, symlinked beside
@@ -63,3 +64,29 @@ resource `clara/explorer/server/editor-resolve-form.clj`. The Emacs/Neovim copie
 are repo-relative symlinks into `explorer/resources/...`. A package/plugin build
 must materialize the symlinked file into the package-local directory before
 release.
+
+## Babashka sandbox note
+
+Every bb entry point (`bin/editor-client.bb`, `bin/bb-shared-smoke-test.bb`) loads
+`bin/bootstrap.bb`, which calls `babashka.deps/add-deps` to put the
+`prismatic/schema` version from `explorer/deps.edn` on the classpath and records
+the resolved basis under the tools.deps cache (`~/.clojure/.cpcache`). In a
+sandbox that denies writes there, `make bb-smoke-test` and the editor's `bb`
+transport fail with `java.io.IOException: Operation not permitted` from
+`add-deps`. That is an environment restriction, not a code defect.
+
+A `BABASHKA_CLASSPATH` override does **not** help: `bootstrap.bb` calls
+`add-deps` unconditionally, so the classpath never gets a chance to matter.
+Point the tools.deps cache at a writable directory instead and rerun the same
+command:
+
+```bash
+cd explorer
+mkdir -p target/cljconf
+CLJ_CONFIG="$PWD/target/cljconf" make bb-smoke-test
+```
+
+`CLJ_CONFIG` is what `add-deps` honours, so resolution needs no write access
+under `$HOME` (the maven artifacts still come from the local `~/.m2`, or the
+network on a cold cache). Report the workaround rather than treating the smoke
+test as a failure.

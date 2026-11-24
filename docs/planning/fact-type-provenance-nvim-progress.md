@@ -1,0 +1,249 @@
+# Progress: fact type provenance in Neovim
+
+Companion to [`fact-type-provenance-nvim-plan.md`](./fact-type-provenance-nvim-plan.md)
+(the plan) and [`fact-type-provenance-progress.md`](./fact-type-provenance-progress.md)
+(the backend + Emacs semantics, which stay the source of truth). This file is
+the checkpoint log for the Neovim port: decisions taken, what landed, the
+deviations from the plan, and the verification runs. Update in place as work
+lands; do not turn it into a diary.
+
+Branch: `fact-type-provenance`. Scope: `editor/neovim/` plus docs. No Clojure
+change was needed — the contract was already complete, so every edge case
+resolved in Lua.
+
+**Status: steps 1–9 done, review fixes in (§3.1); `make check` green (226
+tests), real bb smoke green.**
+
+## 1. Step-1 decisions (plan §6)
+
+| # | Question | Decision |
+| --- | --- | --- |
+| 1 | REPL project directory for the default source root | Eval `(System/getProperty "user.dir")` through the origin buffer once and cache it; fall back to `vim.fs.root(origin_bufnr, {"deps.edn","project.clj","bb.edn",".git"})` when the REPL cannot answer. The default root is that directory's parent, matching Emacs's `nrepl-project-dir`. The cache is dropped by `:ClaraExplorerRefresh`. |
+| 2 | View container | Regular split window (already decided in the plan). |
+| 3 | Refresh key | `R`, plus a `<Plug>` target per key. `g` is left unbound: it is a prefix in several common setups, and `<Plug>` is the escape hatch. |
+| 4 | Navigate picker jumps for var-backed targets | Keep `def-str` on the navigate path (it runs from the source buffer, where Conjure resolves its client). The provenance view routes **every** `<CR>` through the new locate/show path. |
+
+## 2. What landed, per plan step
+
+| # | Step | Where | Result |
+| --- | --- | --- | --- |
+| 1 | Decisions | this doc §1 | done |
+| 2 | Production macros | `structural.lua` (owns the table + `production_kind`), `jump.lua` (head regex built per call) | C1–C5 green |
+| 3 | Wrapper-head fallback | `token.lua` `wrapper_inner_type_bounds` | W1–W2 green |
+| 4 | Origin-buffer eval routing | `conjure.eval_edn` takes `origin_bufnr`, runs `eval-str` inside `nvim_buf_call` | R1 green |
+| 5 | Locate/show split, var line first, source roots | `jump.lua` (`locate`, `show`, `ns_name_from_text`, `source_root_candidates`, `project_dir`) | J1–J8 green |
+| 6 | Provenance transport | `conjure.provenance_input` / `provenance_code` (nested EDN), `bb_eval` takes `{flag = "--provenance"}` | T1–T4 green |
+| 7 | Provenance view + both commands | `lua/clara-explorer/provenance.lua`, `plugin/clara-explorer.vim`, `init.show_provenance` | P1–P8 green |
+| 8 | Docs | `explorer-editor-navigation-neovim.md`, `explorer-editor-navigation.md`, `editor/AGENTS.md` | done |
+| 9 | Verification | §4 below | green |
+
+Test matrix coverage (plan §5), by file:
+
+- **C1–C5** — `structural_spec.lua` (C1–C5 for cursor context) and `jump_spec.lua`
+  (C5 and C2 for the definition-site regex: an empty list matches no head).
+- **W1–W2** — `token_spec.lua`.
+- **R1** — `transport_spec.lua` (`conjure.eval_edn origin routing`).
+- **J1–J8** — `jump_spec.lua`.
+- **T1–T2 / T3–T4** — `transport_spec.lua` + `bb_transport_spec.lua` (flag order).
+- **P1–P8** — `provenance_spec.lua`.
+
+## 3. Deviations and notes
+
+- **Ancestors from node kinds, not path parity.** Emacs computes `<Tab>`'s
+  `:ancestors` from the odd path indices, which only holds for a fact-type
+  root. `provenance.production_ancestors` walks the path prefixes and keeps the
+  components whose node is a `:production`, so it is correct for any root
+  shape (the backend's `:production` roots included).
+- **Source-root walk uses `vim.fs.dir`.** An earlier note here said
+  `vim.fs.dir(root, {depth = math.huge, skip = …})` does not recurse on 0.12.
+  That was wrong: on Neovim 0.12.4 it recurses fully, and `skip` prunes a
+  directory only when it returns exactly `false`. The hand-rolled recursion was
+  replaced with it in the review fixes (§3.1). It follows no symlinked directory
+  unless `follow` is set (matching Emacs's `directory-files-recursively`), and an
+  unreadable directory is skipped because `fs_scandir` returns nil for it.
+- **`join_entries` takes varargs.** The first draft joined a table, and a
+  table literal whose first entry is an omitted key (`:production` nil) made
+  `ipairs` stop at the gap — silently dropping `:side`, `:caller-ns`, and
+  `:token`. Caught by the T1/T4 specs; the encoder now uses `select("#", ...)`.
+- **`provenance.view_state(bufnr)`** is exposed so the P matrix can assert on
+  the path-keyed tables without scraping indentation.
+- **Window choice** is `winnr("#")` (the previous window), the Neovim analogue of
+  Emacs's MRU window, with the window already showing the file taking priority.
+- **The R1 routing is pinned, not reproduced.** The spec asserts that the eval
+  runs with the origin buffer current. The original Conjure "no client from a
+  `nofile` buffer" symptom needs a real Conjure client in a real UI session and
+  was not reproduced here; the bb transport has no such distinction, so the
+  routing matters only for nREPL sessions.
+- **Locate asks the REPL even when the node already carries `:source`.** A live
+  `:production` node's `:source` is `{:var? true :file "/abs/…" :line N
+  :column 1}`, so `<CR>` could read it instead of evaluating the source-location
+  form. Emacs asks the REPL for every node (the plan's decision) because a
+  registry/bb node's `:source` is `{:var? false}` with no location, and one
+  locate path beats two; the extra eval is one round trip.
+- **`:CR` smoke without a REPL.** The visit path was exercised end to end with
+  `g:clara_explorer_source_roots` set and no Conjure connection: locate fell
+  through the failing REPL step to the source roots, found
+  `explorer/test/.../loan_app_rules.clj`, kept the provenance split (2 windows),
+  and landed on `(r/defrule app-outcome-denied?`.
+
+### 3.1 Review fixes
+
+A review against the Emacs semantics (`fact-type-provenance-progress.md` §7.3
+and items 16–17) found these, all fixed in `jump.lua`:
+
+- **`<CR>` hung without a Conjure connection.** `locate` waited for the REPL
+  eval before trying open buffers and source roots. With Conjure loaded but not
+  connected, `eval-str` only logs `; No connection` and never calls back (read
+  from the installed Conjure's `with-conn-or-warn`), so nothing happened. The
+  default REPL eval (`repl_eval`) now fails fast when `conjure.connected()` is
+  false, and `locate` falls through. The no-REPL smoke in §4 missed this
+  because Conjure was not loaded at all, which errors out instead.
+- **Candidate order was nondeterministic.** All roots were sorted together by
+  depth with the unstable `table.sort`, over filesystem listing order. Now the
+  order is root, then depth, then path, matching the function's docstring and
+  Emacs.
+- **The line check read the file on disk.** With unsaved edits the cursor could
+  land on the wrong line, and a var evaluated from an unsaved buffer reports the
+  buffer's line. `locate` now passes the REPL's line through, and `show` checks
+  it in the displayed buffer as a whole symbol (Emacs used a whole-symbol check;
+  this used a substring).
+- **`:edit` of a modified buffer's own file raised E37.** Found while testing
+  the line fix: `<CR>` errored when the target window already showed that file
+  with unsaved changes. `open_source` now shows an existing loaded buffer instead
+  of re-editing it.
+- **An empty skip list fell back to the defaults.** `{}` now skips nothing
+  besides dot-directories, as an empty list does in Emacs and as an empty macro
+  table already did in Lua.
+- **The REPL error was dropped from the final reason.** It is now appended, as
+  Emacs does.
+
+New or changed specs: J2 (`locate` passes the line through; `show` checks the
+unsaved buffer), the no-connection fall-through, J4 ordering and empty skip
+list, J6 naming the REPL error, and a whole-symbol line check. All seven fail
+against the pre-fix `jump.lua` and pass with it.
+
+### 3.2 Field bug: `<Tab>` from the view raised Conjure's `E5108`
+
+**Reported.** In the provenance tree, every expandable production raised
+`E5108: Lua: … conjure/eval.lua:157: No Conjure client configured for the current
+file type.`; non-expandable rows were fine (they only notify), and it happened
+for every tree, not one unit.
+
+**Root cause.** `provenance.request` asked `conjure.with_transport` for the
+effective transport. In `"auto"` mode that runs `server_available`, which evals
+`get-current-system` — and that eval carried no `origin_bufnr`, so it ran in the
+current buffer, which for `<Tab>`/`R` is the provenance view. The view is a
+`nofile` buffer with filetype `clara-provenance`, Conjure finds no client for it,
+and `eval-str` **throws synchronously** rather than calling `cb`. The root call
+escaped because it is issued from the rule's source buffer; only expansions come
+from the view. An explicitly set `bb`/`nrepl` transport hides the bug entirely,
+because explicit transports skip the probe — which is why both the specs and the
+headless smoke (each pinning a transport) missed it. Step 4's `nvim_buf_call`
+routing covered `eval_edn` for the operation itself, but not the probe that
+precedes it.
+
+**Fix.**
+
+- `conjure.with_transport(cb, opts)` and `conjure.server_available(cb, opts)`
+  take and forward `origin_bufnr`, so the availability probe runs with the
+  origin buffer current. `provenance.request` passes its origin, and
+  `init.navigate` passes the source buffer (a window switch during token
+  resolution must not change which client answers).
+- `conjure.eval_edn` wraps the `eval-str` call in `pcall` and routes a
+  synchronous throw to `on_error`, recording it for
+  `:ClaraExplorerLastError`, so a missing client can never escape as `E5108`
+  from any call site.
+- `provenance.request` refuses to send when `conjure.connected()` is false and
+  renders `clara-explorer: not connected to a Conjure REPL` as a message row.
+  Conjure only logs `; No connection` and never calls back, so the expansion
+  would otherwise hang silently — the trap `jump.lua`'s `repl_eval` already
+  guards, and a view can outlive its connection.
+
+**Tests.** `provenance view R1 a <Tab> request from the view reaches the client
+through the origin buffer` stubs `conjure.eval` with one that throws unless the
+origin buffer is current — exactly Conjure's behaviour — and asserts that both
+evals (probe, then operation) run there; with the `with_transport` origin
+removed it fails with one eval and a fallback to bb, which is how the bug was
+confirmed. Unit specs pin the halves: a thrown `eval-str` reaching `on_error`
+(with and without an origin), the probe receiving `origin_bufnr`, and the
+disconnected request rendering a message row.
+
+## 4. Verification
+
+Baseline before any edit: 170 tests across 6 spec files, `format-check` clean,
+`lint` 0/0.
+
+After the work (all run from `editor/neovim`):
+
+```
+mise exec -- make check    # format-check + lint + test
+```
+
+- `format-check`: clean (stylua 2.5.2).
+- `lint`: 0 errors / 0 warnings / 0 parse errors (selene 0.31.0).
+- `test`: **231 tests, 0 failures, 0 errors** — `edn_spec` 21, `structural_spec`
+  11, `token_spec` 52, `transport_spec` 46, `bb_transport_spec` 43,
+  `provenance_spec` 22, `jump_spec` 36 (31 before the review fixes).
+
+`stylua`/`selene` are installed through `mise` but are not on the default
+`PATH` here, so the Makefile is invoked as `mise exec -- make …`. No install
+or network access was needed.
+
+Real-backend smoke (babashka needs a writable tools.deps cache in this sandbox —
+`editor/AGENTS.md` documents the `CLJ_CONFIG` workaround):
+
+1. The exact EDN strings `conjure.provenance_input` produces are accepted by
+   `bb explorer/bin/editor-client.bb --provenance` for both a `:production` root
+   and a `:cursor` root with a nested `:input`.
+2. A headless Neovim run with `g:clara_explorer_transport = "bb"` and the
+   composed `loan-app-ruleset` + `loan-disposition-ruleset` selection rendered
+   the consumer tree at `:depth 0`, then a real `<Tab>` (`--provenance` fetch)
+   expanded `notice-approved-app` into `ApprovalNotice` and
+   `find-approval-notices` (7 → 9 rows), with `via :loan-app/application-outcome`,
+   `@unit`, `(query)`, `(no outputs)`, `↻ cycle`, and `↑ shown above` all
+   rendering as documented.
+3. `<CR>` through locate + source roots (no REPL) opened the production's source
+   file and searched to the `defrule` form.
+4. The reported `E5108` scenario, replayed after the fix: `"auto"` transport
+   (so the probe runs), a fake `conjure.eval` that throws unless the current
+   buffer's filetype is `clojure`, the composed unit, and a `<Tab>` issued from
+   the view buffer itself. The probe and the operation both reach the fake
+   client through the origin buffer and `notice-approved-app` expands into
+   `ApprovalNotice` + `find-approval-notices` (7 → 9 rows).
+
+Live nREPL checks (a scratch session in `explorer/`, registered with
+`client/register!` over the demo rules, no Jetty):
+
+- The **exact Clojure form** `jump.lua` embeds (`SOURCE_LOC_FORM`) answers what
+  locate needs: a loaded var gives `{:file "file:/abs/…/client.clj" :line 237}`
+  (var metadata first, classpath-relative `:file` resolved through `resource`),
+  an unloaded var gives `nil`, and `munge` + dots-to-slashes yields
+  `clara/explorer/test/rules/loan_app_rules`.
+- `client/fact-type-provenance` live: a `:production` root comes back with
+  `:source {:var? true :file "/abs/…/loan_app_rules.clj" :line 34 :column 1}` and
+  **no** `:unit` (live mode), and its `ApplicationOutcome` child lists
+  `app-outcome-denied?` with `:cycle? true` beside the expandable
+  `approved?` / `pending?` siblings.
+- A `:cursor` root from inside the `find-app-outcome` query (direction
+  `:consumer`) answers the `:not`-as-consumer rules (`denied?`, `pending?`) and
+  the query itself as a `:children []` leaf, all with `:via :consume` and
+  `:matches` naming the record.
+
+- `jump.ns_name_of_file` was run over **131 real files** in
+  `explorer/src`, `explorer/test`, and `editor/emacs`: every one yielded an `ns`
+  name, and none disagreed with its munged path — the metadata/docstring forms
+  the parser has to skip are the shapes the repo actually writes.
+
+Not covered by an automated test: the `def-str` navigate path against a real
+Conjure client (tier 3) and the interactive feel in a real UI session. The
+`nvim_buf_call` routing is now covered by §3.2's regression spec, whose stub
+throws exactly as Conjure does for a buffer with no client.
+
+## 5. Commands and settings (as shipped)
+
+See `docs/explorer-editor-navigation-neovim.md` for the user-facing surface:
+`:ClaraExplorerShowProducerProvenance` / `:ClaraExplorerShowConsumerProvenance`,
+`<Tab>`/`<CR>`/`R`/`q` (each with a `<Plug>(ClaraExplorerProvenance…)`
+target), `g:clara_explorer_provenance_depth`,
+`g:clara_explorer_production_macros`, `g:clara_explorer_source_roots`, and
+`g:clara_explorer_source_roots_skip_directories`.

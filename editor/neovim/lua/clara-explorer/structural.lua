@@ -1,8 +1,35 @@
---- Tree-sitter structural skeleton: find the enclosing `defrule`/`defquery`
--- production.  This is the only parser-dependent module; side detection and
--- token resolution live in `token.lua` (byte-based sexp-walker port).
+--- Tree-sitter structural skeleton: find the enclosing production.  This is the
+-- only parser-dependent module; side detection and token resolution live in
+-- `token.lua` (byte-based sexp-walker port).  It also owns the production-macro
+-- table, since recognizing a production head is the same question here and in
+-- `jump.lua`'s definition-site search.
 
 local M = {}
+
+--- The built-in production macros: unqualified macro name -> `"rule"` | `"query"`.
+local DEFAULT_PRODUCTION_MACROS = { defrule = "rule", defquery = "query" }
+
+--- The configured production macros: unqualified name -> `"rule"` | `"query"`.
+-- `g:clara_explorer_production_macros` replaces the defaults entirely, so a
+-- project whose rules are built by `defdata`/`rule` sets its own list.  The
+-- variable is read per call, so a change applies without reloading the plugin.
+-- An entry whose value is neither kind is dropped rather than guessed: the kind
+-- decides the "queries have no RHS" guard, so a wrong answer would refuse a
+-- valid navigation.  Entries are documented as macros whose first argument
+-- (after any metadata) is the production name.
+function M.production_macros()
+  local configured = vim.g.clara_explorer_production_macros
+  if configured == nil then return DEFAULT_PRODUCTION_MACROS end
+  local macros = {}
+  for name, kind in pairs(configured) do
+    if type(name) == "string" and (kind == "rule" or kind == "query") then macros[name] = kind end
+  end
+  return macros
+end
+
+--- The production kind for head symbol HEAD, or nil when HEAD is not a
+-- production macro.
+function M.production_kind(head) return M.production_macros()[head] end
 
 --- True when the clojure parser is loadable (Neovim 0.10 `has_parser` API,
 -- falling back to the 0.12 `vim.treesitter.language.get_lang` API).
@@ -56,14 +83,15 @@ function M.enclosing_production(bufnr, row, col)
       local head = kids[1]
       if head and head:type() == "sym_lit" then
         local head_name = sym_unqualified(head, bufnr)
-        if head_name == "defrule" or head_name == "defquery" then
+        local kind = M.production_kind(head_name)
+        if kind then
           local name_node = kids[2]
           local name = name_node and name_node:type() == "sym_lit" and sym_unqualified(name_node, bufnr)
           if name then
             local srow, scol, erow, ecol = cur:range()
             return {
               name = name,
-              kind = head_name == "defrule" and "rule" or "query",
+              kind = kind,
               range = { srow, scol, erow, ecol },
             }
           end

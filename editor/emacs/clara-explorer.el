@@ -12,15 +12,18 @@
 ;; Editor navigation over a live CIDER REPL running the Clara Rules Explorer
 ;; server.  Point at a fact type in a defrule/defquery and jump to its producer
 ;; (LHS) or consumer (RHS), using the dependency graph the server has already
-;; computed.
+;; computed; or open an expandable producer/consumer provenance tree around it.
 ;;
-;; All semantics live in `clara.explorer.server.client/navigate` (Clojure); this
-;; file is structural navigation + transport + UX glue.  No machine-specific
-;; paths, home directories, or ports are hard-coded anywhere.
+;; All semantics live in `clara.explorer.server.client/navigate` and
+;; `clara.explorer.server.client/fact-type-provenance` (Clojure); this file is
+;; structural navigation + transport + UX glue.  No machine-specific paths, home
+;; directories, or ports are hard-coded anywhere.
 ;;
 ;; Spike workflow: open this file, M-x eval-buffer, then:
 ;;   M-x clara-explorer-navigate-producer   (LHS type -> producer)
 ;;   M-x clara-explorer-navigate-consumer   (RHS type -> consumer)
+;;   M-x clara-explorer-show-producer-provenance  (upstream tree)
+;;   M-x clara-explorer-show-consumer-provenance  (downstream tree)
 ;;   M-x clara-explorer-refresh             (re-warm annotations/analysis)
 ;;   M-x clara-explorer-swap-session        (swap in a rebuilt session)
 
@@ -44,10 +47,11 @@ Set via `M-x customize-variable' or `(setq clara-explorer-debug t)' in init."
   :group 'clara-explorer)
 
 (defcustom clara-explorer-transport 'auto
-  "Transport for navigation queries.
+  "Transport for navigation and provenance queries.
 `auto' uses nREPL when the CIDER session has a running explorer system,
 otherwise babashka (default);
-`nrepl' evals `client/navigate' over the CIDER session;
+`nrepl' evals `client/navigate' / `client/fact-type-provenance' over the CIDER
+session;
 `bb' shells out to `editor-client.bb' over the persisted artifacts."
   :type '(choice (const :tag "Auto (nREPL when the explorer server is running, else babashka)" auto)
                  (const :tag "nREPL (live session)" nrepl)
@@ -66,6 +70,52 @@ When nil, `CLARA_RULES_EXPLORER_REGISTRY' is read from the environment."
 When nil, it is resolved beside `clara-explorer.el' (a symlink in the repo)."
   :type '(choice (const :tag "Beside clara-explorer.el" nil)
                  (file))
+  :group 'clara-explorer)
+
+(defcustom clara-explorer-production-macros
+  '(("defrule" . rule)
+    ("defquery" . query))
+  "Macros that define a production, each mapped to its kind, `rule' or `query'.
+Names are unqualified: any alias prefix matches, so \"defrule\" covers
+`defrule', `r/defrule', and `clara.rules/defrule'.  Add an entry for a macro
+that wraps or renames these (`:refer [defrule] :rename {defrule rule}', or a
+project macro that expands to one); it must take the production name as its
+first argument, after any metadata.
+
+The list decides two things: which enclosing form is the production at point
+(the kind matters because a query has no RHS to navigate from), and which form
+a jump searches for when the REPL cannot say where a production is defined."
+  :type '(alist :key-type (string :tag "Macro name (unqualified)")
+                :value-type (choice (const :tag "Rule" rule)
+                                    (const :tag "Query" query)))
+  :group 'clara-explorer)
+
+(defcustom clara-explorer-source-roots nil
+  "Directories holding repo checkouts, searched for a production's source file.
+This is the last place a jump looks, after the REPL and any open buffer, for a
+namespace the REPL has neither loaded nor on its classpath — for example a
+production from another repo in a composed registry tree.  The file is found
+from the namespace name alone: any file at any depth under a root whose path
+ends in PATH.clj (or .cljc), where PATH is the namespace munged as Clojure does
+(dots to `/', dashes to `_').  It is used only when its own `ns' form names the
+namespace.  `clara-explorer-source-roots-skip-directories' keeps build output
+and dependencies out of the walk.
+
+nil uses the parent directory of the connected REPL's project, which holds the
+REPL's own checkout and, in a side-by-side layout, its sibling repos.  A list
+replaces that default, so include the parent too if you still want it."
+  :type '(choice (const :tag "Parent of the REPL's project directory" nil)
+                 (repeat directory))
+  :group 'clara-explorer)
+
+(defcustom clara-explorer-source-roots-skip-directories
+  '("node_modules" "target" "out")
+  "Directory names the `clara-explorer-source-roots' search never enters.
+A directory whose name starts with a dot (`.git', `.cpcache', `.shadow-cljs',
+…) is always skipped as well.  Build output matters most: a compiled copy of a
+`.cljc' file carries the same `ns' form as its source, so the `ns' check alone
+cannot reject it."
+  :type '(repeat (string :tag "Directory name"))
   :group 'clara-explorer)
 
 (defconst clara-explorer--directory
@@ -110,7 +160,7 @@ comment to end of line, repeatedly until point stops moving.  Uses
 
 
 ;; ---------------------------------------------------------------------------
-;; EDN transport (§9.3, §9.8)
+;; EDN transport
 ;; ---------------------------------------------------------------------------
 
 ;; parseedn contract (parseedn 20231203): EDN maps -> elisp hash-tables
@@ -123,12 +173,19 @@ comment to end of line, repeatedly until point stops moving.  Uses
   (gethash key map))
 
 (defun clara-explorer--edn-value (x)
-  "Print an elisp value X as an EDN literal string."
+  "Print an elisp value X as an EDN literal string.
+A keyword-keyed plist prints as a nested map, and a vector prints element-wise,
+so an operation input that carries maps and vectors (`fact-type-provenance`'s
+`:node` / `:input` / `:ancestors`) serializes without a second printer.  Strings
+are printed without their text properties: `prin1-to-string' would emit
+`#(\"…\" 0 N (face …))', which is not EDN."
   (cond
    ((null x) "nil")
    ((eq x t) "true")
    ((stringp x) (prin1-to-string (substring-no-properties x)))
    ((symbolp x) (substring-no-properties (symbol-name x)))
+   ((vectorp x) (concat "[" (mapconcat #'clara-explorer--edn-value x " ") "]"))
+   ((keywordp (car-safe x)) (clara-explorer--edn-map x))
    (t (prin1-to-string x))))
 
 (defun clara-explorer--edn-map (entries)
@@ -171,13 +228,13 @@ comment to end of line, repeatedly until point stops moving.  Uses
         (message "clara-explorer nREPL error:\n%s\n--- code ---\n%s" err code))
       (user-error "clara-explorer: %s%s"
                   (or ex root "eval failed")
-                  (if-let ((summary (clara-explorer--err-summary err)))
+                  (if-let* ((summary (clara-explorer--err-summary err)))
                       (format " — %s" summary)
                     "")))
      (t nil))))
 
 ;; ---------------------------------------------------------------------------
-;; babashka transport (§Phase 4)
+;; babashka transport
 ;; ---------------------------------------------------------------------------
 
 (defconst clara-explorer--server-probe-code
@@ -290,7 +347,7 @@ out and returns the result."
   (clara-explorer--bb-run (list selection-edn input-edn)))
 
 ;; ---------------------------------------------------------------------------
-;; Structural navigation (§9.2)
+;; Structural navigation
 ;; ---------------------------------------------------------------------------
 
 (defun clara-explorer--symbol-name (sym)
@@ -299,18 +356,17 @@ out and returns the result."
       (match-string 1 sym)
     sym))
 
-(defun clara-explorer--def-head-p (head)
-  "Non-nil when HEAD names a defrule/defquery form (alias-prefix agnostic)."
-  (and head
-       (let ((n (clara-explorer--symbol-name head)))
-         (or (string= n "defrule")
-             (string= n "defquery")))))
-
 (defun clara-explorer--production-kind (head)
-  "Return `rule' or `query' for a defrule/defquery head string."
-  (if (string= (clara-explorer--symbol-name head) "defrule")
-      'rule
-    'query))
+  "`rule' or `query' when HEAD names a production macro, else nil.
+HEAD is a symbol string; its alias prefix is ignored.  The macros and their
+kinds come from `clara-explorer-production-macros'."
+  (and head
+       (cdr (assoc (clara-explorer--symbol-name head)
+                   clara-explorer-production-macros))))
+
+(defun clara-explorer--def-head-p (head)
+  "Non-nil when HEAD names a production macro (alias-prefix agnostic)."
+  (and (clara-explorer--production-kind head) t))
 
 (defun clara-explorer--list-head (start)
   "Return the head symbol (as a string) of the list starting at START, or nil."
@@ -540,7 +596,10 @@ without moving point."
 (defun clara-explorer--wrapper-inner-type-bounds (beg orig)
   "For wrapper vector at BEG, return fact-type bounds of inner containing ORIG.
 BEG must be a vector whose first element is a logical operator
-\(`:and'/`:or'/`:not'/`:exists').  Recurses for nested wrappers."
+\(`:and'/`:or'/`:not'/`:exists').  Recurses for nested wrappers.  When ORIG
+sits on the wrapper head or its opening bracket — before the first child
+condition — the first child's type bounds are returned: the user is pointing at
+the condition, not at an operator."
   (let ((wrapper-end (save-excursion
                        (goto-char beg)
                        (forward-sexp 1)
@@ -555,9 +614,12 @@ BEG must be a vector whose first element is a logical operator
          ((eq (char-after) ?\[)
           (let ((inner-beg (point))
                 (inner-end (save-excursion (forward-sexp 1) (point))))
-            (if (and (>= orig inner-beg) (<= orig inner-end))
-                (throw 'found (clara-explorer--type-bounds-in-condition-at-point inner-beg orig))
-              (goto-char inner-end))))
+            (cond
+             ((and (>= orig inner-beg) (<= orig inner-end))
+              (throw 'found (clara-explorer--type-bounds-in-condition-at-point inner-beg orig)))
+             ((< orig inner-beg)
+              (throw 'found (clara-explorer--type-bounds-in-condition-at-point inner-beg inner-beg)))
+             (t (goto-char inner-end)))))
          ((eq (char-after) ?\()
           (forward-sexp 1))
          (t
@@ -748,20 +810,21 @@ Used for RHS and global cases where LHS-structure is not applicable."
           :caller-ns caller-ns :token token)))
 
 ;; ---------------------------------------------------------------------------
-;; Remote navigation (§9.3, §9.4)
+;; Remote navigation
 ;; ---------------------------------------------------------------------------
 
-(defun clara-explorer--navigate-code (production side caller-ns token)
-  "Build the Clojure form string that calls `client/navigate`.
-   Uses `requiring-resolve` so the namespace is loaded at runtime rather than
-   resolved at compile time (which would fail if the namespace is not yet
-   loaded in the REPL)."
-  (format "((requiring-resolve 'clara.explorer.server.client/navigate) %s)"
-          (clara-explorer--edn-map
-           (list :production production
-                 :side side
-                 :caller-ns caller-ns
-                 :token token))))
+(defun clara-explorer--op-code (op input-edn)
+  "The Clojure form string that calls OP's `client/' fn with INPUT-EDN.
+   OP is `navigate' or `fact-type-provenance'; an unknown OP is an error rather
+   than a silent default.  Uses `requiring-resolve' so the namespace is loaded
+   at runtime rather than resolved at compile time (which would fail if the
+   namespace is not yet loaded in the REPL)."
+  (format "((requiring-resolve 'clara.explorer.server.client/%s) %s)"
+          (pcase op
+            ('navigate "navigate")
+            ('fact-type-provenance "fact-type-provenance")
+            (_ (error "clara-explorer: unknown operation %S" op)))
+          input-edn))
 
 (defun clara-explorer--resolve-template-file ()
   "Absolute path of the canonical resolve-form template shipped beside this
@@ -825,9 +888,19 @@ file (a symlink to the `clara.explorer.server.tokens` canonical text)."
       (match-string 1 fq-name)
     fq-name))
 
-(defconst clara-explorer--fallback-head-rx
-  (rx "(" (* (not (any " \t\n()"))) "def" (or "rule" "query"))
-  "Rx for \"(alias/defrule\" prefix up to head, without rule name.")
+(defun clara-explorer--fallback-head-regexp ()
+  "Regexp for \"(alias/defrule\" up to the head, without the production name.
+The heads are the names in `clara-explorer-production-macros', read on each
+call so a customization applies without reloading.  The head must be one of
+those names exactly, after an optional alias (`r/', `clara.rules/'), so the
+list replaces the defaults rather than matching any head that ends in a listed
+name, and it agrees with `clara-explorer--production-kind'.  A form nested in a
+`let' or `do' matches too: the search is not limited to top-level forms."
+  (rx-to-string
+   `(seq "("
+         (? (* (not (any " \t\n()/"))) "/")
+         (or ,@(mapcar #'car clara-explorer-production-macros)))
+   t))
 
 (defconst clara-explorer--symbol-chars
   "A-Za-z0-9._:/!?*+<>-"
@@ -838,8 +911,9 @@ file (a symlink to the `clara.explorer.server.tokens` canonical text)."
   (concat "\\(?:[^" clara-explorer--symbol-chars "]\\|$\\)"))
 
 (defun clara-explorer--fallback-regexp (rule-name)
-  "Fallback search: (defrule/defquery … RULE-NAME, whole-symbol-bounded."
-  (concat clara-explorer--fallback-head-rx
+  "Fallback search: (<production macro> … RULE-NAME, whole-symbol-bounded.
+The macros come from `clara-explorer-production-macros'."
+  (concat (clara-explorer--fallback-head-regexp)
           (rx (* (seq (+ (any " \t\n")) "^" (+ (not (any " \t\n")))))
               (+ (any " \t\n")))
           (regexp-quote rule-name)
@@ -851,39 +925,266 @@ file (a symlink to the `clara.explorer.server.tokens` canonical text)."
           (regexp-quote rule-name)
           (clara-explorer--symbol-boundary-rx)))
 
-(defun clara-explorer--goto-fallback (target)
-  "Last resort: open the ns file and search for the defrule/defquery form."
+(defun clara-explorer--buffer-visits-ns-p (ns &optional buffer)
+  "True when BUFFER (default: the current buffer) is the source buffer of NS.
+BUFFER must visit a Clojure source file whose own `ns' form names NS.
+`cider-current-ns' is deliberately not consulted: it falls back to the
+connection's namespace, so while the REPL sits in NS every other buffer — the
+REPL itself, `*scratch*', a log — answers NS too, and a jump would then search
+and move point in a buffer that has nothing to do with the target."
+  (with-current-buffer (or buffer (current-buffer))
+    (and buffer-file-name
+         (or (derived-mode-p 'clojure-mode 'clojure-ts-mode)
+             (string-match-p "\\.clj[sc]?\\'" buffer-file-name))
+         (equal ns (ignore-errors
+                     (substring-no-properties (or (cider-get-ns-name) "")))))))
+
+(defun clara-explorer--ns-source-buffer (ns)
+  "The buffer visiting NS's source file, or nil.
+The buffer's own `ns' form decides, so the file need not follow the
+source-path convention; the Clojure-file test in
+`clara-explorer--buffer-visits-ns-p' keeps a doc buffer that merely quotes
+`(ns NS)' from being taken for the source."
+  (cl-find-if (lambda (buf) (clara-explorer--buffer-visits-ns-p ns buf))
+              (buffer-list)))
+
+(defun clara-explorer--navigation-window (buffer)
+  "Window to show BUFFER in when jumping from the provenance view.
+A window already showing BUFFER wins; otherwise the most recently used one.
+The provenance view is a side window, so jumping from the view itself would
+open the source beside it."
+  (or (get-buffer-window buffer t)
+      (get-mru-window nil nil t)))
+
+(defun clara-explorer--call-with-repl (repl fn)
+  "Call FN with REPL's buffer current, so CIDER requests go to REPL's session.
+CIDER resolves the session from the current buffer.  From the provenance view
+that is whatever buffer happens to be current — a file in a project no session
+is linked to, a dired buffer — so requests made there can fail with \"No linked
+CIDER sessions\" even though the view was opened from a linked buffer.  A nil or
+dead REPL calls FN in the current buffer."
+  (if (buffer-live-p repl)
+      (with-current-buffer repl (funcall fn))
+    (funcall fn)))
+
+(defun clara-explorer--source-file-buffer (file ns)
+  "A buffer visiting FILE when FILE is NS's source, else nil.
+FILE is a path or URL as the REPL reports it.  An empty FILE — what
+`cider/ns-path' answers for a namespace loaded from outside the classpath — is
+refused before it reaches `cider-find-file', which would expand it to
+`default-directory' and visit that directory in dired.  A REPL buffer name and
+a missing absolute path are refused too, so no empty buffer is created."
+  (when-let* ((file (and (stringp file) (not (string-empty-p file)) file))
+              ((not (string-prefix-p "*" file)))
+              ((not (and (file-name-absolute-p file) (not (file-exists-p file)))))
+              (buffer (cider-find-file file)))
+    (and (clara-explorer--buffer-visits-ns-p ns buffer) buffer)))
+
+(defun clara-explorer--repl-production-location (name ns)
+  "Where the current REPL places production NAME of NS, as a location, or nil.
+The loaded var's metadata comes first: it carries the absolute file and line
+even when NS was loaded from a checkout that is not on the classpath (another
+repo linked to the session, say), where `cider/ns-path' has no answer.  NS's
+classpath resource is the fallback, for a namespace that is not loaded."
+  (or (when-let* ((info (cider-var-info name))
+                  (buffer (clara-explorer--source-file-buffer
+                           (nrepl-dict-get info "file") ns)))
+        (list :buffer buffer :line (nrepl-dict-get info "line")))
+      (when-let* ((buffer (clara-explorer--source-file-buffer
+                           (cider-sync-request:ns-path ns t) ns)))
+        (list :buffer buffer))))
+
+(defun clara-explorer--ns->relative-path (ns)
+  "NS's source path relative to a source directory, without an extension.
+Dots become directory separators and dashes underscores, as Clojure munges a
+namespace into a resource name."
+  (string-replace "-" "_" (string-replace "." "/" ns)))
+
+(defun clara-explorer--source-root-dirs (repl)
+  "The directories `clara-explorer-source-roots' names, resolving its default.
+The default is the parent of REPL's project directory; with no live REPL, the
+current buffer's session supplies the REPL."
+  (or clara-explorer-source-roots
+      (when-let* ((repl (if (buffer-live-p repl) repl (ignore-errors (cider-current-repl))))
+                  (project-dir (ignore-errors (buffer-local-value 'nrepl-project-dir repl))))
+        (list (file-name-directory (directory-file-name project-dir))))))
+
+(defun clara-explorer--source-root-descend-p (dir)
+  "Non-nil when the source-roots search should walk into DIR.
+Dot-directories, names in `clara-explorer-source-roots-skip-directories', and
+unreadable directories are skipped."
+  (let ((name (file-name-nondirectory (directory-file-name dir))))
+    (and (not (string-prefix-p "." name))
+         (not (member name clara-explorer-source-roots-skip-directories))
+         (file-accessible-directory-p dir))))
+
+(defun clara-explorer--source-root-files (root rel)
+  "Files at any depth under ROOT whose path ends in REL.clj or REL.cljc.
+Shallower files come first, so a checkout's source sorts ahead of a deeper copy
+of it; ties keep the walk's order."
+  (let ((name-regexp (rx-to-string
+                      `(seq bos ,(file-name-nondirectory rel) ".clj" (? "c") eos)
+                      t))
+        (suffix-regexp (rx-to-string `(seq "/" ,rel ".clj" (? "c") eos) t)))
+    (when (file-accessible-directory-p root)
+      (sort (seq-filter (lambda (file) (string-match-p suffix-regexp file))
+                        (directory-files-recursively
+                         root name-regexp nil #'clara-explorer--source-root-descend-p))
+            (lambda (a b) (< (cl-count ?/ a) (cl-count ?/ b)))))))
+
+(defun clara-explorer--source-root-candidates (ns roots)
+  "Files under ROOTS that could hold NS: ROOTS in order, shallowest first in each.
+The walk has no depth limit, so a root can be one checkout or a directory of
+them, and a ruleset nested a few directories into a repo is still found."
+  (let ((rel (clara-explorer--ns->relative-path ns)))
+    (cl-loop for root in roots
+             append (clara-explorer--source-root-files (expand-file-name root) rel))))
+
+(defun clara-explorer--source-root-buffer (ns repl)
+  "A buffer visiting NS's source file under the source roots, or nil.
+REPL resolves the default root (see `clara-explorer-source-roots').  A candidate
+is accepted only when its `ns' form names NS; one opened just to be rejected is
+killed again, so a miss leaves no stray buffers."
+  (let* ((roots (clara-explorer--source-root-dirs repl))
+         (candidates (clara-explorer--source-root-candidates ns roots)))
+    (clara-explorer--log "source roots: %S -> %S" roots candidates)
+    (cl-loop for file in candidates
+             for existing = (find-buffer-visiting file)
+             for buffer = (or existing (find-file-noselect file))
+             if (clara-explorer--buffer-visits-ns-p ns buffer)
+             return buffer
+             else do (unless existing (kill-buffer buffer)))))
+
+(defun clara-explorer--locate-production (name ns repl)
+  "Find production NAME of NS without displaying or selecting anything.
+REPL is the CIDER REPL buffer to ask (see `clara-explorer--call-with-repl').
+Returns (:buffer B :line N), (:buffer B) when B must be searched, (:error
+MESSAGE) when the REPL failed and nothing else found NS, or nil.  When the REPL
+cannot answer, an open buffer visiting NS is used, and then NS's file under
+`clara-explorer-source-roots', so a namespace from another repo is reachable
+without loading it."
+  (let* ((repl-error nil)
+         (location (condition-case err
+                       (clara-explorer--call-with-repl
+                        repl
+                        (lambda () (clara-explorer--repl-production-location name ns)))
+                     (error
+                      (setq repl-error (error-message-string err))
+                      nil))))
+    (clara-explorer--log "locate: %S in %s -> %S (repl error %S)"
+                         name ns location repl-error)
+    (or location
+        (when-let* ((buffer (clara-explorer--ns-source-buffer ns)))
+          (list :buffer buffer))
+        (when-let* ((buffer (clara-explorer--source-root-buffer ns repl)))
+          (list :buffer buffer))
+        (and repl-error (list :error repl-error)))))
+
+(defun clara-explorer--search-production-form (ns rule-name)
+  "Search the current buffer — NS's source — for RULE-NAME and go to it.
+Returns non-nil when found; on a miss point goes back to where it was, so a
+failed jump leaves the buffer as it found it."
+  (let ((start (point)))
+    (goto-char (point-min))
+    (let ((found (or (re-search-forward
+                      (clara-explorer--fallback-regexp rule-name)
+                      nil t)
+                     ;; fallback for ^{:map} metadata or other forms
+                     (re-search-forward
+                      (clara-explorer--whole-symbol-regexp rule-name)
+                      nil t))))
+      (clara-explorer--log "fallback: search %S in %s -> %s at %d"
+                           rule-name ns (if found "found" "NOT-FOUND") (point))
+      (if found
+          t
+        (goto-char start)
+        (message "clara-explorer: %s not found in %s" rule-name ns)
+        nil))))
+
+(defun clara-explorer--goto-reported-line (line rule-name)
+  "Go to LINE when RULE-NAME is on it; non-nil on success.
+On a miss point is unmoved: an edited buffer drifts from the line the loaded
+var reported, and the caller then searches for the form instead."
+  (let ((start (point)))
+    (goto-char (point-min))
+    (forward-line (1- line))
+    (if (re-search-forward (clara-explorer--whole-symbol-regexp rule-name)
+                           (line-end-position) t)
+        (progn (back-to-indentation) t)
+      (goto-char start)
+      nil)))
+
+(defun clara-explorer--show-production (location ns rule-name repl)
+  "Show LOCATION's buffer and put point on RULE-NAME's form; non-nil when found.
+The buffer is displayed the way `cider-jump-to' displays one (honoring
+`cider-jump-to-pop-to-buffer-actions'), and, like it, a buffer outside REPL's
+project is pinned to REPL so CIDER commands there keep using that session."
+  (let ((buffer (plist-get location :buffer))
+        (line (plist-get location :line)))
+    (pop-to-buffer buffer (or (bound-and-true-p cider-jump-to-pop-to-buffer-actions)
+                              '((display-buffer-reuse-window display-buffer-same-window))))
+    (when (and (buffer-live-p repl) (fboundp 'cider--pin-repl-if-out-of-project))
+      (cider--pin-repl-if-out-of-project repl))
+    (or (and (natnump line)
+             (clara-explorer--goto-reported-line line rule-name))
+        (clara-explorer--search-production-form ns rule-name))))
+
+(defun clara-explorer--report-unlocated (ns rule-name repl-error)
+  "Explain why RULE-NAME of NS cannot be shown, including REPL-ERROR if any."
+  (message
+   (concat "clara-explorer: could not open %s%s: it is not loaded in this REPL, "
+           "not on its classpath, and not under `clara-explorer-source-roots'; "
+           "load it, open its source file, or add its checkout's parent directory "
+           "to `clara-explorer-source-roots' to jump to %s")
+   ns
+   (if repl-error (format " (%s)" repl-error) "")
+   rule-name))
+
+(defun clara-explorer--jump-to-production (target repl before-show)
+  "Locate TARGET through REPL, call BEFORE-SHOW with its buffer, then show it.
+Returns non-nil when the jump happened.  Nothing is displayed, selected, or
+pushed until the source is found, so a production the REPL cannot locate leaves
+every window as it was.  BEFORE-SHOW is where a caller pushes the jump and picks
+the window."
   (let* ((name (clara-explorer--edn-get :name target))
          (ns (clara-explorer--edn-get :ns target))
-         (rule-name (clara-explorer--unqualified-name name)))
+         (rule-name (and name (clara-explorer--unqualified-name name))))
     (clara-explorer--log "fallback: name=%S ns=%S rule-name=%S" name ns rule-name)
-    (when (and ns rule-name)
-      (clara-explorer--log "fallback: cider-find-ns %S" ns)
-      (cider-find-ns nil ns)
-      (goto-char (point-min))
-      (let ((found (or (re-search-forward
-                        (clara-explorer--fallback-regexp rule-name)
-                        nil t)
-                       ;; fallback for ^{:map} metadata or other forms
-                       (re-search-forward
-                        (clara-explorer--whole-symbol-regexp rule-name)
-                        nil t))))
-        (clara-explorer--log "fallback: search %S -> %s at %d" rule-name (if found "found" "NOT-FOUND") (point))
-        found))))
+    (if (not (and ns rule-name))
+        (progn
+          (message "clara-explorer: cannot locate %s (no namespace in the target)" name)
+          nil)
+      (let* ((location (clara-explorer--locate-production name ns repl))
+             (buffer (plist-get location :buffer)))
+        (if (not buffer)
+            (progn
+              (clara-explorer--report-unlocated ns rule-name (plist-get location :error))
+              nil)
+          (funcall before-show buffer)
+          (clara-explorer--show-production location ns rule-name repl))))))
 
-(defun clara-explorer--goto (target)
-  "Jump to target.  Pushes evil/xref jumps for C-o."
+(defun clara-explorer--goto-fallback (target &optional no-push)
+  "Jump to TARGET, which carries no var metadata, through the current session.
+Pushes the jump first unless NO-PUSH."
+  (clara-explorer--jump-to-production
+   target nil (lambda (_buffer) (unless no-push (clara-explorer--push-jump)))))
+
+(defun clara-explorer--goto (target &optional no-push)
+  "Jump to TARGET, pushing evil/xref jumps for C-o unless NO-PUSH.
+Returns non-nil when the jump happened.  A target without var metadata is only
+pushed once its source is found, so a failed jump leaves no jump entry."
   (let* ((name (clara-explorer--edn-get :name target))
          (source (clara-explorer--edn-get :source target))
          (var? (clara-explorer--edn-get :var? source)))
     (clara-explorer--log "goto: name=%S var?=%S source=%S" name var? source)
-    (clara-explorer--push-jump)
     (if var?
         (progn
+          (unless no-push (clara-explorer--push-jump))
           (clara-explorer--log "goto: cider-find-var %S" name)
-          (cider-find-var nil name))
+          (cider-find-var nil name)
+          t)
       (clara-explorer--log "goto: fallback path")
-      (clara-explorer--goto-fallback target))))
+      (clara-explorer--goto-fallback target no-push))))
 
 (defun clara-explorer--choose-target (direction targets)
   "completing-read popover over fq target names, then jump to the choice."
@@ -914,43 +1215,79 @@ file (a symlink to the `clara.explorer.server.tokens` canonical text)."
        (clara-explorer--edn-get :type result)
        (clara-explorer--edn-get :targets result)))))
 
-(defun clara-explorer--navigate (side)
-  "Shared dispatcher for producer (:lhs) / consumer (:rhs) navigation.
-The transport is resolved at call time: `auto' picks nREPL when the connected
-CIDER session has a running explorer system, otherwise bb."
+(defun clara-explorer--prepare-query ()
+  "Gather the navigation context at point and resolve the token, without
+sending an operation.  Returns a plist (:input :ctx :transport :conn), or nil
+after messaging why not.  `:input' carries the *structural* side at point; an
+operation that needs a traversal direction sets its own (see
+`clara-explorer--navigate-input').  The transport is resolved at call time:
+`auto' picks nREPL when the connected CIDER session has a running explorer
+system, otherwise bb."
   (unless (cider-connected-p) (user-error "Not connected to a CIDER REPL"))
   (let* ((conn (cider-current-repl 'infer 'ensure))
          (transport (clara-explorer--effective-transport conn))
          (ctx (clara-explorer--context))
-         (production (plist-get ctx :production))
-         (kind (plist-get ctx :kind))
          (caller-ns (plist-get ctx :caller-ns))
          (token (plist-get ctx :token)))
-    (cond
-     ((null token) (message "not on a fact type"))
-     ((and (eq side :rhs) (eq kind 'query))
-      (message "queries have no RHS"))
-     (t
-      (let* ((eff-side side)
-             (resolved (clara-explorer--resolve-token token caller-ns conn))
-             (result (if (eq transport 'bb)
-                         (clara-explorer--bb-eval
-                          (clara-explorer--bb-selection)
-                          (clara-explorer--edn-map
-                           (list :production production
-                                 :side eff-side
-                                 :caller-ns caller-ns
-                                 :token (or resolved token))))
-                       (clara-explorer--eval-edn
-                        (clara-explorer--navigate-code production eff-side caller-ns
-                                                       (or resolved token))
-                        conn))))
-        (if result
-            (clara-explorer--handle-result result)
-          (message "clara-explorer: no result from navigate")))))))
+    (if (null token)
+        (progn (message "not on a fact type") nil)
+      (let* ((resolved (clara-explorer--resolve-token token caller-ns conn))
+             (input (list :production (plist-get ctx :production)
+                          :side (plist-get ctx :side)
+                          :caller-ns caller-ns
+                          :token (or resolved token))))
+        (list :input input :ctx ctx :transport transport :conn conn)))))
+
+(defun clara-explorer--navigate-input (query direction)
+  "QUERY's prepared input with `:side' set to DIRECTION's navigate side
+\(`:lhs' for producer, `:rhs' for consumer).  `navigate' reads `:side' as the
+traversal direction; `fact-type-provenance' keeps the structural side instead."
+  (plist-put (copy-sequence (plist-get query :input)) :side direction))
+
+(defun clara-explorer--bb-provenance (selection-edn input-edn)
+  "Run `bb editor-client.bb --provenance SEL INPUT' and parse the result."
+  (clara-explorer--bb-run (list "--provenance" selection-edn input-edn)))
+
+(defun clara-explorer--op-result (query op &optional input)
+  "Send the prepared QUERY to OP and return the parsed result, or nil after
+messaging why not.  OP is `navigate' or `fact-type-provenance'; INPUT is that
+operation's input map (defaulting to QUERY's prepared input).  bb shells out to
+`editor-client.bb' (no flag for navigate, `--provenance' for provenance); nREPL
+evals the matching call in `client`."
+  (let* ((transport (plist-get query :transport))
+         (conn (plist-get query :conn))
+         (input (or input (plist-get query :input)))
+         (input-edn (clara-explorer--edn-map input))
+         (result (if (eq transport 'bb)
+                     (pcase op
+                       ('navigate
+                        (clara-explorer--bb-eval (clara-explorer--bb-selection) input-edn))
+                       ('fact-type-provenance
+                        (clara-explorer--bb-provenance (clara-explorer--bb-selection)
+                                                       input-edn))
+                       (_ (error "clara-explorer: unknown operation %S" op)))
+                   (clara-explorer--eval-edn
+                    (clara-explorer--op-code op input-edn) conn))))
+    (if result
+        result
+      (message "clara-explorer: no result from %s" op)
+      nil)))
+
+(defun clara-explorer--navigate (direction)
+  "Shared dispatcher for producer (:lhs) / consumer (:rhs) navigation.  A query
+has no RHS, so only the consumer direction rejects one; provenance accepts any
+token."
+  (when-let* ((query (clara-explorer--prepare-query)))
+    (if (and (eq direction :rhs)
+             (eq (plist-get (plist-get query :ctx) :kind) 'query))
+        (message "queries have no RHS")
+      (when-let* ((result (clara-explorer--op-result
+                           query 'navigate
+                           (clara-explorer--navigate-input query direction))))
+        (clara-explorer--handle-result result)))))
 
 ;; ---------------------------------------------------------------------------
-;; Public commands (§9.6, §9.9)
+;; Public commands
 ;; ---------------------------------------------------------------------------
 
 ;;;###autoload
@@ -1056,6 +1393,426 @@ Has no effect on the nREPL transport."
         (setq clara-explorer--bb-selection-cache (clara-explorer--bb-prompt-selection))
         (message "clara-explorer: bb unit set"))
     (message "clara-explorer: warning — unit selection only affects the bb transport (currently nrepl)")))
+
+
+;; ---------------------------------------------------------------------------
+;; Fact type provenance view (built-in `tabulated-list-mode')
+;; ---------------------------------------------------------------------------
+
+(defcustom clara-explorer-provenance-depth 0
+  "Initial expansion depth for a provenance view.
+0 shows the root's immediate production layer; N inlines N further levels;
+`full' expands until a path cycle (`:cycle?') or an already-expanded
+production (`:seen?') stops it."
+  :type '(choice (const :tag "Immediate (0)" 0)
+                 (natnum :tag "Production levels")
+                 (const :tag "Full" full))
+  :group 'clara-explorer)
+
+(defcustom clara-explorer-provenance-window-params nil
+  "Alist for `display-buffer-in-side-window' when showing a provenance view.
+nil uses the side-window defaults."
+  :type '(alist :key-type symbol :value-type sexp)
+  :group 'clara-explorer)
+
+(defconst clara-explorer--provenance-buffer-name "*Clara Fact Type Provenance*"
+  "Buffer name of the provenance view.")
+
+(defvar-local clara-explorer--provenance-root nil
+  "The root node of the rendered tree.")
+
+(defvar-local clara-explorer--provenance-direction nil
+  "The traversal direction: `:producer' or `:consumer'.")
+
+(defvar-local clara-explorer--provenance-query nil
+  "The prepared query the view was opened from (for `g').")
+
+(defvar-local clara-explorer--provenance-input nil
+  "The root operation input the view was opened with (for `g').")
+
+(defvar-local clara-explorer--provenance-expanded nil
+  "Hash table (equal) of full tree path -> t for open production rows.")
+
+(defvar-local clara-explorer--provenance-children nil
+  "Hash table (equal) of full tree path -> children fetched after the root.")
+
+(defvar-local clara-explorer--provenance-nodes nil
+  "Hash table (equal) of full tree path -> node, rebuilt on every render.")
+
+(defun clara-explorer--provenance-message-node (text)
+  "A leaf node carrying TEXT, used for transport and backend errors."
+  (let ((node (make-hash-table :test 'equal)))
+    (puthash :kind :message node)
+    (puthash :text text node)
+    node))
+
+(defun clara-explorer--provenance-node-key (node)
+  "The full-path component for NODE: its fact-type name, production name, or
+message text.  Alternating fact-type and production names make the path unique
+per tree position, so the same production under two sibling fact types toggles
+independently."
+  (pcase (clara-explorer--edn-get :kind node)
+    (:fact-type (clara-explorer--edn-get :type node))
+    (:production (clara-explorer--edn-get :name node))
+    (_ (clara-explorer--edn-get :text node))))
+
+(defun clara-explorer--provenance-vias-label (node)
+  "The retract aside for an edge that is not insert-only, else nil."
+  (let ((vias (clara-explorer--edn-get :vias node))
+        (via (clara-explorer--edn-get :via node)))
+    (cond
+     ((and (vectorp vias) (> (length vias) 1))
+      (propertize " (insert+retract)" 'face 'warning))
+     ((or (equal vias [:retract]) (eq via :retract))
+      (propertize " (retract)" 'face 'warning)))))
+
+(defun clara-explorer--provenance-fact-type-label (node)
+  "NODE's label: the contract's short type, dimmed full type, and markers.
+The short name comes from `:type-short'; nothing is derived from `:type'."
+  (let ((short (clara-explorer--edn-get :type-short node))
+        (full (clara-explorer--edn-get :type node)))
+    (concat short
+            (unless (equal short full)
+              (concat " " (propertize full 'face 'shadow)))
+            (when (clara-explorer--edn-get :external? node)
+              (propertize " (external)" 'face 'shadow))
+            (clara-explorer--provenance-vias-label node))))
+
+(defun clara-explorer--provenance-matches-label (node)
+  "The `via <short types>' suffix for a production that reaches the parent
+through the hierarchy; nil when the edge is direct."
+  (let ((matches (clara-explorer--edn-get :matches node)))
+    (when (and (clara-explorer--edn-get :bridge? node)
+               matches
+               (not (equal matches [])))
+      (propertize
+       (format " via %s"
+               (mapconcat (lambda (match) (clara-explorer--edn-get :short match))
+                          (append matches nil)
+                          ", "))
+       'face 'shadow))))
+
+(defun clara-explorer--provenance-production-label (node direction &optional expanded?)
+  "NODE's label: unqualified rule name, dim ns, unit, kind/leaf/edge markers.
+EXPANDED? suppresses the `shown above' marker on a row that is open here."
+  (let* ((name (clara-explorer--edn-get :name node))
+         (ns (clara-explorer--edn-get :ns node))
+         (unit (clara-explorer--edn-get :unit node))
+         (type (clara-explorer--edn-get :type node))
+         (outputs (clara-explorer--edn-get :outputs node))
+         (leaf (equal (clara-explorer--edn-get :children node) [])))
+    (concat
+     (propertize (clara-explorer--unqualified-name name)
+                 'face 'font-lock-function-name-face)
+     (when ns (concat " " (propertize ns 'face 'shadow)))
+     (when (equal type "query") (propertize " (query)" 'face 'shadow))
+     (when unit (concat " " (propertize (format "@%s" unit) 'face 'shadow)))
+     (cond
+      (outputs (propertize " (outputs unknown)" 'face 'shadow))
+      ((and leaf (eq direction :consumer) (not (equal type "query")))
+       (propertize " (no outputs)" 'face 'shadow)))
+     (clara-explorer--provenance-matches-label node)
+     (clara-explorer--provenance-vias-label node)
+     (when (clara-explorer--edn-get :cycle? node)
+       (propertize " ↻ cycle" 'face 'shadow))
+     (when (and (clara-explorer--edn-get :seen? node) (not expanded?))
+       (propertize " ↑ shown above" 'face 'shadow)))))
+
+(defun clara-explorer--provenance-row-label (node indent direction path)
+  "One row's label: INDENT per path level, then the node's own label."
+  (concat (make-string (* 2 indent) ?\s)
+          (pcase (clara-explorer--edn-get :kind node)
+            (:fact-type (clara-explorer--provenance-fact-type-label node))
+            (:production (clara-explorer--provenance-production-label
+                          node direction
+                          (gethash path clara-explorer--provenance-expanded)))
+            (_ (propertize (format "%s" (clara-explorer--edn-get :text node))
+                           'face 'shadow)))))
+
+(defun clara-explorer--provenance-has-children-p (node)
+  "True when NODE carries a non-empty `:children' list."
+  (let ((children (clara-explorer--edn-get :children node)))
+    (and children (not (equal children [])))))
+
+(defun clara-explorer--provenance-seed (node path)
+  "Mark expanded — and cache — every production below NODE whose children
+came populated.  A `:depth N' / `:full' response therefore renders expanded
+without a fetch."
+  (dolist (child (append (clara-explorer--edn-get :children node) nil))
+    (let ((child-path (vconcat path
+                               (vector (clara-explorer--provenance-node-key child)))))
+      (when (and (eq (clara-explorer--edn-get :kind child) :production)
+                 (clara-explorer--provenance-has-children-p child))
+        (puthash child-path
+                 (append (clara-explorer--edn-get :children child) nil)
+                 clara-explorer--provenance-children)
+        (puthash child-path t clara-explorer--provenance-expanded))
+      (clara-explorer--provenance-seed child child-path))))
+
+(defun clara-explorer--provenance-visible-children (node path)
+  "The child nodes to render under NODE at PATH.  Fact types are
+transparent; a production's children show only while it is expanded, from the
+cache when the level was fetched later."
+  (pcase (clara-explorer--edn-get :kind node)
+    (:fact-type (append (clara-explorer--edn-get :children node) nil))
+    (:production
+     (when (gethash path clara-explorer--provenance-expanded)
+       (or (gethash path clara-explorer--provenance-children)
+           (append (clara-explorer--edn-get :children node) nil))))
+    (_ nil)))
+
+(defun clara-explorer--provenance-rows (node path direction)
+  "Rows for NODE at PATH, depth-first, plus the node table the commands read."
+  (puthash path node clara-explorer--provenance-nodes)
+  (cons (list path (vector (clara-explorer--provenance-row-label
+                            node (1- (length path)) direction path)))
+        (mapcan (lambda (child)
+                  (clara-explorer--provenance-rows
+                   child
+                   (vconcat path (vector (clara-explorer--provenance-node-key child)))
+                   direction))
+                (clara-explorer--provenance-visible-children node path))))
+
+(defun clara-explorer--provenance-entries (root direction)
+  "The `tabulated-list-entries' for ROOT, rebuilding the path -> node table."
+  (setq clara-explorer--provenance-nodes (make-hash-table :test 'equal))
+  (clara-explorer--provenance-rows root
+                                   (vector (clara-explorer--provenance-node-key root))
+                                   direction))
+
+(defun clara-explorer--provenance-set-header (direction)
+  "Show the traversal DIRECTION in the column header, and forbid sorting.
+Sorting an indented tree would flatten it."
+  (setq tabulated-list-format
+        (vector (list (pcase direction
+                        (:producer "Producer Provenance")
+                        (_ "Consumer Provenance"))
+                      0 nil)))
+  (tabulated-list-init-header))
+
+(defun clara-explorer--provenance-load (root direction query input)
+  "Reset the view state to ROOT and return its entries."
+  (setq clara-explorer--provenance-root root
+        clara-explorer--provenance-direction direction
+        clara-explorer--provenance-query query
+        clara-explorer--provenance-input input
+        clara-explorer--provenance-expanded (make-hash-table :test 'equal)
+        clara-explorer--provenance-children (make-hash-table :test 'equal))
+  (clara-explorer--provenance-set-header direction)
+  (clara-explorer--provenance-seed root (vector (clara-explorer--provenance-node-key root)))
+  (clara-explorer--provenance-entries root direction))
+
+(defun clara-explorer--provenance-render ()
+  "Reprint the view in the current buffer."
+  (setq tabulated-list-entries
+        (clara-explorer--provenance-entries clara-explorer--provenance-root
+                                            clara-explorer--provenance-direction))
+  (tabulated-list-print t))
+
+(defun clara-explorer--provenance-request (query input)
+  "Post INPUT to the provenance op and return its `:node', or a message node.
+Both an `{:error …}' answer and a transport failure (a signalled bb exit or
+nREPL error) become message nodes, so a failed expansion keeps the buffer."
+  (condition-case err
+      (let ((result (clara-explorer--op-result query 'fact-type-provenance input)))
+        (cond
+         ((null result)
+          (clara-explorer--provenance-message-node "no result from fact-type-provenance"))
+         ((clara-explorer--edn-get :error result)
+          (clara-explorer--provenance-message-node (clara-explorer--edn-get :error result)))
+         (t (clara-explorer--edn-get :node result))))
+    (user-error
+     (clara-explorer--provenance-message-node (error-message-string err)))
+    (error
+     (clara-explorer--provenance-message-node
+      (format "error: %s" (error-message-string err))))))
+
+(defun clara-explorer--provenance-show (query direction input)
+  "Run INPUT for QUERY walking DIRECTION and reprint the current buffer.
+A root-call error renders as a message row rather than failing the command."
+  (let ((node (clara-explorer--provenance-request query input)))
+    (setq tabulated-list-entries
+          (clara-explorer--provenance-load node direction query input))
+    (tabulated-list-print t)))
+
+(defun clara-explorer--provenance-production-ancestors (path)
+  "Production names strictly above the production at PATH's last element.
+Paths alternate fact-type and production names, so the productions sit at
+the odd indices; the last element is the row being expanded and is
+excluded."
+  (vconcat (cl-loop for i from 1 below (1- (length path)) by 2
+                    collect (aref path i))))
+
+(defun clara-explorer--provenance-expandable-p (node)
+  "True when NODE can fetch another level: not a cycle, not outputs-unknown,
+not a leaf."
+  (and (not (clara-explorer--edn-get :cycle? node))
+       (not (clara-explorer--edn-get :outputs node))
+       (not (equal (clara-explorer--edn-get :children node) []))))
+
+(defun clara-explorer--provenance-toggle-path (path)
+  "Expand or collapse the production row at PATH; non-nil when the view changed.
+A collapsed row re-expands from `clara-explorer--provenance-children' without
+round-tripping; a cached message row retries.  A `:seen?' row is fetched on
+demand at depth 0; cycle, message, outputs-unknown, and leaf rows do not
+toggle."
+  (let* ((node (and path (gethash path clara-explorer--provenance-nodes)))
+         (cached (and path (gethash path clara-explorer--provenance-children :miss)))
+         (cached-error? (and (consp cached)
+                             (= 1 (length cached))
+                             (eq (clara-explorer--edn-get :kind (car cached)) :message))))
+    (when node
+      (pcase (clara-explorer--edn-get :kind node)
+        (:message (message "%s" (clara-explorer--edn-get :text node)))
+        (:fact-type (message "fact types stay expanded; expand a production"))
+        (:production
+         (cond
+          ((gethash path clara-explorer--provenance-expanded)
+           (remhash path clara-explorer--provenance-expanded)
+           t)
+          ((not (clara-explorer--provenance-expandable-p node))
+           (message "nothing to expand")
+           nil)
+          ((and (not (eq cached :miss)) (not cached-error?))
+           (puthash path t clara-explorer--provenance-expanded)
+           t)
+          (t
+           (let ((fetched (clara-explorer--provenance-request
+                           clara-explorer--provenance-query
+                           (list :node (list :kind :production
+                                             :name (clara-explorer--edn-get :name node))
+                                 :direction clara-explorer--provenance-direction
+                                 :depth 0
+                                 :ancestors (clara-explorer--provenance-production-ancestors
+                                             path)))))
+             (if (eq (clara-explorer--edn-get :kind fetched) :message)
+                 (puthash path (list fetched) clara-explorer--provenance-children)
+               (puthash path (append (clara-explorer--edn-get :children fetched) nil)
+                        clara-explorer--provenance-children)
+               (clara-explorer--provenance-seed fetched path))
+             (puthash path t clara-explorer--provenance-expanded)
+             t))))))))
+
+(defun clara-explorer--provenance-row-node ()
+  "The node on the row at point, or nil."
+  (let ((path (tabulated-list-get-id)))
+    (and path (gethash path clara-explorer--provenance-nodes))))
+
+(defun clara-explorer-provenance-toggle ()
+  "Expand or collapse the production on the current row."
+  (interactive)
+  (when (clara-explorer--provenance-toggle-path (tabulated-list-get-id))
+    (clara-explorer--provenance-render)))
+
+(defun clara-explorer--goto-production (node)
+  "Jump to production NODE, asking the REPL the view was opened from.
+The REPL is the one stored with the view's query, never the session of
+whichever buffer the target window happens to show (see
+`clara-explorer--call-with-repl').  That REPL's var metadata locates a
+production whether or not NODE carries `:var? true', so registry/bb trees jump
+to any loaded namespace too.  The jump is pushed from the view before the
+window changes, so `C-o' returns here; a production that cannot be located
+changes no window and pushes nothing."
+  (clara-explorer--jump-to-production
+   node
+   (plist-get clara-explorer--provenance-query :conn)
+   (lambda (buffer)
+     (clara-explorer--push-jump)
+     (when-let* ((window (clara-explorer--navigation-window buffer)))
+       (select-window window)))))
+
+(defun clara-explorer-provenance-visit ()
+  "Jump to the production on the current row.
+The jump runs in the window that already shows the production's source file, if
+there is one, and a failed jump leaves the view and the selection as they were."
+  (interactive)
+  (let* ((path (tabulated-list-get-id))
+         (node (clara-explorer--provenance-row-node)))
+    (cond
+     ((and path (null node))
+      (message "clara-explorer: stale row; press g to refresh the view"))
+     ((and node (eq (clara-explorer--edn-get :kind node) :production))
+      (clara-explorer--goto-production node))
+     (t
+      (message "not a production row (RET jumps from a production row)")))))
+
+(defun clara-explorer-provenance-refresh (&optional _ignore-auto _noconfirm)
+  "Re-run the root call from the stored query.
+Also the buffer's `revert-buffer-function', hence the (ignored) arguments
+`revert-buffer' passes."
+  (interactive)
+  (when clara-explorer--provenance-query
+    (clara-explorer--provenance-show
+     clara-explorer--provenance-query
+     (plist-get clara-explorer--provenance-input :direction)
+     clara-explorer--provenance-input)))
+
+(defvar clara-explorer-provenance-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "TAB") #'clara-explorer-provenance-toggle)
+    (define-key map (kbd "<tab>") #'clara-explorer-provenance-toggle)
+    (define-key map (kbd "RET") #'clara-explorer-provenance-visit)
+    ;; GUI Return, and convenient when a global map shadows C-m.
+    (define-key map (kbd "<return>") #'clara-explorer-provenance-visit)
+    map)
+  "Keymap for `clara-explorer-provenance-mode'.
+Only the keys `special-mode' does not already provide are bound here: `g'
+reverts (through `revert-buffer-function', see the mode) and `q' buries, both
+from the parent map.  Rebind here to customize; if your setup shadows `g' (e.g.
+evil's `g' prefix), bind `clara-explorer-provenance-refresh' yourself or call
+`revert-buffer'.")
+
+(define-derived-mode clara-explorer-provenance-mode tabulated-list-mode "Provenance"
+  "Major mode for a fact type provenance tree.
+\\{clara-explorer-provenance-mode-map}
+`g' reverts through `revert-buffer-function', which re-runs the stored root call
+(`clara-explorer-provenance-refresh'); `q' buries; `TAB' expands or collapses a
+production; `RET' jumps to it.  The mode map is the customization point."
+  (setq tabulated-list-format [("Provenance" 0 nil)])
+  (setq tabulated-list-padding 0)
+  (setq tabulated-list-sort-key nil)
+  (setq-local revert-buffer-function #'clara-explorer-provenance-refresh)
+  (tabulated-list-init-header))
+
+(defun clara-explorer--provenance-root-input (query direction)
+  "The provenance input for QUERY's fact type, walking DIRECTION at the
+configured depth."
+  (list :node (list :kind :cursor :input (plist-get query :input))
+        :direction direction
+        :depth (if (eq clara-explorer-provenance-depth 'full)
+                   :full
+                 clara-explorer-provenance-depth)
+        :ancestors []))
+
+(defun clara-explorer--provenance-display (query direction input)
+  "Open the provenance view for QUERY walking DIRECTION with INPUT, and show it.
+A root-call error renders as a message row rather than failing the command."
+  (with-current-buffer (get-buffer-create clara-explorer--provenance-buffer-name)
+    (clara-explorer-provenance-mode)
+    (clara-explorer--provenance-show query direction input))
+  (select-window
+   (or (display-buffer-in-side-window
+        (get-buffer clara-explorer--provenance-buffer-name)
+        clara-explorer-provenance-window-params)
+       (selected-window))))
+
+(defun clara-explorer--show-provenance (direction)
+  "Open a provenance view for the fact type at point, walking DIRECTION."
+  (when-let* ((query (clara-explorer--prepare-query)))
+    (clara-explorer--provenance-display
+     query direction (clara-explorer--provenance-root-input query direction))))
+
+;;;###autoload
+(defun clara-explorer-show-producer-provenance ()
+  "Show the producer (upstream) provenance of the fact type at point."
+  (interactive)
+  (clara-explorer--show-provenance :producer))
+
+;;;###autoload
+(defun clara-explorer-show-consumer-provenance ()
+  "Show the consumer (downstream) provenance of the fact type at point."
+  (interactive)
+  (clara-explorer--show-provenance :consumer))
 
 (provide 'clara-explorer)
 ;;; clara-explorer.el ends here

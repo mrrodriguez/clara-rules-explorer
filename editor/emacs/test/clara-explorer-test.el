@@ -59,6 +59,13 @@ Tier-1 stub path fast."
 (ert-deftest edn-value-symbol-strips-properties ()
   (should (equal (clara-explorer--edn-value :lhs) ":lhs")))
 
+(ert-deftest edn-value-prints-vectors-element-wise ()
+  (should (equal (clara-explorer--edn-value ["a" "b"]) "[\"a\" \"b\"]"))
+  (should (equal (clara-explorer--edn-value [:a :b]) "[:a :b]"))
+  (should (equal (clara-explorer--edn-value []) "[]"))
+  (should (equal (clara-explorer--edn-value (vector (propertize "a" 'face 'bold)))
+                 "[\"a\"]")))
+
 (ert-deftest edn-map-propertized-strings-are-clean ()
   (let ((m (clara-explorer--edn-map (list :production (propertize "ns/rule" 'face 'bold) :side :lhs :caller-ns (propertize "ns" 'fontified t) :token "Tok"))))
     (should-not (string-match-p "fontified" m))
@@ -72,7 +79,7 @@ Tier-1 stub path fast."
     ;; should not signal wrong-type-argument listp
     (should (equal (length (if (vectorp vec) (append vec nil) vec)) 2))
     ;; choose-or-jump single vector and multi vector (mock completing-read for multi)
-    (cl-letf (((symbol-function 'clara-explorer--goto) (lambda (_t) nil))
+    (cl-letf (((symbol-function 'clara-explorer--goto) (lambda (_t &optional _no-push) nil))
               ((symbol-function 'completing-read) (lambda (_prompt coll &rest _r) (car coll))))
       (should (progn (clara-explorer--choose-or-jump :consumer "X" vec) t))
       (should (progn (clara-explorer--choose-or-jump :consumer "X" (vector t1)) t)))))
@@ -779,6 +786,37 @@ Tier-1 stub path fast."
     (should-not (string-match-p (clara-explorer--whole-symbol-regexp "app-outcome-approved?")
                                 "app-outcome-approved-args-demo"))))
 
+(ert-deftest fallback-regexp-follows-the-production-macros-test ()
+  "The jump search finds a production made by any configured macro, nested too."
+  (cl-labels ((matches-p (s rule) (string-match-p (clara-explorer--fallback-regexp rule) s)))
+    (progn ; the defaults find nested forms but not unknown macros
+      (should (matches-p "(let [x 1] (r/defrule my-rule [A] => x))" "my-rule"))
+      (should (matches-p "(do (defquery my-query [] [A]))" "my-query"))
+      (should-not (matches-p "(g/defdata my-rule [A] => 1)" "my-rule")))
+    (progn ; a customized list replaces the defaults
+      (let ((clara-explorer-production-macros '(("defdata" . rule) ("rule" . rule))))
+        (should (matches-p "(g/defdata my-rule [A] => 1)" "my-rule"))
+        (should (matches-p "(do (rule ^:m my-rule [A] => 1))" "my-rule"))
+        (should-not (matches-p "(r/defrule my-rule [A] => 1)" "my-rule"))))
+    (progn ; an empty list matches nothing, leaving the whole-symbol fallback
+      (let ((clara-explorer-production-macros '()))
+        (should-not (matches-p "(r/defrule my-rule [A] => 1)" "my-rule"))))))
+
+(ert-deftest enclosing-production-follows-the-production-macros-test ()
+  "Cursor context recognizes configured macros and takes their kind from the list."
+  (let ((clara-explorer-production-macros '(("defdata" . rule) ("defview" . query))))
+    (with-clara-buffer "(let [x 1] (g/defdata my-rule [A] => (r/insert! B)))"
+      (search-forward "[A")
+      (let ((enc (clara-explorer--enclosing-production)))
+        (should (equal (nth 0 enc) "my-rule"))
+        (should (eq (nth 1 enc) 'rule))))
+    (with-clara-buffer "(g/defview my-view [] [A])"
+      (search-forward "[A")
+      (should (eq (nth 1 (clara-explorer--enclosing-production)) 'query)))
+    (with-clara-buffer "(r/defrule not-configured [A] => 1)"
+      (search-forward "[A")
+      (should-not (clara-explorer--enclosing-production)))))
+
 
 ;; ---------------------------------------------------------------------------
 ;; Whitespace and comment skipping (clara-explorer--skip-ws)
@@ -982,7 +1020,7 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
       (should (string-match-p (regexp-quote ":token \"Doc\"") captured)))))
 
 ;; ---------------------------------------------------------------------------
-;; babashka transport (Phase 4)
+;; babashka transport
 ;; ---------------------------------------------------------------------------
 
 (ert-deftest registry-root-reads-env-var ()
@@ -1224,6 +1262,872 @@ EVAL-FN is the canned `cider-nrepl-sync-request:eval' replacement."
       (clara-explorer-select-unit)
       (should (equal clara-explorer--bb-selection-cache "{unit}"))
       (should (string-match-p "bb unit set" msg)))))
+
+
+
+;; ---------------------------------------------------------------------------
+;; Wrapper heads — point on `:not`/`:and` (or the wrapper bracket)
+;; ---------------------------------------------------------------------------
+
+(ert-deftest lhs-type-not-wrapper-head-resolves-inner-type ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [:not [:my-ns/my-type]] => 1)"
+    (should (equal (test--search-token ":not") ":my-ns/my-type"))))
+
+(ert-deftest lhs-type-not-wrapper-bracket-resolves-inner-type ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [:not [:my-ns/my-type]] => 1)"
+    (search-forward "[:not")
+    (search-backward "[")
+    (let* ((enc (clara-explorer--enclosing-production))
+           (form-start (nth 2 enc))
+           (side (clara-explorer--side-at-point form-start)))
+      (should (equal (clara-explorer--token-at-point form-start side) ":my-ns/my-type")))))
+
+(ert-deftest lhs-type-and-wrapper-head-resolves-first-child ()
+  (with-clara-buffer "(ns test) (r/defrule x-rule [:and [P] [Q]] => 1)"
+    (should (equal (test--search-token ":and") "P"))))
+
+;; ---------------------------------------------------------------------------
+;; Operation prep and dispatch (`--prepare-query' / `--op-result')
+;; ---------------------------------------------------------------------------
+
+(ert-deftest prepare-query-sends-no-operation ()
+  (let (sent)
+    (cl-letf (((symbol-function 'cider-connected-p) (lambda () t))
+              ((symbol-function 'cider-current-repl) (lambda (&rest _) 'conn))
+              ((symbol-function 'clara-explorer--effective-transport) (lambda (_c) 'bb))
+              ((symbol-function 'clara-explorer--context)
+               (lambda () (list :production "ns/q" :kind 'query :side :lhs
+                                :caller-ns "ns" :token "Doc")))
+              ((symbol-function 'clara-explorer--resolve-token) (lambda (_t _ns _c) "fq.Doc"))
+              ((symbol-function 'clara-explorer--bb-eval) (lambda (&rest _) (setq sent 'bb-eval)))
+              ((symbol-function 'clara-explorer--bb-run) (lambda (&rest _) (setq sent 'bb-run)))
+              ((symbol-function 'clara-explorer--eval-edn) (lambda (&rest _) (setq sent 'nrepl))))
+      (let ((query (clara-explorer--prepare-query)))
+        (should query)
+        (should (eq (plist-get query :transport) 'bb))
+        (should (equal (plist-get (plist-get query :input) :production) "ns/q"))
+        (should (equal (plist-get (plist-get query :input) :side) :lhs))
+        (should (equal (plist-get (plist-get query :input) :caller-ns) "ns"))
+        (should (equal (plist-get (plist-get query :input) :token) "fq.Doc"))
+        (should (eq (plist-get (plist-get query :ctx) :kind) 'query))
+        (should (equal (plist-get query :conn) 'conn))))
+    (should-not sent)))
+
+(ert-deftest prepare-query-works-inside-a-defquery ()
+  (with-clara-buffer "(ns test) (r/defquery find-x [?x] [DocumentCheck (= status :pass)])"
+    (search-forward "DocumentCheck")
+    (cl-letf (((symbol-function 'cider-connected-p) (lambda () t))
+              ((symbol-function 'cider-current-repl) (lambda (&rest _) 'conn))
+              ((symbol-function 'cider-current-ns) (lambda (&rest _) "test"))
+              ((symbol-function 'clara-explorer--effective-transport) (lambda (_c) 'nrepl))
+              ((symbol-function 'clara-explorer--resolve-token) (lambda (_t _ns _c) nil)))
+      (let ((query (clara-explorer--prepare-query)))
+        (should query)
+        (should (eq (plist-get (plist-get query :ctx) :kind) 'query))
+        (should (equal (plist-get (plist-get query :input) :production) "test/find-x"))
+        (should (equal (plist-get (plist-get query :input) :token) "DocumentCheck"))))))
+
+(ert-deftest op-result-provenance-transports ()
+  (let (bb-args nrepl-code
+        (input (list :node (list :kind :production :name "ns/p")
+                     :direction :producer
+                     :depth 0
+                     :ancestors ["ns/outer"]))
+        (bb-query (list :input (list :token "Doc") :transport 'bb :conn nil))
+        (nrepl-query (list :input (list :token "Doc") :transport 'nrepl :conn nil)))
+    (cl-letf (((symbol-function 'clara-explorer--bb-selection) (lambda () "{sel}"))
+              ((symbol-function 'clara-explorer--bb-run)
+               (lambda (args) (setq bb-args args) 'bb-result))
+              ((symbol-function 'clara-explorer--eval-edn)
+               (lambda (code _conn) (setq nrepl-code code) 'nrepl-result)))
+      (should (eq (clara-explorer--op-result bb-query 'fact-type-provenance input) 'bb-result))
+      (should (equal (car bb-args) "--provenance"))
+      (should (equal (cadr bb-args) "{sel}"))
+      (should (string-match-p (regexp-quote ":node {:kind :production :name \"ns/p\"}")
+                              (caddr bb-args)))
+      (should (string-match-p (regexp-quote ":ancestors [\"ns/outer\"]") (caddr bb-args)))
+      (should (eq (clara-explorer--op-result nrepl-query 'fact-type-provenance input)
+                  'nrepl-result))
+      (should (string-match-p (regexp-quote "client/fact-type-provenance") nrepl-code))
+      (should (string-match-p (regexp-quote ":direction :producer") nrepl-code)))))
+
+(ert-deftest op-result-navigate-keeps-the-wire-contract ()
+  (let (bb-input
+        (query (list :input (list :production "ns/p" :side :lhs :caller-ns "ns" :token "T")
+                     :transport 'bb
+                     :conn nil)))
+    (cl-letf (((symbol-function 'clara-explorer--bb-selection) (lambda () "{sel}"))
+              ((symbol-function 'clara-explorer--bb-eval)
+               (lambda (_sel input) (setq bb-input input) 'bb-result)))
+      (should (eq (clara-explorer--op-result query 'navigate) 'bb-result))
+      (should (string-match-p (regexp-quote ":side :lhs") bb-input))
+      (should (string-match-p (regexp-quote ":token \"T\"") bb-input)))))
+
+;; ---------------------------------------------------------------------------
+;; Provenance view (tabulated-list-mode, no packages)
+;; ---------------------------------------------------------------------------
+
+;; ERT has no clojure.test-style grouping form; this names a group of assertions
+;; without changing how failures are reported (the enclosing deftest is the unit).
+(defmacro test--group (_string &rest body)
+  (declare (indent 1))
+  `(progn ,@body))
+
+(defun test--prov (&rest kvs)
+  "A provenance node shaped as parseedn returns one: a hash-table, vectors for lists."
+  (let ((h (make-hash-table :test 'equal)))
+    (while kvs (puthash (pop kvs) (pop kvs) h))
+    h))
+
+(defun test--prov-labels (entries)
+  "The plain-text label of each tabulated-list ENTRY."
+  (mapcar (lambda (row) (substring-no-properties (aref (cadr row) 0))) entries))
+
+(defun test--prov-ids (entries)
+  (mapcar #'car entries))
+
+(ert-deftest provenance-row-labels-render-the-contract-test ()
+  (let* ((matches (vector (test--prov :name ":loan-app/application-outcome"
+                                      :short ":loan-app/application-outcome")))
+         (root (test--prov
+                :kind :fact-type
+                :type "clara.explorer.test.rules.loan_app_rules.ApplicationOutcome"
+                :type-short "ApplicationOutcome"
+                :children
+                (vector
+                 (test--prov :kind :production
+                             :name "clara.explorer.test.rules.loan-outcome-notices/notice-approved-app"
+                             :ns "clara.explorer.test.rules.loan-outcome-notices"
+                             :type "rule"
+                             :unit "loan-disposition-ruleset"
+                             :via :consume
+                             :matches matches
+                             :bridge? t
+                             :children [])
+                 (test--prov :kind :production
+                             :name "clara.explorer.test.rules.loan-app-rules/find-app-outcome"
+                             :ns "clara.explorer.test.rules.loan-app-rules"
+                             :type "query"
+                             :children [])
+                 (test--prov :kind :production
+                             :name "clara.explorer.test.rules.loan-app-rules/app-outcome-approved-args-demo"
+                             :ns "clara.explorer.test.rules.loan-app-rules"
+                             :type "rule"
+                             :children [])
+                 (test--prov :kind :production
+                             :name "clara.explorer.test.rules.loan-app-rules/unresolved"
+                             :ns "clara.explorer.test.rules.loan-app-rules"
+                             :type "rule"
+                             :outputs :unknown
+                             :children []))))
+         (labels (with-temp-buffer
+                   (test--prov-labels (clara-explorer--provenance-load root :consumer nil nil)))))
+    (test--group "the fact type shows its contract short name"
+      (should (string-match-p "^ApplicationOutcome" (car labels))))
+    (test--group "a bridge production says via <short match>"
+      (should (cl-find-if (lambda (l) (string-match-p "via :loan-app/application-outcome" l))
+                          labels)))
+    (test--group "the unit and the kind markers"
+      (should (cl-find-if (lambda (l) (string-match-p "@loan-disposition-ruleset" l)) labels))
+      (should (cl-find-if (lambda (l) (string-match-p "(query)" l)) labels)))
+    (test--group "leaf kinds"
+      (should (cl-find-if (lambda (l) (string-match-p "(no outputs)" l)) labels))
+      (should (cl-find-if (lambda (l) (string-match-p "(outputs unknown)" l)) labels)))))
+
+(ert-deftest provenance-labels-use-contract-short-names-and-markers-test ()
+  (test--group "the short name is the contract's :type-short, never derived from :type"
+    (let* ((node (test--prov :kind :fact-type
+                             :type "some.deep.Klass"
+                             :type-short "SHORT"
+                             :external? t
+                             :children []))
+           (label (substring-no-properties
+                   (clara-explorer--provenance-fact-type-label node))))
+      (should (string-prefix-p "SHORT" label))
+      (should (string-match-p "some\\.deep\\.Klass" label))
+      (should (string-match-p "(external)" label))))
+  (test--group "cycle and already-shown markers"
+    (let ((cycle (test--prov :kind :production :name "ns/a" :ns "ns" :type "rule"
+                             :cycle? t :children []))
+          (seen (test--prov :kind :production :name "ns/b" :ns "ns" :type "rule"
+                            :seen? t :children [])))
+      (should (string-match-p "↻ cycle"
+                              (clara-explorer--provenance-production-label cycle :producer)))
+      (should (string-match-p "↑ shown above"
+                              (clara-explorer--provenance-production-label seen :producer)))
+      (test--group "an expanded seen row drops the marker"
+        (should-not (string-match-p
+                     "↑ shown above"
+                     (clara-explorer--provenance-production-label seen :producer t))))))
+  (test--group "a retract edge is marked in each shape the backend emits"
+    (let ((producer-retract (test--prov :kind :production :name "ns/r" :ns "ns"
+                                        :type "rule" :via :retract :children []))
+          (producer-both (test--prov :kind :production :name "ns/r" :ns "ns" :type "rule"
+                                     :via :retract :vias [:insert :retract] :children []))
+          (consumer-retract (test--prov :kind :fact-type :type "T" :type-short "T"
+                                        :vias [:retract] :children []))
+          (consumer-both (test--prov :kind :fact-type :type "T" :type-short "T"
+                                     :vias [:insert :retract] :children [])))
+      (should (string-match-p "(retract)"
+                              (clara-explorer--provenance-production-label
+                               producer-retract :producer)))
+      (should (string-match-p (regexp-quote "(insert+retract)")
+                              (clara-explorer--provenance-production-label
+                               producer-both :producer)))
+      (should (string-match-p "(retract)"
+                              (clara-explorer--provenance-fact-type-label
+                               consumer-retract)))
+      (should (string-match-p (regexp-quote "(insert+retract)")
+                              (clara-explorer--provenance-fact-type-label
+                               consumer-both))))))
+
+(ert-deftest provenance-toggle-is-keyed-by-full-path-test ()
+  (let* ((q-node (test--prov :kind :production :name "ns/q" :ns "ns" :type "rule"))
+         (ft-a (test--prov :kind :fact-type :type "A" :type-short "A"
+                           :children (vector q-node)))
+         (ft-b (test--prov :kind :fact-type :type "B" :type-short "B"
+                           :children (vector q-node)))
+         (p (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                        :children (vector ft-a ft-b)))
+         (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                           :children (vector p))))
+    (with-temp-buffer
+      (clara-explorer--provenance-load root :producer nil nil)
+      (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                 (lambda (&rest _)
+                   (test--prov :kind :production :name "ns/q" :ns "ns" :type "rule"
+                               :children (vector (test--prov :kind :fact-type
+                                                             :type "A2" :type-short "A2"
+                                                             :children []))))))
+        (should (clara-explorer--provenance-toggle-path
+                 (vector "T" "ns/p" "A" "ns/q")))
+        (let ((labels (test--prov-labels
+                       (clara-explorer--provenance-entries root :producer))))
+          (should (= 1 (length (cl-remove-if-not
+                                (lambda (l) (string-match-p "A2" l)) labels))))))
+      (test--group "the sibling path stays collapsed"
+        (should (= 7 (length (clara-explorer--provenance-entries root :producer))))))))
+
+(ert-deftest provenance-pre-expanded-depth-needs-no-fetch-test ()
+  (let* ((grandchild (test--prov :kind :production :name "ns/r" :ns "ns" :type "rule"
+                                 :children []))
+         (child-ft (test--prov :kind :fact-type :type "U" :type-short "U"
+                               :children (vector grandchild)))
+         (p (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                        :children (vector child-ft)))
+         (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                           :children (vector p))))
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                 (lambda (&rest _) (error "must not fetch"))))
+        (let ((ids (test--prov-ids (clara-explorer--provenance-load root :producer nil nil))))
+          (should (cl-find-if (lambda (id) (equal id (vector "T" "ns/p" "U" "ns/r")))
+                              ids)))))))
+
+(ert-deftest provenance-tab-request-shape-test ()
+  (test--group "the root layer has no ancestors"
+    (let* ((p1 (test--prov :kind :production :name "ns/p1" :ns "ns" :type "rule"))
+           (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                             :children (vector p1)))
+           captured)
+      (with-temp-buffer
+        (clara-explorer--provenance-load root :producer 'query nil)
+        (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                   (lambda (_q input)
+                     (setq captured input)
+                     (test--prov :kind :production :name "ns/p1" :ns "ns" :type "rule"
+                                 :children []))))
+          (should (clara-explorer--provenance-toggle-path (vector "T" "ns/p1"))))
+        (should (equal (plist-get captured :node)
+                       (list :kind :production :name "ns/p1")))
+        (should (equal (plist-get captured :depth) 0))
+        (should (eq (plist-get captured :direction) :producer))
+        (should (equal (plist-get captured :ancestors) [])))))
+  (test--group "a nested production sends the production names above it, minus self"
+    (let* ((p2 (test--prov :kind :production :name "ns/p2" :ns "ns" :type "rule"))
+           (u (test--prov :kind :fact-type :type "U" :type-short "U"
+                          :children (vector p2)))
+           (p1 (test--prov :kind :production :name "ns/p1" :ns "ns" :type "rule"
+                           :children (vector u)))
+           (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                             :children (vector p1)))
+           captured)
+      (with-temp-buffer
+        (clara-explorer--provenance-load root :producer 'query nil)
+        (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                   (lambda (_q input)
+                     (setq captured input)
+                     (test--prov :kind :production :name "ns/p2" :ns "ns" :type "rule"
+                                 :children []))))
+          (should (clara-explorer--provenance-toggle-path
+                   (vector "T" "ns/p1" "U" "ns/p2"))))
+        (should (equal (plist-get captured :ancestors) ["ns/p1"])))))
+  (test--group "a :seen? row is fetched on demand at depth 0"
+    (let* ((seen (test--prov :kind :production :name "ns/seen" :ns "ns" :type "rule"
+                             :seen? t))
+           (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                             :children (vector seen)))
+           captured)
+      (with-temp-buffer
+        (clara-explorer--provenance-load root :producer 'query nil)
+        (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                   (lambda (_q input)
+                     (setq captured input)
+                     (test--prov :kind :production :name "ns/seen" :ns "ns" :type "rule"
+                                 :children []))))
+          (should (clara-explorer--provenance-toggle-path (vector "T" "ns/seen"))))
+        (should (equal (plist-get captured :node)
+                       (list :kind :production :name "ns/seen")))
+        (should (equal (plist-get captured :depth) 0))
+        (should (equal (plist-get captured :ancestors) [])))))
+  (test--group "cycle, leaf, outputs-unknown, and message rows do not fetch"
+    (let* ((leaf (test--prov :kind :production :name "ns/leaf" :ns "ns" :type "rule"
+                             :children []))
+           (cycle (test--prov :kind :production :name "ns/cycle" :ns "ns" :type "rule"
+                              :cycle? t))
+           (unknown (test--prov :kind :production :name "ns/unknown" :ns "ns" :type "rule"
+                                :outputs :unknown :children []))
+           (message (clara-explorer--provenance-message-node "boom"))
+           (ft (test--prov :kind :fact-type :type "A" :type-short "A"
+                           :children (vector leaf cycle unknown message)))
+           (p (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                          :children (vector ft)))
+           (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                             :children (vector p))))
+      (with-temp-buffer
+        (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                   (lambda (&rest _) (error "must not fetch")))
+                  ((symbol-function 'message) (lambda (&rest _) nil)))
+          (clara-explorer--provenance-load root :producer nil nil)
+          (dolist (path (list (vector "T" "ns/p" "A" "ns/leaf")
+                              (vector "T" "ns/p" "A" "ns/cycle")
+                              (vector "T" "ns/p" "A" "ns/unknown")
+                              (vector "T" "ns/p" "A" "boom")))
+            (should-not (clara-explorer--provenance-toggle-path path))))))))
+
+(ert-deftest provenance-request-turns-errors-into-message-nodes-test ()
+  (test--group "a backend error map"
+    (cl-letf (((symbol-function 'clara-explorer--op-result)
+               (lambda (&rest _) (test--prov :error "no fact type found"))))
+      (let ((node (clara-explorer--provenance-request nil nil)))
+        (should (eq (clara-explorer--edn-get :kind node) :message))
+        (should (equal (clara-explorer--edn-get :text node) "no fact type found")))))
+  (test--group "a transport failure (bb exit) becomes a message node"
+    (cl-letf (((symbol-function 'clara-explorer--op-result)
+               (lambda (&rest _) (user-error "editor-client.bb exited 1"))))
+      (let ((node (clara-explorer--provenance-request nil nil)))
+        (should (string-match-p "exited 1" (clara-explorer--edn-get :text node))))))
+  (test--group "a nil result and a message root render as one message row"
+    (cl-letf (((symbol-function 'clara-explorer--op-result) (lambda (&rest _) nil)))
+      (should (eq (clara-explorer--edn-get :kind (clara-explorer--provenance-request nil nil))
+                  :message)))
+    (with-temp-buffer
+      (should (equal (test--prov-labels
+                      (clara-explorer--provenance-load
+                       (clara-explorer--provenance-message-node "boom") :producer nil nil))
+                     '("boom"))))))
+
+(ert-deftest provenance-visit-reports-why-it-does-not-jump-test ()
+  (let* ((prod (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                           :source (test--prov :var? t)))
+         (ft (test--prov :kind :fact-type :type "T" :type-short "T"
+                         :children (vector prod)))
+         (messages '())
+         (goto-called nil))
+    (with-temp-buffer
+      (clara-explorer--provenance-load ft :producer nil nil)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
+                ((symbol-function 'clara-explorer--jump-to-production)
+                 (lambda (&rest _) (setq goto-called t))))
+        (test--group "a fact-type row explains itself"
+          (cl-letf (((symbol-function 'tabulated-list-get-id)
+                     (lambda (&optional _) (vector "T"))))
+            (clara-explorer-provenance-visit))
+          (should (cl-find-if (lambda (m) (string-match-p "not a production row" m))
+                              messages)))
+        (test--group "an ID with no node asks for a refresh"
+          (cl-letf (((symbol-function 'tabulated-list-get-id)
+                     (lambda (&optional _) (vector "T" "gone"))))
+            (clara-explorer-provenance-visit))
+          (should (cl-find-if (lambda (m) (string-match-p "stale row" m)) messages)))
+        (test--group "a production row jumps"
+          (cl-letf (((symbol-function 'tabulated-list-get-id)
+                     (lambda (&optional _) (vector "T" "ns/p"))))
+            (clara-explorer-provenance-visit))
+          (should goto-called))))))
+
+(ert-deftest provenance-collapse-then-expand-uses-the-cache-test ()
+  (let* ((child (test--prov :kind :fact-type :type "U" :type-short "U" :children []))
+         (p (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"))
+         (root (test--prov :kind :fact-type :type "T" :type-short "T"
+                           :children (vector p)))
+         (fetches 0))
+    (with-temp-buffer
+      (clara-explorer--provenance-load root :producer 'query nil)
+      (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                 (lambda (&rest _)
+                   (setq fetches (1+ fetches))
+                   (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                               :children (vector child)))))
+        (should (clara-explorer--provenance-toggle-path (vector "T" "ns/p")))
+        (should (clara-explorer--provenance-toggle-path (vector "T" "ns/p")))
+        (should (clara-explorer--provenance-toggle-path (vector "T" "ns/p")))
+        (should (= 1 fetches))   ; re-expanding reads the cached children
+        (should (= 3 (length (clara-explorer--provenance-entries root :producer))))))))
+
+(ert-deftest provenance-header-shows-the-direction-test ()
+  (with-temp-buffer
+    (clara-explorer-provenance-mode)
+    (clara-explorer--provenance-load
+     (test--prov :kind :fact-type :type "T" :type-short "T" :children [])
+     :consumer nil nil)
+    (should (equal (car (aref tabulated-list-format 0)) "Consumer Provenance"))
+    (should-not (nth 2 (aref tabulated-list-format 0)))
+    (should-error (tabulated-list-sort 0))))
+
+(defconst test--scratch-dir
+  (expand-file-name "target/tmp"
+                    (file-name-directory
+                     (or load-file-name buffer-file-name default-directory)))
+  "Repo-local scratch directory for tests that need a real file.")
+
+(defmacro test--with-repl-lookup (var-info-fn ns-path-fn &rest body)
+  "Run BODY with the REPL's var lookup and `cider/ns-path' answered by stubs.
+`cider-find-file' visits the path as is, and messages and jump pushes are
+silenced.  Messages are collected in `messages', which BODY's caller binds."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'cider-var-info) ,var-info-fn)
+             ((symbol-function 'cider-sync-request:ns-path) ,ns-path-fn)
+             ((symbol-function 'cider-find-file) #'find-file-noselect)
+             ((symbol-function 'message)
+              (lambda (fmt &rest args) (push (apply #'format fmt args) messages)))
+             ((symbol-function 'clara-explorer--push-jump) (lambda () nil))
+             ((symbol-function 'clara-explorer--log) (lambda (&rest _) nil)))
+     ,@body))
+
+(defun test--write-demo-ns (file)
+  "Write a demo.ns source to FILE: the ns form on line 1, rule-a on line 3."
+  (make-directory (file-name-directory file) t)
+  (with-temp-file file
+    (insert "(ns demo.ns)\n\n(r/defrule rule-a [] => 1)\n")))
+
+(defun test--demo-ns-name-stub (file)
+  "A `cider-get-ns-name' stub: \"demo.ns\" in the buffer visiting FILE only."
+  (lambda (&rest _) (and (equal (buffer-file-name) file) "demo.ns")))
+
+(ert-deftest provenance-goto-fallback-reports-a-missing-namespace-test ()
+  "An unloaded namespace off the classpath is reported, and the empty
+`cider/ns-path' answer never reaches `cider-find-file' — which would expand it
+to `default-directory' and open that directory in dired."
+  (let ((messages '())
+        (find-file-args '())
+        (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                          :type "rule" :source (test--prov :var? nil))))
+    (with-temp-buffer
+      (test--with-repl-lookup (lambda (&rest _) nil) (lambda (&rest _) "")
+        (cl-letf (((symbol-function 'cider-find-file)
+                   (lambda (file) (push file find-file-args) nil)))
+          (should-not (clara-explorer--goto node))))
+      (should-not find-file-args)
+      (should (cl-find-if (lambda (m) (string-match-p "classpath" m)) messages))
+      (should (cl-find-if (lambda (m) (string-match-p "demo\\.ns" m)) messages)))))
+
+(ert-deftest provenance-goto-fallback-reports-from-a-file-buffer-visiting-another-ns-test ()
+  (let* ((file (expand-file-name "provenance-goto-other-ns.clj" test--scratch-dir))
+         (messages '())
+         (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                           :type "rule" :source (test--prov :var? nil)))
+         (buffer nil))
+    (make-directory test--scratch-dir t)
+    (with-temp-file file
+      (insert "(ns other.ns)\n\n(r/defrule other-rule [] => 1)\n"))
+    (unwind-protect
+        (with-current-buffer (find-file-noselect file)
+          (setq buffer (current-buffer))
+          (goto-char (point-max))
+          (let ((point-before (point)))
+            (test--with-repl-lookup (lambda (&rest _) nil) (lambda (&rest _) "")
+              (cl-letf (((symbol-function 'cider-get-ns-name)
+                         (lambda (&rest _) "other.ns")))
+                (should-not (clara-explorer--goto node))))
+            ;; point is not clobbered in the wrong buffer
+            (should (= point-before (point)))
+            ;; the classpath diagnostic fires instead of a bogus search of other.ns
+            (should (cl-find-if (lambda (m) (string-match-p "classpath" m)) messages))
+            (should (cl-find-if (lambda (m) (string-match-p "demo\\.ns" m)) messages))
+            (should-not (cl-find-if (lambda (m) (string-match-p "not found in" m)) messages))))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (delete-file file))))
+
+(ert-deftest provenance-goto-fallback-ignores-the-connections-namespace-test ()
+  "A buffer that merely shares the REPL's ns is never searched.
+`cider-current-ns' answers with the connection's namespace for non-Clojure
+buffers, so with the REPL sitting in the target ns an unrelated buffer (the
+REPL itself, `*scratch*', a log) used to pass the guard: point moved to the top
+of that buffer and the rule search ran there."
+  (let ((messages '())
+        (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                          :type "rule" :source (test--prov :var? nil))))
+    (with-temp-buffer
+      (insert "unrelated notes\n\nthe rule-a line is a red herring\n")
+      (goto-char (point-max))
+      (let ((point-before (point)))
+        (test--with-repl-lookup (lambda (&rest _) nil) (lambda (&rest _) "")
+          (cl-letf (((symbol-function 'cider-current-ns)
+                     (lambda (&rest _) "demo.ns"))   ; the connection's ns
+                    ((symbol-function 'cider-get-ns-name)
+                     (lambda (&rest _) nil)))        ; this buffer has no ns form
+            (should-not (clara-explorer--goto node))))
+        (should (= point-before (point)))
+        (should (cl-find-if (lambda (m) (string-match-p "classpath" m)) messages))
+        (should-not (cl-find-if (lambda (m) (string-match-p "not found in" m)) messages))))))
+
+(ert-deftest provenance-goto-fallback-returns-nil-when-cider-signals-test ()
+  (let ((messages '())
+        (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                          :type "rule" :source (test--prov :var? nil))))
+    (with-temp-buffer
+      (goto-char (point-max))
+      (let ((point-before (point)))
+        (test--with-repl-lookup
+            (lambda (&rest _) (user-error "No linked CIDER sessions"))
+            (lambda (&rest _) (error "ns-path must not run after the REPL failed"))
+          (should-not (clara-explorer--goto node)))
+        (should (= point-before (point))))   ; point is not moved after the error
+      (should (cl-find-if (lambda (m)
+                            (string-match-p "could not open demo\\.ns (No linked CIDER sessions)" m))
+                          messages))
+      (should-not (cl-find-if (lambda (m) (string-match-p "not found in" m)) messages)))))
+
+(ert-deftest provenance-navigation-window-prefers-the-sources-own-window-test ()
+  "RET runs in the window showing the production's source, not the MRU window.
+Two windows are open — the rules file and an unrelated buffer — and the caller
+is in the provenance view.  The source's window must win, so the jump neither
+clobbers nor searches the unrelated one; with no such window the MRU one is
+used."
+  (let* ((file (expand-file-name "provenance-nav-window.clj" test--scratch-dir))
+         (src nil)
+         (other nil))
+    (test--write-demo-ns file)
+    (unwind-protect
+        (progn
+          (setq src (find-file-noselect file))
+          (setq other (get-buffer-create " *clara-unrelated*"))
+          (delete-other-windows)
+          (let ((src-win (selected-window))
+                (other-win (split-window)))
+            (set-window-buffer src-win src)
+            (set-window-buffer other-win other)
+            (cl-letf (((symbol-function 'cider-get-ns-name) (test--demo-ns-name-stub file))
+                      ((symbol-function 'get-mru-window)
+                       (lambda (&rest _) other-win)))
+              (select-window other-win)
+              (should (eq (clara-explorer--ns-source-buffer "demo.ns") src))
+              (should (eq (clara-explorer--navigation-window src) src-win))
+              (set-window-buffer src-win other)
+              (should (eq (clara-explorer--navigation-window src) other-win)))))
+      (when (buffer-live-p src) (kill-buffer src))
+      (when (buffer-live-p other) (kill-buffer other))
+      (delete-other-windows)
+      (delete-file file))))
+
+(ert-deftest provenance-visit-changes-nothing-when-the-production-is-not-found-test ()
+  "A failed RET selects no window and pushes no jump: the user stays in the view,
+and the MRU window keeps whatever it showed (a failed jump used to leave a dired
+buffer there, whose missing session then broke the next jump)."
+  (let* ((prod (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                           :source (test--prov :var? nil)))
+         (ft (test--prov :kind :fact-type :type "T" :type-short "T"
+                         :children (vector prod)))
+         (events '())
+         (messages '()))
+    (with-temp-buffer
+      (clara-explorer--provenance-load ft :producer nil nil)
+      (test--with-repl-lookup (lambda (&rest _) nil) (lambda (&rest _) "")
+        (cl-letf (((symbol-function 'tabulated-list-get-id)
+                   (lambda (&optional _) (vector "T" "ns/p")))
+                  ((symbol-function 'clara-explorer--push-jump)
+                   (lambda () (push 'push-jump events)))
+                  ((symbol-function 'select-window)
+                   (lambda (window &rest _) (push (list 'select window) events) window))
+                  ((symbol-function 'pop-to-buffer)
+                   (lambda (buffer &rest _) (push (list 'display buffer) events) buffer)))
+          (clara-explorer-provenance-visit)))
+      (should-not events)
+      (should (cl-find-if (lambda (m) (string-match-p "classpath" m)) messages)))))
+
+(ert-deftest provenance-visit-pushes-the-jump-before-changing-windows-test ()
+  "C-o returns to the provenance view, not to the window the jump ran in."
+  (let* ((prod (test--prov :kind :production :name "ns/p" :ns "ns" :type "rule"
+                           :source (test--prov :var? nil)))
+         (ft (test--prov :kind :fact-type :type "T" :type-short "T"
+                         :children (vector prod)))
+         (events '()))
+    (with-temp-buffer
+      (clara-explorer--provenance-load ft :producer nil nil)
+      (cl-letf (((symbol-function 'tabulated-list-get-id)
+                 (lambda (&optional _) (vector "T" "ns/p")))
+                ((symbol-function 'clara-explorer--locate-production)
+                 (lambda (&rest _) (list :buffer 'source-buffer)))
+                ((symbol-function 'clara-explorer--navigation-window)
+                 (lambda (buffer) (list 'window-for buffer)))
+                ((symbol-function 'clara-explorer--push-jump)
+                 (lambda () (push 'push-jump events)))
+                ((symbol-function 'select-window)
+                 (lambda (window &rest _) (push (list 'select window) events) window))
+                ((symbol-function 'clara-explorer--show-production)
+                 (lambda (location &rest _)
+                   (push (list 'show (plist-get location :buffer)) events)
+                   t)))
+        (clara-explorer-provenance-visit))
+      (should (equal (reverse events)
+                     '(push-jump
+                       (select (window-for source-buffer))
+                       (show source-buffer)))))))
+
+(ert-deftest provenance-goto-fallback-finds-the-form-test ()
+  "With nothing loaded, NS's classpath path is visited and searched."
+  (let* ((file (expand-file-name "provenance-goto-fallback.clj" test--scratch-dir))
+         (messages '())
+         (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                           :type "rule" :source (test--prov :var? nil))))
+    (test--write-demo-ns file)
+    (unwind-protect
+        (with-temp-buffer
+          (test--with-repl-lookup (lambda (&rest _) nil) (lambda (&rest _) file)
+            (cl-letf (((symbol-function 'cider-get-ns-name) (test--demo-ns-name-stub file)))
+              (should (clara-explorer--goto node))
+              (should (equal (buffer-file-name) file))
+              ;; the fallback regexp consumes the symbol's boundary char, so search back
+              (should (save-excursion
+                        (re-search-backward "rule-a" (line-beginning-position) t))))))
+      (when-let* ((visited (find-buffer-visiting file))) (kill-buffer visited))
+      (delete-file file))))
+
+(ert-deftest provenance-visit-jumps-to-a-loaded-var-off-the-classpath-test ()
+  "The reported bug: a namespace loaded from a linked repo outside the classpath.
+`cider/ns-path' answers \"\", but the loaded var's metadata names the file and
+line, so RET lands on the rule.  Every REPL request runs in the REPL the view
+was opened from — not in the buffer the target window shows, which may have no
+linked session — and the opened file is pinned to that REPL like a CIDER jump."
+  (let* ((file (expand-file-name "provenance-loaded-var.clj" test--scratch-dir))
+         (repl (get-buffer-create " *clara-fake-repl*"))
+         (unlinked (get-buffer-create " *clara-unlinked*"))
+         (prod (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                           :type "rule" :source (test--prov :var? nil)))
+         (ft (test--prov :kind :fact-type :type "T" :type-short "T"
+                         :children (vector prod)))
+         (request-buffers '())
+         (pinned nil)
+         (messages '()))
+    (test--write-demo-ns file)
+    (unwind-protect
+        (progn
+          (delete-other-windows)
+          (set-window-buffer (selected-window) unlinked)
+          (with-temp-buffer
+            (clara-explorer--provenance-load ft :producer (list :conn repl) nil)
+            (test--with-repl-lookup
+                (lambda (name &rest _)
+                  (push (current-buffer) request-buffers)
+                  (and (equal name "demo.ns/rule-a")
+                       (list (quote dict) "file" file "line" 3)))
+                (lambda (&rest _) (push (current-buffer) request-buffers) "")
+              (cl-letf (((symbol-function 'tabulated-list-get-id)
+                         (lambda (&optional _) (vector "T" "demo.ns/rule-a")))
+                        ((symbol-function 'get-mru-window)
+                         (lambda (&rest _) (get-buffer-window unlinked)))
+                        ((symbol-function 'cider-get-ns-name)
+                         (test--demo-ns-name-stub file))
+                        ((symbol-function 'cider--pin-repl-if-out-of-project)
+                         (lambda (r) (setq pinned (list r (buffer-file-name))))))
+                (clara-explorer-provenance-visit))))
+          (should (equal request-buffers (list repl)))
+          (should (equal (buffer-file-name (window-buffer (selected-window))) file))
+          (with-current-buffer (window-buffer (selected-window))
+            (should (= 3 (line-number-at-pos)))
+            (should (looking-at-p "(r/defrule rule-a")))
+          (should (equal pinned (list repl file))))
+      (when-let* ((visited (find-buffer-visiting file))) (kill-buffer visited))
+      (kill-buffer repl)
+      (kill-buffer unlinked)
+      (delete-other-windows)
+      (delete-file file))))
+
+(ert-deftest provenance-goto-searches-when-the-reported-line-drifted-test ()
+  "An edited buffer can drift from the loaded var's line: the form is searched."
+  (let* ((file (expand-file-name "provenance-drifted-line.clj" test--scratch-dir))
+         (messages '())
+         (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                           :type "rule" :source (test--prov :var? nil))))
+    (test--write-demo-ns file)
+    (unwind-protect
+        (with-temp-buffer
+          (test--with-repl-lookup
+              (lambda (&rest _) (list (quote dict) "file" file "line" 1))
+              (lambda (&rest _) "")
+            (cl-letf (((symbol-function 'cider-get-ns-name) (test--demo-ns-name-stub file)))
+              (should (clara-explorer--goto node))
+              (should (= 3 (line-number-at-pos))))))
+      (when-let* ((visited (find-buffer-visiting file))) (kill-buffer visited))
+      (delete-file file))))
+
+(ert-deftest provenance-goto-uses-an-open-source-buffer-when-the-repl-fails-test ()
+  "A source file the user has open is reachable without a working session."
+  (let* ((file (expand-file-name "provenance-open-buffer.clj" test--scratch-dir))
+         (messages '())
+         (node (test--prov :kind :production :name "demo.ns/rule-a" :ns "demo.ns"
+                           :type "rule" :source (test--prov :var? nil)))
+         (src nil))
+    (test--write-demo-ns file)
+    (unwind-protect
+        (progn
+          (setq src (find-file-noselect file))
+          (with-temp-buffer
+            (test--with-repl-lookup
+                (lambda (&rest _) (user-error "No linked CIDER sessions"))
+                (lambda (&rest _) "")
+              (cl-letf (((symbol-function 'cider-get-ns-name)
+                         (test--demo-ns-name-stub file)))
+                (should (clara-explorer--goto node))
+                (should (eq (current-buffer) src))
+                (should (= 3 (line-number-at-pos)))))))
+      (when (buffer-live-p src) (kill-buffer src))
+      (delete-file file))))
+
+(defun test--ns-form-name-stub (&rest _)
+  "A `cider-get-ns-name' stub that reads the current buffer's own ns form."
+  (save-excursion
+    (goto-char (point-min))
+    (and (re-search-forward "(ns \\([^ )\n]+\\)" nil t)
+         (match-string-no-properties 1))))
+
+(defmacro test--with-source-root (bindings files &rest body)
+  "Run BODY with a fresh scratch root bound to the first of BINDINGS.
+FILES is a list of (RELATIVE-PATH . CONTENT) written under the root first.  The
+root and any buffers visiting its files are removed afterwards."
+  (declare (indent 2))
+  (let ((root (car bindings)))
+    `(let ((,root (file-name-as-directory
+                   (make-temp-file (expand-file-name "roots-" test--scratch-dir) t))))
+       (unwind-protect
+           (progn
+             (dolist (file ,files)
+               (let ((path (expand-file-name (car file) ,root)))
+                 (make-directory (file-name-directory path) t)
+                 (with-temp-file path (insert (cdr file)))))
+             ,@body)
+         (dolist (buffer (buffer-list))
+           (when (and (buffer-file-name buffer)
+                      (string-prefix-p ,root (buffer-file-name buffer)))
+             (kill-buffer buffer)))
+         (delete-directory ,root t)))))
+
+(ert-deftest source-roots-munge-the-namespace-test ()
+  (should (equal (clara-explorer--ns->relative-path "example-ruleset.reports.memory.core")
+                 "example_ruleset/reports/memory/core"))
+  (should (equal (clara-explorer--ns->relative-path "single") "single")))
+
+(ert-deftest source-roots-find-candidates-at-any-depth-test ()
+  "Any depth is searched, build output and dot-directories are not, and shallower
+files come first, so a checkout's source sorts ahead of a nested copy."
+  (make-directory test--scratch-dir t)
+  (test--with-source-root (root)
+      '(("repo-a/modules/rules/src/main/clojure/demo_ns/core.clj" . "(ns demo-ns.core)")
+        ("repo-b/src/demo_ns/core.cljc" . "(ns demo-ns.core)")
+        ("repo-c/src/demo_ns/other.clj" . "(ns demo-ns.other)")
+        ("repo-c/src/not_demo_ns/core.clj" . "(ns not-demo-ns.core)")
+        ("repo-d/target/classes/demo_ns/core.clj" . "(ns demo-ns.core)")
+        ("repo-d/resources/public/js/out/demo_ns/core.cljc" . "(ns demo-ns.core)")
+        ("repo-d/.cpcache/demo_ns/core.clj" . "(ns demo-ns.core)"))
+    (should (equal (clara-explorer--source-root-candidates "demo-ns.core" (list root))
+                   (list (expand-file-name "repo-b/src/demo_ns/core.cljc" root)
+                         (expand-file-name
+                          "repo-a/modules/rules/src/main/clojure/demo_ns/core.clj" root))))
+    (let ((clara-explorer-source-roots-skip-directories '()))
+      (should (member (expand-file-name "repo-d/target/classes/demo_ns/core.clj" root)
+                      (clara-explorer--source-root-candidates "demo-ns.core" (list root)))))
+    (should (equal (clara-explorer--source-root-candidates
+                    "demo-ns.core" (list (expand-file-name "repo-b" root)))
+                   (list (expand-file-name "repo-b/src/demo_ns/core.cljc" root))))))
+
+(ert-deftest source-roots-default-to-the-repls-parent-directory-test ()
+  (let ((repl (get-buffer-create " *clara-roots-repl*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer repl
+            (setq-local nrepl-project-dir "/checkouts/main-repo/"))
+          (let ((clara-explorer-source-roots nil))
+            (should (equal (clara-explorer--source-root-dirs repl) '("/checkouts/"))))
+          (let ((clara-explorer-source-roots '("/elsewhere/")))
+            (should (equal (clara-explorer--source-root-dirs repl) '("/elsewhere/")))))
+      (kill-buffer repl))))
+
+(ert-deftest source-roots-accept-only-a-file-whose-ns-form-matches-test ()
+  "A file at the right path with another ns form is rejected and not left open."
+  (make-directory test--scratch-dir t)
+  (test--with-source-root (root)
+      '(("repo-a/src/demo_ns/core.clj" . "(ns not-demo.core)")
+        ("repo-b/src/demo_ns/core.clj" . "(ns demo-ns.core)\n\n(r/defrule rule-a [] => 1)\n"))
+    (let ((clara-explorer-source-roots (list root))
+          (rejected (expand-file-name "repo-a/src/demo_ns/core.clj" root)))
+      (cl-letf (((symbol-function 'cider-get-ns-name) #'test--ns-form-name-stub))
+        (should (equal (buffer-file-name (clara-explorer--source-root-buffer "demo-ns.core" nil))
+                       (expand-file-name "repo-b/src/demo_ns/core.clj" root)))
+        (should-not (find-buffer-visiting rejected))))))
+
+(ert-deftest provenance-goto-finds-an-unloaded-namespace-under-the-source-roots-test ()
+  "No REPL answer and no open buffer: the file is found from the ns name alone."
+  (make-directory test--scratch-dir t)
+  (test--with-source-root (root)
+      '(("other-repo/src/demo_ns/core.clj"
+         . "(ns demo-ns.core)\n\n(let [x 1]\n  (r/defrule rule-a [] => x))\n"))
+    (let ((messages '())
+          (clara-explorer-source-roots (list root))
+          (node (test--prov :kind :production :name "demo-ns.core/rule-a" :ns "demo-ns.core"
+                            :type "rule" :source (test--prov :var? nil))))
+      (with-temp-buffer
+        (test--with-repl-lookup (lambda (&rest _) nil) (lambda (&rest _) "")
+          (cl-letf (((symbol-function 'cider-get-ns-name) #'test--ns-form-name-stub))
+            (should (clara-explorer--goto node))
+            (should (equal (buffer-file-name)
+                           (expand-file-name "other-repo/src/demo_ns/core.clj" root)))
+            (should (= 4 (line-number-at-pos)))))))))
+
+(ert-deftest provenance-mode-uses-the-standard-keys-test ()
+  (test--group "g and q come from the parent mode, not from us"
+    (with-temp-buffer
+      (clara-explorer-provenance-mode)
+      (should (eq revert-buffer-function #'clara-explorer-provenance-refresh))
+      (should (eq (lookup-key clara-explorer-provenance-mode-map (kbd "g"))
+                  #'revert-buffer))
+      (should (eq (lookup-key clara-explorer-provenance-mode-map (kbd "q"))
+                  #'quit-window))
+      (test--group "the view's own keys are bound in the mode map"
+        (should (eq (lookup-key clara-explorer-provenance-mode-map (kbd "TAB"))
+                    #'clara-explorer-provenance-toggle))
+        (should (eq (lookup-key clara-explorer-provenance-mode-map (kbd "RET"))
+                    #'clara-explorer-provenance-visit))))))
+
+(ert-deftest provenance-revert-reruns-the-root-call-test ()
+  (let* ((root (test--prov :kind :fact-type :type "T" :type-short "T" :children []))
+         (new-root (test--prov :kind :fact-type :type "T2" :type-short "T2"
+                               :children []))
+         (calls 0))
+    (with-temp-buffer
+      (clara-explorer-provenance-mode)
+      (setq tabulated-list-entries
+            (clara-explorer--provenance-load root :producer 'query
+                                             (list :direction :producer)))
+      (tabulated-list-print t)
+      (cl-letf (((symbol-function 'clara-explorer--provenance-request)
+                 (lambda (_q _input)
+                   (setq calls (1+ calls))
+                   new-root)))
+        (revert-buffer t t))
+      (should (= 1 calls))
+      (should (equal (test--prov-labels tabulated-list-entries) '("T2"))))))
 
 (provide 'clara-explorer-test)
 ;;; clara-explorer-test.el ends here

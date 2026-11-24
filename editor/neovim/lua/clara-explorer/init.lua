@@ -98,6 +98,9 @@ function M.navigate(side)
     on_resolved = function(fq)
       local resolved_token = fq or ctx.token
       conjure.debug_log("navigate resolved-token=" .. tostring(resolved_token) .. " (fq=" .. tostring(fq) .. ")")
+      -- `origin_bufnr` routes the transport probe through the source buffer, so
+      -- the probe still finds a client when navigate is invoked from a command
+      -- line or a picker.
       conjure.with_transport(function(transport)
         conjure.debug_log("navigate transport=" .. tostring(transport))
         if transport == "bb" then
@@ -136,6 +139,7 @@ function M.navigate(side)
           code = code,
           bufnr = bufnr,
           win = win,
+          origin_bufnr = bufnr,
           passive = true,
           on_value = function(value, _, cb_win)
             if vim.api.nvim_win_is_valid(cb_win) then vim.api.nvim_set_current_win(cb_win) end
@@ -148,7 +152,7 @@ function M.navigate(side)
           end,
           on_error = function(msg) vim.notify(msg, vim.log.levels.ERROR) end,
         })
-      end)
+      end, { origin_bufnr = bufnr })
     end,
   })
 end
@@ -159,6 +163,9 @@ function M.refresh()
     vim.notify("Not connected to a Conjure Clojure REPL", vim.log.levels.WARN)
     return
   end
+  -- A refresh means the REPL state changed, so cached answers about it (the REPL's
+  -- project directory, used as the default source root) are dropped.
+  jump.clear_caches()
   conjure.with_transport(function(transport)
     if transport == "bb" then
       vim.notify(
@@ -264,6 +271,11 @@ function M.transport_status()
     conjure.show_scratch("clara-explorer://transport-status", lines, "clojure")
   end)
 end
+
+--- `:ClaraExplorerShowProducerProvenance` / `:ClaraExplorerShowConsumerProvenance`
+-- — open the fact type provenance view for the type at the cursor, walking
+-- DIRECTION (`"producer"` upstream, `"consumer"` downstream).
+function M.show_provenance(direction) require("clara-explorer.provenance").open(direction) end
 
 --- `:ClaraExplorerSelectUnit` — re-prompt for the bb transport's registry unit.
 function M.select_unit()

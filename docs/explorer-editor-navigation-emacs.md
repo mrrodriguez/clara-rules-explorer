@@ -4,7 +4,7 @@ The Emacs client for the shared editor-navigation feature. See
 [Editor Navigation (shared)](./explorer-editor-navigation.md) for the contract,
 REPL bootstrap, fact-type resolution, jump semantics, and refresh/swap
 workflow — those are identical across editors. This page is the Emacs-specific
-surface: install, jump history, debugging, and testing.
+surface: install, the provenance view, jump history, debugging, and testing.
 
 The client is a single file, `editor/emacs/clara-explorer.el`.
 
@@ -58,6 +58,8 @@ cd editor/emacs && make package
   :load-path "~/src/clara-rules-explorer/editor/emacs"
   :commands (clara-explorer-navigate-producer
              clara-explorer-navigate-consumer
+             clara-explorer-show-producer-provenance
+             clara-explorer-show-consumer-provenance
              clara-explorer-refresh
              clara-explorer-swap-session
              clara-explorer-toggle-transport
@@ -72,34 +74,119 @@ the same way any Emacs package does.
 **Evil:** `C-o` (`evil-jump-backward`) / `C-i` work for every navigation —
 see _Jump history_ below.
 
-## Emacs implementation notes
+## Fact type provenance view
 
-Two details are Emacs-specific (the shared semantics live in the common doc):
+`clara-explorer-show-producer-provenance` and
+`clara-explorer-show-consumer-provenance` open a side window showing the
+upstream or downstream reference tree of the fact type at point. The shared
+contract (node kinds, depth, `:cycle?` / `:seen?`, `:type-short` / `:matches`
+/ `:bridge?`, and the v1 no-polarity limitation) is documented in the
+[shared navigation doc](./explorer-editor-navigation.md#fact-type-provenance-shared);
+this section is the Emacs surface.
 
-- **EDN transport strips text properties.** `substring-no-properties` before
-  `prin1-to-string`; otherwise Emacs prints `#("ns/rule" 0 4 (face ...))`
-  which is invalid EDN for `client/navigate`.
-- **Targets are `vector`s from `parseedn`.** `choose-target`/`choose-or-jump`
-  coerce `(append vec nil)` so `length`/`mapcar`/`nth` never signal
-  `wrong-type-argument listp`.
+The view is built-in `tabulated-list-mode` — no `lsp-treemacs` and no extra
+package:
+
+| Key | Action |
+| --- | ------ |
+| `TAB` | expand/collapse the production on the row |
+| `RET` / `<return>` | jump to the production (the same target machinery as navigate) |
+| `M-x revert-buffer` | re-run the root call (refresh) |
+| `q` | bury the view |
+
+Only `TAB`, `RET`, and `<return>` are bound in the mode map; `g`/`q` come from
+`special-mode`, so a setup that shadows `g` (evil's `g` prefix, for example)
+can bind `clara-explorer-provenance-refresh` itself. The same production under
+two sibling fact types toggles independently.
+
+`RET` opens the production in the window that already shows its source file, if
+one does; otherwise in the most recent other window.
+
+`RET` asks the REPL the view was opened from, never the session of whatever
+buffer the target window shows. It locates the production in this order:
+
+1. The loaded var's `info` (file and line), whether or not the node says
+   `:var? true`. This reaches a namespace loaded from a checkout outside the
+   classpath, such as another repo linked to the session with sesman, where
+   `cider/ns-path` has no answer.
+2. The namespace's classpath resource, searched for the `defrule`/`defquery`
+   form.
+3. An already-open buffer whose `ns` form names the namespace.
+4. The namespace's file under `clara-explorer-source-roots`, found from the
+   name alone: any file at any depth whose path ends in `<ns path>.clj` (or
+   `.cljc`). The ns path is the name munged as Clojure does (dots to `/`, dashes
+   to `_`), and the file is used only when its own `ns` form names the
+   namespace. Shallower matches are tried first. The walk skips dot-directories
+   and the names in `clara-explorer-source-roots-skip-directories` (default
+   `node_modules`, `target`, `out`), because a compiled copy of a `.cljc` file
+   carries the same `ns` form as its source.
+
+Steps 2–4 search the file for the production's defining form (see _Production
+macros_ below), since only the REPL knows the line.
+
+`clara-explorer-source-roots` defaults to `nil`, which means the parent
+directory of the connected REPL's project. With checkouts kept side by side,
+that finds a composed tree's other repos with no configuration. Set it to a list
+of directories to search those instead; the list replaces the default. A root
+can be a single checkout or a directory of them:
+
+```elisp
+(setq clara-explorer-source-roots
+      '("~/src/team-a/" "~/src/team-b/"))
+```
+
+Like a CIDER jump, the opened file is pinned to that REPL when it lies outside
+the REPL's project, so `cider-eval-buffer` there uses the same session without
+linking it in sesman first.
+
+Two defcustoms control the view:
+
+- `clara-explorer-provenance-depth` — `0` (the root's immediate production
+  layer), an integer `n` (inline `n` further levels), or `full` (`:depth
+  :full`).
+- `clara-explorer-provenance-window-params` — `display-buffer-in-side-window`
+  arguments; `nil` uses the side-window defaults.
+
+Backend and transport failures (an `{:error …}` answer or a non-zero babashka
+exit) render as `:message` rows for both the root call and a `TAB` expansion,
+so a failed request never breaks the buffer. `RET` reports why it cannot jump
+when a registry/offline tree names a namespace that is not loaded in the
+connected REPL, not on its classpath, and not under the source roots; load that
+namespace, open its file, or add its checkout's parent directory to
+`clara-explorer-source-roots`. A jump that fails displays nothing, selects no
+window, and pushes no jump.
+
+## Production macros
+
+`clara-explorer-production-macros` lists the macros that define a production,
+each mapped to its kind. The default is `(("defrule" . rule) ("defquery" .
+query))`. Names are unqualified, and any alias prefix matches (`r/defrule`,
+`clara.rules/defrule`). Setting the list replaces the defaults, so keep them if
+you still use them:
+
+```elisp
+(setq clara-explorer-production-macros
+      '(("defrule" . rule)
+        ("defquery" . query)
+        ("rule" . rule)))   ; e.g. :refer [defrule] :rename {defrule rule}
+```
+
+A listed macro must take the production name as its first argument, after any
+metadata. The list is used in two places:
+
+- **Cursor context**: which enclosing form is the production at point. A query
+  has no RHS, so the kind matters.
+- **Jump search**: which form is searched for when the REPL cannot say where a
+  production is defined. Forms nested in a `let` or `do` are found too. A file
+  with no listed head for the name falls back to the name's first whole-symbol
+  occurrence, at the lowest precedence.
 
 ## Jump history (evil, xref)
 
-Every navigation pushes the _origin_ onto both jump lists **before** the jump,
-so `C-o` (`evil-jump-backward`) / `C-i` and `M-.` / `M-*` (`xref-pop-marker-stack`)
-work regardless of path:
-
-- `var? t` — `cider-find-var` (which itself pushes `xref`) + explicit
-  `evil-set-jump`/`xref-push-marker-stack`
-- `var? nil` — fallback `cider-find-ns` + `re-search-forward` for
-  `(defrule|defquery name)` — previously had **no** push, now also goes
-  through `clara-explorer--push-jump`
-
-```elisp
-;; clara-explorer--push-jump
-(when (fboundp 'evil-set-jump) (evil-set-jump))
-(xref-push-marker-stack)
-```
+Every navigation pushes the origin onto the evil and xref jump lists before it
+jumps, so `C-o` (`evil-jump-backward`) / `C-i` and `M-.` / `M-*`
+(`xref-pop-marker-stack`) return to where you were — for a provenance `RET` that
+is the tree on screen.
 
 ## Debugging
 
@@ -135,21 +222,19 @@ Other useful checks:
 Tests live in `editor/emacs/test/clara-explorer-test.el`. Three tiers, fastest
 first:
 
-| Tier                      | Command                                               | Deps                                                                                                        | What it proves                                                                                                                                                                                                                                                                                                                    |
-| ------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 — stubbed unit          | `make test-unit` (no Eldev)                           | stubbed `cider`/`parseedn`/`clojure-mode` via `test/test-helper.el` + `with-clara-buffer` minimal syntax    | structural nav, EDN `substring-no-properties` stripping, vector-target coercion — `35+ passed, 0 unexpected` in `<1s`, no network/JVM                                                                                                                                                                                            |
-| 2 — real-deps unit        | `eldev test` (or `make test-unit` with Eldev on PATH) | real `cider "1.12"` / `parseedn "1.2"` / `clojure-mode "5.18"` from `Eldev`; `test-helper.el` becomes no-op | Tier 1 + round-trip `clara-explorer--edn-map` → `parseedn-read-str` hash-table, `clara-explorer--eval-edn`+`nrepl-dict` wiring against real `parseedn`, `cider-symbol-at-point` keyword handling and real `clojure-mode` `syntax-ppss` — extra `skip-unless` tests run only here |
-| 3 — live nREPL (deferred) | `make test-integration` (future)                      | running `clara.explorer.server.main` JVM + `cider-connect-clj`                                                      | full `client/navigate` payload against `loan-app-rules`/`analyze-test-rules` (ctor, `:via :retract`, global `{:production nil}`) — deferred |
+| Tier                      | Command                                               | Deps                                                                    |
+| ------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------- |
+| 1 — stubbed unit          | `make test-tier1`                                     | stubbed `cider`/`parseedn`/`clojure-mode` (`test/test-helper.el`)       |
+| 2 — real-deps unit        | `eldev test` (or `make test-unit` with Eldev on PATH) | real `cider`/`parseedn`/`clojure-mode` from `Eldev`                     |
+| 3 — live nREPL (deferred) | `make test-integration` (future)                      | running `clara.explorer.server.main` JVM + `cider-connect-clj`          |
 
 ```bash
-cd editor/emacs && make test-unit   # Tier 1 (stubbed) or Tier 2 if eldev present
-cd editor/emacs && eldev test         # Tier 2 explicitly
+cd editor/emacs && make test-tier1   # Tier 1 only (stubbed, no Eldev required)
+cd editor/emacs && make test         # Tier 1 via test-unit, or Tier 2 when Eldev is present
+cd editor/emacs && eldev test        # Tier 2 explicitly
 ```
 
-`test-helper.el` provides `(provide 'cider)` etc. and autoloads `cider-*`/
-`parseedn-read-str` plus a tiny `nrepl-dict-get`/`parseedn-read-str` stub so
-`M-x eval-buffer` and `make -C editor/emacs check-elisp` byte-compile pass
-without a live REPL. Under Eldev the real packages win (guards are
-`unless (featurep ...)` / `unless (fboundp ...)` and `autoloadp` checks), and
-`test-helper--parseedn-real-p` / `test-helper--real-deps-p` gate the Tier-2
-tests via `skip-unless`.
+Tier 1 is the CI path and needs no network or JVM (currently 127 expected + 5
+skipped); Tier 2 runs the same suite plus the `skip-unless` tests that only work
+with the real libraries (132/132). The stub mechanics and the guards that gate
+the Tier-2 tests are documented in `test/test-helper.el`.

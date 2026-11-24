@@ -186,6 +186,19 @@ describe("lhs_type_at_point (logical wrappers)", function()
     local src = "(ns test) (r/defrule x-rule [?a <- MyType] [:not [OtherType]] => 1)"
     assert.are.same("OtherType", search_token(src, "(r/defrule x-rule", "OtherType"))
   end)
+
+  it("W1 point on the wrapper head resolves the first child condition", function()
+    local src = "(ns test) (r/defrule x-rule [:not [:my-ns/my-type]] => 1)"
+    assert.are.same(":my-ns/my-type", search_token(src, "(r/defrule x-rule", ":not"))
+    local and_src = "(ns test) (r/defrule x-rule [:and [A] [B]] => 1)"
+    assert.are.same("A", search_token(and_src, "(r/defrule x-rule", ":and"))
+  end)
+
+  it("W2 point on the wrapper's opening bracket resolves the first child condition", function()
+    local src = "(ns test) (r/defrule x-rule [:not [:my-ns/my-type]] => 1)"
+    local fs = first(src, "(r/defrule x-rule")
+    assert.are.same(":my-ns/my-type", token.token_at_point(src, fs, "lhs", first(src, "[:not")))
+  end)
 end)
 
 describe("lhs_type_at_point (accumulator cases)", function()

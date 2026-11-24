@@ -10,6 +10,15 @@ local function buf_with(lines)
   return buf
 end
 
+--- Run FN with `g:clara_explorer_production_macros` set to MACROS, then restore.
+local function with_macros(macros, fn)
+  local orig = vim.g.clara_explorer_production_macros
+  vim.g.clara_explorer_production_macros = macros
+  local ok, err = pcall(fn)
+  vim.g.clara_explorer_production_macros = orig
+  assert(ok, err)
+end
+
 --- 0-indexed (row, col) of the first occurrence of `needle` in `lines`.
 local function find_pos(lines, needle)
   for r, line in ipairs(lines) do
@@ -74,5 +83,63 @@ describe("structural.enclosing_production", function()
     local row, col = find_pos({ "(r/defrule my-rule [A] => 1)" }, "my-rule")
     local enc = structural.enclosing_production(buf, row, col)
     assert.are.same({ 0, 0, 0, #"(r/defrule my-rule [A] => 1)" }, enc.range)
+  end)
+end)
+
+describe("structural production macros", function()
+  it("C1 default list recognizes defrule/defquery (aliased too) and not g/defdata", function()
+    with_macros(nil, function()
+      local lines = { "(r/defrule my-rule [A] => 1)", "(defquery my-q [] [A])", "(g/defdata my-data [A] => 1)" }
+      local buf = buf_with(lines)
+      local row, col = find_pos(lines, "my-rule")
+      assert.are.same("rule", structural.enclosing_production(buf, row, col).kind)
+      row, col = find_pos(lines, "my-q")
+      assert.are.same("query", structural.enclosing_production(buf, row, col).kind)
+      row, col = find_pos(lines, "my-data")
+      assert.is_nil(structural.enclosing_production(buf, row, col))
+    end)
+  end)
+
+  it("C2 a custom list replaces the defaults", function()
+    with_macros({ defdata = "rule", rule = "rule" }, function()
+      local lines = { "(d/defdata my-data [A] => 1)", "(rule my-plain-rule [A] => 1)", "(r/defrule my-rule [A] => 1)" }
+      local buf = buf_with(lines)
+      local row, col = find_pos(lines, "my-data")
+      assert.are.same("rule", structural.enclosing_production(buf, row, col).kind)
+      row, col = find_pos(lines, "my-plain-rule")
+      assert.are.same("rule", structural.enclosing_production(buf, row, col).kind)
+      row, col = find_pos(lines, "my-rule")
+      assert.is_nil(structural.enclosing_production(buf, row, col))
+    end)
+  end)
+
+  it("C3 the kind comes from the list", function()
+    with_macros({ defquery2 = "query" }, function()
+      local lines = { "(r/defquery2 my-q [] [A])" }
+      local buf = buf_with(lines)
+      local row, col = find_pos(lines, "my-q")
+      assert.are.same("query", structural.enclosing_production(buf, row, col).kind)
+    end)
+  end)
+
+  it("C4 nested forms are still productions", function()
+    with_macros(nil, function()
+      local lines = { "(let [x 1] (r/defrule my-rule [A] => 1))", "(do (defquery my-q [] [A]))" }
+      local buf = buf_with(lines)
+      local row, col = find_pos(lines, "my-rule")
+      assert.are.same("my-rule", structural.enclosing_production(buf, row, col).name)
+      row, col = find_pos(lines, "my-q")
+      assert.are.same("my-q", structural.enclosing_production(buf, row, col).name)
+    end)
+  end)
+
+  it("C5 an empty list recognizes nothing", function()
+    with_macros({}, function()
+      local lines = { "(r/defrule my-rule [A] => 1)" }
+      local buf = buf_with(lines)
+      local row, col = find_pos(lines, "my-rule")
+      assert.is_nil(structural.enclosing_production(buf, row, col))
+      assert.are.same({}, structural.production_macros())
+    end)
   end)
 end)

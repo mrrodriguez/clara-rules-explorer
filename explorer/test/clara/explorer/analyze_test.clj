@@ -420,7 +420,7 @@
   (testing "Edge cases: Clojure record constructors and helper tracing"
     (let [ann edge-case-annotations]
 
-      ;; Rule A: standard Clojure record constructor — resolved through the
+      ;; standard Clojure record constructor — resolved through the
       ;; boundary path (a real callsite), not the subtree scan.
       (let [a (ann/get-annotation ann `atr/rule-record-constructor)]
         (is (some? a))
@@ -431,31 +431,31 @@
                     (:clara-rules/dynamic-insert-types-detected a))
             "direct record ctors at the boundary resolve via the ctor chain"))
 
-      ;; Rule H2: insert! with varargs
+      ;; insert! with varargs
       (is (= [`LocalDummyRecord]
              (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-varargs))))
 
-      ;; Rule H4: complex nested doseq loop
+      ;; complex nested doseq loop
       (is (= [`LocalDummyRecord]
              (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-complex-rhs-nested))))
 
-      ;; Rule H5: insert-all! with collection literal
+      ;; insert-all! with collection literal
       (is (= [`LocalDummyRecord]
              (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-collection))))
 
-      ;; Rule H7: insert-all! with collection built by helper
+      ;; insert-all! with collection built by helper
       (is (= [`LocalDummyRecord]
              (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-helper))))
 
-      ;; Rule H8: insert-all! heterogeneous — only LocalDummyRecord static, Java ctor deferred
+      ;; insert-all! heterogeneous — only LocalDummyRecord static, Java ctor deferred
       (is (= [`LocalDummyRecord]
              (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-heterogeneous))))
 
-      ;; Rule H9: insert-unconditional!
+      ;; insert-unconditional!
       (is (= [`LocalDummyRecord]
              (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-unconditional))))
 
-      ;; Rule H10: insert-all-unconditional!
+      ;; insert-all-unconditional!
       (is (= [`LocalDummyRecord]
              (:clara-rules/insert-types (ann/get-annotation ann `atr/rule-insert-all-unconditional)))))))
 
@@ -539,7 +539,7 @@
         filename "clara/explorer/test/rules/analyze_test_rules.clj"]
 
     (testing "Static retract types — record constructors"
-      ;; Rule H3: retract! with varargs — resolved through the boundary path
+      ;; retract! with varargs — resolved through the boundary path
       ;; (one callsite per argument), not the subtree scan.
       (let [h3 (ann/get-annotation ann `atr/rule-retract-varargs)
             dyn (:clara-rules/dynamic-retract-types-detected h3)]
@@ -550,21 +550,21 @@
         (is (every? #(= :full (:status %)) (:callsites dyn)))))
 
     (testing "Dynamic retract types — Java constructors resolve and promote"
-      ;; Rule I1: short Class. constructor
+      ;; short Class. constructor
       (is (match? (resolved-detection ns-sym filename
                                       "(DocumentCheck. ?app-id :pass \"dot-retract\" nil nil)"
                                       `DocumentCheck)
                   (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-java-dot))))
       (is (= [`DocumentCheck] (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-java-dot))))
 
-      ;; Rule I2: new Class constructor
+      ;; new Class constructor
       (is (match? (resolved-detection ns-sym filename
                                       "(new clara.explorer.test.rules.loan_app_facts.DocumentCheck ?app-id :pass \"new-retract\" nil nil)"
                                       `DocumentCheck)
                   (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-java-new))))
       (is (= [`DocumentCheck] (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-java-new))))
 
-      ;; Rule I3: modern Class/new constructor
+      ;; modern Class/new constructor
       (is (match? (resolved-detection ns-sym filename
                                       "(clara.explorer.test.rules.loan_app_facts.DocumentCheck/new ?app-id :pass \"modern-retract\" nil nil)"
                                       `DocumentCheck)
@@ -572,13 +572,13 @@
       (is (= [`DocumentCheck] (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-java-modern)))))
 
     (testing "Dynamic retract types — metadata map facts and helpers"
-      ;; Rule I4: with-meta map fact (retract) — unresolved
+      ;; with-meta map fact (retract) — unresolved
       (is (match? (unresolved-detection ns-sym filename
                                         "(with-meta {:app-id ?app-id, :status :pass} {:type :custom-retract-type})")
                   (:clara-rules/dynamic-retract-types-detected (ann/get-annotation ann `atr/rule-retract-metadata-map))))
       (is (nil? (:clara-rules/retract-types (ann/get-annotation ann `atr/rule-retract-metadata-map))))
 
-      ;; Rule I5: helper that does Java constructor + retract — resolved at the helper
+      ;; helper that does Java constructor + retract — resolved at the helper
       (is (match? (resolved-detection ns-sym filename
                                       "(clara.explorer.test.rules.loan_app_facts.DocumentCheck/new app-id :pass \"helper-retract\" nil nil)"
                                       `DocumentCheck)

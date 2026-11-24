@@ -59,9 +59,9 @@
 ;; ---------------------------------------------------------------------------
 
 (mapc (lambda (s) (autoload s "cider"))
-      '(cider-connected-p cider-current-repl cider-current-ns
-        cider-symbol-at-point cider-find-var cider-find-ns
-        cider-nrepl-sync-request:eval))
+      '(cider-connected-p cider-current-repl cider-current-ns cider-get-ns-name
+        cider-symbol-at-point cider-find-var cider-var-info cider-find-file
+        cider-sync-request:ns-path cider-nrepl-sync-request:eval))
 (autoload 'parseedn-read-str "parseedn")
 (autoload 'nrepl-dict-get "nrepl-dict")
 (autoload 'nrepl-dict-put "nrepl-dict")

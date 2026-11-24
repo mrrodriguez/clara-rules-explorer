@@ -59,12 +59,15 @@
 (defn- ->production-ref
   "A production `clara.explorer.server.api/ProductionDep` from its name. Rule vs query is which map the
   name lives in — the distinction `:type` records and a slim analysis keeps by splitting `:rules`
-  and `:queries`."
-  [rules _queries p-name]
-  {:name (str p-name)
-   :id (route-id (str p-name))
-   :ns (fq-ns p-name)
-   :type (if (contains? rules p-name) "rule" "query")})
+  and `:queries`. `:unit` is carried through when the referred production has one (a composed
+  selection tags every production; a live session does not)."
+  [rules queries p-name]
+  (let [{:keys [unit]} (or (get rules p-name) (get queries p-name))]
+    (cond-> {:name (str p-name)
+             :id (route-id (str p-name))
+             :ns (fq-ns p-name)
+             :type (if (contains? rules p-name) "rule" "query")}
+      unit (assoc :unit unit))))
 
 (defn- expand-type-ref
   "A slim-collapsed fact-type name back into a `TypeReference`."

@@ -2,7 +2,7 @@
 -- Dependency-free (Lua standard library only) and the *only* module that knows
 -- the wire format.  Every other module consumes plain Lua tables.
 --
--- Grammar (§5.1 of the plan):
+-- Grammar:
 --   maps `{…}`, vectors `[…]`, keywords `:kw`, strings `"…"` (Clojure escapes),
 --   integers (incl. negative), `true`, `false`, `nil`; commas are whitespace.
 --

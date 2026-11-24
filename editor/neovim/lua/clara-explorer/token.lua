@@ -253,6 +253,12 @@ local LOGICAL = { [":and"] = true, [":or"] = true, [":not"] = true, [":exists"] 
 
 function M.logical_operator_p(kw) return LOGICAL[kw] == true end
 
+--- Bounds of the first child condition that ORIG can be attributed to, inside
+-- the logical wrapper spanning `i` to `wrapper_end`.
+-- When ORIG sits before the first child condition — on the wrapper head
+-- (`:not`, `:and`, …) or on the wrapper's own opening bracket — the first
+-- child's type bounds are returned: the user is pointing at the condition, not
+-- at an operator.  Recurses through nested wrappers, as Emacs does.
 local function wrapper_inner_type_bounds(src, i, orig, wrapper_end)
   while i < wrapper_end do
     i = M.skip_ws(src, i)
@@ -261,7 +267,9 @@ local function wrapper_inner_type_bounds(src, i, orig, wrapper_end)
     if c == "[" then
       local inner_beg = i
       local inner_end = match_paren(src, i)
-      if inner_end and orig >= inner_beg and orig <= inner_end then
+      if inner_end and orig < inner_beg then
+        return M.type_bounds_in_condition_at_point(src, inner_beg, inner_beg)
+      elseif inner_end and orig <= inner_end then
         return M.type_bounds_in_condition_at_point(src, inner_beg, orig)
       else
         i = inner_end or wrapper_end
@@ -539,7 +547,7 @@ function M.side_at_point(src, form_start, cursor)
   return "lhs"
 end
 
---- The fact-type token at point (the §4.4 routing order).
+--- The fact-type token at point (the routing order).
 function M.token_at_point(src, form_start, side, cursor)
   if form_start then
     local doc = M.docstring_token_at_point(src, form_start, cursor)
