@@ -53,7 +53,7 @@ name is shortened in Lua.
 | `R` | `<Plug>(ClaraExplorerProvenanceRefresh)` | re-run the root call |
 | `q` | `<Plug>(ClaraExplorerProvenanceClose)` | close the view |
 
-`g` is deliberately unbound (it is a prefix in several setups); `<Plug>` is the
+`<Plug>` is the
 customization point. A row whose node is gone asks for `R`, a cached error row
 retries on `<Tab>`, and an error response becomes a `:message` row instead of
 breaking the buffer.
