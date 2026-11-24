@@ -91,7 +91,7 @@ package:
 | --- | ------ |
 | `TAB` | expand/collapse the production on the row |
 | `RET` / `<return>` | jump to the production (the same target machinery as navigate) |
-| `g` | re-run the root call (refresh) |
+| `M-x revert-buffer` | re-run the root call (refresh) |
 | `q` | bury the view |
 
 Only `TAB`, `RET`, and `<return>` are bound in the mode map; `g`/`q` come from
