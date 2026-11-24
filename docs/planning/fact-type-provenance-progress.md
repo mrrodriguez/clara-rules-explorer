@@ -721,7 +721,7 @@ Checkpoints, not a diary. Update in place as work lands.
       namespace (rejected candidates' buffers are killed). `nil` (default) means
       the parent of the REPL's `nrepl-project-dir`; a list replaces it. Nothing is
       evaluated, and the registry artifacts stay free of file locations. About
-      0.6s warm across 131 sibling checkouts, paid once per namespace (the open
+      0.6s warm across over a hundred sibling checkouts, paid once per namespace (the open
       buffer answers afterwards). An earlier fixed two-level glob (0.05s) was
       dropped because rulesets nest deeper than `<checkout>/<source dir>`. The
       jump search's head regexp is built with `rx-to-string`. The Neovim port of

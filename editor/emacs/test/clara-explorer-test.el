@@ -2025,8 +2025,8 @@ root and any buffers visiting its files are removed afterwards."
          (delete-directory ,root t)))))
 
 (ert-deftest source-roots-munge-the-namespace-test ()
-  (should (equal (clara-explorer--ns->relative-path "gateless-resource-ruleset.reports.memory.core")
-                 "gateless_resource_ruleset/reports/memory/core"))
+  (should (equal (clara-explorer--ns->relative-path "example-ruleset.reports.memory.core")
+                 "example_ruleset/reports/memory/core"))
   (should (equal (clara-explorer--ns->relative-path "single") "single")))
 
 (ert-deftest source-roots-find-candidates-at-any-depth-test ()

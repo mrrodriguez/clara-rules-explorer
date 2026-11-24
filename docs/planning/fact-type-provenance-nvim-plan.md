@@ -249,7 +249,7 @@ Lookup:
   `target`, `out`). A compiled copy of a `.cljc` file has the same `ns` form as
   its source, so the `ns` check alone cannot reject it.
 - Accept the first candidate whose own `ns` form names the namespace.
-- Cost: Emacs measured about 0.6s warm across 131 sibling checkouts. It is paid
+- Cost: Emacs measured about 0.6s warm across a workspace of over a hundred sibling checkouts. It is paid
   once per namespace, because the open-buffer step answers afterwards.
 
 Neovim specifics:
